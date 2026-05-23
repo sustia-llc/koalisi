@@ -1,0 +1,40 @@
+use config::{Config, ConfigError, Environment, File};
+use serde::Deserialize;
+use std::env;
+use std::sync::LazyLock;
+
+pub static SETTINGS: LazyLock<Settings> =
+    LazyLock::new(|| Settings::new().expect("Failed to setup settings"));
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Logger {
+    pub level: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SwarmSettings {
+    pub threshold_bps: f64,
+    pub history_capacity: usize,
+    /// "guaranteed" or "best_effort"
+    pub delivery_strategy: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Settings {
+    pub environment: String,
+    pub logger: Logger,
+    pub swarm: SwarmSettings,
+}
+
+impl Settings {
+    pub fn new() -> Result<Self, ConfigError> {
+        let run_mode = env::var("RUN_MODE").unwrap_or_else(|_| "development".into());
+
+        let builder = Config::builder()
+            .add_source(File::with_name("config/default"))
+            .add_source(File::with_name(&format!("config/{run_mode}")).required(false))
+            .add_source(Environment::default().separator("__"));
+
+        builder.build()?.try_deserialize()
+    }
+}

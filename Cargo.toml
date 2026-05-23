@@ -1,0 +1,47 @@
+[package]
+name = "forex_arbitrage_swarm"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88.0"
+description = "POC: kameo actor swarm for triangular forex arbitrage detection (historical + live)"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+# Kameo actor framework — local path while the upstream 0.20.0 is the working baseline.
+kameo = { path = "../../agentics/kameo" }
+kameo_actors = { path = "../../agentics/kameo/actors" }
+
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-stream = "0.1"
+tokio-util = { version = "0.7", features = ["rt"] }
+futures = "0.3"
+
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+config = { version = "0.15", default-features = false, features = ["toml"] }
+serde = { version = "1.0", features = ["derive"] }
+
+# Optional: databento DBN-file adapter. Enabled via `--features databento`.
+dbn = { version = "0.58", features = ["async"], optional = true }
+time = { version = "0.3", optional = true, features = ["macros"] }
+
+[features]
+default = []
+databento = ["dep:dbn", "dep:time"]
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "test-util"] }
+futures = "0.3"
+
+[[example]]
+name = "databento_historical"
+required-features = ["databento"]
+
+[[example]]
+name = "databento_live_replay"
+required-features = ["databento"]
+
+[[test]]
+name = "databento_integration"
+required-features = ["databento"]

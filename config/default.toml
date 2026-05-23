@@ -1,0 +1,15 @@
+environment = "development"
+
+[logger]
+level = "info"
+
+[swarm]
+# Threshold in basis points: an opportunity fires when |synthetic - actual| / actual * 10_000 > threshold_bps.
+threshold_bps = 5.0
+
+# Ring-buffer depth per MarketMonitor for historical tick retention.
+history_capacity = 1024
+
+# Delivery strategy for the internal pubsubs: "guaranteed" | "best_effort".
+# Guaranteed gives FIFO determinism (used by tests). BestEffort drops on full mailbox.
+delivery_strategy = "guaranteed"
