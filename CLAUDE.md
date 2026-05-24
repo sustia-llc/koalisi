@@ -1,7 +1,14 @@
 # CLAUDE.md — forex-arbitrage-swarm
 
 Working-state document for the POC. See `README.md` for the user-facing
-description; this file is for picking the project back up later.
+description and `CHANGELOG.md` for the per-release diff; this file is for
+picking the project back up later (what's done, what bit me, what's next).
+
+When you bump the project's behaviour, also:
+- update `Cargo.toml` `version`
+- add a new top section to `CHANGELOG.md` (Keep a Changelog format)
+- update the relevant entries here (Current state, Worth flagging,
+  File inventory) so future-me doesn't relitigate decisions
 
 ## Mission (one paragraph)
 
@@ -16,7 +23,7 @@ library-first three-step shutdown (`cancel → close → drain`) mirrored
 from `surrealdb-live-message`. No persistence layer (per project
 constraint).
 
-## Current state — 2026-05-23
+## Current state — 2026-05-24
 
 ### Done
 
@@ -26,25 +33,32 @@ constraint).
 - **`SwarmFeeder`** — clone-able feed handle (owns only the monitor
   `ActorRef` map). Lets background tasks call `feed_tick` without
   borrowing the `Swarm`.
-- **Examples (6 total)**:
+- **Examples (7 total)**:
   - `historical_bootstrap` — single-pair history replay, ring-buffer inspection
   - `live_pubsub` — scripted feed + user listener subscribed to the alert bus
   - `triangular_arbitrage` — full triangle, fires +45.25 bps and −72.06 bps signals
   - `supervised_swarm` — kameo `OneForOne` supervisor with `restart_limit(3, 5s)` + oneshot ready handshake (mirror of `sdb_server.rs` pattern)
   - `databento_historical` *(feature `databento`)* — decode bundled `.dbn.zst`, pump asap
   - `databento_live_replay` *(feature `databento`)* — `spawn_dbn_pump` on `swarm.task_tracker()` with `Pacing::Realtime`
+  - `distributed_alert_consumer` *(feature `remote`)* — single binary with `ROLE=producer` / `ROLE=consumer`; libp2p + mDNS discovery; remote `PollOpportunities` ask via wire
 - **Databento adapter** (`subsystems::databento`, feature-gated):
   - `Pacing::{Asap, Realtime { speed_factor }}`
   - `SymbolMapper = Arc<dyn Fn(u32, Option<&str>) -> Option<Pair> + Send + Sync>`
   - `pump_dbn_file(feeder, path, mapper, pacing, token) -> Result<PumpStats>`
   - `spawn_dbn_pump(swarm, path, mapper, pacing) -> JoinHandle<...>` (uses `swarm.task_tracker()` + child cancellation token)
   - `mbp1_to_tick` — fixed-point + nanos→ms conversion
+- **Remote alert gateway** (`subsystems::distributed`, feature `remote`):
+  - `RemoteAlertGateway` actor: `#[derive(Actor, RemoteActor)]`, locally subscribed to `alert_bus`, exposes `#[remote_message]` asks `PollOpportunities`, `PeekOpportunityCount`, `ClearOpportunities`.
+  - `enable_remote_alerts(&swarm, RemoteConfig) -> Result<RemoteHandle>` builds libp2p swarm (`tcp` + `noise` + `yamux` + `mdns` + `kameo::remote::Behaviour`), calls `init_global()`, listens, spawns the event loop on `swarm.task_tracker()` with a child cancellation token, registers the gateway.
+  - `ArbitrageOpportunity`, `Triangle`, `Pair`, `Quote`, `Direction`, `Tick` all derive `Serialize + Deserialize` so the type doubles as the wire payload (POC trade-off — production would split this).
+  - Hot path (monitor → coordinator → sink) deliberately stays on local mpsc; libp2p is only at the publish-to-outside-world boundary. Architectural rationale in §"Worth flagging" entry 8.
 - **Tests passing**:
   | Suite | Tests | Command |
   |---|---|---|
   | Default | 6 unit + 5 integration | `cargo test` |
   | `--features databento` | + 4 databento integration | `cargo test --features databento` |
-  | All 6 examples | exit 0 | see Reproducers below |
+  | `--features remote` | + 1 remote integration | `cargo test --features remote` |
+  | All 7 examples | exit 0 | see Reproducers below |
 
 ### File inventory
 
@@ -65,17 +79,20 @@ forex-arbitrage-swarm/
 │       ├── coordinator.rs                  ArbitrageCoordinator (TickUpdate, GetQuotes, Ping) + hysteresis
 │       ├── sink.rs                         AlertSink (ArbitrageOpportunity, GetAlerts, DrainAlerts, Ping)
 │       ├── swarm.rs                        Swarm + SwarmConfig + SwarmFeeder
-│       └── databento.rs                    DBN adapter (gated)
+│       ├── databento.rs                    DBN adapter (feature `databento`)
+│       └── distributed.rs                  RemoteAlertGateway + libp2p wiring (feature `remote`)
 ├── examples/
 │   ├── historical_bootstrap.rs
 │   ├── live_pubsub.rs
 │   ├── triangular_arbitrage.rs
 │   ├── supervised_swarm.rs
 │   ├── databento_historical.rs             (required-features = ["databento"])
-│   └── databento_live_replay.rs            (required-features = ["databento"])
+│   ├── databento_live_replay.rs            (required-features = ["databento"])
+│   └── distributed_alert_consumer.rs       (required-features = ["remote"])
 └── tests/
     ├── integration_test.rs                 5 tests
-    └── databento_integration.rs            4 tests (required-features = ["databento"])
+    ├── databento_integration.rs            4 tests (required-features = ["databento"])
+    └── remote_integration.rs               1 test (required-features = ["remote"])
 ```
 
 ## Worth flagging (gotchas)
@@ -116,26 +133,56 @@ These cost time during the build; future-me should not relearn them.
    - All current examples spawn the listener first, then subscribe — keep that order.
 
 7. **Cargo target dir + timeout convention (project-wide).**
-   - We use `--manifest-path forex-arbitrage-swarm/Cargo.toml --target-dir /tmp/forex-arbitrage-swarm-target` to avoid contention with Zed's own `cargo check`.
+   - We use `--manifest-path Cargo.toml --target-dir /tmp/forex-arbitrage-swarm-target` to avoid contention with Zed's own `cargo check`. Run from inside the `forex-arbitrage-swarm` worktree.
    - Wrap with `timeout 30s` (or 60s, 120s as appropriate) so a hang in a freshly-built binary is killed cleanly, not just the shell wrapper.
-   - Pattern: `timeout 30s cargo run --manifest-path … --target-dir … --example foo 2>/dev/null ; echo "exit=$?"`. Exit 124 = unix `timeout` fired.
+   - Pattern: `timeout 30s cargo run --manifest-path Cargo.toml --target-dir /tmp/… --example foo 2>/dev/null ; echo "exit=$?"`. Exit 124 = unix `timeout` fired.
+
+8. **libp2p remote actor RPC: hybrid, NOT hot-path.**
+   - The `remote` feature is intentionally a *publish-to-outside-world* boundary, NOT a replacement for the local mpsc hot path.
+   - Rationale: local `ask` is sub-μs (see `kameo/benches/overhead.rs`); `remote::ask` adds rmp-serde encode/decode + libp2p `request-response` over yamux + noise + network I/O — ≅10μs loopback, ≅10µs–1ms real network. Default `remote::messaging::Config::request_timeout` is **10 seconds**, sized for the network, not for actor-internal calls.
+   - Trait-bound asymmetry: local needs `Send + 'static`. Remote needs `Send + 'static + Serialize + DeserializeOwned` on messages, `Serialize` on `Reply::Ok` and `Reply::Error`, `#[derive(RemoteActor)]` on the actor, `#[remote_message]` on each exposed handler. Strictly more, not less.
+   - The hybrid we settled on: `MarketMonitor` → `tick_bus` → `Coordinator` → `alert_bus` → `AlertSink` is all local mpsc. A separate `RemoteAlertGateway` actor subscribes to `alert_bus` AND is remote-registered. Off-process consumers (`RemoteActorRef::<RemoteAlertGateway>::lookup(name).ask(&PollOpportunities)`) get alerts without ever touching the hot path.
+
+9. **`kameo::remote::Behaviour::init_global()` is process-wide.**
+   - Called once inside `enable_remote_alerts`. Calling it twice in the same process (e.g., from two integration tests in a single binary) will conflict.
+   - For now: one `remote_integration` test only. Future remote tests need to share the libp2p swarm, OR use `serial_test` + tear-down hooks.
+
+10. **`ActorRef::register` returns `Result<(), RegistryError>`; with the `remote` feature it becomes `async`.**
+    - Signature is `register(impl Into<Arc<str>>)`. Passing `&String` doesn't work — `&String` does not impl `Into<Arc<str>>`. Pass `&str` (via `.as_str()` or `&literal`).
+    - Without `remote`: sync, just returns `Result<(), RegistryError>` (no `.await`).
+    - With `remote`: returns a future that resolves once libp2p propagates the registration.
+
+11. **libp2p `#[derive(NetworkBehaviour)]` requires the `macros` feature.**
+    - kameo enables libp2p with `cbor, kad, noise, mdns, quic, request-response, tcp, tokio, yamux`, but NOT `macros`. Our `Cargo.toml` adds libp2p directly with `macros` so `SwarmBehaviour` derive works.
+    - Generated event-enum naming: `#[derive(NetworkBehaviour)] struct SwarmBehaviour {...}` produces `SwarmBehaviourEvent`. Match on `SwarmEvent::Behaviour(SwarmBehaviourEvent::Mdns(…))`.
 
 ## Reproducers
 
 The canonical commands. All assume `cd sustia-llc`.
 
+All assume `cwd = forex-arbitrage-swarm/`.
+
 ```sh
 # === default features ===
-timeout 60s  cargo test --manifest-path forex-arbitrage-swarm/Cargo.toml --target-dir /tmp/forex-arbitrage-swarm-target
-timeout 30s  cargo run  --manifest-path forex-arbitrage-swarm/Cargo.toml --target-dir /tmp/forex-arbitrage-swarm-target --example historical_bootstrap
-timeout 30s  cargo run  --manifest-path forex-arbitrage-swarm/Cargo.toml --target-dir /tmp/forex-arbitrage-swarm-target --example live_pubsub
-timeout 30s  cargo run  --manifest-path forex-arbitrage-swarm/Cargo.toml --target-dir /tmp/forex-arbitrage-swarm-target --example triangular_arbitrage
-timeout 30s  cargo run  --manifest-path forex-arbitrage-swarm/Cargo.toml --target-dir /tmp/forex-arbitrage-swarm-target --example supervised_swarm
+timeout 60s  cargo test --manifest-path Cargo.toml --target-dir /tmp/forex-arbitrage-swarm-target
+timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/forex-arbitrage-swarm-target --example historical_bootstrap
+timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/forex-arbitrage-swarm-target --example live_pubsub
+timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/forex-arbitrage-swarm-target --example triangular_arbitrage
+timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/forex-arbitrage-swarm-target --example supervised_swarm
 
 # === with databento feature ===
-timeout 120s cargo test --manifest-path forex-arbitrage-swarm/Cargo.toml --target-dir /tmp/forex-arbitrage-swarm-target --features databento
-timeout 30s  cargo run  --manifest-path forex-arbitrage-swarm/Cargo.toml --target-dir /tmp/forex-arbitrage-swarm-target --features databento --example databento_historical
-timeout 30s  cargo run  --manifest-path forex-arbitrage-swarm/Cargo.toml --target-dir /tmp/forex-arbitrage-swarm-target --features databento --example databento_live_replay
+timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/forex-arbitrage-swarm-target --features databento
+timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/forex-arbitrage-swarm-target --features databento --example databento_historical
+timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/forex-arbitrage-swarm-target --features databento --example databento_live_replay
+
+# === with remote feature ===
+timeout 60s  cargo test --manifest-path Cargo.toml --target-dir /tmp/forex-arbitrage-swarm-target --features remote
+# producer + consumer in two terminals:
+ROLE=producer timeout 60s cargo run --manifest-path Cargo.toml --target-dir /tmp/… --features remote --example distributed_alert_consumer
+ROLE=consumer timeout 60s cargo run --manifest-path Cargo.toml --target-dir /tmp/… --features remote --example distributed_alert_consumer
+
+# === everything at once ===
+timeout 240s cargo test --manifest-path Cargo.toml --target-dir /tmp/forex-arbitrage-swarm-target --features 'databento remote'
 ```
 
 Expected outcomes documented in README §"What the integration test verifies"
@@ -268,7 +315,32 @@ path. Generate a synthetic file at runtime.
   built via `MetadataBuilder::mappings(...)`. Each `SymbolMapping`
   needs a date range covering the records' timestamps.
 
-### C. Smaller nice-to-haves (optional)
+### C. Remote gateway hardening  *(unblocked, low priority)*
+
+The POC remote gateway works (round-trip integration test green) but is
+minimal. To make it production-shaped:
+
+1. **Bounded buffer + size cap.** Replace `Vec<ArbitrageOpportunity>` in
+   `RemoteAlertGateway` with a `VecDeque` capped at e.g. `1024`; oldest
+   evicted on push. Consumers that lag forever should not OOM the producer.
+2. **Sequence numbers + cursor-based polling.** Add a monotonic `seq:
+   u64` field to each buffered alert; replace `PollOpportunities` with
+   `PollSince { last_seq: u64 } -> Vec<(u64, ArbitrageOpportunity)>`.
+   Consumers remember the last seq they saw and only fetch deltas.
+3. **Stable wire schema.** `ArbitrageOpportunity` is currently the wire
+   type; this couples on-wire format to internal struct changes. Define a
+   `RemoteArbitrageOpportunityV1` in `distributed.rs` and convert at the
+   boundary.
+4. **Multiple gateways under one libp2p swarm.** `init_global()` is
+   one-shot per process; future work may want both an alert gateway AND,
+   say, a tick gateway. Factor the libp2p swarm setup out of
+   `enable_remote_alerts` so the same swarm hosts multiple registered
+   actors.
+5. **QUIC transport in addition to TCP.** `custom_swarm.rs` shows
+   `.with_quic()` as an additional transport. Useful for higher-RTT
+   links. Cheap to add.
+
+### D. Smaller nice-to-haves (optional)
 
 - **Metrics example** — subscribe a `metrics::Counter`-driven actor to
   both pubsubs, scrape via `metrics-exporter-prometheus`. Requires
@@ -280,7 +352,7 @@ path. Generate a synthetic file at runtime.
   realistic execution costs (you cross the spread on each leg). Triangle
   `edge_bps` becomes signed by direction and net of spread.
 - **Switch off path deps when kameo 0.20.0 is on crates.io** — the API
-  surface we use is stable (no remote/metrics features needed).
+  surface we use is stable (we now use both `remote` and default features).
 
 ## Open questions (jot anything here as it comes up)
 

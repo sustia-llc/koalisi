@@ -10,42 +10,70 @@ No persistence yet — everything lives in mpsc mailboxes and pubsub
 broadcasts under kameo. A SurrealDB / message-store layer can be folded in
 later without changing the actor topology.
 
+Three optional capabilities ship as cargo features on top of the core swarm:
+
+| Feature | What it adds |
+|---|---|
+| *(none)* | Core actor swarm, 4 examples, 11 tests |
+| `databento` | DBN file decoder + adapter — feed `.dbn.zst` historical files at `Asap` or `Realtime { speed_factor }` pacing |
+| `remote` | libp2p-based remote alert gateway — register the swarm's alerts so other processes / machines can discover and pull them via `RemoteActorRef::<RemoteAlertGateway>::lookup(name)` |
+
+Project state, gotchas, and detailed next-steps are tracked in
+[`CLAUDE.md`](./CLAUDE.md); per-release changes in
+[`CHANGELOG.md`](./CHANGELOG.md).
+
 ## Architecture
 
 ```
-┌──────────────┐  Tick (per pair)  ┌──────────────────┐
-│ feeders      ├──────────────────▶│ MarketMonitor    │  (one per pair)
-│ (hist/live)  │                   │ - ring buffer    │
-└──────────────┘                   │ - latest quote   │
-                                   └────────┬─────────┘
-                                            │ Publish(TickUpdate)
-                                            ▼
-                                  ┌──────────────────────┐
-                                  │ PubSub<TickUpdate>   │
-                                  └────────┬─────────────┘
-                                           │
-                                           ▼
-                          ┌────────────────────────────────┐
-                          │ ArbitrageCoordinator           │
-                          │  - tracks latest quote/pair    │
-                          │  - walks all triangles         │
-                          │  - hysteresis-based firing     │
-                          └────────────┬───────────────────┘
-                                       │ Publish(ArbitrageOpportunity)
-                                       ▼
-                            ┌──────────────────────────────┐
-                            │ PubSub<ArbitrageOpportunity> │
-                            └────────────┬─────────────────┘
-                                         ▼
-                                ┌──────────────────┐
-                                │ AlertSink (+ any │
-                                │ user listeners)  │
-                                └──────────────────┘
+              ┌──────────────┐  Tick (per pair)  ┌──────────────────┐
+              │ feeders      ├──────────────────▶│ MarketMonitor    │  (one per pair)
+              │ (hist/live)  │                   │ - ring buffer    │
+              └──────────────┘                   │ - latest quote   │
+                                                 └────────┬─────────┘
+                                                          │ Publish(TickUpdate)
+                                                          ▼
+                                                ┌──────────────────────┐
+                                                │ PubSub<TickUpdate>   │
+                                                └────────┬─────────────┘
+                                                         │
+                                                         ▼
+LOCAL MPSC                              ┌────────────────────────────────┐
+HOT PATH                                │ ArbitrageCoordinator           │
+(sub-μs)                                │  - tracks latest quote/pair    │
+                                        │  - walks all triangles         │
+                                        │  - hysteresis-based firing     │
+                                        └────────────┬───────────────────┘
+                                                     │ Publish(ArbitrageOpportunity)
+                                                     ▼
+                                          ┌──────────────────────────────┐
+                                          │ PubSub<ArbitrageOpportunity> │
+                                          └──┬────────────────────┬──────┘
+                                             │                    │
+                                             ▼                    ▼
+                                  ┌──────────────────┐  ┌──────────────────────────────┐
+                                  │ AlertSink (+ any │  │ RemoteAlertGateway           │
+                                  │ user listeners)  │  │  (feature `remote` only)     │
+                                  └──────────────────┘  └──────────┬───────────────────┘
+                                                                   │ #[remote_message]
+LIBP2P                                                             │ PollOpportunities
+PUBLISH-TO-OUTSIDE-WORLD                                           │ PeekOpportunityCount
+BOUNDARY (~10μs–1ms)                                               │ ClearOpportunities
+                                                                   ▼
+                                                       ┌────────────────────────────┐
+                                                       │ Remote consumers           │
+                                                       │ (other procs / machines):  │
+                                                       │  RemoteActorRef::lookup    │
+                                                       │  + ask(&PollOpportunities) │
+                                                       └────────────────────────────┘
 ```
 
 `Swarm` is the top-level container. It owns all actor refs, both pubsubs, a
 `TaskTracker`, and a root `CancellationToken` (the same library-first
 lifecycle shape as `surrealdb-live-message`'s `Coalition<T>`).
+
+The split between LOCAL MPSC HOT PATH and LIBP2P PUBLISH-TO-OUTSIDE-WORLD
+BOUNDARY is deliberate — see `CLAUDE.md` §"Worth flagging" #8 for the
+latency / trait-bound rationale.
 
 ### Why kameo
 
@@ -60,6 +88,10 @@ lifecycle shape as `surrealdb-live-message`'s `Coalition<T>`).
 - **Deterministic flush primitive**: every actor exposes a `Ping` ask. With
   `DeliveryStrategy::Guaranteed`, the FIFO mailbox + `ask` chain lets the
   integration test verify alerts without any `sleep`s.
+- **Composable libp2p**: `kameo::remote::Behaviour` is a
+  `NetworkBehaviour` that drops into your own `#[derive(NetworkBehaviour)]`
+  alongside `mdns`, `gossipsub`, etc. — the `remote` feature uses this to
+  add cross-process RPC without owning the transport.
 
 ## Layout
 
@@ -69,27 +101,29 @@ src/
 ├── main.rs                   — daemon: build swarm + scripted live feed + ctrl-c
 ├── logger.rs                 — tracing setup
 ├── settings.rs               — config-driven settings
-├── market.rs                 — value types (Pair, Tick, Quote, Triangle, TickUpdate, ArbitrageOpportunity)
+├── market.rs                 — value types (Pair, Tick, Quote, Triangle,
+│                               TickUpdate, ArbitrageOpportunity, Direction)
 └── subsystems/
     ├── monitor.rs            — MarketMonitor actor
     ├── coordinator.rs        — ArbitrageCoordinator actor
     ├── sink.rs               — AlertSink actor
-    ├── swarm.rs              — Swarm orchestrator (Coalition-shaped) + SwarmFeeder
-    └── databento.rs          — DBN-file adapter (feature `databento`)
+    ├── swarm.rs              — Swarm orchestrator + SwarmFeeder
+    ├── databento.rs          — DBN-file adapter        (feature `databento`)
+    └── distributed.rs        — Remote alert gateway    (feature `remote`)
 
 examples/
 ├── historical_bootstrap.rs        — feed one pair's history, inspect the monitor
 ├── live_pubsub.rs                 — scripted live feed + custom listener actor
 ├── triangular_arbitrage.rs        — full triangle, observe firing + hysteresis
 ├── supervised_swarm.rs            — kameo OneForOne supervision restarts a panicking monitor
-├── databento_historical.rs        — (feature: databento) decode a `.dbn.zst` file, pump asap
-└── databento_live_replay.rs       — (feature: databento) spawn the pump on `swarm.task_tracker()`
-                                    with realtime pacing
+├── databento_historical.rs        — (feature: databento) decode `.dbn.zst`, pump asap
+├── databento_live_replay.rs       — (feature: databento) spawn pump on TaskTracker, realtime pacing
+└── distributed_alert_consumer.rs  — (feature: remote)    ROLE=producer / ROLE=consumer demo
 
 tests/
 ├── integration_test.rs            — end-to-end alert wiring, hysteresis, ring-buffer eviction
-└── databento_integration.rs       — (feature: databento) Mbp1→Tick conversion,
-                                    file decode, cancellation
+├── databento_integration.rs       — (feature: databento) Mbp1→Tick conversion, file decode, cancellation
+└── remote_integration.rs          — (feature: remote)    libp2p wire round-trip via RemoteActorRef
 ```
 
 ## Run
@@ -105,13 +139,23 @@ cargo run --example supervised_swarm
 cargo run --features databento --example databento_historical
 cargo run --features databento --example databento_live_replay
 
-# unit + integration tests (`--features databento` adds the adapter suite)
+# the remote alert gateway example (two terminals)
+ROLE=producer cargo run --features remote --example distributed_alert_consumer
+ROLE=consumer cargo run --features remote --example distributed_alert_consumer
+
+# tests (add features to include the optional suites)
 cargo test
 cargo test --features databento
+cargo test --features remote
+cargo test --features 'databento remote'
 
 # the daemon (scripted EUR/USD-GBP/USD-EUR/GBP feed; ctrl-c to stop)
 cargo run
 ```
+
+`CLAUDE.md` documents the canonical `--manifest-path Cargo.toml --target-dir
+/tmp/forex-arbitrage-swarm-target` + `timeout 30s` invocation pattern we use
+to avoid contention with editor-managed cargo runs.
 
 ## Configuration
 
@@ -150,7 +194,7 @@ mirroring `surrealdb-live-message`'s settings pattern.
 
 The `subsystems::databento` module decodes a `.dbn` / `.dbn.zst` file from
 Databento's ecosystem and pumps the MBP-1 top-of-book records into the
-swarm via a clone-able [`SwarmFeeder`].
+swarm via a clone-able `SwarmFeeder`.
 
 ```rust,ignore
 use forex_arbitrage_swarm::subsystems::databento::{
@@ -188,13 +232,67 @@ S&P futures — not forex). Override the location with `DBN_TEST_PATH=...`.
 The fixture is sufficient to verify the decode → mapper → swarm path; for
 actual arbitrage detection you'd supply your own forex-bearing DBN file.
 
+## Remote alert gateway (optional feature: `remote`)
+
+The `subsystems::distributed` module spins up a libp2p swarm
+(TCP + noise + yamux + mDNS + `kameo::remote::Behaviour`) and registers a
+`RemoteAlertGateway` actor that's subscribed to the local alert bus and
+exposes its buffer to remote peers via `#[remote_message]` asks.
+
+The hot path (monitor → coordinator → sink) deliberately stays on local
+mpsc — see `CLAUDE.md` §"Worth flagging" #8 for the rationale. Remote is
+the *publish-to-outside-world* layer, not a replacement for actor RPC.
+
+```rust,ignore
+use forex_arbitrage_swarm::subsystems::distributed::{
+    enable_remote_alerts, PollOpportunities, RemoteAlertGateway, RemoteConfig,
+};
+
+// Producer side: enable the gateway on a built swarm.
+let handle = enable_remote_alerts(&swarm, RemoteConfig::default()).await?;
+println!("listening as peer {}", handle.local_peer_id);
+
+// Consumer side (different process, mDNS-discovered):
+use futures::TryStreamExt;
+use kameo::prelude::RemoteActorRef;
+
+let mut peers = RemoteActorRef::<RemoteAlertGateway>::lookup_all("forex_swarm_alerts");
+while let Some(peer) = peers.try_next().await? {
+    let opps = peer.ask(&PollOpportunities).send().await?;
+    for opp in opps {
+        println!("{opp}");
+    }
+}
+```
+
+### Remote-callable messages
+
+| Message | Reply | Semantics |
+|---|---|---|
+| `PollOpportunities` | `Vec<ArbitrageOpportunity>` | Returns a *clone* of the buffer (does not drain) — consumers can poll repeatedly |
+| `PeekOpportunityCount` | `u64` | Cheap liveness probe — no payload copy |
+| `ClearOpportunities` | `u64` | Drops the buffer; returns the count that was dropped |
+
+### What's actually on the wire
+
+`ArbitrageOpportunity`, `Triangle`, `Pair`, `Quote`, `Direction`, `Tick`
+all derive `Serialize + Deserialize` so the swarm's local types double as
+the wire payload. This is a POC trade-off — a production deployment would
+typically split into stable `RemoteArbitrageOpportunityV1` wire types
+behind a conversion boundary.
+
 ## Next steps (not in this POC)
 
-- Real price feeds (websocket subscribers wired into `swarm.feed_tick(...)`,
-  or `databento::LiveClient` swapped in alongside the file adapter).
-- Persistence — replace the per-monitor ring buffer with a SurrealDB
-  live-query subscription, OR keep the ring buffer and add a separate
-  archival actor that drains the tick pubsub into storage.
-- More triangles (USD-, EUR-, JPY-quoted families) — the coordinator
-  already walks `Vec<Triangle>`.
-- Move from mid-price arithmetic to bid/ask-aware execution-cost modeling.
+Tracked in detail in [`CLAUDE.md`](./CLAUDE.md):
+
+- **A. Databento `LiveClient` integration** — real-time websocket source,
+  same kameo wiring as the file adapter. *Blocked on `DATABENTO_API_KEY`.*
+- **B. Synthetic DBN file** — generate a forex-shaped DBN at runtime via
+  `dbn::encode::AsyncDbnEncoder` so we can demonstrate end-to-end arb
+  detection through the file adapter (the bundled fixture is too small).
+- **C. Remote gateway hardening** — bounded buffer, cursor-based polling
+  with sequence numbers, stable `RemoteArbitrageOpportunityV1` wire schema,
+  multiple gateways under one libp2p swarm, QUIC transport.
+- **D. Smaller nice-to-haves** — `metrics`/Prometheus example,
+  multi-triangle stress test, bid/ask-aware execution-cost model, switch
+  off path deps when kameo 0.20.0 is published.

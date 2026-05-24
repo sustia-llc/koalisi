@@ -1,9 +1,9 @@
 [package]
 name = "forex_arbitrage_swarm"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.88.0"
-description = "POC: kameo actor swarm for triangular forex arbitrage detection (historical + live)"
+description = "POC: kameo actor swarm for triangular forex arbitrage detection (historical + live + libp2p-remote alerts)"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
@@ -26,9 +26,15 @@ serde = { version = "1.0", features = ["derive"] }
 dbn = { version = "0.58", features = ["async"], optional = true }
 time = { version = "0.3", optional = true, features = ["macros"] }
 
+# Optional: libp2p-based remote actor RPC. Enabled via `--features remote`.
+# We add libp2p directly because the swarm builder + `#[derive(NetworkBehaviour)]`
+# need to be visible in OUR code (not just transitively through kameo).
+libp2p = { version = "0.56", features = ["macros", "noise", "mdns", "tcp", "tokio", "yamux"], optional = true }
+
 [features]
 default = []
 databento = ["dep:dbn", "dep:time"]
+remote = ["kameo/remote", "dep:libp2p"]
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "test-util"] }
@@ -42,6 +48,14 @@ required-features = ["databento"]
 name = "databento_live_replay"
 required-features = ["databento"]
 
+[[example]]
+name = "distributed_alert_consumer"
+required-features = ["remote"]
+
 [[test]]
 name = "databento_integration"
 required-features = ["databento"]
+
+[[test]]
+name = "remote_integration"
+required-features = ["remote"]

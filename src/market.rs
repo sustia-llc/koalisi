@@ -56,7 +56,7 @@ impl FromStr for Pair {
 // ---------------------------------------------------------------------------
 
 /// A raw market tick — what feeders push into a `MarketMonitor`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Tick {
     pub pair: Pair,
     pub bid: f64,
@@ -91,7 +91,7 @@ impl Tick {
 
 /// A monitor's distilled view of a pair: the latest bid/ask/mid + when it
 /// was observed.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Quote {
     pub bid: f64,
     pub ask: f64,
@@ -123,7 +123,7 @@ pub struct TickUpdate {
 /// Given `leg_a = X/Z`, `leg_b = Y/Z`, `cross = X/Y`:
 /// `synthetic(cross) = mid(leg_a) / mid(leg_b)`,
 /// compared against `mid(cross)` for the edge.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Triangle {
     pub leg_a: Pair, // X/Z
     pub leg_b: Pair, // Y/Z
@@ -189,7 +189,7 @@ impl Triangle {
 
 /// Direction of the detected arbitrage relative to the synthetic vs the
 /// actual cross.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Direction {
     /// Actual > synthetic: buy `X` via the synthetic route (legs), sell on
     /// the cross.
@@ -199,7 +199,13 @@ pub enum Direction {
 }
 
 /// A triangular-arbitrage signal — the collective fire of the swarm.
-#[derive(Debug, Clone)]
+///
+/// `Serialize` + `Deserialize` so the type doubles as the wire payload
+/// for the remote alert gateway (see `subsystems::distributed`, feature
+/// `remote`). A production deployment would likely split this into a
+/// separate stable wire schema; for the POC the local and remote types
+/// are the same.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArbitrageOpportunity {
     pub triangle: Triangle,
     pub leg_a_quote: Quote,
@@ -324,6 +330,9 @@ mod tests {
             timestamp_ms: 0,
         };
         let edge = tri.edge_bps(&qa, &qb, &qc);
-        assert!(edge > 40.0 && edge < 50.0, "edge {edge} not in [40, 50] bps");
+        assert!(
+            edge > 40.0 && edge < 50.0,
+            "edge {edge} not in [40, 50] bps"
+        );
     }
 }

@@ -28,6 +28,8 @@ pub mod subsystems {
     pub mod coordinator;
     #[cfg(feature = "databento")]
     pub mod databento;
+    #[cfg(feature = "remote")]
+    pub mod distributed;
     pub mod monitor;
     pub mod sink;
     pub mod swarm;
