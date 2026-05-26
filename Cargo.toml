@@ -22,6 +22,11 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 config = { version = "0.15", default-features = false, features = ["toml"] }
 serde = { version = "1.0", features = ["derive"] }
 
+# Hypergraph — directed hypergraph data structure (topology layer)
+hypergraph = { git = "https://github.com/yamafaktory/hypergraph", tag = "v4.2.0" }
+rayon = "1.12"
+tokio-rayon = "2.1"
+
 # Optional: databento DBN-file adapter. Enabled via `--features databento`.
 dbn = { version = "0.58", features = ["async"], optional = true }
 time = { version = "0.3", optional = true, features = ["macros"] }

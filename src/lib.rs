@@ -16,6 +16,7 @@
 
 pub mod core;
 pub mod market;
+pub mod topology;
 
 pub mod subsystems {
     pub mod coordinator;
