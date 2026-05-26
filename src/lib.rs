@@ -14,6 +14,7 @@
 //!
 //! See `examples/*.rs` for end-to-end wiring patterns.
 
+pub mod algorithms;
 pub mod core;
 pub mod market;
 pub mod topology;
