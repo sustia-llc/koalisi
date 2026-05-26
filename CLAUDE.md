@@ -1,8 +1,7 @@
-# CLAUDE.md — forex-arbitrage-swarm
+# CLAUDE.md — koalisi
 
-Working-state document for the POC. See `README.md` for the user-facing
-description and `CHANGELOG.md` for the per-release diff; this file is for
-picking the project back up later (what's done, what bit me, what's next).
+Working-state document. See `README.md` for user-facing description.
+This file is for picking the project back up later.
 
 When you bump the project's behaviour, also:
 - update `Cargo.toml` `version`
@@ -12,20 +11,32 @@ When you bump the project's behaviour, also:
 
 ## Mission (one paragraph)
 
-A kameo-actor swarm POC for triangular forex arbitrage. Per-pair
-`MarketMonitor` actors publish ticks into a `PubSub<TickUpdate>`; a single
-`ArbitrageCoordinator` subscribes, walks `Vec<Triangle>`, fires
-`ArbitrageOpportunity` events through a second pubsub on hysteresis-
-guarded threshold crosses; an `AlertSink` (plus optional user listeners)
-consume the alerts. The top-level `Swarm` is Coalition-shaped — it owns
-the actor refs, a `TaskTracker`, and a root `CancellationToken`, with the
-library-first three-step shutdown (`cancel → close → drain`) mirrored
-from `surrealdb-live-message`. No persistence layer (per project
-constraint).
+**koalisi** — a reference implementation of agentic coalitions in Rust.
+Four-layer architecture: Core (CoalitionRuntime, lifecycle), Topology
+(temporal hypergraph via hypergraph v4.2.0, event sourcing, CoalitionManager,
+time-travel queries, analytics), Algorithms (DCVC workload distribution,
+AIPA partition search, pluggable value calculators), and Runtime (kameo
+actors, PubSub buses, remote gateway). The forex triangular arbitrage
+domain is preserved as a working adapter; the architecture is domain-agnostic.
+Evolved from four prior projects: dynamo (topology), coalesce (algorithms),
+coalition_aif (decision — planned), and forex-arbitrage-swarm (runtime).
 
-## Current state — 2026-05-24
+## Current state — 2026-05-26
 
 ### Done
+
+- **Rename**: forex-arbitrage-swarm → koalisi v0.4.0
+- **Core**: `CoalitionRuntime` (TaskTracker + CancellationToken + three-step
+  shutdown), consolidated settings/logging in `core::config`
+- **Topology layer** (from dynamo): `TemporalHypergraph<V, HE>` with event
+  sourcing, `CoalitionManager` (form/join/leave/dissolve/merge),
+  `TemporalQueries` (point-in-time state reconstruction),
+  `TemporalAnalytics` (delta/time-series/activity), `HypergraphExecutor`
+  (rayon↔tokio bridge), `Timestamp`/`TimeRange`/`Clock`
+- **Algorithm layer** (from coalesce): `AgentCapabilities` trait,
+  `ValueCalculator` trait + 4 calculators (Additive, Synergistic,
+  Multiplicative, Weighted), `DCVCDistributor`, AIPA partition search
+- **Forex adapter** (preserved from forex-arbitrage-swarm):
 
 - **Core swarm**: `MarketMonitor` × N + `ArbitrageCoordinator` +
   `AlertSink` + 2 `PubSub`s wired by `Swarm::new`, all under a single
@@ -63,36 +74,58 @@ constraint).
 ### File inventory
 
 ```
-forex-arbitrage-swarm/
-├── Cargo.toml                              path deps on ../../agentics/kameo{,/actors}
+koalisi/
+├── Cargo.toml                              path deps: kameo, git dep: hypergraph v4.2.0
 ├── README.md                               user-facing
 ├── CLAUDE.md                               THIS FILE
-├── config/{default,development,test}.toml  swarm threshold, history capacity, delivery
+├── config/{default,development,test}.toml  coalition threshold, history capacity, delivery
 ├── src/
 │   ├── lib.rs                              module surface + re-exports
 │   ├── main.rs                             daemon binary with scripted live feed
-│   ├── logger.rs                           idempotent tracing_subscriber setup
-│   ├── settings.rs                         config crate, env override
 │   ├── market.rs                           Pair/Tick/Quote/Triangle/TickUpdate/Opportunity + 6 unit tests
+│   ├── core/
+│   │   ├── mod.rs                          re-exports
+│   │   ├── config.rs                       Settings + CoalitionSettings + setup_logging
+│   │   └── runtime.rs                      CoalitionRuntime (TaskTracker + CancellationToken)
+│   ├── topology/
+│   │   ├── mod.rs                          re-exports + hypergraph type re-exports
+│   │   ├── timestamp.rs                    Timestamp, TimeRange, Clock + 8 unit tests
+│   │   ├── events.rs                       TemporalEvent (13 variants), EventStats
+│   │   ├── event_log.rs                    EventLog with BTreeMap time + HashMap entity indices
+│   │   ├── errors.rs                       TemporalError, TemporalResult
+│   │   ├── temporal.rs                     TemporalHypergraph<V, HE>, SharedGraph, Snapshot
+│   │   ├── queries.rs                      TemporalQueries (point-in-time state)
+│   │   ├── analytics.rs                    TemporalAnalytics, GraphDelta
+│   │   ├── coalitions.rs                   CoalitionManager (form/join/leave/dissolve/merge)
+│   │   └── executor.rs                     HypergraphExecutor (rayon↔tokio bridge)
+│   ├── algorithms/
+│   │   ├── mod.rs                          AgentCapabilities trait + re-exports
+│   │   ├── value_calculation.rs            ValueCalculator + 4 calculators
+│   │   ├── dcvc.rs                         DCVCDistributor, WorkloadShare
+│   │   └── aipa.rs                         Integer partitions, bounds, best-partition + 10 unit tests
 │   └── subsystems/
 │       ├── monitor.rs                      MarketMonitor (Tick, GetSnapshot, Ping)
-│       ├── coordinator.rs                  ArbitrageCoordinator (TickUpdate, GetQuotes, Ping) + hysteresis
+│       ├── coordinator.rs                  ArbitrageCoordinator (TickUpdate, GetQuotes, Ping)
 │       ├── sink.rs                         AlertSink (ArbitrageOpportunity, GetAlerts, DrainAlerts, Ping)
-│       ├── swarm.rs                        Swarm + SwarmConfig + SwarmFeeder
+│       ├── swarm.rs                        Swarm (wraps CoalitionRuntime) + SwarmConfig + SwarmFeeder
 │       ├── databento.rs                    DBN adapter (feature `databento`)
 │       └── distributed.rs                  RemoteAlertGateway + libp2p wiring (feature `remote`)
 ├── examples/
-│   ├── historical_bootstrap.rs
-│   ├── live_pubsub.rs
-│   ├── triangular_arbitrage.rs
-│   ├── supervised_swarm.rs
-│   ├── databento_historical.rs             (required-features = ["databento"])
-│   ├── databento_live_replay.rs            (required-features = ["databento"])
-│   └── distributed_alert_consumer.rs       (required-features = ["remote"])
+│   ├── topology_coalition.rs               coalition lifecycle + time-travel queries
+│   ├── algorithm_values.rs                 value calculators + DCVC + AIPA
+│   ├── historical_bootstrap.rs             single-pair history replay
+│   ├── live_pubsub.rs                      scripted feed + user listener
+│   ├── triangular_arbitrage.rs             full triangle, fires arb signals
+│   ├── supervised_swarm.rs                 kameo supervisor + restart
+│   ├── databento_historical.rs             (feature `databento`)
+│   ├── databento_live_replay.rs            (feature `databento`)
+│   └── distributed_alert_consumer.rs       (feature `remote`)
 └── tests/
-    ├── integration_test.rs                 5 tests
-    ├── databento_integration.rs            4 tests (required-features = ["databento"])
-    └── remote_integration.rs               1 test (required-features = ["remote"])
+    ├── topology_test.rs                    11 tests
+    ├── algorithms_test.rs                  15 tests
+    ├── integration_test.rs                 5 tests (forex)
+    ├── databento_integration.rs            4 tests (feature `databento`)
+    └── remote_integration.rs               1 test (feature `remote`)
 ```
 
 ## Worth flagging (gotchas)
@@ -158,39 +191,55 @@ These cost time during the build; future-me should not relearn them.
 
 ## Reproducers
 
-The canonical commands. All assume `cd sustia-llc`.
-
-All assume `cwd = forex-arbitrage-swarm/`.
+All assume `cwd = koalisi/`.
 
 ```sh
-# === default features ===
-timeout 60s  cargo test --manifest-path Cargo.toml --target-dir /tmp/forex-arbitrage-swarm-target
-timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/forex-arbitrage-swarm-target --example historical_bootstrap
-timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/forex-arbitrage-swarm-target --example live_pubsub
-timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/forex-arbitrage-swarm-target --example triangular_arbitrage
-timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/forex-arbitrage-swarm-target --example supervised_swarm
+# === default features (57 tests) ===
+timeout 60s  cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target
+timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example topology_coalition
+timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example algorithm_values
+timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example triangular_arbitrage
+timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example historical_bootstrap
+timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example live_pubsub
+timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example supervised_swarm
 
 # === with databento feature ===
-timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/forex-arbitrage-swarm-target --features databento
-timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/forex-arbitrage-swarm-target --features databento --example databento_historical
-timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/forex-arbitrage-swarm-target --features databento --example databento_live_replay
+timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features databento
+timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features databento --example databento_historical
+timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features databento --example databento_live_replay
 
 # === with remote feature ===
-timeout 60s  cargo test --manifest-path Cargo.toml --target-dir /tmp/forex-arbitrage-swarm-target --features remote
-# producer + consumer in two terminals:
-ROLE=producer timeout 60s cargo run --manifest-path Cargo.toml --target-dir /tmp/… --features remote --example distributed_alert_consumer
-ROLE=consumer timeout 60s cargo run --manifest-path Cargo.toml --target-dir /tmp/… --features remote --example distributed_alert_consumer
-
-# === everything at once ===
-timeout 240s cargo test --manifest-path Cargo.toml --target-dir /tmp/forex-arbitrage-swarm-target --features 'databento remote'
+timeout 60s  cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features remote
+ROLE=producer timeout 60s cargo run --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features remote --example distributed_alert_consumer
+ROLE=consumer timeout 60s cargo run --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features remote --example distributed_alert_consumer
 ```
-
-Expected outcomes documented in README §"What the integration test verifies"
-and §"Test data" (databento section).
 
 ## Next steps
 
-### A. Databento `LiveClient` integration  **(blocked: needs `DATABENTO_API_KEY`)**
+### Phase 5: Persistence  *(planned)*
+
+Feature-gated persistence using hypergraph v4.2.0's `PersistentHypergraph`
+for graph state plus an `EventStore` trait for temporal event durability.
+Default impl: append-only file log with `rmp-serde`. See `.claude/plans/`
+for full design.
+
+### Phase 6: Decision layer (Active Inference)  *(planned)*
+
+Feature-gated (`decision`) port of coalition_aif's EFE calculator,
+BeliefState, CoalitionBelief. Adds `ndarray` dependency. Most experimental.
+
+### Downstream: nautilus_trader bridge  *(separate project)*
+
+IB adapter patterns from the nautilus_trader glean analysis inform a
+separate `koalisi-nautilus` bridge project. Not a koalisi feature.
+
+### Downstream: tauhokohoko integration  *(separate project)*
+
+Salmon Prisoner's Dilemma simulator using koalisi's coalition primitives
+with deep_causality's CSM/EPP/Teloid/Uncertain layers. See
+`~/Documents/tauhokohoko/tauhokohoko/requirements/causal-context-architecture.md`.
+
+### Legacy: Databento `LiveClient` integration  **(blocked: needs `DATABENTO_API_KEY`)**
 
 The `LiveClient` is databento's real-time websocket-style subscriber.
 Same kameo wiring as the DBN-file adapter — only the source changes.
