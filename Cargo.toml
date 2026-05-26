@@ -1,9 +1,9 @@
 [package]
-name = "forex_arbitrage_swarm"
-version = "0.3.0"
+name = "koalisi"
+version = "0.4.0"
 edition = "2024"
 rust-version = "1.88.0"
-description = "POC: kameo actor swarm for triangular forex arbitrage detection (historical + live + libp2p-remote alerts)"
+description = "Reference implementation of agentic coalitions in Rust — kameo actors, temporal hypergraph topology, coalition algorithms, and optional Active Inference decision-making"
 license = "MIT OR Apache-2.0"
 
 [dependencies]

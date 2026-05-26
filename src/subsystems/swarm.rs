@@ -1,14 +1,8 @@
-//! `Swarm` — top-level orchestrator that ties the actors together.
+//! `Swarm` — top-level orchestrator that ties the forex actors together.
 //!
-//! Modeled after `surrealdb-live-message`'s `Coalition<T>`:
-//!
-//! - Owns the kameo actor refs (monitors per pair + coordinator + sink) and
-//!   the two pubsub buses.
-//! - Wires up subscriptions before returning from `new`, so callers can
-//!   start sending ticks immediately without racing the subscription path.
-//! - Carries a `TaskTracker` + root `CancellationToken` for callers wiring
-//!   library-first shutdown (bare `tokio::signal::ctrl_c`, parent token,
-//!   test harness, etc.).
+//! Wraps a [`CoalitionRuntime`] (TaskTracker + CancellationToken + three-step
+//! shutdown) with forex-specific actors: monitors per pair, coordinator, sink,
+//! and two pubsub buses.
 
 use std::collections::{HashMap, HashSet};
 
@@ -18,10 +12,11 @@ use kameo_actors::{
     DeliveryStrategy,
     pubsub::{PubSub, Subscribe},
 };
-use tokio_util::{sync::CancellationToken, task::TaskTracker};
+use tokio_util::sync::CancellationToken;
 
+use crate::core::config::SETTINGS;
+use crate::core::runtime::CoalitionRuntime;
 use crate::market::{ArbitrageOpportunity, Pair, Tick, TickUpdate, Triangle};
-use crate::settings::SETTINGS;
 use crate::subsystems::coordinator::{self, ArbitrageCoordinator, ArbitrageCoordinatorArgs};
 use crate::subsystems::monitor::{self, MarketMonitor, MarketMonitorArgs};
 use crate::subsystems::sink::{self, AlertSink};
@@ -43,7 +38,7 @@ impl SwarmConfig {
     /// Build a config from a list of triangles, pulling threshold / history
     /// capacity / delivery strategy from `config/*.toml`.
     pub fn from_settings(triangles: Vec<Triangle>) -> Self {
-        let s = &SETTINGS.swarm;
+        let s = &SETTINGS.coalition;
         Self {
             triangles,
             threshold_bps: s.threshold_bps,
@@ -109,8 +104,7 @@ pub struct Swarm {
     sink: ActorRef<AlertSink>,
     tick_bus: ActorRef<PubSub<TickUpdate>>,
     alert_bus: ActorRef<PubSub<ArbitrageOpportunity>>,
-    task_tracker: TaskTracker,
-    cancellation_token: CancellationToken,
+    runtime: CoalitionRuntime,
 }
 
 impl Swarm {
@@ -122,8 +116,7 @@ impl Swarm {
             return Err(anyhow!("SwarmConfig.triangles must be non-empty"));
         }
 
-        let task_tracker = TaskTracker::new();
-        let cancellation_token = CancellationToken::new();
+        let runtime = CoalitionRuntime::new();
 
         // ---- pubsubs ----
         let tick_bus = PubSub::spawn(PubSub::<TickUpdate>::new(config.delivery_strategy));
@@ -174,8 +167,7 @@ impl Swarm {
             sink,
             tick_bus,
             alert_bus,
-            task_tracker,
-            cancellation_token,
+            runtime,
         })
     }
 
@@ -207,11 +199,11 @@ impl Swarm {
     }
 
     pub fn cancellation_token(&self) -> &CancellationToken {
-        &self.cancellation_token
+        self.runtime.cancellation_token()
     }
 
-    pub fn task_tracker(&self) -> &TaskTracker {
-        &self.task_tracker
+    pub fn task_tracker(&self) -> &tokio_util::task::TaskTracker {
+        self.runtime.task_tracker()
     }
 
     /// A clone-able, owned feed handle that captures the monitor refs and
@@ -278,13 +270,10 @@ impl Swarm {
     // Lifecycle
     // -----------------------------------------------------------------------
 
-    /// Three-step shutdown: cancel the root token (so any caller-spawned
-    /// tasks attached to `task_tracker()` see the signal), close the
-    /// tracker, then stop all kameo actors gracefully.
+    /// Three-step shutdown: drain the CoalitionRuntime (cancel token →
+    /// close tracker → wait), then stop all kameo actors gracefully.
     pub async fn shutdown(self) {
-        self.cancellation_token.cancel();
-        self.task_tracker.close();
-        self.task_tracker.wait().await;
+        self.runtime.shutdown().await;
 
         // Stop actors in reverse-dependency order so no actor publishes
         // into a bus that's already stopped.

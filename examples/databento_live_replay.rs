@@ -29,9 +29,9 @@ use kameo::error::Infallible;
 use kameo::prelude::*;
 use kameo_actors::{DeliveryStrategy, pubsub::Subscribe};
 
-use forex_arbitrage_swarm::market::{ArbitrageOpportunity, Pair, Triangle};
-use forex_arbitrage_swarm::subsystems::databento::{Pacing, mapper_from_fn, spawn_dbn_pump};
-use forex_arbitrage_swarm::subsystems::swarm::{Swarm, SwarmConfig};
+use koalisi::market::{ArbitrageOpportunity, Pair, Triangle};
+use koalisi::subsystems::databento::{Pacing, mapper_from_fn, spawn_dbn_pump};
+use koalisi::subsystems::swarm::{Swarm, SwarmConfig};
 
 #[derive(Default)]
 struct PrintListener;

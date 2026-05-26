@@ -6,8 +6,8 @@
 use anyhow::Result;
 use kameo_actors::DeliveryStrategy;
 
-use forex_arbitrage_swarm::market::{Pair, Tick, Triangle};
-use forex_arbitrage_swarm::subsystems::swarm::{Swarm, SwarmConfig};
+use koalisi::market::{Pair, Tick, Triangle};
+use koalisi::subsystems::swarm::{Swarm, SwarmConfig};
 
 #[tokio::main]
 async fn main() -> Result<()> {

@@ -25,8 +25,8 @@ use kameo_actors::{DeliveryStrategy, pubsub::PubSub};
 use tokio::sync::oneshot;
 use tokio::time::timeout;
 
-use forex_arbitrage_swarm::market::{Pair, Tick, TickUpdate};
-use forex_arbitrage_swarm::subsystems::monitor::{GetSnapshot, MarketMonitor, MarketMonitorArgs};
+use koalisi::market::{Pair, Tick, TickUpdate};
+use koalisi::subsystems::monitor::{GetSnapshot, MarketMonitor, MarketMonitorArgs};
 
 // ---------------------------------------------------------------------------
 // Force-panic message

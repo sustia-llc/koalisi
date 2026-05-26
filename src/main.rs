@@ -6,9 +6,9 @@ use std::time::Duration;
 use tokio::time::interval;
 use tokio_util::sync::CancellationToken;
 
-use forex_arbitrage_swarm::logger;
-use forex_arbitrage_swarm::market::{Pair, Tick, Triangle};
-use forex_arbitrage_swarm::subsystems::swarm::{Swarm, SwarmConfig};
+use koalisi::logger;
+use koalisi::market::{Pair, Tick, Triangle};
+use koalisi::subsystems::swarm::{Swarm, SwarmConfig};
 
 #[tokio::main]
 async fn main() -> Result<()> {

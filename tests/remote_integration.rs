@@ -25,11 +25,11 @@ use kameo::prelude::*;
 use kameo_actors::DeliveryStrategy;
 use tokio::time::{sleep, timeout};
 
-use forex_arbitrage_swarm::market::{Pair, Tick, Triangle};
-use forex_arbitrage_swarm::subsystems::distributed::{
+use koalisi::market::{Pair, Tick, Triangle};
+use koalisi::subsystems::distributed::{
     PeekOpportunityCount, PollOpportunities, RemoteAlertGateway, RemoteConfig, enable_remote_alerts,
 };
-use forex_arbitrage_swarm::subsystems::swarm::{Swarm, SwarmConfig};
+use koalisi::subsystems::swarm::{Swarm, SwarmConfig};
 
 fn p(s: &str) -> Pair {
     s.parse().unwrap()
@@ -91,7 +91,7 @@ async fn remote_gateway_round_trips_opportunity() {
         // Direct (local) check: the gateway has the opportunity.
         let local_count = handle
             .gateway
-            .ask(forex_arbitrage_swarm::subsystems::distributed::PeekOpportunityCount)
+            .ask(koalisi::subsystems::distributed::PeekOpportunityCount)
             .await
             .unwrap();
         assert_eq!(local_count, 1, "gateway should have buffered 1 alert");

@@ -316,7 +316,7 @@ path. Generate a synthetic file at runtime.
   needs a date range covering the records' timestamps.
 
 ### C. Remote gateway hardening  *(unblocked, low priority)*
-
+- see /home/oryx/Documents/category/deep_causality/examples/avionics_examples/flight_envelope_monitor/README.md for a template for trade_envelope_monitor
 The POC remote gateway works (round-trip integration test green) but is
 minimal. To make it production-shaped:
 

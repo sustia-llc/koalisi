@@ -13,12 +13,12 @@ use kameo_actors::DeliveryStrategy;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 
-use forex_arbitrage_swarm::market::{Pair, Triangle};
-use forex_arbitrage_swarm::subsystems::databento::{
+use koalisi::market::{Pair, Triangle};
+use koalisi::subsystems::databento::{
     Pacing, PumpStats, mapper_from_fn, mbp1_to_tick, pump_dbn_file, spawn_dbn_pump,
 };
-use forex_arbitrage_swarm::subsystems::monitor::GetSnapshot;
-use forex_arbitrage_swarm::subsystems::swarm::{Swarm, SwarmConfig};
+use koalisi::subsystems::monitor::GetSnapshot;
+use koalisi::subsystems::swarm::{Swarm, SwarmConfig};
 
 fn p(s: &str) -> Pair {
     s.parse().unwrap()

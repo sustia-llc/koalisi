@@ -1,28 +1,21 @@
-//! Forex arbitrage swarm — a POC kameo actor swarm that establishes historical
-//! data, listens to live tick events, and fires collective arbitrage events
-//! once the synthetic-vs-actual cross-rate edge crosses a configured
-//! threshold.
+//! koalisi — a reference implementation of agentic coalitions in Rust.
 //!
-//! No persistence yet; everything is in-memory ring buffers + mpsc channels
-//! under kameo's actor model.
+//! ## Architecture
 //!
-//! ## Public surface
-//!
-//! - [`market`] — value types: `Pair`, `Tick`, `Quote`, `Triangle`,
+//! - [`core`] — domain-agnostic coalition infrastructure:
+//!   [`CoalitionRuntime`](core::CoalitionRuntime) (TaskTracker +
+//!   CancellationToken + three-step shutdown), settings, logging.
+//! - [`subsystems`] — forex-specific kameo actors (monitor, coordinator,
+//!   sink, swarm) and optional adapters (databento, libp2p remote).
+//! - [`market`] — forex value types: `Pair`, `Tick`, `Quote`, `Triangle`,
 //!   `TickUpdate`, `ArbitrageOpportunity`.
-//! - [`subsystems::swarm::Swarm`] — top-level container, modeled after
-//!   `surrealdb-live-message`'s `Coalition<T>`: owns the internal kameo
-//!   actor refs + a `TaskTracker` + a root `CancellationToken`, exposes
-//!   `feed_tick`, `replay_history`, `alerts`, and `shutdown`.
-//! - [`subsystems::monitor::MarketMonitor`],
-//!   [`subsystems::coordinator::ArbitrageCoordinator`],
-//!   [`subsystems::sink::AlertSink`] — the three actor types.
+//!
+//! ## Quick start
 //!
 //! See `examples/*.rs` for end-to-end wiring patterns.
 
-pub mod logger;
+pub mod core;
 pub mod market;
-pub mod settings;
 
 pub mod subsystems {
     pub mod coordinator;
@@ -35,5 +28,15 @@ pub mod subsystems {
     pub mod swarm;
 }
 
+// --- backward-compat re-exports (pre-rename public surface) ---
+pub mod logger {
+    pub use crate::core::config::setup_logging as setup;
+}
+pub mod settings {
+    pub use crate::core::config::{Settings, SETTINGS};
+    pub use crate::core::config::CoalitionSettings as SwarmSettings;
+}
+
 pub use market::{ArbitrageOpportunity, Direction, Pair, Quote, Tick, TickUpdate, Triangle};
 pub use subsystems::swarm::{Swarm, SwarmConfig, SwarmFeeder};
+pub use core::CoalitionRuntime;

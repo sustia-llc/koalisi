@@ -9,9 +9,9 @@
 use std::time::Duration;
 use tokio::time::timeout;
 
-use forex_arbitrage_swarm::logger;
-use forex_arbitrage_swarm::market::{Direction, Pair, Tick, Triangle};
-use forex_arbitrage_swarm::subsystems::swarm::{Swarm, SwarmConfig};
+use koalisi::logger;
+use koalisi::market::{Direction, Pair, Tick, Triangle};
+use koalisi::subsystems::swarm::{Swarm, SwarmConfig};
 use kameo_actors::DeliveryStrategy;
 
 fn p(s: &str) -> Pair {
@@ -140,7 +140,7 @@ async fn end_to_end_triangular_arbitrage() {
 
 #[tokio::test]
 async fn monitor_snapshot_holds_full_history_within_capacity() {
-    use forex_arbitrage_swarm::subsystems::monitor::GetSnapshot;
+    use koalisi::subsystems::monitor::GetSnapshot;
     logger::setup();
 
     let swarm = build_swarm().await;
@@ -170,7 +170,7 @@ async fn monitor_snapshot_holds_full_history_within_capacity() {
 
 #[tokio::test]
 async fn monitor_ring_buffer_evicts_oldest_when_full() {
-    use forex_arbitrage_swarm::subsystems::monitor::GetSnapshot;
+    use koalisi::subsystems::monitor::GetSnapshot;
     logger::setup();
 
     let triangle = Triangle::new(p("EUR/USD"), p("GBP/USD"), p("EUR/GBP")).unwrap();

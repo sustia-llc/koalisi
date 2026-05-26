@@ -4,9 +4,9 @@
 
 use anyhow::Result;
 
-use forex_arbitrage_swarm::market::{Pair, Tick, Triangle};
-use forex_arbitrage_swarm::subsystems::monitor::{GetSnapshot, MonitorSnapshot};
-use forex_arbitrage_swarm::subsystems::swarm::{Swarm, SwarmConfig};
+use koalisi::market::{Pair, Tick, Triangle};
+use koalisi::subsystems::monitor::{GetSnapshot, MonitorSnapshot};
+use koalisi::subsystems::swarm::{Swarm, SwarmConfig};
 use kameo_actors::DeliveryStrategy;
 
 #[tokio::main]

@@ -4,7 +4,7 @@
 //! What this example demonstrates:
 //! 1. `dbn::AsyncDbnDecoder::from_zstd_file` reading a real `.dbn.zst`.
 //! 2. The `Mbp1Msg → Tick` translation in the adapter.
-//! 3. `forex_arbitrage_swarm::subsystems::databento::pump_dbn_file`
+//! 3. `koalisi::subsystems::databento::pump_dbn_file`
 //!    routing records into the swarm via the FIFO-deterministic
 //!    `SwarmFeeder::feed_tick`.
 //! 4. The mapper from DBN's `instrument_id` to our `Pair` type.
@@ -28,9 +28,9 @@ use anyhow::{Context, Result};
 use kameo_actors::DeliveryStrategy;
 use tokio_util::sync::CancellationToken;
 
-use forex_arbitrage_swarm::market::{Pair, Triangle};
-use forex_arbitrage_swarm::subsystems::databento::{Pacing, mapper_from_fn, pump_dbn_file};
-use forex_arbitrage_swarm::subsystems::swarm::{Swarm, SwarmConfig};
+use koalisi::market::{Pair, Triangle};
+use koalisi::subsystems::databento::{Pacing, mapper_from_fn, pump_dbn_file};
+use koalisi::subsystems::swarm::{Swarm, SwarmConfig};
 
 fn locate_test_data() -> Result<PathBuf> {
     // Walk a few common locations: relative to the binary, relative to
@@ -94,7 +94,7 @@ async fn main() -> Result<()> {
     let snap = swarm
         .monitor(&"EUR/USD".parse()?)
         .unwrap()
-        .ask(forex_arbitrage_swarm::subsystems::monitor::GetSnapshot)
+        .ask(koalisi::subsystems::monitor::GetSnapshot)
         .await?;
     println!(
         "EUR/USD monitor: {} ticks in history (latest mid = {:.6})",

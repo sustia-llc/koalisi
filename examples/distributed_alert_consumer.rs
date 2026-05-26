@@ -40,11 +40,11 @@ use kameo::prelude::*;
 use kameo_actors::DeliveryStrategy;
 use tokio::time::{interval, sleep};
 
-use forex_arbitrage_swarm::market::{Pair, Tick, Triangle};
-use forex_arbitrage_swarm::subsystems::distributed::{
+use koalisi::market::{Pair, Tick, Triangle};
+use koalisi::subsystems::distributed::{
     PollOpportunities, RemoteAlertGateway, RemoteConfig, enable_remote_alerts,
 };
-use forex_arbitrage_swarm::subsystems::swarm::{Swarm, SwarmConfig};
+use koalisi::subsystems::swarm::{Swarm, SwarmConfig};
 
 const GATEWAY_NAME: &str = "forex_swarm_alerts";
 

@@ -1,7 +1,9 @@
 use config::{Config, ConfigError, Environment, File};
 use serde::Deserialize;
 use std::env;
-use std::sync::LazyLock;
+use std::str::FromStr;
+use std::sync::{LazyLock, Once};
+use tracing::Level;
 
 pub static SETTINGS: LazyLock<Settings> =
     LazyLock::new(|| Settings::new().expect("Failed to setup settings"));
@@ -12,7 +14,7 @@ pub struct Logger {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct SwarmSettings {
+pub struct CoalitionSettings {
     pub threshold_bps: f64,
     pub history_capacity: usize,
     /// "guaranteed" or "best_effort"
@@ -23,7 +25,10 @@ pub struct SwarmSettings {
 pub struct Settings {
     pub environment: String,
     pub logger: Logger,
-    pub swarm: SwarmSettings,
+    // Accept both "swarm" and "coalition" keys from config files for
+    // backward compatibility during the rename transition.
+    #[serde(alias = "swarm")]
+    pub coalition: CoalitionSettings,
 }
 
 impl Settings {
@@ -37,4 +42,28 @@ impl Settings {
 
         builder.build()?.try_deserialize()
     }
+}
+
+static INIT: Once = Once::new();
+
+/// Initialise `tracing_subscriber` from `SETTINGS.logger.level`.
+///
+/// Idempotent: calling this multiple times (e.g. from `main` and from each
+/// integration test) is safe — only the first call installs a global
+/// subscriber.
+pub fn setup_logging() {
+    INIT.call_once(|| {
+        let level = Level::from_str(SETTINGS.logger.level.as_str()).unwrap_or_else(|_| {
+            eprintln!(
+                "Invalid log level: {}, defaulting to INFO",
+                SETTINGS.logger.level
+            );
+            Level::INFO
+        });
+
+        let _ = tracing_subscriber::fmt()
+            .with_max_level(level)
+            .with_test_writer()
+            .try_init();
+    });
 }

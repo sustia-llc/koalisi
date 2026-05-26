@@ -11,8 +11,8 @@ use kameo::error::Infallible;
 use kameo::prelude::*;
 use kameo_actors::{DeliveryStrategy, pubsub::Subscribe};
 
-use forex_arbitrage_swarm::market::{ArbitrageOpportunity, Pair, Tick, Triangle};
-use forex_arbitrage_swarm::subsystems::swarm::{Swarm, SwarmConfig};
+use koalisi::market::{ArbitrageOpportunity, Pair, Tick, Triangle};
+use koalisi::subsystems::swarm::{Swarm, SwarmConfig};
 
 #[derive(Default)]
 struct PrintListener;
