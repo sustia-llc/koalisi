@@ -49,7 +49,7 @@ fn main() {
     println!("=== Coalition Value Calculators ===\n");
 
     let additive = AdditiveCalculator;
-    let synergistic = SynergisticCalculator::new();
+    let synergistic = SynergisticCalculator;
     let weighted = WeightedCalculator::balanced();
 
     let team_ab = as_caps(&agents[0..2]);
@@ -81,8 +81,11 @@ fn main() {
             id, agents[id - 1].trust_level, share.share_size);
     }
 
-    let (min, max, avg, total) = dist.calculate_statistics();
-    println!("\n  total={} min={} max={} avg={:.1}", total, min, max, avg);
+    let stats = dist.calculate_statistics();
+    println!(
+        "\n  total={} min={} max={} avg={:.1}",
+        stats.total, stats.min, stats.max, stats.avg
+    );
     println!("  exhaustive+disjoint: {}", dist.verify_distribution(100));
 
     // --- AIPA partition search ---

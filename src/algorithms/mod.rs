@@ -9,10 +9,11 @@ pub mod dcvc;
 pub mod value_calculation;
 
 pub use aipa::{
-    IntegerPartition, PartitionBounds, compute_all_partition_bounds, find_best_partition,
+    IntegerPartition, PartitionBounds, compute_all_partition_bounds, compute_partition_avg_bound,
+    compute_partition_min_bound, compute_partition_upper_bound, find_best_partition,
     generate_integer_partitions, partition_count, verify_partition,
 };
-pub use dcvc::{DCVCDistributor, WorkloadShare};
+pub use dcvc::{DCVCDistributor, DistributionStats, WorkloadShare};
 pub use value_calculation::{
     AdditiveCalculator, MultiplicativeCalculator, SynergisticCalculator, ValueCalculator,
     WeightedCalculator,

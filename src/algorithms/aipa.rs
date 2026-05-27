@@ -201,6 +201,35 @@ pub fn compute_partition_min_bound(
         .sum()
 }
 
+/// Pre-aggregate max/avg per size so the per-partition loop is O(|partition|)
+/// instead of O(|partition| × |bucket|).
+fn aggregate_per_size(
+    values_by_size: &HashMap<usize, Vec<f64>>,
+) -> (HashMap<usize, f64>, HashMap<usize, f64>) {
+    let max_per_size: HashMap<usize, f64> = values_by_size
+        .iter()
+        .map(|(&size, values)| {
+            let max = values
+                .iter()
+                .copied()
+                .fold(f64::NEG_INFINITY, f64::max);
+            (size, max)
+        })
+        .collect();
+    let avg_per_size: HashMap<usize, f64> = values_by_size
+        .iter()
+        .map(|(&size, values)| {
+            let sum: f64 = values.iter().sum();
+            (size, sum / values.len() as f64)
+        })
+        .collect();
+    (max_per_size, avg_per_size)
+}
+
+fn sum_for_partition(partition: &IntegerPartition, map: &HashMap<usize, f64>) -> f64 {
+    partition.iter().filter_map(|s| map.get(s).copied()).sum()
+}
+
 /// Compute bounds for all partitions
 ///
 /// Returns vector of (partition, upper_bound, lower_bound) sorted by upper bound descending
@@ -208,18 +237,17 @@ pub fn compute_all_partition_bounds(
     n: usize,
     values_by_size: &HashMap<usize, Vec<f64>>,
 ) -> Vec<PartitionBounds> {
-    let partitions = generate_integer_partitions(n);
+    let (max_per_size, avg_per_size) = aggregate_per_size(values_by_size);
 
-    let mut bounds: Vec<PartitionBounds> = partitions
+    let mut bounds: Vec<PartitionBounds> = generate_integer_partitions(n)
         .into_iter()
         .map(|partition| {
-            let upper = compute_partition_upper_bound(&partition, values_by_size);
-            let lower = compute_partition_avg_bound(&partition, values_by_size);
+            let upper = sum_for_partition(&partition, &max_per_size);
+            let lower = sum_for_partition(&partition, &avg_per_size);
             PartitionBounds::new(partition, upper, lower)
         })
         .collect();
 
-    // Sort by upper bound (descending)
     bounds.sort_by(|a, b| {
         b.upper_bound
             .partial_cmp(&a.upper_bound)
@@ -231,21 +259,44 @@ pub fn compute_all_partition_bounds(
 
 /// Find the best partition based on upper bounds
 ///
-/// Returns the partition with the highest upper bound
+/// Returns the partition with the highest upper bound. Uses `max_by` over the
+/// partition stream instead of materializing+sorting the full bounds vec.
 pub fn find_best_partition(
     n: usize,
     values_by_size: &HashMap<usize, Vec<f64>>,
 ) -> Option<PartitionBounds> {
-    compute_all_partition_bounds(n, values_by_size)
+    let (max_per_size, avg_per_size) = aggregate_per_size(values_by_size);
+
+    generate_integer_partitions(n)
         .into_iter()
-        .next()
+        .map(|partition| {
+            let upper = sum_for_partition(&partition, &max_per_size);
+            let lower = sum_for_partition(&partition, &avg_per_size);
+            PartitionBounds::new(partition, upper, lower)
+        })
+        .max_by(|a, b| {
+            a.upper_bound
+                .partial_cmp(&b.upper_bound)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
 }
 
-/// Calculate partition count for a given n
+/// Calculate partition count for a given n.
 ///
-/// Returns the number of integer partitions of n (also known as p(n))
+/// Uses the standard p(n) dynamic-programming recurrence in O(n²) time and
+/// O(n) space — no per-partition Vec allocation.
 pub fn partition_count(n: usize) -> usize {
-    generate_integer_partitions(n).len()
+    if n == 0 {
+        return 1;
+    }
+    let mut p = vec![0usize; n + 1];
+    p[0] = 1;
+    for k in 1..=n {
+        for i in k..=n {
+            p[i] += p[i - k];
+        }
+    }
+    p[n]
 }
 
 /// Verify that a partition is valid

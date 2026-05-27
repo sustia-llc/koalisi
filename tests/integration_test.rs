@@ -9,7 +9,7 @@
 use std::time::Duration;
 use tokio::time::timeout;
 
-use koalisi::logger;
+use koalisi::core::config::setup_logging;
 use koalisi::market::{Direction, Pair, Tick, Triangle};
 use koalisi::subsystems::swarm::{Swarm, SwarmConfig};
 use kameo_actors::DeliveryStrategy;
@@ -34,7 +34,7 @@ async fn build_swarm() -> Swarm {
 
 #[tokio::test]
 async fn end_to_end_triangular_arbitrage() {
-    logger::setup();
+    setup_logging();
 
     // Bound the whole test so a misbehaving flush can't hang CI.
     timeout(Duration::from_secs(10), async {
@@ -141,7 +141,7 @@ async fn end_to_end_triangular_arbitrage() {
 #[tokio::test]
 async fn monitor_snapshot_holds_full_history_within_capacity() {
     use koalisi::subsystems::monitor::GetSnapshot;
-    logger::setup();
+    setup_logging();
 
     let swarm = build_swarm().await;
     let eu = p("EUR/USD");
@@ -171,7 +171,7 @@ async fn monitor_snapshot_holds_full_history_within_capacity() {
 #[tokio::test]
 async fn monitor_ring_buffer_evicts_oldest_when_full() {
     use koalisi::subsystems::monitor::GetSnapshot;
-    logger::setup();
+    setup_logging();
 
     let triangle = Triangle::new(p("EUR/USD"), p("GBP/USD"), p("EUR/GBP")).unwrap();
     let swarm = Swarm::new(SwarmConfig {
@@ -200,7 +200,7 @@ async fn monitor_ring_buffer_evicts_oldest_when_full() {
 
 #[tokio::test]
 async fn swarm_rejects_empty_triangles() {
-    logger::setup();
+    setup_logging();
     let result = Swarm::new(SwarmConfig {
         triangles: vec![],
         threshold_bps: 5.0,
@@ -216,7 +216,7 @@ async fn swarm_rejects_empty_triangles() {
 
 #[tokio::test]
 async fn feed_tick_rejects_unknown_pair() {
-    logger::setup();
+    setup_logging();
     let swarm = build_swarm().await;
     let err = swarm
         .feed_tick(Tick::new(p("CHF/JPY"), 1.0, 1.0001, 0))

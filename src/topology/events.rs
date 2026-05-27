@@ -6,7 +6,7 @@ use std::fmt::Debug;
 
 /// A unique identifier for a snapshot.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
-pub struct SnapshotId(pub u64);
+pub struct SnapshotId(pub(crate) u64);
 
 impl SnapshotId {
     /// Create a new snapshot ID.
@@ -222,11 +222,6 @@ pub struct EventStats {
 }
 
 impl EventStats {
-    /// Create new empty stats.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     /// Count an event.
     pub fn count<V, HE>(&mut self, event: &TemporalEvent<V, HE>)
     where

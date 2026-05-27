@@ -87,14 +87,14 @@ async fn main() -> anyhow::Result<()> {
     println!("\n=== Phase 4: Time-travel queries ===");
     let events_ref = manager.graph().events_ref();
 
-    let agents_at_t0 = TemporalQueries::count_vertices_at(events_ref, Timestamp(0)).await;
+    let agents_at_t0 = TemporalQueries::count_vertices_at(events_ref, Timestamp::new(0)).await;
     println!("  agents at T=0: {}", agents_at_t0);
 
-    let agents_at_t3 = TemporalQueries::count_vertices_at(events_ref, Timestamp(3)).await;
+    let agents_at_t3 = TemporalQueries::count_vertices_at(events_ref, Timestamp::new(3)).await;
     println!("  agents at T=3: {}", agents_at_t3);
 
     let coalitions_at_t4 =
-        TemporalQueries::count_hyperedges_at(events_ref, Timestamp(4)).await;
+        TemporalQueries::count_hyperedges_at(events_ref, Timestamp::new(4)).await;
     println!("  coalitions at T=4 (before formation): {}", coalitions_at_t4);
 
     // --- Phase 5: merge coalitions ---

@@ -1,67 +1,13 @@
 //! Topology layer integration tests — temporal hypergraph, coalition management,
 //! time-travel queries, and analytics.
-//!
-//! Ported from dynamo's temporal_basic, coalition_formation, and
-//! temporal_analytics test suites.
 
-use std::fmt::{Display, Formatter};
+mod common;
 
+use common::topology::{Agent, Coalition};
 use koalisi::topology::{
     CoalitionManager, TemporalAnalytics, TemporalEvent, TemporalHypergraph, TemporalQueries,
     TimeRange, Timestamp,
 };
-
-// =========================================================================
-// Test types — satisfy VertexTrait (Copy+Debug+Display+Eq+Hash+Send+Sync)
-//                  and HyperedgeTrait (VertexTrait + Into<usize>)
-// =========================================================================
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-struct Agent {
-    id: &'static str,
-    capabilities: u32,
-}
-
-impl Agent {
-    const fn new(id: &'static str, capabilities: u32) -> Self {
-        Self { id, capabilities }
-    }
-}
-
-impl Display for Agent {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Agent({})", self.id)
-    }
-}
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-struct Coalition {
-    name: &'static str,
-    formation_cost: usize,
-    value: usize,
-}
-
-impl Coalition {
-    const fn new(name: &'static str, formation_cost: usize, value: usize) -> Self {
-        Self {
-            name,
-            formation_cost,
-            value,
-        }
-    }
-}
-
-impl Display for Coalition {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Coalition({})", self.name)
-    }
-}
-
-impl From<Coalition> for usize {
-    fn from(c: Coalition) -> Self {
-        c.formation_cost
-    }
-}
 
 // =========================================================================
 // Temporal basic tests
@@ -110,18 +56,18 @@ async fn point_in_time_queries() {
 
     let events_ref = graph.events_ref();
 
-    let count_at_0 = TemporalQueries::count_vertices_at(events_ref, Timestamp(0)).await;
+    let count_at_0 = TemporalQueries::count_vertices_at(events_ref, Timestamp::new(0)).await;
     assert_eq!(count_at_0, 1);
 
-    let count_at_1 = TemporalQueries::count_vertices_at(events_ref, Timestamp(1)).await;
+    let count_at_1 = TemporalQueries::count_vertices_at(events_ref, Timestamp::new(1)).await;
     assert_eq!(count_at_1, 2);
 
     let he_count_at_2 =
-        TemporalQueries::count_hyperedges_at(events_ref, Timestamp(2)).await;
+        TemporalQueries::count_hyperedges_at(events_ref, Timestamp::new(2)).await;
     assert_eq!(he_count_at_2, 1);
 
     let he_count_at_1 =
-        TemporalQueries::count_hyperedges_at(events_ref, Timestamp(1)).await;
+        TemporalQueries::count_hyperedges_at(events_ref, Timestamp::new(1)).await;
     assert_eq!(he_count_at_1, 0);
 }
 
@@ -184,12 +130,12 @@ async fn vertex_weight_at() {
     let events_ref = graph.events_ref();
 
     let weight_at_0 =
-        TemporalQueries::vertex_weight_at(events_ref, a1, Timestamp(0)).await;
+        TemporalQueries::vertex_weight_at(events_ref, a1, Timestamp::new(0)).await;
     assert!(weight_at_0.is_some());
     assert_eq!(weight_at_0.unwrap().capabilities, 5);
 
     let weight_at_1 =
-        TemporalQueries::vertex_weight_at(events_ref, a1, Timestamp(1)).await;
+        TemporalQueries::vertex_weight_at(events_ref, a1, Timestamp::new(1)).await;
     assert!(weight_at_1.is_some());
     assert_eq!(weight_at_1.unwrap().capabilities, 10);
 }
@@ -296,7 +242,7 @@ async fn analytics_delta() {
 
     // delta skips events at exactly `from`, so from=0 excludes a1(T=0)
     let delta =
-        TemporalAnalytics::delta(graph.events_ref(), Timestamp(0), Timestamp(2)).await;
+        TemporalAnalytics::delta(graph.events_ref(), Timestamp::new(0), Timestamp::new(2)).await;
     assert_eq!(delta.vertices_added.len(), 1);
     assert!(delta.vertices_removed.is_empty());
 }

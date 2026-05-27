@@ -8,7 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// Timestamps are used to track when events occurred in the temporal hypergraph.
 /// They can be either logical (incrementing counter) or wall-clock based.
 #[derive(Clone, Copy, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-pub struct Timestamp(pub u64);
+pub struct Timestamp(pub(crate) u64);
 
 impl Timestamp {
     /// Create a new timestamp from a raw value.
@@ -149,25 +149,25 @@ impl Clock {
 
     /// Get the next timestamp, incrementing the clock.
     pub fn tick(&self) -> Timestamp {
-        Timestamp(self.counter.fetch_add(1, Ordering::SeqCst))
+        Timestamp(self.counter.fetch_add(1, Ordering::Relaxed))
     }
 
     /// Get the current timestamp without incrementing.
     pub fn current(&self) -> Timestamp {
-        Timestamp(self.counter.load(Ordering::SeqCst))
+        Timestamp(self.counter.load(Ordering::Acquire))
     }
 
     /// Advance the clock to at least the given timestamp.
     /// Returns the new current value.
     pub fn advance_to(&self, timestamp: Timestamp) -> Timestamp {
         loop {
-            let current = self.counter.load(Ordering::SeqCst);
+            let current = self.counter.load(Ordering::Acquire);
             if current >= timestamp.0 {
                 return Timestamp(current);
             }
             if self
                 .counter
-                .compare_exchange(current, timestamp.0, Ordering::SeqCst, Ordering::SeqCst)
+                .compare_exchange(current, timestamp.0, Ordering::AcqRel, Ordering::Acquire)
                 .is_ok()
             {
                 return timestamp;

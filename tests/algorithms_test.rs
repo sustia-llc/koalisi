@@ -1,56 +1,14 @@
 //! Algorithm layer integration tests — value calculators, DCVC, AIPA.
 
+mod common;
+
+use common::algorithms::{Agent, as_caps, test_agents};
 use koalisi::algorithms::{
-    AdditiveCalculator, AgentCapabilities, DCVCDistributor, MultiplicativeCalculator,
-    SynergisticCalculator, ValueCalculator, WeightedCalculator, compute_all_partition_bounds,
-    find_best_partition, generate_integer_partitions, partition_count, verify_partition,
+    AdditiveCalculator, DCVCDistributor, MultiplicativeCalculator, SynergisticCalculator,
+    ValueCalculator, WeightedCalculator, compute_all_partition_bounds, find_best_partition,
+    generate_integer_partitions, partition_count, verify_partition,
 };
 use std::collections::HashMap;
-
-// =========================================================================
-// Test agent type implementing AgentCapabilities
-// =========================================================================
-
-#[derive(Debug, Copy, Clone)]
-struct Agent {
-    id: usize,
-    capabilities: u32,
-    trust_level: u32,
-}
-
-impl Agent {
-    fn new(id: usize, capabilities: u32, trust_level: u32) -> Self {
-        Self {
-            id,
-            capabilities,
-            trust_level,
-        }
-    }
-}
-
-impl AgentCapabilities for Agent {
-    fn agent_id(&self) -> usize {
-        self.id
-    }
-    fn capabilities(&self) -> u32 {
-        self.capabilities
-    }
-    fn trust_level(&self) -> u32 {
-        self.trust_level
-    }
-}
-
-fn test_agents() -> Vec<Agent> {
-    vec![
-        Agent::new(1, 0b001, 80),
-        Agent::new(2, 0b010, 90),
-        Agent::new(3, 0b100, 70),
-    ]
-}
-
-fn as_caps(agents: &[Agent]) -> Vec<&dyn AgentCapabilities> {
-    agents.iter().map(|a| a as &dyn AgentCapabilities).collect()
-}
 
 // =========================================================================
 // Value calculator tests
@@ -69,7 +27,7 @@ fn additive_calculator() {
 
 #[test]
 fn synergistic_values_diversity() {
-    let calc = SynergisticCalculator::new();
+    let calc = SynergisticCalculator;
 
     let diverse = [Agent::new(1, 0b001, 80), Agent::new(2, 0b010, 80)];
     let duplicate = [Agent::new(1, 0b001, 80), Agent::new(2, 0b001, 80)];
@@ -112,7 +70,7 @@ fn synergistic_beats_additive_for_diverse() {
     let refs = as_caps(&agents);
 
     let additive = AdditiveCalculator;
-    let synergistic = SynergisticCalculator::new();
+    let synergistic = SynergisticCalculator;
 
     assert!(synergistic.calculate_value(&refs) > additive.calculate_value(&refs));
 }

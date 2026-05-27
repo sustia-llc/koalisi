@@ -6,13 +6,13 @@ use std::time::Duration;
 use tokio::time::interval;
 use tokio_util::sync::CancellationToken;
 
-use koalisi::logger;
+use koalisi::core::config::setup_logging;
 use koalisi::market::{Pair, Tick, Triangle};
 use koalisi::subsystems::swarm::{Swarm, SwarmConfig};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    logger::setup();
+    setup_logging();
 
     let triangle = Triangle::new(
         "EUR/USD".parse()?,

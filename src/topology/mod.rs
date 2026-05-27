@@ -18,7 +18,7 @@ pub use coalitions::CoalitionManager;
 pub use errors::{TemporalError, TemporalResult};
 pub use event_log::EventLog;
 pub use events::{EventStats, SnapshotId, TemporalEvent};
-pub use executor::{HypergraphExecutor, EXEC};
+pub use executor::HypergraphExecutor;
 pub use queries::TemporalQueries;
 pub use temporal::{SharedGraph, Snapshot, TemporalHypergraph};
 pub use timestamp::{Clock, TimeRange, Timestamp};

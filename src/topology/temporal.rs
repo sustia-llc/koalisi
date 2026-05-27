@@ -295,6 +295,49 @@ where
         Ok(())
     }
 
+    /// Read-modify-write a hyperedge's vertex set atomically.
+    ///
+    /// The mutator runs inside the same write-lock as the read of `old_vertices`
+    /// and the write of the new set, so two concurrent join/leave calls cannot
+    /// race. The mutator may return `Err` to abort the update (e.g. a coalition
+    /// leave that would leave the membership empty).
+    pub async fn update_hyperedge_vertices_try<F>(
+        &self,
+        index: HyperedgeIndex,
+        mutator: F,
+    ) -> TemporalResult<(), V, HE>
+    where
+        F: FnOnce(Vec<VertexIndex>) -> Result<Vec<VertexIndex>, TemporalError<V, HE>>
+            + Send
+            + 'static,
+    {
+        let timestamp = self.clock.tick();
+        let graph = self.graph.clone();
+
+        let (old_vertices, new_vertices) = EXEC
+            .run_job(move || {
+                let mut g = graph.write().unwrap();
+                let old_vertices = g.get_hyperedge_vertices(index).map_err(TemporalError::from)?;
+                let new_vertices = mutator(old_vertices.clone())?;
+                g.update_hyperedge_vertices(index, new_vertices.clone())
+                    .map_err(TemporalError::from)?;
+                Ok::<_, TemporalError<V, HE>>((old_vertices, new_vertices))
+            })
+            .await?;
+
+        self.events
+            .write()
+            .await
+            .append(TemporalEvent::HyperedgeVerticesUpdated {
+                timestamp,
+                index,
+                old_vertices,
+                new_vertices,
+            });
+
+        Ok(())
+    }
+
     /// Reverse a hyperedge and record the event.
     pub async fn reverse_hyperedge(
         &self,
@@ -504,27 +547,31 @@ where
     // =========================================================================
 
     /// Create a snapshot at the current timestamp.
+    ///
+    /// `event_index` points to the SnapshotMarker itself, so replay-to-snapshot
+    /// includes the marker as its terminator. The marker append and the snapshots
+    /// table insert happen under a single events-log write guard to keep the
+    /// stored index consistent under concurrent mutation.
     pub async fn create_snapshot(&self) -> SnapshotId {
         let timestamp = self.clock.tick();
-        let id = SnapshotId(self.snapshot_counter.fetch_add(1, Ordering::SeqCst));
+        let id = SnapshotId(self.snapshot_counter.fetch_add(1, Ordering::Relaxed));
 
-        let event_index = self.events.read().await.len();
+        let event_index = {
+            let mut events = self.events.write().await;
+            let index = events.len();
+            events.append(TemporalEvent::SnapshotMarker {
+                timestamp,
+                snapshot_id: id,
+            });
+            index
+        };
 
         let snapshot = Snapshot {
             id,
             timestamp,
             event_index,
         };
-
         self.snapshots.write().await.insert(timestamp, snapshot);
-
-        self.events
-            .write()
-            .await
-            .append(TemporalEvent::SnapshotMarker {
-                timestamp,
-                snapshot_id: id,
-            });
 
         id
     }
@@ -624,7 +671,7 @@ where
             snapshots: self.snapshots.clone(),
             clock: Clock::starting_at(self.clock.current().value()),
             snapshot_counter: AtomicU64::new(
-                self.snapshot_counter.load(Ordering::SeqCst),
+                self.snapshot_counter.load(Ordering::Acquire),
             ),
         }
     }

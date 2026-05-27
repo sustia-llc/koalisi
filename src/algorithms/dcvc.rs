@@ -17,6 +17,15 @@ pub struct WorkloadShare {
     pub share_size: usize,
 }
 
+/// Aggregate statistics over all per-agent workload shares.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct DistributionStats {
+    pub min: usize,
+    pub max: usize,
+    pub avg: f64,
+    pub total: usize,
+}
+
 pub struct DCVCDistributor {
     workload_distribution: HashMap<usize, WorkloadShare>,
 }
@@ -85,23 +94,29 @@ impl DCVCDistributor {
         &self.workload_distribution
     }
 
-    pub fn calculate_statistics(&self) -> (usize, usize, f64, usize) {
+    pub fn calculate_statistics(&self) -> DistributionStats {
         if self.workload_distribution.is_empty() {
-            return (0, 0, 0.0, 0);
+            return DistributionStats::default();
         }
 
-        let share_sizes: Vec<usize> = self
-            .workload_distribution
-            .values()
-            .map(|s| s.share_size)
-            .collect();
+        let (min, max, total, count) = self.workload_distribution.values().fold(
+            (usize::MAX, 0usize, 0usize, 0usize),
+            |(min, max, total, count), share| {
+                (
+                    min.min(share.share_size),
+                    max.max(share.share_size),
+                    total + share.share_size,
+                    count + 1,
+                )
+            },
+        );
 
-        let min_share = *share_sizes.iter().min().unwrap_or(&0);
-        let max_share = *share_sizes.iter().max().unwrap_or(&0);
-        let total: usize = share_sizes.iter().sum();
-        let avg_share = total as f64 / share_sizes.len() as f64;
-
-        (min_share, max_share, avg_share, total)
+        DistributionStats {
+            min,
+            max,
+            avg: total as f64 / count as f64,
+            total,
+        }
     }
 
     pub fn verify_distribution(&self, total_coalitions: usize) -> bool {

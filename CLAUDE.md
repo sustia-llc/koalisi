@@ -21,6 +21,18 @@ domain is preserved as a working adapter; the architecture is domain-agnostic.
 Evolved from four prior projects: dynamo (topology), coalesce (algorithms),
 coalition_aif (decision — planned), and forex-arbitrage-swarm (runtime).
 
+## Available tooling for this project
+
+- **`graph` plugin v2.0.1** (`~/.claude/plugins/cache/sustia-claude-code-plugins/graph/2.0.1/`)
+  ships a `hypergraph` agent plus six hypergraph skills tracking
+  hypergraph v4.2.0 HEAD: `hypergraph-core`, `hypergraph-mutations`,
+  `hypergraph-algorithms`, `hypergraph-analytics`, `hypergraph-projections`,
+  `hypergraph-persistence`. Use them when working on `src/topology/` or
+  planning Phase 5 (the `hypergraph-persistence` skill maps directly onto
+  the planned `PersistentHypergraph` integration).
+- `rust-v2:rust-dev-v2` / `rust-v2:rust-practical` — primary Rust agents per
+  the user CLAUDE.md routing rules.
+
 ## Current state — 2026-05-26
 
 ### Done
@@ -216,14 +228,20 @@ ROLE=consumer timeout 60s cargo run --manifest-path Cargo.toml --target-dir /tmp
 
 ## Next steps
 
-### Phase 5: Persistence  *(planned)*
+> **GATE — 2026-05-27.** Two additional design inputs are pending from
+> the user before phases 5 and 6 begin implementation. Do NOT start
+> Phase 5 or Phase 6 work until those inputs are recorded here and the
+> gate is lifted. The current Phase 5/6 entries below are the *prior*
+> plan and may be revised once the new inputs land.
+
+### Phase 5: Persistence  *(planned — gated, see above)*
 
 Feature-gated persistence using hypergraph v4.2.0's `PersistentHypergraph`
 for graph state plus an `EventStore` trait for temporal event durability.
 Default impl: append-only file log with `rmp-serde`. See `.claude/plans/`
 for full design.
 
-### Phase 6: Decision layer (Active Inference)  *(planned)*
+### Phase 6: Decision layer (Active Inference)  *(planned — gated, see above)*
 
 Feature-gated (`decision`) port of coalition_aif's EFE calculator,
 BeliefState, CoalitionBelief. Adds `ndarray` dependency. Most experimental.

@@ -1,32 +1,224 @@
 # Changelog
 
-All notable changes to **forex-arbitrage-swarm** will be documented in
-this file.
+All notable changes to **koalisi** will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Planned (tracked in [`CLAUDE.md`](./CLAUDE.md) §"Next steps"):
+Gated on two pending design inputs from the user before Phases 5 and 6
+begin implementation. Planned work (tracked in [`CLAUDE.md`](./CLAUDE.md)
+§"Next steps"):
 
-- **Databento `LiveClient` integration** *(blocked on `DATABENTO_API_KEY`)* —
-  real-time websocket source via `databento::LiveClient`, same kameo
-  wiring as the existing DBN-file adapter. New module
-  `subsystems::databento_live`, `spawn_live_pump` on the swarm's
-  `TaskTracker`, `examples/databento_live.rs`.
-- **Synthetic DBN file for end-to-end arb signal** — generate a
-  forex-shaped `.dbn.zst` at runtime via `dbn::encode::AsyncDbnEncoder`
-  so the file adapter can demonstrate the full "DBN decode → triangle arb
-  fires" path (the bundled `test_data.mbp-1.dbn.zst` is too small).
-- **Remote gateway hardening** — bounded `VecDeque` buffer with eviction
-  cap; cursor-based `PollSince { last_seq }` semantics; stable
-  `RemoteArbitrageOpportunityV1` wire schema separate from the local
-  `ArbitrageOpportunity`; multiple gateways under one libp2p swarm; QUIC
-  transport alongside TCP.
-- **Nice-to-haves** — `metrics`/Prometheus example, multi-triangle stress
-  test, bid/ask-aware execution-cost modelling, switch off path
-  dependencies when `kameo 0.20.0` lands on crates.io.
+- **Phase 5 — Persistence**: feature-gated `PersistentHypergraph` from
+  hypergraph v4.2.0 + an append-only `EventStore` trait for temporal
+  events.
+- **Phase 6 — Decision layer**: feature-gated (`decision`) port of
+  coalition_aif's EFE calculator, `BeliefState`, `CoalitionBelief`.
+- **Databento `LiveClient` integration** *(blocked on `DATABENTO_API_KEY`)*.
+- **Synthetic DBN file** for end-to-end arb signal demo.
+- **Remote gateway hardening** — bounded buffer, cursor-based polling,
+  stable wire schema, QUIC transport alongside TCP.
+
+## [0.5.0] — 2026-05-27
+
+Max-effort `/code-review` sweep across the topology and algorithms
+layers. Three reviewers (reuse, quality, efficiency) flagged 33
+distinct findings; all applied or explicitly deferred. Includes real
+API breakage — see "Breaking" below.
+
+### Fixed
+
+- **`TemporalHypergraph::create_snapshot` race**: the marker append and
+  the snapshots-table insert now happen under a single events-log write
+  guard. `Snapshot::event_index` correctly points at the marker
+  (previously off-by-one even single-threaded). `temporal.rs:507-531`.
+- **`TemporalQueries::{vertex,hyperedge}_lifespan` double-lock race**:
+  `created` and `removed` are now sampled under a single read lock via
+  private `_impl` helpers, eliminating the window where a concurrent
+  writer could yield an inconsistent lifespan. `queries.rs`.
+- **`TemporalAnalytics::{vertex,hyperedge}_count_series` O(samples × |V|)
+  re-locking**: replaced with a single-pass chronological walk that
+  maintains a `HashSet<VertexIndex>` of live entities and emits counts
+  at sample boundaries. One lock acquisition per call instead of one
+  per sample. `analytics.rs`.
+- **`TemporalAnalytics::delta` silently dropped clears**: `HyperedgesCleared`
+  and `GraphCleared` events are now recorded in two new `GraphDelta`
+  fields (`hyperedges_cleared`, `graph_cleared`) instead of being
+  swallowed.
+- **`EventLog::events_until` ignored its own index**: now uses
+  `time_index.range(..=ts)`, O(log n + k) instead of O(n).
+- **`EventLog::snapshot_before` linear HashMap scan**: snapshot index
+  is now a `BTreeMap<Timestamp, (SnapshotId, usize)>` so
+  `snapshot_before` is O(log n) via `.range(..=t).next_back()`.
+- **`CoalitionManager::{join,leave}_coalition` TOCTOU window**: replaced
+  the two-round-trip read-then-write with a new atomic
+  `TemporalHypergraph::update_hyperedge_vertices_try` mutator helper
+  that holds the graph write lock across the membership check + update.
+- **`agent_coalition_history` lock-holding scan**: now snapshots the
+  events vec under the read lock, then processes outside. The linear
+  scan no longer blocks concurrent writers for its duration.
+- **AIPA combinatorial wastefulness**:
+  - `partition_count(n)` switched from full Vec enumeration to the
+    O(n²) dynamic-programming recurrence (no per-partition allocation;
+    n=50 went from ~204k Vec allocations to 51 usize cells).
+  - `find_best_partition` replaced sort-then-take-first with `max_by`;
+    O(p(n)) instead of O(p(n) log p(n)).
+  - `compute_all_partition_bounds` pre-aggregates max/avg per coalition
+    size once before the partition loop instead of rescanning each
+    bucket per partition.
+
+### Changed
+
+- **Atomics**: `Clock` and `TemporalHypergraph::snapshot_counter`
+  switched from `Ordering::SeqCst` to `Relaxed` (`tick`) /
+  `Acquire`/`AcqRel` (compare-exchange) — same correctness, no x86_64
+  `MFENCE` on every clock tick.
+- **`TemporalAnalytics::events_by_type`**: returns `HashMap<&'static str,
+  usize>` instead of `HashMap<String, usize>` and routes through the
+  existing `TemporalEvent::event_type()` method — eliminates one
+  `String` allocation per event in range and deduplicates the 13-arm
+  match.
+- **`DCVCDistributor::calculate_statistics`**: returns a typed
+  `DistributionStats` struct (`min`, `max`, `avg`, `total`) instead of
+  an unnamed 4-tuple. Computed in a single fold (no per-share Vec
+  allocation, no three-pass min/max/sum).
+- **`ValueCalculator` impls**: shared helpers (`size_bonus`,
+  `capability_bonus`, `trust_sum`, `combined_capabilities`) and named
+  constants (`SIZE_UNIT`, `CAP_UNIT`, `SYNERGY_UNIT`, `TEAM_UNIT`,
+  `TEAM_THRESHOLD`) replace the three duplicated implementations'
+  magic numbers.
+- **`EventLog`**: `stats()` is now O(1) (incremental on `append`)
+  instead of O(total events). All five `.or_insert_with(Vec::new)`
+  call sites use `.or_default()` (clippy::pedantic alignment).
+- **`HypergraphExecutor`**: gained `with_num_threads(n)` constructor
+  for downstream runtimes that already partition CPUs across rayon
+  pools. Module + struct documentation added.
+- **CLAUDE.md**: new §"Available tooling for this project" section
+  pointing at the `graph` plugin v2.0.1 (hypergraph agent + six
+  hypergraph skills tracking hypergraph v4.2.0 HEAD). New gate notice
+  on Phases 5 and 6 noting they are pending two user design inputs.
+- **Test fixtures**: extracted shared `Agent`/`Coalition`/`as_caps`
+  scaffolding from `tests/{algorithms,topology}_test.rs` into
+  `tests/common/{algorithms,topology}.rs`. Examples stay standalone
+  per the cargo-examples idiom.
+
+### Breaking
+
+- `Timestamp` and `SnapshotId` inner `u64` fields are now `pub(crate)`.
+  External callers must use `Timestamp::new(n)` / `SnapshotId::new(n)`
+  and `Timestamp::value()` / `SnapshotId::value()` instead of tuple
+  construction or field access.
+- `EventStats::new()` removed — use `EventStats::default()`.
+- `SynergisticCalculator::new()` removed — use
+  `SynergisticCalculator::default()` or the unit-struct literal
+  `SynergisticCalculator`.
+- `DCVCDistributor::calculate_statistics()` return type changed from
+  `(usize, usize, f64, usize)` to `DistributionStats { min, max, avg,
+  total }`. Callers must replace `let (min, max, avg, total) = ...`
+  with field access.
+- `koalisi::logger` and `koalisi::settings` modules removed — use
+  `koalisi::core::config::{setup_logging, Settings, CoalitionSettings,
+  SETTINGS}` directly.
+- `koalisi::topology::EXEC` no longer re-exported at the topology
+  module root (now `pub(crate)` in `executor.rs`). External callers
+  can construct their own pool via `HypergraphExecutor::with_num_threads`.
+- 6 `TemporalAnalytics` methods and 7 `CoalitionManager` temporal-query
+  methods are now `pub(crate)` (no in-crate or external callers; will
+  be re-promoted when Phase 5/6 wires them up): `vertex_count_series`,
+  `hyperedge_count_series`, `mutation_rate`, `most_active_vertices`,
+  `most_active_hyperedges`, `events_by_type`; `was_member_at`,
+  `coalition_formed_at`, `coalition_dissolved_at`, `coalition_lifespan`,
+  `count_agents_at`, `count_coalitions_at`, `agent_coalition_history`.
+- `GraphDelta` gained two new fields (`hyperedges_cleared`,
+  `graph_cleared`). Exhaustive pattern matches on `GraphDelta` will
+  need to cover them.
+
+### Verified
+
+- `cargo test` (default): 26 lib + 15 algorithms + 11 topology + 5
+  integration + 2 doctests = **59 pass, 0 fail, 0 warnings**.
+- `cargo test --features databento`: + 4 integration tests pass.
+- `cargo test --features remote`: + 1 integration test passes.
+- `cargo check --all-targets` across all three feature configurations:
+  clean.
+- All seven examples (`topology_coalition`, `algorithm_values`,
+  `triangular_arbitrage`, `historical_bootstrap`, `live_pubsub`,
+  `supervised_swarm`, `distributed_alert_consumer`) plus the two
+  databento examples exit 0 with expected output.
+
+## [0.4.0] — 2026-05-26
+
+Rename + topology and algorithm layer integration. Consolidates three
+prior projects into a single layered crate; `forex-arbitrage-swarm`
+becomes the runtime adapter.
+
+### Added
+
+- **Rename**: `forex-arbitrage-swarm` → `koalisi`. The original crate
+  name survives as the runtime adapter's nickname; everything else
+  re-aligned under `koalisi::`.
+- **`core` layer** — `CoalitionRuntime` (domain-agnostic three-step
+  shutdown: cancel → close → drain) extracted from the old `Swarm`'s
+  lifecycle plumbing. `core::config` consolidates `Settings`,
+  `CoalitionSettings`, and `setup_logging` behind one module.
+- **`topology` layer** (ported from dynamo, on top of hypergraph
+  v4.2.0):
+  - `TemporalHypergraph<V, HE>` — event-sourced wrapper around
+    `Hypergraph` with full per-mutation event recording.
+  - `EventLog<V, HE>` — chronological `Vec<TemporalEvent>` plus
+    `BTreeMap` time index, `HashMap` vertex/hyperedge indices,
+    `HashMap` snapshot index.
+  - `TemporalEvent<V, HE>` — 13-variant enum covering every
+    hypergraph mutation plus snapshot markers.
+  - `CoalitionManager<V, HE>` — agent (vertex) + coalition (hyperedge)
+    API: `add_agent`, `form_coalition`, `join_coalition`,
+    `leave_coalition`, `dissolve_coalition`, `merge_coalitions`,
+    `coalition_members`, etc.
+  - `TemporalQueries` — point-in-time state reconstruction via event
+    replay (`vertex_exists_at`, `hyperedge_vertices_at`,
+    `count_vertices_at`, etc.).
+  - `TemporalAnalytics` — delta computation, time-series sampling,
+    activity ranking, mutation-rate aggregation.
+  - `HypergraphExecutor` (+ `EXEC` singleton) — rayon ↔ tokio bridge
+    so the std `RwLock` inside the upstream hypergraph crate doesn't
+    leak across `.await`.
+  - `Timestamp`, `TimeRange`, `Clock` — logical-time primitives with
+    thread-safe monotonic counter.
+  - `examples/topology_coalition.rs` — form/join/merge + time-travel
+    walkthrough.
+  - `tests/topology_test.rs` — 11 integration tests.
+- **`algorithms` layer** (ported from coalesce):
+  - `AgentCapabilities` trait — abstract interface (`agent_id`,
+    `capabilities`, `trust_level`) so calculators stay
+    domain-agnostic.
+  - `ValueCalculator` trait + four implementations:
+    `AdditiveCalculator`, `SynergisticCalculator`,
+    `MultiplicativeCalculator`, `WeightedCalculator` (with
+    `balanced` / `capability_focused` / `trust_focused` presets).
+  - `DCVCDistributor` — Distributed Coalitional Value Calculation
+    workload split (Rahwan & Jennings, 2007).
+  - `aipa` module — Anytime Integer-Partition Algorithm (Rahwan et
+    al., 2007): `generate_integer_partitions`, `compute_*_bound`,
+    `compute_all_partition_bounds`, `find_best_partition`,
+    `partition_count`, `verify_partition`.
+  - `examples/algorithm_values.rs` — calculator comparison + DCVC
+    distribution + AIPA bound enumeration walkthrough.
+  - `tests/algorithms_test.rs` — 15 integration tests.
+- README rewrite documenting the four-layer architecture with the
+  forex domain as a working adapter, the new examples, and the four
+  origin projects.
+
+### Changed
+
+- `forex-arbitrage-swarm`'s public surface migrated under
+  `koalisi::subsystems::{coordinator, monitor, sink, swarm}` (forex
+  domain) and `koalisi::market` (value types). Examples and tests
+  updated to the new paths.
+- `CLAUDE.md` reorganised: four-layer mission statement, new file
+  inventory with topology + algorithms additions, all 11 "worth
+  flagging" gotchas updated for the koalisi naming.
 
 ## [0.3.0] — 2026-05-24
 
@@ -194,6 +386,8 @@ Initial POC release.
   binaries cleanly.
 
 [Unreleased]: #unreleased
+[0.5.0]: #050--2026-05-27
+[0.4.0]: #040--2026-05-26
 [0.3.0]: #030--2026-05-24
 [0.2.0]: #020--2026-05-23
 [0.1.0]: #010--2026-05-23

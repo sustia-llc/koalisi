@@ -30,15 +30,6 @@ pub mod subsystems {
     pub mod swarm;
 }
 
-// --- backward-compat re-exports (pre-rename public surface) ---
-pub mod logger {
-    pub use crate::core::config::setup_logging as setup;
-}
-pub mod settings {
-    pub use crate::core::config::{Settings, SETTINGS};
-    pub use crate::core::config::CoalitionSettings as SwarmSettings;
-}
-
 pub use market::{ArbitrageOpportunity, Direction, Pair, Quote, Tick, TickUpdate, Triangle};
 pub use subsystems::swarm::{Swarm, SwarmConfig, SwarmFeeder};
 pub use core::CoalitionRuntime;

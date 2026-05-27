@@ -20,8 +20,10 @@ where
     vertex_index: HashMap<VertexIndex, Vec<usize>>,
     /// Index from hyperedge to event indices affecting that hyperedge.
     hyperedge_index: HashMap<HyperedgeIndex, Vec<usize>>,
-    /// Index from snapshot ID to event index.
-    snapshot_index: HashMap<SnapshotId, usize>,
+    /// Snapshots ordered by timestamp for `snapshot_before` to use range queries.
+    snapshot_index: BTreeMap<Timestamp, (SnapshotId, usize)>,
+    /// Running event-type counts, maintained on every `append` so `stats()` is O(1).
+    stats: EventStats,
 }
 
 impl<V, HE> EventLog<V, HE>
@@ -36,7 +38,8 @@ where
             time_index: BTreeMap::new(),
             vertex_index: HashMap::new(),
             hyperedge_index: HashMap::new(),
-            snapshot_index: HashMap::new(),
+            snapshot_index: BTreeMap::new(),
+            stats: EventStats::default(),
         }
     }
 
@@ -45,57 +48,43 @@ where
         let index = self.events.len();
         let timestamp = event.timestamp();
 
-        // Update time index
-        self.time_index
-            .entry(timestamp)
-            .or_insert_with(Vec::new)
-            .push(index);
+        self.time_index.entry(timestamp).or_default().push(index);
 
-        // Update vertex index
         if let Some(vertex) = event.vertex_index() {
-            self.vertex_index
-                .entry(vertex)
-                .or_insert_with(Vec::new)
-                .push(index);
+            self.vertex_index.entry(vertex).or_default().push(index);
         }
 
-        // Handle contracted vertices (they affect multiple vertices)
+        // Contracted vertices each get the same event in their per-vertex history.
         if let TemporalEvent::VerticesContracted {
             contracted_vertices,
             ..
         } = &event
         {
             for v in contracted_vertices {
-                self.vertex_index
-                    .entry(*v)
-                    .or_insert_with(Vec::new)
-                    .push(index);
+                self.vertex_index.entry(*v).or_default().push(index);
             }
         }
 
-        // Update hyperedge index
         if let Some(hyperedge) = event.hyperedge_index() {
             self.hyperedge_index
                 .entry(hyperedge)
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(index);
         }
 
-        // Handle joined hyperedges (they affect multiple hyperedges)
+        // Source hyperedges each get the join event in their per-hyperedge history.
         if let TemporalEvent::HyperedgesJoined { source_indices, .. } = &event {
             for h in source_indices {
-                self.hyperedge_index
-                    .entry(*h)
-                    .or_insert_with(Vec::new)
-                    .push(index);
+                self.hyperedge_index.entry(*h).or_default().push(index);
             }
         }
 
-        // Update snapshot index
         if let TemporalEvent::SnapshotMarker { snapshot_id, .. } = &event {
-            self.snapshot_index.insert(*snapshot_id, index);
+            self.snapshot_index
+                .insert(timestamp, (*snapshot_id, index));
         }
 
+        self.stats.count(&event);
         self.events.push(event);
     }
 
@@ -141,9 +130,10 @@ where
 
     /// Get events up to (and including) a timestamp.
     pub fn events_until(&self, timestamp: Timestamp) -> Vec<&TemporalEvent<V, HE>> {
-        self.events
-            .iter()
-            .take_while(|e| e.timestamp() <= timestamp)
+        self.time_index
+            .range(..=timestamp)
+            .flat_map(|(_, indices)| indices.iter())
+            .filter_map(|&i| self.events.get(i))
             .collect()
     }
 
@@ -173,31 +163,22 @@ where
         self.time_index.keys().next_back().copied()
     }
 
-    /// Get the most recent snapshot before or at a timestamp.
-    pub fn snapshot_before(&self, timestamp: Timestamp) -> Option<(&SnapshotId, usize)> {
+    /// Get the most recent snapshot at or before `timestamp`. O(log n) via the BTreeMap range.
+    pub fn snapshot_before(&self, timestamp: Timestamp) -> Option<(SnapshotId, usize)> {
         self.snapshot_index
-            .iter()
-            .filter(|&(_, idx)| {
-                self.events
-                    .get(*idx)
-                    .is_some_and(|e| e.timestamp() <= timestamp)
-            })
-            .max_by_key(|&(_, idx)| self.events.get(*idx).map(|e| e.timestamp()))
-            .map(|(id, idx)| (id, *idx))
+            .range(..=timestamp)
+            .next_back()
+            .map(|(_, payload)| *payload)
     }
 
-    /// Get statistics about events.
+    /// Get statistics about events. O(1) — maintained incrementally on append.
     pub fn stats(&self) -> EventStats {
-        let mut stats = EventStats::new();
-        for event in &self.events {
-            stats.count(event);
-        }
-        stats
+        self.stats.clone()
     }
 
     /// Get statistics for events in a time range.
     pub fn stats_in_range(&self, range: &TimeRange) -> EventStats {
-        let mut stats = EventStats::new();
+        let mut stats = EventStats::default();
         for event in self.events_in_range(range) {
             stats.count(event);
         }
@@ -214,14 +195,24 @@ where
         self.time_index.keys().copied().collect()
     }
 
+    /// Iterate vertex indices ever touched (without allocating a Vec).
+    pub fn vertex_indices(&self) -> impl Iterator<Item = VertexIndex> + '_ {
+        self.vertex_index.keys().copied()
+    }
+
+    /// Iterate hyperedge indices ever touched (without allocating a Vec).
+    pub fn hyperedge_indices(&self) -> impl Iterator<Item = HyperedgeIndex> + '_ {
+        self.hyperedge_index.keys().copied()
+    }
+
     /// Get all vertices that have been added (even if later removed).
     pub fn all_vertex_indices(&self) -> Vec<VertexIndex> {
-        self.vertex_index.keys().copied().collect()
+        self.vertex_indices().collect()
     }
 
     /// Get all hyperedges that have been added (even if later removed).
     pub fn all_hyperedge_indices(&self) -> Vec<HyperedgeIndex> {
-        self.hyperedge_index.keys().copied().collect()
+        self.hyperedge_indices().collect()
     }
 
     /// Clear the event log.
@@ -231,6 +222,7 @@ where
         self.vertex_index.clear();
         self.hyperedge_index.clear();
         self.snapshot_index.clear();
+        self.stats = EventStats::default();
     }
 }
 
@@ -249,9 +241,11 @@ mod tests {
     use super::*;
 
     #[derive(Clone, Debug)]
+    #[allow(dead_code)]
     struct TestV(String);
 
     #[derive(Clone, Debug)]
+    #[allow(dead_code)]
     struct TestHE(String);
 
     #[test]
@@ -320,5 +314,44 @@ mod tests {
 
         assert_eq!(log.vertex_events(VertexIndex(0)).len(), 2);
         assert_eq!(log.vertex_events(VertexIndex(1)).len(), 0);
+    }
+
+    #[test]
+    fn snapshot_before_uses_btree_range() {
+        let mut log = EventLog::<TestV, TestHE>::new();
+        log.append(TemporalEvent::SnapshotMarker {
+            timestamp: Timestamp(10),
+            snapshot_id: SnapshotId(0),
+        });
+        log.append(TemporalEvent::SnapshotMarker {
+            timestamp: Timestamp(20),
+            snapshot_id: SnapshotId(1),
+        });
+
+        let (sid, idx) = log.snapshot_before(Timestamp(15)).unwrap();
+        assert_eq!(sid, SnapshotId(0));
+        assert_eq!(idx, 0);
+
+        let (sid, _) = log.snapshot_before(Timestamp(25)).unwrap();
+        assert_eq!(sid, SnapshotId(1));
+    }
+
+    #[test]
+    fn stats_are_incremental() {
+        let mut log = EventLog::<TestV, TestHE>::new();
+        log.append(TemporalEvent::VertexAdded {
+            timestamp: Timestamp(1),
+            index: VertexIndex(0),
+            weight: TestV("a".into()),
+        });
+        log.append(TemporalEvent::VertexRemoved {
+            timestamp: Timestamp(2),
+            index: VertexIndex(0),
+            weight: TestV("a".into()),
+        });
+        let stats = log.stats();
+        assert_eq!(stats.vertex_added, 1);
+        assert_eq!(stats.vertex_removed, 1);
+        assert_eq!(stats.total(), 2);
     }
 }

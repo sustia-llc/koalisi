@@ -70,7 +70,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Time-travel: how many agents existed at T=0?
     let count = TemporalQueries::count_vertices_at(
-        mgr.graph().events_ref(), Timestamp(0)
+        mgr.graph().events_ref(), Timestamp::new(0)
     ).await;
     assert_eq!(count, 1); // only alice
     Ok(())
@@ -103,7 +103,7 @@ cargo run --features remote --example distributed_alert_consumer
 ## Tests
 
 ```sh
-cargo test                      # 57 tests (core + topology + algorithms + forex)
+cargo test                      # 59 tests (core + topology + algorithms + forex)
 cargo test --features databento # + 4 databento integration tests
 cargo test --features remote    # + 1 remote integration test
 ```

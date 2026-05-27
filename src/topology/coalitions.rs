@@ -4,10 +4,12 @@
 //! where agents are vertices and coalitions are hyperedges connecting them.
 
 use super::errors::{TemporalError, TemporalResult};
+use super::events::TemporalEvent;
 use super::queries::TemporalQueries;
 use super::temporal::TemporalHypergraph;
 use super::timestamp::{TimeRange, Timestamp};
 use hypergraph::{HyperedgeIndex, HyperedgeTrait, VertexIndex, VertexTrait};
+use std::collections::HashMap;
 
 /// Manages coalitions (hyperedges) of agents (vertices) in a temporal hypergraph.
 ///
@@ -17,7 +19,7 @@ use hypergraph::{HyperedgeIndex, HyperedgeTrait, VertexIndex, VertexTrait};
 /// # Example
 ///
 /// ```ignore
-/// use dynamo::temporal::{CoalitionManager, TemporalHypergraph};
+/// use koalisi::topology::{CoalitionManager, TemporalHypergraph};
 ///
 /// let manager = CoalitionManager::new(TemporalHypergraph::new());
 ///
@@ -127,45 +129,44 @@ where
     }
 
     /// Add an agent to an existing coalition.
+    ///
+    /// Read-modify-write happens atomically under a single graph write lock so
+    /// concurrent join/leave calls cannot race on the membership vector.
     pub async fn join_coalition(
         &self,
         agent: VertexIndex,
         coalition: HyperedgeIndex,
     ) -> TemporalResult<(), V, HE> {
-        let mut members = self.graph.get_hyperedge_vertices(coalition).await?;
-
-        // Check if agent is already in the coalition
-        if members.contains(&agent) {
-            return Ok(()); // Already a member, no-op
-        }
-
-        members.push(agent);
         self.graph
-            .update_hyperedge_vertices(coalition, members)
+            .update_hyperedge_vertices_try(coalition, move |mut members| {
+                if !members.contains(&agent) {
+                    members.push(agent);
+                }
+                Ok(members)
+            })
             .await
     }
 
     /// Remove an agent from a coalition.
     ///
-    /// Returns an error if the coalition would become empty (use dissolve_coalition instead).
+    /// Returns `EmptyCoalition` if the result would have zero members (use
+    /// `dissolve_coalition` instead). The check happens atomically with the
+    /// update under a single graph write lock.
     pub async fn leave_coalition(
         &self,
         agent: VertexIndex,
         coalition: HyperedgeIndex,
     ) -> TemporalResult<(), V, HE> {
-        let members = self.graph.get_hyperedge_vertices(coalition).await?;
-
-        let new_members: Vec<VertexIndex> = members
-            .into_iter()
-            .filter(|&v| v != agent)
-            .collect();
-
-        if new_members.is_empty() {
-            return Err(TemporalError::EmptyCoalition);
-        }
-
         self.graph
-            .update_hyperedge_vertices(coalition, new_members)
+            .update_hyperedge_vertices_try(coalition, move |members| {
+                let new_members: Vec<VertexIndex> =
+                    members.into_iter().filter(|&v| v != agent).collect();
+                if new_members.is_empty() {
+                    Err(TemporalError::EmptyCoalition)
+                } else {
+                    Ok(new_members)
+                }
+            })
             .await
     }
 
@@ -221,37 +222,41 @@ where
     ///
     /// Returns a list of (coalition_index, time_range) pairs showing when
     /// the agent was a member of each coalition.
-    pub async fn agent_coalition_history(
+    #[allow(dead_code)]
+    pub(crate) async fn agent_coalition_history(
         &self,
         agent: VertexIndex,
     ) -> Vec<(HyperedgeIndex, TimeRange)> {
-        let events = self.graph.events_ref().read().await;
+        // Snapshot the events under the lock, then process outside so the read
+        // lock isn't held for the duration of the linear scan.
+        let snapshot: Vec<TemporalEvent<V, HE>> = {
+            let events = self.graph.events_ref().read().await;
+            events.events().to_vec()
+        };
+
         let mut history: Vec<(HyperedgeIndex, TimeRange)> = Vec::new();
+        let mut membership_start: HashMap<HyperedgeIndex, Timestamp> = HashMap::new();
 
-        // Track membership state for each hyperedge
-        use std::collections::HashMap;
-        let mut membership_start: HashMap<HyperedgeIndex, Option<Timestamp>> = HashMap::new();
-
-        for event in events.events() {
+        for event in &snapshot {
             match event {
-                super::events::TemporalEvent::HyperedgeAdded {
+                TemporalEvent::HyperedgeAdded {
                     timestamp,
                     index,
                     vertices,
                     ..
                 } => {
                     if vertices.contains(&agent) {
-                        membership_start.insert(*index, Some(*timestamp));
+                        membership_start.insert(*index, *timestamp);
                     }
                 }
-                super::events::TemporalEvent::HyperedgeRemoved {
+                TemporalEvent::HyperedgeRemoved {
                     timestamp, index, ..
                 } => {
-                    if let Some(Some(start)) = membership_start.remove(index) {
+                    if let Some(start) = membership_start.remove(index) {
                         history.push((*index, TimeRange::new(Some(start), Some(*timestamp))));
                     }
                 }
-                super::events::TemporalEvent::HyperedgeVerticesUpdated {
+                TemporalEvent::HyperedgeVerticesUpdated {
                     timestamp,
                     index,
                     old_vertices,
@@ -260,40 +265,41 @@ where
                 } => {
                     let was_member = old_vertices.contains(&agent);
                     let is_member = new_vertices.contains(&agent);
-
                     match (was_member, is_member) {
                         (false, true) => {
-                            // Agent joined
-                            membership_start.insert(*index, Some(*timestamp));
+                            membership_start.insert(*index, *timestamp);
                         }
                         (true, false) => {
-                            // Agent left
-                            if let Some(Some(start)) = membership_start.remove(index) {
-                                history.push((*index, TimeRange::new(Some(start), Some(*timestamp))));
+                            if let Some(start) = membership_start.remove(index) {
+                                history.push((
+                                    *index,
+                                    TimeRange::new(Some(start), Some(*timestamp)),
+                                ));
                             }
                         }
-                        _ => {} // No change in membership
+                        _ => {}
                     }
                 }
-                super::events::TemporalEvent::HyperedgesJoined {
+                TemporalEvent::HyperedgesJoined {
                     timestamp,
                     target_index,
                     source_indices,
                     new_vertices,
                     ..
                 } => {
-                    // Check if agent was in any source coalition
                     for source in source_indices {
-                        if let Some(Some(start)) = membership_start.remove(source) {
-                            history.push((*source, TimeRange::new(Some(start), Some(*timestamp))));
+                        if let Some(start) = membership_start.remove(source) {
+                            history.push((
+                                *source,
+                                TimeRange::new(Some(start), Some(*timestamp)),
+                            ));
                         }
                     }
-                    // Check if agent is in the merged coalition
                     if new_vertices.contains(&agent) {
-                        membership_start.insert(*target_index, Some(*timestamp));
+                        membership_start.insert(*target_index, *timestamp);
                     }
                 }
-                super::events::TemporalEvent::VerticesContracted {
+                TemporalEvent::VerticesContracted {
                     timestamp,
                     hyperedge_index,
                     old_vertices,
@@ -302,11 +308,9 @@ where
                 } => {
                     let was_member = old_vertices.contains(&agent);
                     let is_member = new_vertices.contains(&agent);
-
                     match (was_member, is_member) {
                         (true, false) => {
-                            // Agent was contracted out
-                            if let Some(Some(start)) = membership_start.remove(hyperedge_index) {
+                            if let Some(start) = membership_start.remove(hyperedge_index) {
                                 history.push((
                                     *hyperedge_index,
                                     TimeRange::new(Some(start), Some(*timestamp)),
@@ -314,8 +318,7 @@ where
                             }
                         }
                         (false, true) => {
-                            // Agent joined via contraction
-                            membership_start.insert(*hyperedge_index, Some(*timestamp));
+                            membership_start.insert(*hyperedge_index, *timestamp);
                         }
                         _ => {}
                     }
@@ -324,51 +327,41 @@ where
             }
         }
 
-        // Add still-active memberships (no end time)
-        for (index, start_opt) in membership_start {
-            if let Some(start) = start_opt {
-                history.push((index, TimeRange::new(Some(start), None)));
-            }
+        for (index, start) in membership_start {
+            history.push((index, TimeRange::new(Some(start), None)));
         }
 
         history
     }
 
     /// Check if an agent was a member of a coalition at a specific time.
-    pub async fn was_member_at(
+    #[allow(dead_code)]
+    pub(crate) async fn was_member_at(
         &self,
         agent: VertexIndex,
         coalition: HyperedgeIndex,
         timestamp: Timestamp,
     ) -> bool {
-        if let Some(members) = self.coalition_members_at(coalition, timestamp).await {
-            members.contains(&agent)
-        } else {
-            false
-        }
+        self.coalition_members_at(coalition, timestamp)
+            .await
+            .is_some_and(|members| members.contains(&agent))
     }
 
     /// Get when a coalition was formed.
-    pub async fn coalition_formed_at(
-        &self,
-        coalition: HyperedgeIndex,
-    ) -> Option<Timestamp> {
+    #[allow(dead_code)]
+    pub(crate) async fn coalition_formed_at(&self, coalition: HyperedgeIndex) -> Option<Timestamp> {
         TemporalQueries::hyperedge_created_at(self.graph.events_ref(), coalition).await
     }
 
     /// Get when a coalition was dissolved (if it was).
-    pub async fn coalition_dissolved_at(
-        &self,
-        coalition: HyperedgeIndex,
-    ) -> Option<Timestamp> {
+    #[allow(dead_code)]
+    pub(crate) async fn coalition_dissolved_at(&self, coalition: HyperedgeIndex) -> Option<Timestamp> {
         TemporalQueries::hyperedge_removed_at(self.graph.events_ref(), coalition).await
     }
 
     /// Get the lifespan of a coalition.
-    pub async fn coalition_lifespan(
-        &self,
-        coalition: HyperedgeIndex,
-    ) -> Option<TimeRange> {
+    #[allow(dead_code)]
+    pub(crate) async fn coalition_lifespan(&self, coalition: HyperedgeIndex) -> Option<TimeRange> {
         TemporalQueries::hyperedge_lifespan(self.graph.events_ref(), coalition).await
     }
 
@@ -387,12 +380,14 @@ where
     }
 
     /// Count agents at a specific timestamp.
-    pub async fn count_agents_at(&self, timestamp: Timestamp) -> usize {
+    #[allow(dead_code)]
+    pub(crate) async fn count_agents_at(&self, timestamp: Timestamp) -> usize {
         TemporalQueries::count_vertices_at(self.graph.events_ref(), timestamp).await
     }
 
     /// Count coalitions at a specific timestamp.
-    pub async fn count_coalitions_at(&self, timestamp: Timestamp) -> usize {
+    #[allow(dead_code)]
+    pub(crate) async fn count_coalitions_at(&self, timestamp: Timestamp) -> usize {
         TemporalQueries::count_hyperedges_at(self.graph.events_ref(), timestamp).await
     }
 
