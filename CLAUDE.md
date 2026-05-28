@@ -228,23 +228,107 @@ ROLE=consumer timeout 60s cargo run --manifest-path Cargo.toml --target-dir /tmp
 
 ## Next steps
 
-> **GATE — 2026-05-27.** Two additional design inputs are pending from
-> the user before phases 5 and 6 begin implementation. Do NOT start
-> Phase 5 or Phase 6 work until those inputs are recorded here and the
-> gate is lifted. The current Phase 5/6 entries below are the *prior*
-> plan and may be revised once the new inputs land.
+> **GATE — 2026-05-27 (1 of 2 design inputs received).** Input #1
+> landed: integrate SwarmAgentic-style optimisation as the new Phase 5
+> (was Persistence). One more design input still pending before
+> implementation begins on any of Phases 5–7. The LLM stub in
+> `src/llm/mod.rs` is the only code anchor in place so far; everything
+> else is plan-only.
+>
+> Reordering: Phase 5 = SwarmAgentic features (was nothing), Phase 6 =
+> Decision layer / Active Inference (unchanged scope, moved up), Phase 7
+> = Persistence (was Phase 5, moved last so the SwarmAgentic + EFE
+> dynamics that *generate* the events can settle before we commit to a
+> durable storage format).
 
-### Phase 5: Persistence  *(planned — gated, see above)*
+### Phase 5: SwarmAgentic-style optimisation  *(planned — gated, see above)*
 
-Feature-gated persistence using hypergraph v4.2.0's `PersistentHypergraph`
-for graph state plus an `EventStore` trait for temporal event durability.
-Default impl: append-only file log with `rmp-serde`. See `.claude/plans/`
-for full design.
+Lift the SwarmAgentic framework (Zhang et al., 2025 — see
+`docs/SwarmAgentic-summary.md` for full paper digest) into koalisi as a
+meta-layer that *evolves coalition designs* by language-driven PSO.
+Five concrete integration ideas, ported verbatim from the summary's
+"Concrete integration ideas worth flagging for Phase 6+" section:
+
+1. **SwarmAgentic as a `CoalitionManager` configurator.**
+   Offline system discovery from a task description: SwarmAgentic
+   produces an agent set `A` and collaboration structure `W`, which map
+   directly onto koalisi vertices (`add_agent`) and hyperedges
+   (`form_coalition`). New module `src/swarmagentic/configurator.rs` +
+   `examples/swarmagentic_bootstrap.rs` showing a synthetic task →
+   discovered coalition → runtime execution flow.
+
+2. **Failure-aware velocity ↔ Active Inference EFE.** SwarmAgentic's
+   flaw-driven velocity update (`c_f · r_f · F(v)`) and the planned
+   Phase 6 EFE calculator are two mechanisms for self-optimisation;
+   they're complementary, not competitors. The plan: EFE handles fast
+   within-coalition decisions; SwarmAgentic-style LLM rewrites handle
+   slow between-iteration structural changes. The trait surface in
+   `src/llm/mod.rs` is where both phases meet.
+
+3. **`ValueCalculator` extension with feedback weights.** SwarmAgentic's
+   three coefficients (`c_f` failure / `c_p` personal-best / `c_g`
+   global-best) are direct analogues of `WeightedCalculator`'s
+   `size`/`capability`/`trust`/`synergy` weights. Add `history_weight`
+   (derived from `CoalitionManager::agent_coalition_history`) and
+   `failure_weight` (derived from past low-value outcomes) so the
+   value-calculation feedback loop closes inside Rust without LLM
+   round-trips for every score.
+
+4. **Population-based search atop AIPA.** AIPA enumerates integer
+   partitions deterministically; SwarmAgentic maintains a *population*
+   of full system designs. Hybrid: AIPA generates candidate partitions,
+   a SwarmAgentic-style swarm evolves agent assignments + collaboration
+   policies per partition, and `TemporalHypergraph` records every
+   particle's trajectory so good lineages can be replayed via
+   `TemporalQueries`. The fitness function is the existing
+   `ValueCalculator` trait.
+
+5. **Cross-model transferability as a koalisi value-prop.** SwarmAgentic
+   shows discovered systems transfer across LLMs. If the runtime layer
+   (kameo + PubSub + libp2p gateway) stays provider-agnostic, a
+   SwarmAgentic-discovered coalition spec can be re-instantiated under
+   different LLM backends without re-running the search. The `LlmProvider`
+   trait in `src/llm/mod.rs` is the abstraction boundary that makes this
+   work — discovered specs reference the trait, not a concrete backend.
+
+#### LLM dependency
+
+SwarmAgentic operates as an *optimiser ≠ executor* pattern: an LLM
+proposes flaw analyses + velocity rewrites; the koalisi runtime
+executes the resulting design. We ship the stub `src/llm/mod.rs` now
+(trait + `StubLlmProvider` that returns an error) so plan documents
+and future code can reference `LlmProvider::complete(prompt)` without
+committing to a backend. Real backends (OpenAI / Anthropic / Ollama /
+local llama.cpp) land later behind a future `llm` feature flag with
+per-backend sub-features.
+
+#### Scope NOT covered by Phase 5
+
+- Multimodal LLMs / vision / embodied perception — SwarmAgentic itself
+  is text-only (paper §"Limitations").
+- The actual offline optimisation loop driving real LLM calls — that's
+  a follow-up after the stub is fleshed out.
+- Persisting the discovered systems — that's Phase 7 (Persistence).
 
 ### Phase 6: Decision layer (Active Inference)  *(planned — gated, see above)*
 
 Feature-gated (`decision`) port of coalition_aif's EFE calculator,
 BeliefState, CoalitionBelief. Adds `ndarray` dependency. Most experimental.
+Builds on the LLM stub from Phase 5 (Phase 5 idea #2 — EFE handles
+fast within-coalition decisions; SwarmAgentic-style rewrites handle
+slow between-iteration structural changes).
+
+### Phase 7: Persistence  *(planned — gated, see above; was Phase 5, moved last)*
+
+Feature-gated persistence using hypergraph v4.2.0's `PersistentHypergraph`
+for graph state plus an `EventStore` trait for temporal event durability.
+Default impl: append-only file log with `rmp-serde`. Moved to the end of
+the pipeline so the SwarmAgentic optimisation traces (Phase 5) and
+Active Inference belief states (Phase 6) inform the persistence schema
+before we commit to a wire format. See `.claude/plans/` for the
+original design (still applicable; new requirement is that
+`EventStore` must also be able to durably record SwarmAgentic particle
+lineages and EFE belief snapshots).
 
 ### Downstream: nautilus_trader bridge  *(separate project)*
 

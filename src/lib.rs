@@ -5,6 +5,10 @@
 //! - [`core`] — domain-agnostic coalition infrastructure:
 //!   [`CoalitionRuntime`](core::CoalitionRuntime) (TaskTracker +
 //!   CancellationToken + three-step shutdown), settings, logging.
+//! - [`topology`] — temporal hypergraph, event sourcing,
+//!   `CoalitionManager`, time-travel queries, analytics.
+//! - [`algorithms`] — `ValueCalculator`, DCVC, AIPA partition search.
+//! - [`llm`] — Phase 5/6 LLM provider stub (real backends land later).
 //! - [`subsystems`] — forex-specific kameo actors (monitor, coordinator,
 //!   sink, swarm) and optional adapters (databento, libp2p remote).
 //! - [`market`] — forex value types: `Pair`, `Tick`, `Quote`, `Triangle`,
@@ -16,6 +20,7 @@
 
 pub mod algorithms;
 pub mod core;
+pub mod llm;
 pub mod market;
 pub mod topology;
 

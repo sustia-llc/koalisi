@@ -7,19 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Gated on two pending design inputs from the user before Phases 5 and 6
-begin implementation. Planned work (tracked in [`CLAUDE.md`](./CLAUDE.md)
-§"Next steps"):
+Design input #1 of 2 landed: SwarmAgentic-style optimisation becomes
+the new Phase 5 (see `docs/SwarmAgentic-summary.md`). One more design
+input still pending before any of Phases 5–7 begin implementation.
+Phase ordering reshuffled: Persistence moved to Phase 7 (last) so the
+SwarmAgentic particle traces and Active Inference belief states inform
+the persistence schema before we commit to a wire format.
 
-- **Phase 5 — Persistence**: feature-gated `PersistentHypergraph` from
-  hypergraph v4.2.0 + an append-only `EventStore` trait for temporal
-  events.
-- **Phase 6 — Decision layer**: feature-gated (`decision`) port of
-  coalition_aif's EFE calculator, `BeliefState`, `CoalitionBelief`.
+Planned work (tracked in [`CLAUDE.md`](./CLAUDE.md) §"Next steps"):
+
+- **Phase 5 — SwarmAgentic-style optimisation**: language-driven PSO
+  meta-layer that evolves coalition designs. Five integration ideas
+  (configurator, failure-aware velocity ↔ EFE bridge, ValueCalculator
+  feedback weights, AIPA + population hybrid, cross-model
+  transferability). Depends on the new `LlmProvider` stub. *(Stub
+  trait already in place — see "Added" below.)*
+- **Phase 6 — Decision layer (Active Inference)**: feature-gated
+  (`decision`) port of coalition_aif's EFE calculator, `BeliefState`,
+  `CoalitionBelief`. Pairs with Phase 5 — EFE for fast within-coalition
+  decisions, SwarmAgentic for slow structural rewrites.
+- **Phase 7 — Persistence**: feature-gated `PersistentHypergraph` from
+  hypergraph v4.2.0 + an append-only `EventStore` trait. Must also
+  durably record SwarmAgentic particle lineages and EFE belief
+  snapshots.
 - **Databento `LiveClient` integration** *(blocked on `DATABENTO_API_KEY`)*.
 - **Synthetic DBN file** for end-to-end arb signal demo.
 - **Remote gateway hardening** — bounded buffer, cursor-based polling,
   stable wire schema, QUIC transport alongside TCP.
+
+### Added (unreleased — Phase 5 prep)
+
+- **`koalisi::llm` stub module** (`src/llm/mod.rs`): defines the
+  `LlmProvider` trait (`fn complete(&self, prompt: &str) -> impl
+  Future<Output = anyhow::Result<String>> + Send`) plus
+  `StubLlmProvider` that returns `"no LLM backend configured yet"`.
+  Plan documents and future Phase 5/6 code reference `LlmProvider`;
+  real backends (OpenAI / Anthropic / Ollama / local llama.cpp) land
+  later behind a future `llm` feature flag with per-backend
+  sub-features. One unit test covers the stub error path (default
+  test count: 26 → 27).
 
 ## [0.5.0] — 2026-05-27
 
