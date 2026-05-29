@@ -27,6 +27,12 @@ hypergraph = { git = "https://github.com/yamafaktory/hypergraph", tag = "v4.2.0"
 rayon = "1.12"
 tokio-rayon = "2.1"
 
+# Optional: Active Inference decision strategy (expected free energy).
+# Engine crate from the `tira` repo. When the `decision` feature is off, none
+# of this (and none of its nalgebra dependency) is compiled — the non-AIF
+# ThresholdPolicy / ValueCalculator path is always available without it.
+aif = { git = "ssh://git@github.com/sustia-llc/tira", tag = "aif-v0.4.0", optional = true }
+
 # Optional: databento DBN-file adapter. Enabled via `--features databento`.
 dbn = { version = "0.58", features = ["async"], optional = true }
 time = { version = "0.3", optional = true, features = ["macros"] }
@@ -38,6 +44,8 @@ libp2p = { version = "0.56", features = ["macros", "noise", "mdns", "tcp", "toki
 
 [features]
 default = []
+# Active Inference coalition-decision strategy (pluggable, off by default).
+decision = ["dep:aif"]
 databento = ["dep:dbn", "dep:time"]
 remote = ["kameo/remote", "dep:libp2p"]
 

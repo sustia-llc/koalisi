@@ -8,6 +8,9 @@
 //! - [`topology`] — temporal hypergraph, event sourcing,
 //!   `CoalitionManager`, time-travel queries, analytics.
 //! - [`algorithms`] — `ValueCalculator`, DCVC, AIPA partition search.
+//! - [`decision`] — coalition join/leave policies: `ThresholdPolicy` (always
+//!   available) and, behind feature `decision`, an Active Inference
+//!   expected-free-energy policy.
 //! - [`llm`] — Phase 5/6 LLM provider stub (real backends land later).
 //! - [`subsystems`] — forex-specific kameo actors (monitor, coordinator,
 //!   sink, swarm) and optional adapters (databento, libp2p remote).
@@ -20,6 +23,7 @@
 
 pub mod algorithms;
 pub mod core;
+pub mod decision;
 pub mod llm;
 pub mod market;
 pub mod topology;
@@ -35,6 +39,7 @@ pub mod subsystems {
     pub mod swarm;
 }
 
+pub use decision::{CoalitionDecisionPolicy, Decision, DecisionContext, ThresholdPolicy};
 pub use market::{ArbitrageOpportunity, Direction, Pair, Quote, Tick, TickUpdate, Triangle};
 pub use subsystems::swarm::{Swarm, SwarmConfig, SwarmFeeder};
 pub use core::CoalitionRuntime;
