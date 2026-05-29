@@ -9,8 +9,8 @@
 //!
 //! - [`ThresholdPolicy`] (always available) — decides on the *marginal value*
 //!   an agent contributes, measured by any existing
-//!   [`ValueCalculator`](crate::algorithms::ValueCalculator).
-//! - [`AifDecisionPolicy`] (feature `decision`) — decides via expected free
+//!   [`ValueCalculator`].
+//! - `AifDecisionPolicy` (feature `decision`) — decides via expected free
 //!   energy from the Active Inference engine, where coalition membership
 //!   changes the agent's *observation model* (capability coverage of the
 //!   required capabilities). Higher coverage lowers expected free energy `G`.
@@ -25,6 +25,8 @@
 //!   current members **including** `agent`. `act == true` means *leave*.
 
 use crate::algorithms::{AgentCapabilities, ValueCalculator};
+use std::future::Future;
+use std::pin::Pin;
 
 /// Outcome of a join/leave decision.
 ///
@@ -42,9 +44,9 @@ pub struct Decision {
 ///
 /// `required_capabilities` is a capability bitmask describing what the task /
 /// coalition needs covered. Policies that reason about capability coverage
-/// (e.g. [`AifDecisionPolicy`]) use it; value-only policies such as
+/// (e.g. `AifDecisionPolicy`, feature `decision`) use it; value-only policies such as
 /// [`ThresholdPolicy`] currently ignore it (the base
-/// [`ValueCalculator`](crate::algorithms::ValueCalculator)s do not consult it).
+/// [`ValueCalculator`]s do not consult it).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DecisionContext {
     pub required_capabilities: u32,
@@ -75,10 +77,55 @@ pub trait CoalitionDecisionPolicy: Send + Sync {
         coalition: &[&dyn AgentCapabilities],
         ctx: &DecisionContext,
     ) -> Decision;
+
+    /// Async, runtime-friendly variant of [`should_join`](Self::should_join).
+    ///
+    /// The default impl runs the sync method inline and returns a ready future —
+    /// correct for cheap policies. Policies whose decision is CPU-heavy (e.g.
+    /// the AIF expected-free-energy bridge) override this to offload the work to a
+    /// thread pool so the async runtime is not blocked. Dyn-compatible: returns a
+    /// boxed future rather than using `async fn` in trait position.
+    ///
+    /// `coalition` excludes `agent` (same convention as
+    /// [`should_join`](Self::should_join)).
+    fn should_join_async<'a>(
+        &'a self,
+        agent: &'a dyn AgentCapabilities,
+        coalition: &'a [&'a dyn AgentCapabilities],
+        ctx: &'a DecisionContext,
+    ) -> Pin<Box<dyn Future<Output = Decision> + Send + 'a>> {
+        // Compute the decision in the synchronous prologue and move only the
+        // owned (Copy) `Decision` into the future. The `&dyn` borrows must NOT be
+        // captured into the async block — `AgentCapabilities` is not `Sync`, so a
+        // future holding those borrows would not be `Send`.
+        let decision = self.should_join(agent, coalition, ctx);
+        Box::pin(async move { decision })
+    }
+
+    /// Async, runtime-friendly variant of [`should_leave`](Self::should_leave).
+    ///
+    /// The default impl runs the sync method inline and returns a ready future —
+    /// correct for cheap policies. Policies whose decision is CPU-heavy override
+    /// this to offload the work to a thread pool. Dyn-compatible: returns a boxed
+    /// future rather than using `async fn` in trait position.
+    ///
+    /// `coalition` includes `agent` (same convention as
+    /// [`should_leave`](Self::should_leave)).
+    fn should_leave_async<'a>(
+        &'a self,
+        agent: &'a dyn AgentCapabilities,
+        coalition: &'a [&'a dyn AgentCapabilities],
+        ctx: &'a DecisionContext,
+    ) -> Pin<Box<dyn Future<Output = Decision> + Send + 'a>> {
+        // See `should_join_async`: compute synchronously, move only the owned
+        // `Decision` into the future to keep it `Send`.
+        let decision = self.should_leave(agent, coalition, ctx);
+        Box::pin(async move { decision })
+    }
 }
 
 /// Marginal-value decision policy backed by a
-/// [`ValueCalculator`](crate::algorithms::ValueCalculator).
+/// [`ValueCalculator`].
 ///
 /// The agent joins when the *marginal value* it adds to the coalition is at
 /// least `join_threshold`, and leaves when the marginal value it currently
@@ -121,6 +168,12 @@ impl<C: ValueCalculator + Send + Sync> CoalitionDecisionPolicy for ThresholdPoli
         let value_with = self.calculator.calculate_value(&with);
 
         let marginal = value_with - value_without;
+        // A non-finite marginal means a calculator failed (e.g. EfeValueCalculator
+        // returning ±∞ on engine error); never join on a value we can't trust, and
+        // never propagate NaN/±∞ as a score.
+        if !marginal.is_finite() {
+            return Decision { act: false, score: 0.0 };
+        }
         Decision {
             act: marginal >= self.join_threshold,
             score: marginal,
@@ -140,6 +193,8 @@ impl<C: ValueCalculator + Send + Sync> CoalitionDecisionPolicy for ThresholdPoli
     ) -> Decision {
         let value_with = self.calculator.calculate_value(coalition);
 
+        // Removes the agent by id; assumes coalition members have distinct
+        // `agent_id`s (duplicates would drop every match).
         let without: Vec<&dyn AgentCapabilities> = coalition
             .iter()
             .filter(|a| a.agent_id() != agent.agent_id())
@@ -148,6 +203,11 @@ impl<C: ValueCalculator + Send + Sync> CoalitionDecisionPolicy for ThresholdPoli
         let value_without = self.calculator.calculate_value(&without);
 
         let marginal_of_staying = value_with - value_without;
+        // Non-finite ⇒ a calculator failed; don't eject on an untrustworthy value
+        // and don't propagate NaN/±∞.
+        if !marginal_of_staying.is_finite() {
+            return Decision { act: false, score: 0.0 };
+        }
         Decision {
             act: marginal_of_staying < self.leave_threshold,
             score: marginal_of_staying,
@@ -245,5 +305,35 @@ mod tests {
         let full: [&dyn AgentCapabilities; 2] = [&a0, &a1];
         let leave = leave_policy.should_leave(&a0, &full, &ctx);
         assert!(leave.act, "high leave threshold forces leave");
+    }
+
+    #[tokio::test]
+    async fn threshold_default_async_matches_sync() {
+        // The default (non-overridden) async methods must reproduce the sync
+        // results exactly, including through a `Box<dyn ...>` trait object.
+        let policy: Box<dyn CoalitionDecisionPolicy> =
+            Box::new(ThresholdPolicy::new(AdditiveCalculator, 0.0, 0.0));
+        let ctx = DecisionContext::default();
+
+        let a0 = TestAgent {
+            id: 0,
+            caps: 0b001,
+            trust: 50,
+        };
+        let a1 = TestAgent {
+            id: 1,
+            caps: 0b010,
+            trust: 50,
+        };
+
+        let coalition: [&dyn AgentCapabilities; 1] = [&a1];
+        let sync_join = policy.should_join(&a0, &coalition, &ctx);
+        let async_join = policy.should_join_async(&a0, &coalition, &ctx).await;
+        assert_eq!(sync_join, async_join, "default should_join_async == sync");
+
+        let full: [&dyn AgentCapabilities; 2] = [&a0, &a1];
+        let sync_leave = policy.should_leave(&a0, &full, &ctx);
+        let async_leave = policy.should_leave_async(&a0, &full, &ctx).await;
+        assert_eq!(sync_leave, async_leave, "default should_leave_async == sync");
     }
 }

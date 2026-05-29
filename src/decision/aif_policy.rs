@@ -15,6 +15,9 @@
 //! which collapses to `G ≈ 0` for every coalition. We therefore build
 //! [`aif::POMDPAgent`] directly here.
 
+use std::future::Future;
+use std::pin::Pin;
+
 use crate::algorithms::{AgentCapabilities, ValueCalculator};
 
 use super::{CoalitionDecisionPolicy, Decision, DecisionContext};
@@ -131,15 +134,76 @@ impl Default for AifDecisionPolicy {
 }
 
 impl AifDecisionPolicy {
-    /// Compute `G` at the given coverage, treating an engine error as the
-    /// worst possible outcome (`+∞`).
-    fn g(&self, cov: f64) -> f64 {
-        match CapabilityModel::efe_for_coverage(cov, self.params) {
+    /// Coverage→`G` over owned params (no `&self` borrow), so it can run inside
+    /// a `'static` rayon closure. Engine error ⇒ `+∞` (worst outcome).
+    fn g_at(cov: f64, params: BridgeParams) -> f64 {
+        match CapabilityModel::efe_for_coverage(cov, params) {
             Ok(g) => g,
             Err(e) => {
                 tracing::warn!(error = %e, coverage = cov, "EFE computation failed");
                 f64::INFINITY
             }
+        }
+    }
+
+    /// Pure join decision over owned capability masks.
+    ///
+    /// Shared by the sync [`CoalitionDecisionPolicy::should_join`] and the async
+    /// [`CoalitionDecisionPolicy::should_join_async`] override: both reduce the
+    /// borrowed agents to owned `u32` masks and call this. `union_with_agent` is
+    /// the unioned capability mask of the coalition *including* the candidate
+    /// agent.
+    fn join_decision_from_masks(
+        agent_caps: u32,
+        union_with_agent: u32,
+        required: u32,
+        params: BridgeParams,
+        join_margin: f64,
+    ) -> Decision {
+        let cov_alone = coverage(agent_caps, required);
+        let cov_coalition = coverage(union_with_agent, required);
+        let g_alone = Self::g_at(cov_alone, params);
+        let g_coalition = Self::g_at(cov_coalition, params);
+        let margin = g_alone - g_coalition;
+        // `g_at` returns +∞ on engine error, so `∞ - ∞` can be NaN. Never join on
+        // an untrustworthy margin, and never propagate NaN/±∞ as a score.
+        if !margin.is_finite() {
+            return Decision { act: false, score: 0.0 };
+        }
+        Decision {
+            act: margin > join_margin,
+            score: margin,
+        }
+    }
+
+    /// Pure leave decision over owned capability masks.
+    ///
+    /// Shared by the sync [`CoalitionDecisionPolicy::should_leave`] and the async
+    /// [`CoalitionDecisionPolicy::should_leave_async`] override: both reduce the
+    /// borrowed agents to owned `u32` masks and call this. `union_in` is the
+    /// unioned capability mask of the coalition *including* the agent; `union_out`
+    /// is the union after removing the agent (by id).
+    fn leave_decision_from_masks(
+        union_in: u32,
+        union_out: u32,
+        required: u32,
+        params: BridgeParams,
+    ) -> Decision {
+        let cov_in = coverage(union_in, required);
+        let cov_out = coverage(union_out, required);
+        let g_in = Self::g_at(cov_in, params);
+        let g_out = Self::g_at(cov_out, params);
+        // `g_out - g_in` is how much removing the agent raises G. If it does not
+        // raise G (<= 0), the agent contributes no coverage and should leave.
+        let delta = g_out - g_in;
+        // `g_at` returns +∞ on engine error, so `∞ - ∞` can be NaN. Don't eject on
+        // an untrustworthy value and don't propagate NaN/±∞ as a score.
+        if !delta.is_finite() {
+            return Decision { act: false, score: 0.0 };
+        }
+        Decision {
+            act: delta <= 0.0,
+            score: delta,
         }
     }
 }
@@ -157,19 +221,15 @@ impl CoalitionDecisionPolicy for AifDecisionPolicy {
         coalition: &[&dyn AgentCapabilities],
         ctx: &DecisionContext,
     ) -> Decision {
-        let cov_alone = coverage(agent.capabilities(), ctx.required_capabilities);
-
-        let mut with: Vec<&dyn AgentCapabilities> = coalition.to_vec();
-        with.push(agent);
-        let cov_coalition = coverage(union_caps(&with), ctx.required_capabilities);
-
-        let g_alone = self.g(cov_alone);
-        let g_coalition = self.g(cov_coalition);
-        let margin = g_alone - g_coalition;
-        Decision {
-            act: margin > self.join_margin,
-            score: margin,
-        }
+        let agent_caps = agent.capabilities();
+        let union_with_agent = union_caps(coalition) | agent_caps;
+        Self::join_decision_from_masks(
+            agent_caps,
+            union_with_agent,
+            ctx.required_capabilities,
+            self.params,
+            self.join_margin,
+        )
     }
 
     /// Leave iff staying does not lower `G`.
@@ -185,24 +245,98 @@ impl CoalitionDecisionPolicy for AifDecisionPolicy {
         coalition: &[&dyn AgentCapabilities],
         ctx: &DecisionContext,
     ) -> Decision {
-        let cov_in = coverage(union_caps(coalition), ctx.required_capabilities);
+        let union_in = union_caps(coalition);
 
+        // Removes the agent by id; assumes coalition members have distinct
+        // `agent_id`s (duplicates would drop every match and understate `union_out`).
         let without: Vec<&dyn AgentCapabilities> = coalition
             .iter()
             .filter(|a| a.agent_id() != agent.agent_id())
             .copied()
             .collect();
-        let cov_out = coverage(union_caps(&without), ctx.required_capabilities);
+        let union_out = union_caps(&without);
 
-        let g_in = self.g(cov_in);
-        let g_out = self.g(cov_out);
-        // `g_out - g_in` is how much removing the agent raises G. If it does not
-        // raise G (<= 0), the agent contributes no coverage and should leave.
-        let delta = g_out - g_in;
-        Decision {
-            act: delta <= 0.0,
-            score: delta,
-        }
+        Self::leave_decision_from_masks(
+            union_in,
+            union_out,
+            ctx.required_capabilities,
+            self.params,
+        )
+    }
+
+    /// Async, runtime-friendly override of
+    /// [`should_join`](Self::should_join).
+    ///
+    /// Snapshots the borrowed agents' capability masks to owned `u32` *before*
+    /// spawning, then runs the CPU-bound expected-free-energy compute on the
+    /// rayon pool via [`tokio_rayon::spawn`], so the tokio worker thread is not
+    /// blocked. Produces the same [`Decision`] as the sync
+    /// [`should_join`](Self::should_join).
+    ///
+    /// `coalition` excludes `agent` (same convention as the sync method).
+    fn should_join_async<'a>(
+        &'a self,
+        agent: &'a dyn AgentCapabilities,
+        coalition: &'a [&'a dyn AgentCapabilities],
+        ctx: &'a DecisionContext,
+    ) -> Pin<Box<dyn Future<Output = Decision> + Send + 'a>> {
+        // Snapshot to owned values in the sync prologue: the &dyn borrows are not
+        // 'static and must not cross into the spawned closure or the future.
+        let agent_caps = agent.capabilities();
+        let union_with_agent = union_caps(coalition) | agent_caps;
+        let required = ctx.required_capabilities;
+        let params = self.params;
+        let join_margin = self.join_margin;
+
+        Box::pin(async move {
+            tokio_rayon::spawn(move || {
+                Self::join_decision_from_masks(
+                    agent_caps,
+                    union_with_agent,
+                    required,
+                    params,
+                    join_margin,
+                )
+            })
+            .await
+        })
+    }
+
+    /// Async, runtime-friendly override of
+    /// [`should_leave`](Self::should_leave).
+    ///
+    /// Snapshots the in/out unioned capability masks to owned `u32` *before*
+    /// spawning, then runs the CPU-bound expected-free-energy compute on the
+    /// rayon pool via [`tokio_rayon::spawn`], so the tokio worker thread is not
+    /// blocked. Produces the same [`Decision`] as the sync
+    /// [`should_leave`](Self::should_leave).
+    ///
+    /// `coalition` includes `agent` (same convention as the sync method).
+    fn should_leave_async<'a>(
+        &'a self,
+        agent: &'a dyn AgentCapabilities,
+        coalition: &'a [&'a dyn AgentCapabilities],
+        ctx: &'a DecisionContext,
+    ) -> Pin<Box<dyn Future<Output = Decision> + Send + 'a>> {
+        // Snapshot owned masks in the sync prologue, mirroring the sync
+        // `should_leave`: union with the agent, and union after removing it by id.
+        let union_in = union_caps(coalition);
+        let union_out = union_caps(
+            &coalition
+                .iter()
+                .filter(|a| a.agent_id() != agent.agent_id())
+                .copied()
+                .collect::<Vec<_>>(),
+        );
+        let required = ctx.required_capabilities;
+        let params = self.params;
+
+        Box::pin(async move {
+            tokio_rayon::spawn(move || {
+                Self::leave_decision_from_masks(union_in, union_out, required, params)
+            })
+            .await
+        })
     }
 }
 
@@ -414,5 +548,136 @@ mod tests {
 
         // Object-safety alongside the existing calculators.
         let _: &dyn ValueCalculator = &calc;
+    }
+
+    #[tokio::test]
+    async fn should_join_async_matches_sync() {
+        let policy = AifDecisionPolicy::default();
+        let ctx = DecisionContext {
+            required_capabilities: 0b111,
+        };
+        let a0 = TestAgent {
+            id: 0,
+            caps: 0b001,
+            trust: 50,
+        };
+        let a1 = TestAgent {
+            id: 1,
+            caps: 0b010,
+            trust: 50,
+        };
+        let a2 = TestAgent {
+            id: 2,
+            caps: 0b100,
+            trust: 50,
+        };
+        let coalition: [&dyn AgentCapabilities; 2] = [&a1, &a2];
+
+        // `should_join_async` is now the trait override; this still resolves on
+        // the concrete type.
+        let sync = policy.should_join(&a0, &coalition, &ctx);
+        let asyncd = policy.should_join_async(&a0, &coalition, &ctx).await;
+
+        assert_eq!(sync.act, asyncd.act, "act must match sync");
+        assert!(
+            (sync.score - asyncd.score).abs() < 1e-12,
+            "score must match sync: sync={} async={}",
+            sync.score,
+            asyncd.score
+        );
+        // Sanity: this is the non-degenerate join case.
+        assert!(asyncd.act && asyncd.score > 0.0);
+    }
+
+    #[tokio::test]
+    async fn should_leave_async_matches_sync() {
+        let policy = AifDecisionPolicy::default();
+        let ctx = DecisionContext {
+            required_capabilities: 0b111,
+        };
+        let a0 = TestAgent {
+            id: 0,
+            caps: 0b001,
+            trust: 50,
+        };
+        let a1 = TestAgent {
+            id: 1,
+            caps: 0b010,
+            trust: 50,
+        };
+        let a2 = TestAgent {
+            id: 2,
+            caps: 0b100,
+            trust: 50,
+        };
+
+        // Unique-coverage stay case: a0 is the only provider of bit 0 ⇒ stay.
+        let full: [&dyn AgentCapabilities; 3] = [&a0, &a1, &a2];
+        let sync_stay = policy.should_leave(&a0, &full, &ctx);
+        let async_stay = policy.should_leave_async(&a0, &full, &ctx).await;
+        assert_eq!(sync_stay.act, async_stay.act, "stay: act must match sync");
+        assert!(
+            (sync_stay.score - async_stay.score).abs() < 1e-12,
+            "stay: score must match sync: sync={} async={}",
+            sync_stay.score,
+            async_stay.score
+        );
+        assert!(!async_stay.act, "unique-coverage agent should stay");
+
+        // Redundant-clone leave case: a clone of a0 adds no coverage ⇒ leave.
+        let redundant = TestAgent {
+            id: 3,
+            caps: 0b001,
+            trust: 50,
+        };
+        let with_clone: [&dyn AgentCapabilities; 4] = [&a0, &a1, &a2, &redundant];
+        let sync_leave = policy.should_leave(&redundant, &with_clone, &ctx);
+        let async_leave = policy.should_leave_async(&redundant, &with_clone, &ctx).await;
+        assert_eq!(sync_leave.act, async_leave.act, "leave: act must match sync");
+        assert!(
+            (sync_leave.score - async_leave.score).abs() < 1e-12,
+            "leave: score must match sync: sync={} async={}",
+            sync_leave.score,
+            async_leave.score
+        );
+        assert!(async_leave.act, "redundant agent should leave");
+    }
+
+    /// Regression test for the actual review finding: a caller holding a
+    /// `Box<dyn CoalitionDecisionPolicy>` must reach the async (rayon-offloaded)
+    /// path, not fall through to the blocking sync `should_join`.
+    #[tokio::test]
+    async fn async_path_reachable_through_trait_object() {
+        let p: Box<dyn CoalitionDecisionPolicy> = Box::new(AifDecisionPolicy::default());
+        let ctx = DecisionContext {
+            required_capabilities: 0b111,
+        };
+        let a0 = TestAgent {
+            id: 0,
+            caps: 0b001,
+            trust: 50,
+        };
+        let a1 = TestAgent {
+            id: 1,
+            caps: 0b010,
+            trust: 50,
+        };
+        let a2 = TestAgent {
+            id: 2,
+            caps: 0b100,
+            trust: 50,
+        };
+        let coalition: [&dyn AgentCapabilities; 2] = [&a1, &a2];
+
+        // The dynamic-dispatch async call must produce the non-degenerate join
+        // decision (coverage 1/3 → 3/3), proving the override is reached.
+        let d = p.should_join_async(&a0, &coalition, &ctx).await;
+        assert!(d.act, "trait-object async join should fire (score={})", d.score);
+        assert!(d.score > 0.0, "join margin must be positive");
+
+        // And the leave override is reachable too: a0 provides unique coverage.
+        let full: [&dyn AgentCapabilities; 3] = [&a0, &a1, &a2];
+        let stay = p.should_leave_async(&a0, &full, &ctx).await;
+        assert!(!stay.act, "trait-object async leave: unique-coverage agent stays");
     }
 }

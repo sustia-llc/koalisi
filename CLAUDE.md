@@ -33,10 +33,15 @@ coalition_aif (decision — planned), and forex-arbitrage-swarm (runtime).
 - `rust-v2:rust-dev-v2` / `rust-v2:rust-practical` — primary Rust agents per
   the user CLAUDE.md routing rules.
 
-## Current state — 2026-05-26
+## Current state — 2026-05-29
 
 ### Done
 
+- **Decision layer (Phase 6, B0–B7) — v0.6.0**: pluggable `CoalitionDecisionPolicy`
+  + always-available `ThresholdPolicy`; optional `decision` feature bridging `u32`
+  capabilities to the `aif` AIF engine (`EfeValueCalculator`, `AifDecisionPolicy`)
+  via a capability-coverage→POMDP-precision map; `tokio-rayon` async offload;
+  `examples/strategy_comparison.rs`. See Phase 6 section below. 10 `decision::` tests.
 - **Rename**: forex-arbitrage-swarm → koalisi v0.4.0
 - **Core**: `CoalitionRuntime` (TaskTracker + CancellationToken + three-step
   shutdown), consolidated settings/logging in `core::config`
