@@ -35,6 +35,7 @@ actor-based runtime orchestration.
 | `core` | `CoalitionRuntime` (lifecycle), settings, logging |
 | `topology` | Temporal hypergraph with event sourcing, `CoalitionManager`, time-travel queries, analytics |
 | `algorithms` | `ValueCalculator` trait + 4 calculators, `DCVCDistributor`, AIPA partition search |
+| `decision` | `CoalitionDecisionPolicy` trait + always-available `ThresholdPolicy`; optional Active Inference strategy (`EfeValueCalculator`, `AifDecisionPolicy`) behind the `decision` feature |
 | `subsystems` | Forex-specific kameo actors (monitor, coordinator, sink, swarm) |
 | `market` | Forex value types (Pair, Tick, Quote, Triangle, ArbitrageOpportunity) |
 
@@ -95,6 +96,7 @@ cargo run --example live_pubsub
 cargo run --example supervised_swarm
 
 # Feature-gated
+cargo run --features decision --example strategy_comparison   # AIF vs non-AIF join decision
 cargo run --features databento --example databento_historical
 cargo run --features databento --example databento_live_replay
 cargo run --features remote --example distributed_alert_consumer
@@ -103,7 +105,8 @@ cargo run --features remote --example distributed_alert_consumer
 ## Tests
 
 ```sh
-cargo test                      # 59 tests (core + topology + algorithms + forex)
+cargo test                      # 63 tests (core + topology + algorithms + decision + forex)
+cargo test --features decision  # 73 tests (+ Active Inference decision strategy)
 cargo test --features databento # + 4 databento integration tests
 cargo test --features remote    # + 1 remote integration test
 ```
@@ -114,13 +117,14 @@ cargo test --features remote    # + 1 remote integration test
 - [hypergraph](https://github.com/yamafaktory/hypergraph) v4.2.0 — directed hypergraph data structure
 - tokio + tokio-util — async runtime + lifecycle primitives
 - rayon + tokio-rayon — CPU-bound graph operations bridge
+- [aif](https://github.com/sustia-llc/tira) (tag `aif-v0.4.0`, **optional**, feature `decision`) — active-inference engine for the AIF decision strategy; pulls `nalgebra` only when the feature is enabled
 
 ## Origin
 
 koalisi consolidates four prior coalition projects into a single layered architecture:
 - **dynamo** — temporal hypergraph + event sourcing + CoalitionManager
 - **coalesce** — DCVC + AIPA + value calculators
-- **coalition_aif** — Active Inference + EFE (planned, feature-gated)
+- **coalition_aif** — Active Inference + EFE (retired; its ideas re-expressed on the `aif` reference engine, available behind the optional `decision` feature)
 - **forex-arbitrage-swarm** — kameo actor runtime + PubSub + lifecycle
 
 The forex domain is preserved as a working adapter; the architecture is domain-agnostic.

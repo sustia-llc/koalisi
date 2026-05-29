@@ -375,10 +375,12 @@ Relation to Phase 5 (idea #2): EFE handles fast within-coalition join/leave deci
 SwarmAgentic-style LLM rewrites handle slow between-iteration structural changes — they
 meet at the `src/llm/mod.rs` trait surface.
 
-**Still open (not done this round):** wiring `AifDecisionPolicy` into an actual kameo
-actor / `CoalitionManager` call site (only the policy + offload primitive exist);
-recovering aif's belief structures (`TrustBeliefs`/`CompatibilityBeliefs`/
-`CoalitionHistory`) into koalisi if richer scoring is wanted.
+**Still open (not done this round) — tracked as GitHub issues:**
+- [#1](https://github.com/sustia-llc/koalisi/issues/1) — wire `AifDecisionPolicy` into an
+  actual kameo actor / `CoalitionManager` call site (only the policy + offload primitive
+  exist; no live call site).
+- [#2](https://github.com/sustia-llc/koalisi/issues/2) — recover aif's belief structures
+  (`TrustBeliefs`/`CompatibilityBeliefs`/`CoalitionHistory`) into koalisi for richer scoring.
 
 Cross-project plan (upstream `aif` + this Phase B): see
 `~/Documents/iwahi/tira/.claude/plans/aif-merge-koalisi-integration.md`.

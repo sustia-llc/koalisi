@@ -22,10 +22,6 @@ Planned work (tracked in [`CLAUDE.md`](./CLAUDE.md) §"Next steps"):
   feedback weights, AIPA + population hybrid, cross-model
   transferability). Depends on the new `LlmProvider` stub. *(Stub
   trait already in place — see "Added" below.)*
-- **Phase 6 — Decision layer (Active Inference)**: feature-gated
-  (`decision`) port of coalition_aif's EFE calculator, `BeliefState`,
-  `CoalitionBelief`. Pairs with Phase 5 — EFE for fast within-coalition
-  decisions, SwarmAgentic for slow structural rewrites.
 - **Phase 7 — Persistence**: feature-gated `PersistentHypergraph` from
   hypergraph v4.2.0 + an append-only `EventStore` trait. Must also
   durably record SwarmAgentic particle lineages and EFE belief
@@ -46,6 +42,57 @@ Planned work (tracked in [`CLAUDE.md`](./CLAUDE.md) §"Next steps"):
   later behind a future `llm` feature flag with per-backend
   sub-features. One unit test covers the stub error path (default
   test count: 26 → 27).
+
+## [0.6.0] — 2026-05-29
+
+Phase 6 — a **pluggable, optional** Active Inference coalition-decision
+layer, built on the code-reviewed `aif` reference engine (the `tira`
+repo, tag `aif-v0.4.0`). AIF is never forced on all swarms: it coexists
+with a non-AIF baseline behind a trait, selectable per swarm. This does
+**not** port the retired `coalition_aif` prototype (its AIF math was
+buggy); it bridges koalisi capabilities to the correct engine.
+
+### Added
+
+- **`decision` module** (`src/decision/`, `mod.rs` always compiled):
+  - `CoalitionDecisionPolicy` trait — object-safe; `should_join` /
+    `should_leave` plus dyn-compatible `should_join_async` /
+    `should_leave_async` (boxed-future variants) over
+    `&dyn AgentCapabilities` + `&[&dyn AgentCapabilities]` +
+    `&DecisionContext { required_capabilities: u32 }`, returning
+    `Decision { act: bool, score: f64 }`.
+  - `ThresholdPolicy<C: ValueCalculator>` — always available, non-AIF
+    baseline; joins when a candidate's marginal coalition value clears a
+    threshold. Reuses the existing `ValueCalculator` impls unchanged.
+- **Optional `decision` feature** (`decision = ["dep:aif"]`):
+  - `aif = { git = "ssh://git@github.com/sustia-llc/tira", tag =
+    "aif-v0.4.0", optional = true }` (SSH because `tira` is private and
+    git is SSH-only). Feature-off builds compile **no `aif` and no
+    `nalgebra`**; koalisi itself adds no matrix library.
+  - `EfeValueCalculator` — impl of the EXISTING `ValueCalculator`;
+    coalition value = `−G` (negated expected free energy). Slots
+    alongside Additive/Synergistic/Multiplicative/Weighted.
+  - `AifDecisionPolicy` — impl of `CoalitionDecisionPolicy`; joins iff
+    coalition membership lowers `G`. The capability→EFE bridge maps
+    coverage of `required_capabilities` to a 2-state POMDP
+    observation-model precision (built via `aif::POMDPAgent` directly),
+    so membership alters `G` (not just preferences) and the decision is
+    non-degenerate (verified monotone; unit-tested). CPU-bound EFE is
+    offloaded to the rayon pool via `tokio-rayon`; the async trait
+    methods keep `Box<dyn CoalitionDecisionPolicy>` non-blocking.
+- **`examples/strategy_comparison.rs`** (`required-features =
+  ["decision"]`) — one join scenario under both `ThresholdPolicy` and
+  `AifDecisionPolicy`, printing where they diverge.
+- Tests: 30 default / 40 with `--features decision` (incl. monotonicity,
+  non-degeneracy + degeneracy guards, sync/async equivalence,
+  async-via-trait-object). Non-finite (NaN/±∞) margins are guarded.
+
+### Notes
+
+- Deferred (tracked as GitHub issues #1, #2): wiring `AifDecisionPolicy`
+  into a live kameo / `CoalitionManager` call site, and recovering aif's
+  `TrustBeliefs`/`CompatibilityBeliefs`/`CoalitionHistory` for richer
+  scoring. See `CLAUDE.md` §"Phase 6".
 
 ## [0.5.0] — 2026-05-27
 
