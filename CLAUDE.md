@@ -315,13 +315,73 @@ per-backend sub-features.
   a follow-up after the stub is fleshed out.
 - Persisting the discovered systems — that's Phase 7 (Persistence).
 
-### Phase 6: Decision layer (Active Inference)  *(planned — gated, see above)*
+### Phase 6: Decision layer (Active Inference)  *(SHIPPED v0.6.0, 2026-05-29)*
 
-Feature-gated (`decision`) port of coalition_aif's EFE calculator,
-BeliefState, CoalitionBelief. Adds `ndarray` dependency. Most experimental.
-Builds on the LLM stub from Phase 5 (Phase 5 idea #2 — EFE handles
-fast within-coalition decisions; SwarmAgentic-style rewrites handle
-slow between-iteration structural changes).
+Active Inference is a **pluggable, optional** coalition-decision strategy — never
+forced on all swarms; it coexists with non-AIF strategies behind a trait, selectable
+per swarm. It does **not** port `coalition_aif` (that prototype is retired/archived;
+its AIF math was buggy — unnormalized belief updates, obs/state dim confusion, no-op
+learning, ad-hoc RNG). Instead koalisi depends on the code-reviewed `aif` reference
+engine from the `tira` repo and bridges to it.
+
+- **Dependency:** `aif = { git = "ssh://git@github.com/sustia-llc/tira", tag =
+  "aif-v0.4.0", optional = true }`, behind `[features] decision = ["dep:aif"]`. SSH
+  URL (not HTTPS) because `tira` is private and git here is SSH-only — cargo's libgit2
+  HTTPS fetch can't authenticate. Feature-off builds compile **no `aif` and no
+  `nalgebra`**. (`aif` uses `nalgebra` internally — NOT `ndarray`; the old "adds
+  ndarray dependency" note was wrong. koalisi itself adds no matrix lib: the bridge
+  boundary is plain `u32`/`f64`.)
+- **`src/decision/` module** (`mod.rs` always compiled; `aif_policy.rs` feature-gated):
+  - `CoalitionDecisionPolicy` trait — `should_join`/`should_leave` (and dyn-compatible
+    `*_async` variants returning boxed futures) over `&dyn AgentCapabilities` +
+    `&[&dyn AgentCapabilities]` + `&DecisionContext` (`{ required_capabilities: u32 }`).
+    Returns `Decision { act: bool, score: f64 }`. Object-safe.
+  - `ThresholdPolicy<C: ValueCalculator>` — always available, non-AIF baseline. Joins
+    when the candidate's **marginal** coalition value clears a threshold. Reuses the
+    existing `ValueCalculator` impls unchanged.
+  - `EfeValueCalculator` (feature `decision`) — impl of the EXISTING `ValueCalculator`;
+    coalition value = `−G` (negated expected free energy). Slots alongside
+    Additive/Synergistic/Multiplicative/Weighted.
+  - `AifDecisionPolicy` (feature `decision`) — impl of `CoalitionDecisionPolicy`; joins
+    iff coalition membership lowers `G` (mirrors aif's `decide_join`).
+- **The capability→EFE bridge (the crux).** `aif::POMDPAgent::expected_free_energy()`
+  is *policy-posterior weighted*: if membership only shifts preferences over a flexible
+  observation model, the agent routes around conflict and `G ≈ 0` for everyone — the
+  decision degenerates. So the bridge maps **capability coverage** of
+  `required_capabilities` → observation-model **precision** of a 2-state POMDP, built
+  via `POMDPAgent::new` directly (NOT via `aif::CoalitionEvaluator`, whose
+  `observation_probs` can't see members). Higher coverage ⇒ sharper `A` ⇒ lower `G`
+  (verified monotone: `G(0)=0.511 > G(0.5)=0.121 > G(1)=0.017`). Non-degeneracy is
+  unit-tested: an agent covering a new required bit lowers `G` (joins); a redundant
+  clone does not. `BridgeParams` (`max_precision` 0.95, `success_preference` 0.9,
+  `alpha` 8.0) tunes the mapping.
+- **Execution (sync engine, async edge).** The `aif` engine stays sync. EFE is
+  CPU-bound, so `AifDecisionPolicy`'s `should_join_async`/`should_leave_async` snapshot
+  capability masks to owned `u32` (the `&dyn` borrows aren't `'static`) and offload to
+  the rayon pool via `tokio_rayon::spawn(..).await` — callable from a kameo handler
+  without blocking the tokio worker. The async methods are on the trait via boxed
+  futures, so `Box<dyn CoalitionDecisionPolicy>` callers reach the non-blocking path.
+- **A/B proof:** `examples/strategy_comparison.rs` (`required-features = ["decision"]`)
+  runs one join scenario under both `ThresholdPolicy(Synergistic)` and
+  `AifDecisionPolicy` and prints their divergence (Threshold joins on raw marginal
+  value; AIF declines when coverage doesn't improve).
+- **Tests:** feature-off 30; feature-on 40 (monotonicity, coverage helper,
+  non-degeneracy + degeneracy guards, leave, EfeValueCalculator ordering,
+  ThresholdPolicy join/leave + object-safety + high-threshold, sync/async equivalence,
+  async-via-trait-object). Both modes clippy-pedantic + `cargo doc` clean for the new
+  files. NaN/±∞ margins are guarded (no decision or score made on a non-finite value).
+
+Relation to Phase 5 (idea #2): EFE handles fast within-coalition join/leave decisions;
+SwarmAgentic-style LLM rewrites handle slow between-iteration structural changes — they
+meet at the `src/llm/mod.rs` trait surface.
+
+**Still open (not done this round):** wiring `AifDecisionPolicy` into an actual kameo
+actor / `CoalitionManager` call site (only the policy + offload primitive exist);
+recovering aif's belief structures (`TrustBeliefs`/`CompatibilityBeliefs`/
+`CoalitionHistory`) into koalisi if richer scoring is wanted.
+
+Cross-project plan (upstream `aif` + this Phase B): see
+`~/Documents/iwahi/tira/.claude/plans/aif-merge-koalisi-integration.md`.
 
 ### Phase 7: Persistence  *(planned — gated, see above; was Phase 5, moved last)*
 
