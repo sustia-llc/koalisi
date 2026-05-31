@@ -50,7 +50,7 @@ impl Message<ForcePanic> for MarketMonitor {
 /// Args passed into the supervisor. The `ready_tx` is consumed inside
 /// `on_start` and fires with the supervised child's ref the moment it's
 /// spawned — mirror of `surrealdb-live-message`'s `(tx, rx) = oneshot::channel()`
-/// + `let _ = tx.send(())` pattern, but carrying the child ref as the
+/// then `let _ = tx.send(())` pattern, but carrying the child ref as the
 /// payload so the main task doesn't need a separate lookup step.
 struct SupervisorArgs {
     pair: Pair,

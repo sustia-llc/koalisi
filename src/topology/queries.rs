@@ -52,14 +52,13 @@ where
         match event {
             TemporalEvent::HyperedgeAdded { .. } => exists = true,
             TemporalEvent::HyperedgeRemoved { .. } => exists = false,
-            TemporalEvent::HyperedgesJoined { source_indices, .. } => {
+            TemporalEvent::HyperedgesJoined { source_indices, .. }
                 // Inserted into both target and sources' index lists; only the
                 // source role removes the hyperedge — the target role doesn't
                 // change existence (it just absorbs the new vertices).
-                if source_indices.contains(&hyperedge) {
+                if source_indices.contains(&hyperedge) => {
                     exists = false;
                 }
-            }
             _ => {}
         }
     }

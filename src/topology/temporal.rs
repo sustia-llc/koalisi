@@ -104,7 +104,7 @@ where
     /// Add a vertex and record the event.
     pub async fn add_vertex(&self, weight: V) -> TemporalResult<VertexIndex, V, HE> {
         let timestamp = self.clock.tick();
-        let weight_clone = weight.clone();
+        let weight_clone = weight;
         let graph = self.graph.clone();
 
         let index = EXEC
@@ -154,7 +154,7 @@ where
     ) -> TemporalResult<(), V, HE> {
         let timestamp = self.clock.tick();
         let graph = self.graph.clone();
-        let new_weight_clone = new_weight.clone();
+        let new_weight_clone = new_weight;
 
         // Get old weight and update atomically in single write lock
         let old_weight = EXEC
@@ -184,7 +184,7 @@ where
         weight: HE,
     ) -> TemporalResult<HyperedgeIndex, V, HE> {
         let timestamp = self.clock.tick();
-        let weight_clone = weight.clone();
+        let weight_clone = weight;
         let vertices_clone = vertices.clone();
         let graph = self.graph.clone();
 
@@ -238,7 +238,7 @@ where
     ) -> TemporalResult<(), V, HE> {
         let timestamp = self.clock.tick();
         let graph = self.graph.clone();
-        let new_weight_clone = new_weight.clone();
+        let new_weight_clone = new_weight;
 
         // Get old weight and update atomically in single write lock
         let old_weight = EXEC

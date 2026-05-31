@@ -244,11 +244,10 @@ where
                     index,
                     vertices,
                     ..
-                } => {
-                    if vertices.contains(&agent) {
+                }
+                    if vertices.contains(&agent) => {
                         membership_start.insert(*index, *timestamp);
                     }
-                }
                 TemporalEvent::HyperedgeRemoved {
                     timestamp, index, ..
                 } => {

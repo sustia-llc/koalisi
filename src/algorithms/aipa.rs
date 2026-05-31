@@ -315,7 +315,7 @@ pub fn verify_partition(partition: &IntegerPartition, n: usize) -> bool {
     }
 
     // Check all positive
-    if partition.iter().any(|&x| x == 0) {
+    if partition.contains(&0) {
         return false;
     }
 

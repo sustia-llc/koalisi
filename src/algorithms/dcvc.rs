@@ -69,8 +69,8 @@ impl DCVCDistributor {
         if start_idx < total_coalitions {
             let remaining_indices: Vec<usize> = (start_idx..total_coalitions).collect();
 
-            let mut sorted: Vec<&dyn AgentCapabilities> = agents.iter().copied().collect();
-            sorted.sort_by(|a, b| b.trust_level().cmp(&a.trust_level()));
+            let mut sorted: Vec<&dyn AgentCapabilities> = agents.to_vec();
+            sorted.sort_by_key(|a| std::cmp::Reverse(a.trust_level()));
 
             for (i, &idx) in remaining_indices.iter().enumerate() {
                 let agent = sorted[i % sorted.len()];
