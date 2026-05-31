@@ -10,10 +10,12 @@
 //! adding an agent that covers a previously-uncovered required bit strictly
 //! lowers `G`, while adding a redundant clone leaves `G` unchanged.
 //!
-//! Contrast with `aif::CoalitionEvaluator`, whose `observation_probs` cannot
-//! see coalition members and so can only vary *preferences* by membership —
-//! which collapses to `G ≈ 0` for every coalition. We therefore build
-//! [`aif::POMDPAgent`] directly here.
+//! The coverage→`G` math lives upstream in [`aif::competence_efe`] (the
+//! reusable coalition-value primitive): coverage *is* the scalar competence it
+//! takes, and it varies the *observation model* by competence. We use it rather
+//! than `aif::CoalitionEvaluator`, whose `observation_probs` cannot see coalition
+//! members and so can only vary *preferences* by membership — which collapses to
+//! `G ≈ 0` for every coalition.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -65,25 +67,26 @@ fn union_caps(agents: &[&dyn AgentCapabilities]) -> u32 {
 pub struct CapabilityModel;
 
 impl CapabilityModel {
-    /// Build a 2-state / 2-observation POMDP at the given coverage and return
-    /// its expected free energy `G` (lower = better).
-    ///
-    /// Precision `p = 0.5 + (max_precision - 0.5) * cov`, so `cov == 0` gives an
-    /// uninformative observation model (`p = 0.5`) and `cov == 1` gives the most
-    /// informative one (`p = max_precision`). State 0 ("success") emits
-    /// observation 1 with probability `p`; state 1 ("fail") emits observation 1
-    /// with probability `1 - p`.
+    /// Map capability coverage `cov ∈ [0, 1]` to expected free energy `G`
+    /// (lower = better) via the upstream [`aif::competence_efe`] primitive:
+    /// precision `p = 0.5 + (max_precision - 0.5) * cov`, so `cov == 0` gives an
+    /// uninformative observation model (`p = 0.5`) and `cov == 1` the most
+    /// informative one (`p = max_precision`). The AIF math lives in `aif`; this
+    /// only maps koalisi's `BridgeParams` onto [`aif::ObsPrecisionParams`].
     ///
     /// # Errors
     ///
-    /// Returns [`aif::OneManyError`] if the constructed POMDP parameters are
-    /// rejected by the engine.
-    pub fn efe_for_coverage(cov: f64, params: BridgeParams) -> Result<f64, aif::OneManyError> {
-        let p = 0.5 + (params.max_precision - 0.5) * cov;
-        let obs = vec![p, 1.0 - p];
-        let prefs = vec![params.success_preference, 1.0 - params.success_preference];
-        let agent = aif::POMDPAgent::new(2, Some(obs), None, prefs, None, params.alpha, false)?;
-        Ok(agent.expected_free_energy())
+    /// Returns [`aif::AifError`] if `cov` is outside `[0, 1]` or the resulting
+    /// POMDP parameters are rejected by the engine.
+    pub fn efe_for_coverage(cov: f64, params: BridgeParams) -> Result<f64, aif::AifError> {
+        aif::competence_efe(
+            cov,
+            aif::ObsPrecisionParams {
+                max_precision: params.max_precision,
+                success_preference: params.success_preference,
+                alpha: params.alpha,
+            },
+        )
     }
 }
 
