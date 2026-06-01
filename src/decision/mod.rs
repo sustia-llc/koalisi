@@ -219,7 +219,10 @@ impl<C: ValueCalculator + Send + Sync> CoalitionDecisionPolicy for ThresholdPoli
 #[cfg(feature = "decision")]
 mod aif_policy;
 #[cfg(feature = "decision")]
-pub use aif_policy::{AifDecisionPolicy, BridgeParams, CapabilityModel, EfeValueCalculator};
+pub use aif_policy::{
+    AifDecisionPolicy, BridgeParams, CapabilityModel, CoalitionHistory, CompatibilityBeliefs,
+    EfeValueCalculator, TrustBeliefs,
+};
 
 #[cfg(test)]
 mod tests {

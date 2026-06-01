@@ -24,6 +24,14 @@ use crate::algorithms::{AgentCapabilities, ValueCalculator};
 
 use super::{CoalitionDecisionPolicy, Decision, DecisionContext};
 
+// Supporting belief structures (issue #2). Re-exported so koalisi callers reach
+// them as `koalisi::decision::{TrustBeliefs, CompatibilityBeliefs,
+// CoalitionHistory}` without depending on `aif` directly. They are plain
+// `f64`/`HashMap` data (no extra deps). `belief_weighted_preference` aggregates
+// them into a single alignment scalar in `[0.05, 0.95]`.
+use aif::{AgentId, belief_weighted_preference};
+pub use aif::{CoalitionHistory, CompatibilityBeliefs, TrustBeliefs};
+
 /// Tunable parameters mapping capability coverage onto a POMDP and its `G`.
 #[derive(Debug, Clone, Copy)]
 pub struct BridgeParams {
@@ -33,6 +41,18 @@ pub struct BridgeParams {
     pub success_preference: f64,
     /// Action precision passed to the POMDP agent.
     pub alpha: f64,
+    /// How much the belief signal (trust / compatibility / history) modulates
+    /// the competence that drives the observation model, in `[0, 1]` (issue #2).
+    ///
+    /// The competence fed to the POMDP is
+    /// `(1 - belief_weight)·coverage + belief_weight·alignment`, where
+    /// `alignment ∈ [0.05, 0.95]` is the belief aggregate from
+    /// [`belief_weighted_preference`]. At the default `0.0` the policy is pure
+    /// capability coverage — identical to the pre-issue-#2 behavior. Crucially
+    /// the blend modulates the *observation model* (via competence), not just
+    /// preferences, so membership still alters achievable `G` and the decision
+    /// stays non-degenerate (the B2/B4 requirement).
+    pub belief_weight: f64,
 }
 
 impl Default for BridgeParams {
@@ -41,6 +61,7 @@ impl Default for BridgeParams {
             max_precision: 0.95,
             success_preference: 0.9,
             alpha: 8.0,
+            belief_weight: 0.0,
         }
     }
 }
@@ -121,52 +142,95 @@ impl ValueCalculator for EfeValueCalculator {
 /// The agent joins when doing so *lowers* expected free energy by more than
 /// `join_margin`; it leaves when staying does not lower `G`. This mirrors the
 /// engine's `decide_join` rule (`g_coalition < g_alone`) at `join_margin == 0`.
-#[derive(Debug, Clone, Copy)]
+/// `belief_weight` defaults to `0.0`, so a default-constructed policy is pure
+/// capability coverage and the (empty) belief structures are never consulted.
+/// Use [`AifDecisionPolicy::with_beliefs`] (and a `params.belief_weight > 0`) to
+/// fold trust / compatibility / history into the decision (issue #2).
+#[derive(Debug, Clone, Default)]
 pub struct AifDecisionPolicy {
     pub params: BridgeParams,
     pub join_margin: f64,
-}
-
-impl Default for AifDecisionPolicy {
-    fn default() -> Self {
-        Self {
-            params: BridgeParams::default(),
-            join_margin: 0.0,
-        }
-    }
+    /// Per-agent dynamic trust (EMA, `[0, 1]`). Distinct from the *static*
+    /// [`AgentCapabilities::trust_level`] baseline — this is the learned signal.
+    pub trust: TrustBeliefs,
+    /// Symmetric pairwise compatibility (`[0, 1]`).
+    pub compat: CompatibilityBeliefs,
+    /// Observed past performance keyed by (sorted) membership.
+    pub history: CoalitionHistory,
 }
 
 impl AifDecisionPolicy {
-    /// Coverage→`G` over owned params (no `&self` borrow), so it can run inside
-    /// a `'static` rayon closure. Engine error ⇒ `+∞` (worst outcome).
-    fn g_at(cov: f64, params: BridgeParams) -> f64 {
-        match CapabilityModel::efe_for_coverage(cov, params) {
+    /// Construct a belief-aware policy. The beliefs only take effect when
+    /// `params.belief_weight > 0`; at `0` they are ignored and this behaves
+    /// exactly like the pure-coverage policy.
+    #[must_use]
+    pub fn with_beliefs(
+        params: BridgeParams,
+        join_margin: f64,
+        trust: TrustBeliefs,
+        compat: CompatibilityBeliefs,
+        history: CoalitionHistory,
+    ) -> Self {
+        Self {
+            params,
+            join_margin,
+            trust,
+            compat,
+            history,
+        }
+    }
+
+    /// Competence→`G` over owned params (no `&self` borrow), so it can run inside
+    /// a `'static` rayon closure. The competence is capability coverage,
+    /// optionally blended with belief alignment (see [`Self::blended_competence`]).
+    /// Engine error ⇒ `+∞` (worst outcome).
+    fn g_at(competence: f64, params: BridgeParams) -> f64 {
+        match CapabilityModel::efe_for_coverage(competence, params) {
             Ok(g) => g,
             Err(e) => {
-                tracing::warn!(error = %e, coverage = cov, "EFE computation failed");
+                tracing::warn!(error = %e, competence, "EFE computation failed");
                 f64::INFINITY
             }
         }
     }
 
-    /// Pure join decision over owned capability masks.
+    /// Blend capability `coverage` with belief `alignment` into the competence
+    /// that drives the observation model:
+    /// `(1 - belief_weight)·coverage + belief_weight·alignment`. At
+    /// `belief_weight == 0` this is exactly `coverage`, preserving the original
+    /// non-degenerate coverage→`G` behavior. Both inputs are in `[0, 1]`, so the
+    /// result is too (clamped defensively).
+    fn blended_competence(coverage: f64, alignment: f64, belief_weight: f64) -> f64 {
+        let w = belief_weight.clamp(0.0, 1.0);
+        ((1.0 - w) * coverage + w * alignment).clamp(0.0, 1.0)
+    }
+
+    /// Belief alignment scalar in `[0.05, 0.95]` for `agent` among `members`
+    /// (mean trust + compatibility with its partners, blended with any recorded
+    /// history). Returns the neutral `0.5` when beliefs are disabled
+    /// (`belief_weight == 0`) or the agent has no partners in `members`.
+    fn alignment(&self, agent: AgentId, members: &[AgentId]) -> f64 {
+        if self.params.belief_weight <= 0.0 {
+            return 0.5;
+        }
+        belief_weighted_preference(agent, members, &self.trust, &self.compat, &self.history)[0]
+    }
+
+    /// Pure join decision over owned competence scalars.
     ///
-    /// Shared by the sync [`CoalitionDecisionPolicy::should_join`] and the async
-    /// [`CoalitionDecisionPolicy::should_join_async`] override: both reduce the
-    /// borrowed agents to owned `u32` masks and call this. `union_with_agent` is
-    /// the unioned capability mask of the coalition *including* the candidate
-    /// agent.
-    fn join_decision_from_masks(
-        agent_caps: u32,
-        union_with_agent: u32,
-        required: u32,
+    /// `comp_alone` / `comp_coalition` are the blended competences for the agent
+    /// acting alone vs. in the coalition. Shared by the sync
+    /// [`CoalitionDecisionPolicy::should_join`] and the async
+    /// [`CoalitionDecisionPolicy::should_join_async`] override: both reduce their
+    /// borrowed inputs to these two owned `f64` and call this.
+    fn join_decision_from_competences(
+        comp_alone: f64,
+        comp_coalition: f64,
         params: BridgeParams,
         join_margin: f64,
     ) -> Decision {
-        let cov_alone = coverage(agent_caps, required);
-        let cov_coalition = coverage(union_with_agent, required);
-        let g_alone = Self::g_at(cov_alone, params);
-        let g_coalition = Self::g_at(cov_coalition, params);
+        let g_alone = Self::g_at(comp_alone, params);
+        let g_coalition = Self::g_at(comp_coalition, params);
         let margin = g_alone - g_coalition;
         // `g_at` returns +∞ on engine error, so `∞ - ∞` can be NaN. Never join on
         // an untrustworthy margin, and never propagate NaN/±∞ as a score.
@@ -179,25 +243,21 @@ impl AifDecisionPolicy {
         }
     }
 
-    /// Pure leave decision over owned capability masks.
+    /// Pure leave decision over owned competence scalars.
     ///
-    /// Shared by the sync [`CoalitionDecisionPolicy::should_leave`] and the async
-    /// [`CoalitionDecisionPolicy::should_leave_async`] override: both reduce the
-    /// borrowed agents to owned `u32` masks and call this. `union_in` is the
-    /// unioned capability mask of the coalition *including* the agent; `union_out`
-    /// is the union after removing the agent (by id).
-    fn leave_decision_from_masks(
-        union_in: u32,
-        union_out: u32,
-        required: u32,
+    /// `comp_in` is the agent-present competence (coverage of the coalition
+    /// including the agent, blended with the agent's belief alignment to its
+    /// partners); `comp_out` is the agent-absent competence (coverage without the
+    /// agent, neutral alignment). If removing the agent does not raise `G`
+    /// (`g_out - g_in <= 0`) it contributes nothing — by coverage *or* belief —
+    /// and should leave.
+    fn leave_decision_from_competences(
+        comp_in: f64,
+        comp_out: f64,
         params: BridgeParams,
     ) -> Decision {
-        let cov_in = coverage(union_in, required);
-        let cov_out = coverage(union_out, required);
-        let g_in = Self::g_at(cov_in, params);
-        let g_out = Self::g_at(cov_out, params);
-        // `g_out - g_in` is how much removing the agent raises G. If it does not
-        // raise G (<= 0), the agent contributes no coverage and should leave.
+        let g_in = Self::g_at(comp_in, params);
+        let g_out = Self::g_at(comp_out, params);
         let delta = g_out - g_in;
         // `g_at` returns +∞ on engine error, so `∞ - ∞` can be NaN. Don't eject on
         // an untrustworthy value and don't propagate NaN/±∞ as a score.
@@ -208,6 +268,80 @@ impl AifDecisionPolicy {
             act: delta <= 0.0,
             score: delta,
         }
+    }
+
+    /// Collect the `AgentId`s of `coalition`, appending `extra` if `Some`.
+    /// Used to build the membership list `belief_weighted_preference` consumes.
+    fn member_ids(coalition: &[&dyn AgentCapabilities], extra: Option<AgentId>) -> Vec<AgentId> {
+        coalition
+            .iter()
+            .map(|a| a.agent_id())
+            .chain(extra)
+            .collect()
+    }
+
+    /// Blended `(comp_alone, comp_coalition)` competences for a join decision.
+    /// `coalition` excludes `agent`. Acting alone has no partners ⇒ neutral
+    /// alignment; the coalition's alignment is the agent's belief aggregate over
+    /// its prospective partners. Returns owned `f64` so the async path can move
+    /// them into the rayon closure.
+    fn join_competences(
+        &self,
+        agent: &dyn AgentCapabilities,
+        coalition: &[&dyn AgentCapabilities],
+        ctx: &DecisionContext,
+    ) -> (f64, f64) {
+        let required = ctx.required_capabilities;
+        let w = self.params.belief_weight;
+        let agent_caps = agent.capabilities();
+
+        let cov_alone = coverage(agent_caps, required);
+        let cov_coalition = coverage(union_caps(coalition) | agent_caps, required);
+
+        let members = Self::member_ids(coalition, Some(agent.agent_id()));
+        let align_coalition = self.alignment(agent.agent_id(), &members);
+
+        (
+            Self::blended_competence(cov_alone, 0.5, w),
+            Self::blended_competence(cov_coalition, align_coalition, w),
+        )
+    }
+
+    /// Blended `(comp_in, comp_out)` competences for a leave decision.
+    /// `coalition` includes `agent`. Agent-present competence carries the agent's
+    /// belief alignment to its partners; agent-absent competence uses neutral
+    /// alignment (the leaving agent's belief no longer applies). Returns owned
+    /// `f64` for the async path.
+    fn leave_competences(
+        &self,
+        agent: &dyn AgentCapabilities,
+        coalition: &[&dyn AgentCapabilities],
+        ctx: &DecisionContext,
+    ) -> (f64, f64) {
+        let required = ctx.required_capabilities;
+        let w = self.params.belief_weight;
+        let agent_id = agent.agent_id();
+
+        let union_in = union_caps(coalition);
+        // Removes the agent by id; assumes coalition members have distinct
+        // `agent_id`s (duplicates would drop every match and understate `union_out`).
+        let without: Vec<&dyn AgentCapabilities> = coalition
+            .iter()
+            .filter(|a| a.agent_id() != agent_id)
+            .copied()
+            .collect();
+        let union_out = union_caps(&without);
+
+        let cov_in = coverage(union_in, required);
+        let cov_out = coverage(union_out, required);
+
+        let members_in = Self::member_ids(coalition, None);
+        let align_in = self.alignment(agent_id, &members_in);
+
+        (
+            Self::blended_competence(cov_in, align_in, w),
+            Self::blended_competence(cov_out, 0.5, w),
+        )
     }
 }
 
@@ -224,12 +358,10 @@ impl CoalitionDecisionPolicy for AifDecisionPolicy {
         coalition: &[&dyn AgentCapabilities],
         ctx: &DecisionContext,
     ) -> Decision {
-        let agent_caps = agent.capabilities();
-        let union_with_agent = union_caps(coalition) | agent_caps;
-        Self::join_decision_from_masks(
-            agent_caps,
-            union_with_agent,
-            ctx.required_capabilities,
+        let (comp_alone, comp_coalition) = self.join_competences(agent, coalition, ctx);
+        Self::join_decision_from_competences(
+            comp_alone,
+            comp_coalition,
             self.params,
             self.join_margin,
         )
@@ -238,42 +370,29 @@ impl CoalitionDecisionPolicy for AifDecisionPolicy {
     /// Leave iff staying does not lower `G`.
     ///
     /// `coalition` includes `agent`. `g_in` is `G` with the agent present,
-    /// `g_out` is `G` after removing it. Removing the agent that covers a
-    /// required bit *raises* `G` (`g_out > g_in`), so the agent stays; if
-    /// removing it does not raise `G` (`g_out - g_in <= 0`), the agent is
-    /// redundant and should leave.
+    /// `g_out` is `G` after removing it. An agent that covers a required bit —
+    /// or (with `belief_weight > 0`) is well-trusted/compatible with its partners
+    /// — *raises* `G` when removed (`g_out > g_in`), so it stays; if removing it
+    /// does not raise `G` (`g_out - g_in <= 0`) it is redundant and should leave.
     fn should_leave(
         &self,
         agent: &dyn AgentCapabilities,
         coalition: &[&dyn AgentCapabilities],
         ctx: &DecisionContext,
     ) -> Decision {
-        let union_in = union_caps(coalition);
-
-        // Removes the agent by id; assumes coalition members have distinct
-        // `agent_id`s (duplicates would drop every match and understate `union_out`).
-        let without: Vec<&dyn AgentCapabilities> = coalition
-            .iter()
-            .filter(|a| a.agent_id() != agent.agent_id())
-            .copied()
-            .collect();
-        let union_out = union_caps(&without);
-
-        Self::leave_decision_from_masks(
-            union_in,
-            union_out,
-            ctx.required_capabilities,
-            self.params,
-        )
+        let (comp_in, comp_out) = self.leave_competences(agent, coalition, ctx);
+        Self::leave_decision_from_competences(comp_in, comp_out, self.params)
     }
 
     /// Async, runtime-friendly override of
     /// [`should_join`](Self::should_join).
     ///
-    /// Snapshots the borrowed agents' capability masks to owned `u32` *before*
-    /// spawning, then runs the CPU-bound expected-free-energy compute on the
-    /// rayon pool via [`tokio_rayon::spawn`], so the tokio worker thread is not
-    /// blocked. Produces the same [`Decision`] as the sync
+    /// Reduces the borrowed agents (capability masks + agent ids) and beliefs to
+    /// two owned competence `f64` in the sync prologue, then runs the CPU-bound
+    /// expected-free-energy compute on the rayon pool via [`tokio_rayon::spawn`],
+    /// so the tokio worker thread is not blocked. The belief lookups are cheap
+    /// `HashMap` reads done in the prologue; only the EFE math is offloaded.
+    /// Produces the same [`Decision`] as the sync
     /// [`should_join`](Self::should_join).
     ///
     /// `coalition` excludes `agent` (same convention as the sync method).
@@ -285,21 +404,13 @@ impl CoalitionDecisionPolicy for AifDecisionPolicy {
     ) -> Pin<Box<dyn Future<Output = Decision> + Send + 'a>> {
         // Snapshot to owned values in the sync prologue: the &dyn borrows are not
         // 'static and must not cross into the spawned closure or the future.
-        let agent_caps = agent.capabilities();
-        let union_with_agent = union_caps(coalition) | agent_caps;
-        let required = ctx.required_capabilities;
+        let (comp_alone, comp_coalition) = self.join_competences(agent, coalition, ctx);
         let params = self.params;
         let join_margin = self.join_margin;
 
         Box::pin(async move {
             tokio_rayon::spawn(move || {
-                Self::join_decision_from_masks(
-                    agent_caps,
-                    union_with_agent,
-                    required,
-                    params,
-                    join_margin,
-                )
+                Self::join_decision_from_competences(comp_alone, comp_coalition, params, join_margin)
             })
             .await
         })
@@ -308,10 +419,10 @@ impl CoalitionDecisionPolicy for AifDecisionPolicy {
     /// Async, runtime-friendly override of
     /// [`should_leave`](Self::should_leave).
     ///
-    /// Snapshots the in/out unioned capability masks to owned `u32` *before*
-    /// spawning, then runs the CPU-bound expected-free-energy compute on the
-    /// rayon pool via [`tokio_rayon::spawn`], so the tokio worker thread is not
-    /// blocked. Produces the same [`Decision`] as the sync
+    /// Reduces the borrowed agents and beliefs to two owned competence `f64` in
+    /// the sync prologue, then runs the CPU-bound expected-free-energy compute on
+    /// the rayon pool via [`tokio_rayon::spawn`], so the tokio worker thread is
+    /// not blocked. Produces the same [`Decision`] as the sync
     /// [`should_leave`](Self::should_leave).
     ///
     /// `coalition` includes `agent` (same convention as the sync method).
@@ -321,22 +432,12 @@ impl CoalitionDecisionPolicy for AifDecisionPolicy {
         coalition: &'a [&'a dyn AgentCapabilities],
         ctx: &'a DecisionContext,
     ) -> Pin<Box<dyn Future<Output = Decision> + Send + 'a>> {
-        // Snapshot owned masks in the sync prologue, mirroring the sync
-        // `should_leave`: union with the agent, and union after removing it by id.
-        let union_in = union_caps(coalition);
-        let union_out = union_caps(
-            &coalition
-                .iter()
-                .filter(|a| a.agent_id() != agent.agent_id())
-                .copied()
-                .collect::<Vec<_>>(),
-        );
-        let required = ctx.required_capabilities;
+        let (comp_in, comp_out) = self.leave_competences(agent, coalition, ctx);
         let params = self.params;
 
         Box::pin(async move {
             tokio_rayon::spawn(move || {
-                Self::leave_decision_from_masks(union_in, union_out, required, params)
+                Self::leave_decision_from_competences(comp_in, comp_out, params)
             })
             .await
         })
@@ -682,5 +783,294 @@ mod tests {
         let full: [&dyn AgentCapabilities; 3] = [&a0, &a1, &a2];
         let stay = p.should_leave_async(&a0, &full, &ctx).await;
         assert!(!stay.act, "trait-object async leave: unique-coverage agent stays");
+    }
+
+    // -----------------------------------------------------------------------
+    // Belief-aware behavior (issue #2): trust / compatibility / history fold
+    // into the competence that drives the observation model.
+    // -----------------------------------------------------------------------
+
+    /// `BridgeParams` with the belief blend cranked up; everything else default.
+    fn belief_params(belief_weight: f64) -> BridgeParams {
+        BridgeParams {
+            belief_weight,
+            ..BridgeParams::default()
+        }
+    }
+
+    /// Drive `agent`'s EMA trust toward `target` so the EMA settles near it.
+    fn trust_toward(agent: AgentId, target: f64) -> TrustBeliefs {
+        let mut t = TrustBeliefs::new();
+        for _ in 0..200 {
+            t.update(agent, target);
+        }
+        t
+    }
+
+    #[test]
+    fn belief_weight_zero_matches_pure_coverage() {
+        // A belief-aware policy with belief_weight == 0 must reproduce the
+        // pure-coverage default exactly: a redundant clone does NOT join.
+        let mut trust = TrustBeliefs::new();
+        trust.update(1, 1.0);
+        let mut compat = CompatibilityBeliefs::new();
+        compat.set(0, 1, 1.0);
+        let policy = AifDecisionPolicy::with_beliefs(
+            belief_params(0.0),
+            0.0,
+            trust,
+            compat,
+            CoalitionHistory::new(),
+        );
+        let ctx = DecisionContext { required_capabilities: 0b111 };
+
+        let a0 = TestAgent { id: 0, caps: 0b010, trust: 50 };
+        let a1 = TestAgent { id: 1, caps: 0b010, trust: 50 };
+        let coalition: [&dyn AgentCapabilities; 1] = [&a1];
+
+        // Even with strong beliefs present, weight 0 ignores them ⇒ redundant
+        // coverage ⇒ decline (identical to AifDecisionPolicy::default()).
+        assert!(!policy.should_join(&a0, &coalition, &ctx).act);
+        assert_eq!(
+            policy.should_join(&a0, &coalition, &ctx),
+            AifDecisionPolicy::default().should_join(&a0, &coalition, &ctx),
+        );
+    }
+
+    #[test]
+    fn high_trust_lets_capability_redundant_agent_join() {
+        // a0 (caps 0b010) adds NO new coverage over partner a1 (caps 0b010), so
+        // the pure-coverage policy declines. But high trust + compatibility makes
+        // the partnership valuable, so the belief-aware policy joins.
+        let policy = AifDecisionPolicy::with_beliefs(
+            belief_params(0.9),
+            0.0,
+            trust_toward(1, 0.95),
+            {
+                let mut c = CompatibilityBeliefs::new();
+                c.set(0, 1, 0.95);
+                c
+            },
+            CoalitionHistory::new(),
+        );
+        let ctx = DecisionContext { required_capabilities: 0b111 };
+
+        let a0 = TestAgent { id: 0, caps: 0b010, trust: 50 };
+        let a1 = TestAgent { id: 1, caps: 0b010, trust: 50 };
+        let coalition: [&dyn AgentCapabilities; 1] = [&a1];
+
+        assert!(
+            !AifDecisionPolicy::default().should_join(&a0, &coalition, &ctx).act,
+            "pure coverage: redundant clone declines",
+        );
+        assert!(
+            policy.should_join(&a0, &coalition, &ctx).act,
+            "high trust+compat: redundant agent now joins",
+        );
+    }
+
+    #[test]
+    fn low_trust_blocks_a_coverage_improving_join() {
+        // a0 (caps 0b001) DOES add new coverage (1/3 → 2/3), so pure coverage
+        // joins. But the partner is badly distrusted/incompatible, so under a
+        // high belief weight the agent prefers to act alone.
+        let policy = AifDecisionPolicy::with_beliefs(
+            belief_params(0.9),
+            0.0,
+            trust_toward(1, 0.05),
+            {
+                let mut c = CompatibilityBeliefs::new();
+                c.set(0, 1, 0.05);
+                c
+            },
+            CoalitionHistory::new(),
+        );
+        let ctx = DecisionContext { required_capabilities: 0b111 };
+
+        let a0 = TestAgent { id: 0, caps: 0b001, trust: 50 };
+        let a1 = TestAgent { id: 1, caps: 0b010, trust: 50 };
+        let coalition: [&dyn AgentCapabilities; 1] = [&a1];
+
+        assert!(
+            AifDecisionPolicy::default().should_join(&a0, &coalition, &ctx).act,
+            "pure coverage: new bit ⇒ join",
+        );
+        assert!(
+            !policy.should_join(&a0, &coalition, &ctx).act,
+            "low trust+compat blocks the otherwise-good join",
+        );
+    }
+
+    #[test]
+    fn recorded_history_flips_a_redundant_join() {
+        // Neutral trust/compat (base alignment 0.5), redundant coverage ⇒ no
+        // join. Recording strong past performance for {0,1} lifts alignment and
+        // flips the decision to join.
+        let ctx = DecisionContext { required_capabilities: 0b111 };
+        let a0 = TestAgent { id: 0, caps: 0b010, trust: 50 };
+        let a1 = TestAgent { id: 1, caps: 0b010, trust: 50 };
+        let coalition: [&dyn AgentCapabilities; 1] = [&a1];
+
+        let no_history = AifDecisionPolicy::with_beliefs(
+            belief_params(0.9),
+            0.0,
+            TrustBeliefs::new(),
+            CompatibilityBeliefs::new(),
+            CoalitionHistory::new(),
+        );
+        assert!(
+            !no_history.should_join(&a0, &coalition, &ctx).act,
+            "neutral beliefs, redundant coverage ⇒ decline",
+        );
+
+        let mut hist = CoalitionHistory::new();
+        hist.record(&[0, 1], 0.95);
+        let with_history = AifDecisionPolicy::with_beliefs(
+            belief_params(0.9),
+            0.0,
+            TrustBeliefs::new(),
+            CompatibilityBeliefs::new(),
+            hist,
+        );
+        assert!(
+            with_history.should_join(&a0, &coalition, &ctx).act,
+            "strong recorded history ⇒ join",
+        );
+    }
+
+    #[test]
+    fn trust_controls_whether_a_redundant_member_leaves() {
+        // a0 is capability-redundant within {a0, a1} (both 0b010): pure coverage
+        // says leave. High trust keeps it; low trust ejects it.
+        let ctx = DecisionContext { required_capabilities: 0b111 };
+        let a0 = TestAgent { id: 0, caps: 0b010, trust: 50 };
+        let a1 = TestAgent { id: 1, caps: 0b010, trust: 50 };
+        let full: [&dyn AgentCapabilities; 2] = [&a0, &a1];
+
+        assert!(
+            AifDecisionPolicy::default().should_leave(&a0, &full, &ctx).act,
+            "pure coverage: redundant member leaves",
+        );
+
+        let trusted = AifDecisionPolicy::with_beliefs(
+            belief_params(0.9),
+            0.0,
+            trust_toward(1, 0.95),
+            {
+                let mut c = CompatibilityBeliefs::new();
+                c.set(0, 1, 0.95);
+                c
+            },
+            CoalitionHistory::new(),
+        );
+        assert!(
+            !trusted.should_leave(&a0, &full, &ctx).act,
+            "high trust keeps the redundant member",
+        );
+
+        let distrusted = AifDecisionPolicy::with_beliefs(
+            belief_params(0.9),
+            0.0,
+            trust_toward(1, 0.05),
+            {
+                let mut c = CompatibilityBeliefs::new();
+                c.set(0, 1, 0.05);
+                c
+            },
+            CoalitionHistory::new(),
+        );
+        assert!(
+            distrusted.should_leave(&a0, &full, &ctx).act,
+            "low trust ejects the redundant member",
+        );
+    }
+
+    #[test]
+    fn well_trusted_redundant_member_stays_in_larger_coalition() {
+        // Design-intent guard (review finding, issue #2): the leave path is the
+        // symmetric dual of join. `comp_out` uses neutral 0.5 ("agent not in the
+        // coalition"), exactly as join's `comp_alone` does — so if high trust
+        // lets a capability-redundant agent JOIN, the same trust must keep it
+        // from being EJECTED. Here all three members share caps 0b010 (coverage
+        // pinned at 1/3 regardless of size), so a pure-coverage policy would shed
+        // any of them; high mutual trust keeps a0.
+        let ctx = DecisionContext { required_capabilities: 0b111 };
+        let a0 = TestAgent { id: 0, caps: 0b010, trust: 50 };
+        let a1 = TestAgent { id: 1, caps: 0b010, trust: 50 };
+        let a2 = TestAgent { id: 2, caps: 0b010, trust: 50 };
+        let full: [&dyn AgentCapabilities; 3] = [&a0, &a1, &a2];
+
+        // Pure coverage: a redundant member in a 3-clone coalition leaves.
+        assert!(
+            AifDecisionPolicy::default().should_leave(&a0, &full, &ctx).act,
+            "pure coverage: redundant member of a 3-clone coalition leaves",
+        );
+
+        // a0 well-trusted by / compatible with both partners ⇒ stays.
+        let mut trust = TrustBeliefs::new();
+        for _ in 0..200 {
+            trust.update(1, 0.95);
+            trust.update(2, 0.95);
+        }
+        let mut compat = CompatibilityBeliefs::new();
+        compat.set(0, 1, 0.95);
+        compat.set(0, 2, 0.95);
+        let trusted = AifDecisionPolicy::with_beliefs(
+            belief_params(0.9),
+            0.0,
+            trust,
+            compat,
+            CoalitionHistory::new(),
+        );
+        assert!(
+            !trusted.should_leave(&a0, &full, &ctx).act,
+            "high mutual trust keeps the redundant member (dual of belief-aware join)",
+        );
+
+        // Low trust toward both partners ⇒ the redundant a0 is ejected.
+        let mut low_trust = TrustBeliefs::new();
+        for _ in 0..200 {
+            low_trust.update(1, 0.05);
+            low_trust.update(2, 0.05);
+        }
+        let mut low_compat = CompatibilityBeliefs::new();
+        low_compat.set(0, 1, 0.05);
+        low_compat.set(0, 2, 0.05);
+        let distrusted = AifDecisionPolicy::with_beliefs(
+            belief_params(0.9),
+            0.0,
+            low_trust,
+            low_compat,
+            CoalitionHistory::new(),
+        );
+        assert!(
+            distrusted.should_leave(&a0, &full, &ctx).act,
+            "low trust ejects the redundant member from the larger coalition",
+        );
+    }
+
+    #[tokio::test]
+    async fn belief_aware_sync_async_equivalent() {
+        // The async (rayon-offloaded) path must reproduce the sync belief-aware
+        // decision exactly, including through a trait object.
+        let policy = AifDecisionPolicy::with_beliefs(
+            belief_params(0.9),
+            0.0,
+            trust_toward(1, 0.95),
+            {
+                let mut c = CompatibilityBeliefs::new();
+                c.set(0, 1, 0.95);
+                c
+            },
+            CoalitionHistory::new(),
+        );
+        let ctx = DecisionContext { required_capabilities: 0b111 };
+        let a0 = TestAgent { id: 0, caps: 0b010, trust: 50 };
+        let a1 = TestAgent { id: 1, caps: 0b010, trust: 50 };
+        let coalition: [&dyn AgentCapabilities; 1] = [&a1];
+
+        let sync = policy.should_join(&a0, &coalition, &ctx);
+        let r#async = policy.should_join_async(&a0, &coalition, &ctx).await;
+        assert_eq!(sync, r#async, "belief-aware async join == sync");
     }
 }

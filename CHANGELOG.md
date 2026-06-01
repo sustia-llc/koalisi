@@ -58,6 +58,35 @@ Planned work (tracked in [`CLAUDE.md`](./CLAUDE.md) §"Next steps"):
 
 [#1]: https://github.com/sustia-llc/koalisi/issues/1
 
+### Added (unreleased — issue [#2] belief-aware scoring)
+
+- **Trust / compatibility / history beliefs in the AIF decision path** ([#2],
+  feature `decision`): the decision now reflects more than capability coverage.
+  - `koalisi::decision::{TrustBeliefs, CompatibilityBeliefs, CoalitionHistory}`
+    re-exported from `aif` (plain `f64`/`HashMap`, no new deps).
+  - `BridgeParams.belief_weight` (default `0.0`) blends a belief *alignment*
+    scalar (from `aif::belief_weighted_preference`) into the **competence** that
+    drives the POMDP observation model:
+    `competence = (1 - belief_weight)·coverage + belief_weight·alignment`. At the
+    default `0.0` the policy is pure coverage — behavior is byte-for-byte
+    unchanged. Because beliefs modulate the *observation model* (not just
+    preferences), the decision stays **non-degenerate** (the B2/B4 requirement):
+    membership still alters achievable `G`.
+  - `AifDecisionPolicy` now carries `trust`/`compat`/`history` (constructible via
+    `AifDecisionPolicy::with_beliefs`). With `belief_weight > 0`: a
+    capability-redundant but well-trusted agent can now join; a coverage-improving
+    but badly-distrusted partnership can be declined; recorded coalition history
+    shifts the margin. The async (rayon) path is preserved — belief lookups happen
+    in the sync prologue, only the EFE math is offloaded.
+  - Trust reconciliation: `AgentCapabilities::trust_level()` is the *static*
+    baseline; `TrustBeliefs` is the *dynamic* EMA-learned signal. They are
+    complementary, not duplicated — koalisi has no `TrustGraph`.
+  - Tests: 6 new policy unit tests (belief-weight-zero parity, high-trust join,
+    low-trust block, history flip, leave control, sync/async equivalence) + 1
+    integration test driving a belief-aware join through the live `CoalitionActor`.
+
+[#2]: https://github.com/sustia-llc/koalisi/issues/2
+
 ### Added (unreleased — Phase 5 prep)
 
 - **`koalisi::llm` stub module** (`src/llm/mod.rs`): defines the

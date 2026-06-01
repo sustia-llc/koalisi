@@ -324,3 +324,69 @@ async fn aif_policy_join_non_degenerate_through_actor() {
         assert_eq!(members.len(), 1, "declined join left membership unchanged");
     }
 }
+
+/// Issue #2 through the live #1 seam: belief structures (trust / compatibility)
+/// fold into the decision. A capability-redundant candidate that the
+/// pure-coverage policy declines now JOINS through the actor once the policy is
+/// belief-aware and the partner is well-trusted.
+#[cfg(feature = "decision")]
+#[tokio::test]
+async fn belief_aware_join_through_actor() {
+    use koalisi::decision::{
+        AifDecisionPolicy, BridgeParams, CompatibilityBeliefs, CoalitionHistory, TrustBeliefs,
+    };
+
+    let ctx = DecisionContext {
+        required_capabilities: 0b111,
+    };
+    // Seed member has agent_id 2 (Worker::new(2, 0b010, 90)); the candidate
+    // (agent_id 9) is capability-redundant with it.
+    let (manager, _seed, coalition) = manager_with_seed_coalition().await;
+    let redundant = manager
+        .add_agent(Worker::new(9, 0b010, 80))
+        .await
+        .expect("add redundant");
+
+    // Strong trust in partner 2 and high pairwise compatibility (9,2).
+    let mut trust = TrustBeliefs::new();
+    for _ in 0..200 {
+        trust.update(2, 0.95);
+    }
+    let mut compat = CompatibilityBeliefs::new();
+    compat.set(9, 2, 0.95);
+
+    let policy = AifDecisionPolicy::with_beliefs(
+        BridgeParams {
+            belief_weight: 0.9,
+            ..BridgeParams::default()
+        },
+        0.0,
+        trust,
+        compat,
+        CoalitionHistory::new(),
+    );
+
+    let actor = CoalitionActor::spawn(CoalitionActorArgs {
+        manager,
+        policy: Box::new(policy),
+        ctx,
+    });
+
+    let decision = actor
+        .ask(JoinRequest {
+            agent: redundant,
+            coalition,
+        })
+        .await
+        .expect("decision");
+    assert!(
+        decision.act,
+        "high trust+compat lets the redundant agent join through the actor"
+    );
+    let members = actor
+        .ask(Members { coalition })
+        .await
+        .expect("members");
+    assert_eq!(members.len(), 2, "belief-aware join was applied");
+    assert!(members.contains(&redundant));
+}

@@ -384,11 +384,17 @@ meet at the `src/llm/mod.rs` trait surface.
   membership; `AifDecisionPolicy` is never named at the seam. `AgentCapabilities` gained a
   `Send + Sync` supertrait so capability views cross `.await`. Tested in
   `tests/decision_integration.rs` (both feature modes).
-- [#2](https://github.com/sustia-llc/koalisi/issues/2) — recover aif's belief structures
-  (`TrustBeliefs`/`CompatibilityBeliefs`/`CoalitionHistory`) into koalisi for richer scoring.
-  Note: the pinned `aif-v0.5.0` already exposes all three + `belief_weighted_preference`, so
-  no aif bump is needed. (Issue's `src/trust.rs`/`TrustGraph` reference is stale — no such
-  file; trust today is only `AgentCapabilities::trust_level()`.)
+- [#2](https://github.com/sustia-llc/koalisi/issues/2) — **DONE** (same branch): re-exported
+  `TrustBeliefs`/`CompatibilityBeliefs`/`CoalitionHistory` from `aif` (no bump — `aif-v0.5.0`
+  already exposes them + `belief_weighted_preference`). `BridgeParams.belief_weight` (default
+  `0.0`) blends a belief alignment scalar into the **competence** driving the observation model
+  (`competence = (1-w)·coverage + w·alignment`), so beliefs modulate `G` without collapsing to
+  a preference-only shift — non-degeneracy (B2/B4) preserved. `AifDecisionPolicy::with_beliefs`
+  carries the beliefs; with `belief_weight > 0` a trusted redundant agent can join, a distrusted
+  coverage-improving partnership can be declined, and history shifts the margin. Trust
+  reconciliation: `trust_level()` = static baseline, `TrustBeliefs` = dynamic EMA (no koalisi
+  `TrustGraph` exists). Tested in `decision/aif_policy.rs` (6 unit) + `decision_integration.rs`
+  (belief-aware join through the live actor).
 
 Cross-project plan (upstream `aif` + this Phase B): see
 `~/Documents/iwahi/tira/.claude/plans/aif-merge-koalisi-integration.md`.
