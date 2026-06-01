@@ -31,6 +31,33 @@ Planned work (tracked in [`CLAUDE.md`](./CLAUDE.md) §"Next steps"):
 - **Remote gateway hardening** — bounded buffer, cursor-based polling,
   stable wire schema, QUIC transport alongside TCP.
 
+### Added (unreleased — issue [#1] decision wiring)
+
+- **Live decision call site** ([#1]): the `AifDecisionPolicy` / async-offload
+  primitives shipped in v0.6.0 now have a real seam.
+  - `CoalitionManager::{try_join_coalition, try_leave_coalition}`
+    (`src/topology/coalitions.rs`, gated `where V: AgentCapabilities`):
+    consult a `&dyn CoalitionDecisionPolicy` over the coalition's current
+    membership and a real `DecisionContext`, then apply the mutation iff the
+    policy returns `act`. The CPU-bound part runs through the policy's async
+    offload (`should_{join,leave}_async`), so the runtime worker is not blocked
+    even for the AIF policy.
+  - `subsystems::coalition_actor::CoalitionActor<V, HE>` — kameo actor owning a
+    `CoalitionManager`, a `Box<dyn CoalitionDecisionPolicy>`, and a
+    `DecisionContext`. `JoinRequest`/`LeaveRequest`/`Members` messages drive
+    policy-gated membership. `AifDecisionPolicy` is never named here — the AIF
+    strategy and `ThresholdPolicy` are interchangeable behind the trait object.
+  - `tests/decision_integration.rs` (4 feature-off + 1 feature-on): apply /
+    decline / force-leave through the actor, the manager primitive in isolation,
+    and AIF non-degeneracy through the live actor (an agent covering a new
+    required bit joins; a redundant clone does not).
+- **`AgentCapabilities: Send + Sync`** (`src/algorithms/mod.rs`): lets
+  `&dyn AgentCapabilities` capability views cross `.await` points / threads, as
+  the async decision seam requires. All concrete agent types are `Copy` data, so
+  the bound is satisfied for free.
+
+[#1]: https://github.com/sustia-llc/koalisi/issues/1
+
 ### Added (unreleased — Phase 5 prep)
 
 - **`koalisi::llm` stub module** (`src/llm/mod.rs`): defines the

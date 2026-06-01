@@ -29,6 +29,7 @@ pub mod market;
 pub mod topology;
 
 pub mod subsystems {
+    pub mod coalition_actor;
     pub mod coordinator;
     #[cfg(feature = "databento")]
     pub mod databento;

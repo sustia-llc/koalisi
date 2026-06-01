@@ -95,9 +95,10 @@ pub trait CoalitionDecisionPolicy: Send + Sync {
         ctx: &'a DecisionContext,
     ) -> Pin<Box<dyn Future<Output = Decision> + Send + 'a>> {
         // Compute the decision in the synchronous prologue and move only the
-        // owned (Copy) `Decision` into the future. The `&dyn` borrows must NOT be
-        // captured into the async block — `AgentCapabilities` is not `Sync`, so a
-        // future holding those borrows would not be `Send`.
+        // owned (Copy) `Decision` into the future. The `&dyn` borrows are
+        // `Send` (`AgentCapabilities: Send + Sync`) but not `'static`, so an
+        // overriding impl that offloads to a thread pool (see `AifDecisionPolicy`)
+        // must still snapshot to owned values rather than capture the borrows.
         let decision = self.should_join(agent, coalition, ctx);
         Box::pin(async move { decision })
     }

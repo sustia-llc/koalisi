@@ -8,6 +8,8 @@ use super::events::TemporalEvent;
 use super::queries::TemporalQueries;
 use super::temporal::TemporalHypergraph;
 use super::timestamp::{TimeRange, Timestamp};
+use crate::algorithms::AgentCapabilities;
+use crate::decision::{CoalitionDecisionPolicy, Decision, DecisionContext};
 use hypergraph::{HyperedgeIndex, HyperedgeTrait, VertexIndex, VertexTrait};
 use std::collections::HashMap;
 
@@ -397,6 +399,116 @@ where
     /// Create a snapshot of the current state.
     pub async fn create_snapshot(&self) -> super::events::SnapshotId {
         self.graph.create_snapshot().await
+    }
+}
+
+// =============================================================================
+// Policy-aware membership operations
+// =============================================================================
+//
+// These bridge the [`CoalitionDecisionPolicy`] family (which reasons over
+// `&dyn AgentCapabilities`) to the graph mutations above. They are only
+// available when the vertex weight `V` itself exposes
+// [`AgentCapabilities`], so the manager can build the capability views a
+// policy needs without the caller threading them through by hand. The policy
+// is taken as `&dyn CoalitionDecisionPolicy`, so the AIF strategy (feature
+// `decision`) and the always-available `ThresholdPolicy` are interchangeable
+// here and `AifDecisionPolicy` is never named at this seam.
+impl<V, HE> CoalitionManager<V, HE>
+where
+    V: VertexTrait + Clone + AgentCapabilities + 'static,
+    HE: HyperedgeTrait + Clone + 'static,
+{
+    /// Fetch the (Copy/Clone) weights of `members`, preserving order.
+    async fn agent_weights(&self, members: &[VertexIndex]) -> TemporalResult<Vec<V>, V, HE> {
+        let mut weights = Vec::with_capacity(members.len());
+        for &idx in members {
+            weights.push(self.get_agent(idx).await?);
+        }
+        Ok(weights)
+    }
+
+    /// Consult `policy` about whether `agent` should join `coalition`, and apply
+    /// the join iff the policy says so.
+    ///
+    /// The decision is computed over the coalition's *current* members
+    /// (excluding `agent`) and the candidate's own capabilities, against the
+    /// supplied [`DecisionContext`]. The CPU-bound part of the policy runs via
+    /// its async offload (`should_join_async`), so this does not block the
+    /// runtime worker even for the AIF expected-free-energy policy.
+    ///
+    /// Returns the policy [`Decision`]. The membership mutation is applied
+    /// exactly when `decision.act` is true (and is idempotent if `agent` is
+    /// already a member).
+    pub async fn try_join_coalition(
+        &self,
+        agent: VertexIndex,
+        coalition: HyperedgeIndex,
+        policy: &dyn CoalitionDecisionPolicy,
+        ctx: &DecisionContext,
+    ) -> TemporalResult<Decision, V, HE> {
+        let agent_weight = self.get_agent(agent).await?;
+
+        // `should_join` convention: `coalition` excludes the candidate.
+        let members: Vec<VertexIndex> = self
+            .coalition_members(coalition)
+            .await?
+            .into_iter()
+            .filter(|&m| m != agent)
+            .collect();
+        let weights = self.agent_weights(&members).await?;
+        let views: Vec<&dyn AgentCapabilities> =
+            weights.iter().map(|w| w as &dyn AgentCapabilities).collect();
+
+        let decision = policy
+            .should_join_async(&agent_weight, &views, ctx)
+            .await;
+
+        if decision.act {
+            self.join_coalition(agent, coalition).await?;
+        }
+        Ok(decision)
+    }
+
+    /// Consult `policy` about whether `agent` should leave `coalition`, and apply
+    /// the leave iff the policy says so.
+    ///
+    /// The decision is computed over the coalition's *current* members
+    /// (including `agent`) against the supplied [`DecisionContext`], using the
+    /// policy's async offload (`should_leave_async`).
+    ///
+    /// Returns the policy [`Decision`]. The membership mutation is applied
+    /// exactly when `decision.act` is true; as with [`leave_coalition`], leaving
+    /// the final member yields [`TemporalError::EmptyCoalition`] rather than
+    /// dissolving the coalition.
+    ///
+    /// [`leave_coalition`]: Self::leave_coalition
+    pub async fn try_leave_coalition(
+        &self,
+        agent: VertexIndex,
+        coalition: HyperedgeIndex,
+        policy: &dyn CoalitionDecisionPolicy,
+        ctx: &DecisionContext,
+    ) -> TemporalResult<Decision, V, HE> {
+        // `should_leave` convention: `coalition` includes the agent.
+        let members = self.coalition_members(coalition).await?;
+        let weights = self.agent_weights(&members).await?;
+        let views: Vec<&dyn AgentCapabilities> =
+            weights.iter().map(|w| w as &dyn AgentCapabilities).collect();
+
+        // The candidate's view is whichever member equals `agent`; if it is not
+        // currently a member there is nothing to leave.
+        let Some(pos) = members.iter().position(|&m| m == agent) else {
+            return Ok(Decision { act: false, score: 0.0 });
+        };
+        let agent_view = views[pos];
+
+        let decision = policy.should_leave_async(agent_view, &views, ctx).await;
+
+        if decision.act {
+            self.leave_coalition(agent, coalition).await?;
+        }
+        Ok(decision)
     }
 }
 

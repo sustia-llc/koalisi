@@ -23,7 +23,14 @@ pub use value_calculation::{
 ///
 /// Implement this on your agent type so the coalition algorithms
 /// (value calculators, DCVC workload distribution) can operate generically.
-pub trait AgentCapabilities {
+///
+/// The `Send + Sync` supertrait bound lets `&dyn AgentCapabilities` capability
+/// views cross `.await` points and thread boundaries — required by the async
+/// decision seam (`CoalitionManager::try_join_coalition` /
+/// `CoalitionActor`), where a `Vec<&dyn AgentCapabilities>` is held across the
+/// policy's async offload. Concrete agent types are typically small `Copy`
+/// data, so this bound is satisfied for free.
+pub trait AgentCapabilities: Send + Sync {
     fn agent_id(&self) -> usize;
     fn capabilities(&self) -> u32;
     fn trust_level(&self) -> u32;
