@@ -31,6 +31,62 @@ Planned work (tracked in [`CLAUDE.md`](./CLAUDE.md) §"Next steps"):
 - **Remote gateway hardening** — bounded buffer, cursor-based polling,
   stable wire schema, QUIC transport alongside TCP.
 
+### Added (unreleased — issue [#1] decision wiring)
+
+- **Live decision call site** ([#1]): the `AifDecisionPolicy` / async-offload
+  primitives shipped in v0.6.0 now have a real seam.
+  - `CoalitionManager::{try_join_coalition, try_leave_coalition}`
+    (`src/topology/coalitions.rs`, gated `where V: AgentCapabilities`):
+    consult a `&dyn CoalitionDecisionPolicy` over the coalition's current
+    membership and a real `DecisionContext`, then apply the mutation iff the
+    policy returns `act`. The CPU-bound part runs through the policy's async
+    offload (`should_{join,leave}_async`), so the runtime worker is not blocked
+    even for the AIF policy.
+  - `subsystems::coalition_actor::CoalitionActor<V, HE>` — kameo actor owning a
+    `CoalitionManager`, a `Box<dyn CoalitionDecisionPolicy>`, and a
+    `DecisionContext`. `JoinRequest`/`LeaveRequest`/`Members` messages drive
+    policy-gated membership. `AifDecisionPolicy` is never named here — the AIF
+    strategy and `ThresholdPolicy` are interchangeable behind the trait object.
+  - `tests/decision_integration.rs` (4 feature-off + 1 feature-on): apply /
+    decline / force-leave through the actor, the manager primitive in isolation,
+    and AIF non-degeneracy through the live actor (an agent covering a new
+    required bit joins; a redundant clone does not).
+- **`AgentCapabilities: Send + Sync`** (`src/algorithms/mod.rs`): lets
+  `&dyn AgentCapabilities` capability views cross `.await` points / threads, as
+  the async decision seam requires. All concrete agent types are `Copy` data, so
+  the bound is satisfied for free.
+
+[#1]: https://github.com/sustia-llc/koalisi/issues/1
+
+### Added (unreleased — issue [#2] belief-aware scoring)
+
+- **Trust / compatibility / history beliefs in the AIF decision path** ([#2],
+  feature `decision`): the decision now reflects more than capability coverage.
+  - `koalisi::decision::{TrustBeliefs, CompatibilityBeliefs, CoalitionHistory}`
+    re-exported from `aif` (plain `f64`/`HashMap`, no new deps).
+  - `BridgeParams.belief_weight` (default `0.0`) blends a belief *alignment*
+    scalar (from `aif::belief_weighted_preference`) into the **competence** that
+    drives the POMDP observation model:
+    `competence = (1 - belief_weight)·coverage + belief_weight·alignment`. At the
+    default `0.0` the policy is pure coverage — behavior is byte-for-byte
+    unchanged. Because beliefs modulate the *observation model* (not just
+    preferences), the decision stays **non-degenerate** (the B2/B4 requirement):
+    membership still alters achievable `G`.
+  - `AifDecisionPolicy` now carries `trust`/`compat`/`history` (constructible via
+    `AifDecisionPolicy::with_beliefs`). With `belief_weight > 0`: a
+    capability-redundant but well-trusted agent can now join; a coverage-improving
+    but badly-distrusted partnership can be declined; recorded coalition history
+    shifts the margin. The async (rayon) path is preserved — belief lookups happen
+    in the sync prologue, only the EFE math is offloaded.
+  - Trust reconciliation: `AgentCapabilities::trust_level()` is the *static*
+    baseline; `TrustBeliefs` is the *dynamic* EMA-learned signal. They are
+    complementary, not duplicated — koalisi has no `TrustGraph`.
+  - Tests: 6 new policy unit tests (belief-weight-zero parity, high-trust join,
+    low-trust block, history flip, leave control, sync/async equivalence) + 1
+    integration test driving a belief-aware join through the live `CoalitionActor`.
+
+[#2]: https://github.com/sustia-llc/koalisi/issues/2
+
 ### Added (unreleased — Phase 5 prep)
 
 - **`koalisi::llm` stub module** (`src/llm/mod.rs`): defines the
