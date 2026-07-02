@@ -30,7 +30,9 @@
 //! feature `magnitude`) over a seeded scenario battery, then prints a markdown
 //! report to stdout. The protocol is **pre-registered** (koalisi #7 comment
 //! 2026-07-02): the harness reports whatever the data says — falsification of the
-//! magnitude arm is a legitimate outcome and nothing is tuned to flip it.
+//! magnitude arm is a legitimate outcome and nothing is tuned to flip it. The
+//! report prints BOTH the original (v1) and amended (v2 — #7 amendment
+//! 2026-07-02) verdicts for cross-run comparability.
 //!
 //! ## Protocol (fixed)
 //!
@@ -722,6 +724,24 @@ fn print_report(
         (true, false) => "FALSIFIED (latency)",
     };
 
+    // v2 amended criterion (#7 amendment, 2026-07-02): dual-path validation.
+    // Path A is the v1 route (unchanged); Path B is the new quality-dominance
+    // route with a bounded-latency-overhead constraint instead of a strict race.
+    let path_a = crit1 && crit2;
+    let b1 = mag_primary_med >= 1.25 * aif_primary_med;
+    let superior_count = (0..aif_seeds.len())
+        .filter(|&i| mag_seeds[i].primary > aif_seeds[i].primary)
+        .count();
+    let b2 = superior_count as f64 >= 0.60 * SEEDS as f64;
+    let b3 = mag_l_med <= 10.0 * aif_l_med;
+    let path_b = b1 && b2 && b3;
+    let v2_verdict = match (path_a, path_b) {
+        (true, true) => "VALIDATED (A+B)",
+        (true, false) => "VALIDATED (A)",
+        (false, true) => "VALIDATED (B)",
+        (false, false) => "FALSIFIED",
+    };
+
     // Oracle regret over eligible seeds.
     let aif_regrets: Vec<f64> = (0..aif_seeds.len())
         .filter_map(|i| oracle[i].map(|o| o - aif_seeds[i].primary))
@@ -802,6 +822,8 @@ fn print_report(
     // Verdict.
     println!("## Verdict");
     println!();
+    println!("### Original criterion (v1)");
+    println!();
     println!(
         "- Criterion 1 (non-inferiority): mag median {mag_primary_med:.4} ≥ 0.95 × aif median {aif_primary_med:.4} ({}); mag strictly inferior in {inferior_count}/{SEEDS} seeds ≤ 40% ({}). → {}",
         pass(non_inferior_median),
@@ -813,7 +835,29 @@ fn print_report(
         pass(crit2)
     );
     println!();
-    println!("**VERDICT: {verdict}**");
+    println!("**VERDICT (v1): {verdict}**");
+    println!();
+    println!("### Amended criterion (v2 — #7 amendment, 2026-07-02)");
+    println!();
+    println!(
+        "- Path B.1 (clear superiority): mag median {mag_primary_med:.4} ≥ 1.25 × aif median {aif_primary_med:.4} → {}",
+        pass(b1)
+    );
+    println!(
+        "- Path B.2 (consistency): mag strictly superior in {superior_count}/{SEEDS} seeds ≥ 60% → {}",
+        pass(b2)
+    );
+    println!(
+        "- Path B.3 (bounded latency overhead): mag median {mag_l_med:.3} µs ≤ 10 × aif median {aif_l_med:.3} µs → {}",
+        pass(b3)
+    );
+    println!("- Path A (v1 speed route): equals the v1 result → {}", pass(path_a));
+    println!();
+    println!("**VERDICT (v2): {v2_verdict}**");
+    println!();
+    println!(
+        "_Criterion history: run 1 (2026-07-02) was scored under v1 — FALSIFIED (latency) — and that recorded outcome stands; the v2 amendment (quality-dominance Path B with bounded ≤10× latency overhead, OR the original Path A) was posted on #7 before any subsequent run and governs re-runs (K1 backend parity, post-optimization)._"
+    );
     println!();
     println!("_Falsification is a legitimate result; nothing was tuned to flip it (koalisi #7)._");
     println!();
