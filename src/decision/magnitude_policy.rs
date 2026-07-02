@@ -28,12 +28,15 @@
 //!
 //! ```text
 //! A(i → j) = popcount(rel_i & rel_j) / popcount(rel_i)   if rel_i != 0
-//! A(i → j) = 1.0                                         if rel_i == 0
+//! A(i → j) = 0.0                                         if rel_i == 0
 //! ```
 //!
 //! Read `A(i → j)` as "the fraction of `i`'s task-relevant capabilities that `j`
-//! also has" — the probability that `j` can stand in for `i` on this task. The
-//! resulting design choices (all hand-verified against the upstream Möbius math):
+//! also has" — the probability that `j` can stand in for `i` on this task.
+//! Agents with `rel = 0` never actually reach the coupling: they are **excluded
+//! from the member set** before the magnitude computation (see rationale
+//! point 4). The resulting design choices (all hand-verified against the
+//! upstream Möbius math):
 //!
 //! 1. **Clones merge (deliberate skeletalization).** Two agents with identical
 //!    relevant masks are mutually coupled at exactly `1.0`, so upstream
@@ -47,11 +50,20 @@
 //!    check: `ζ = [[1, 1], [0.5, 1]] ⇒ w = (0, 1) ⇒ Mag = 1.0`).
 //! 3. **Complementary specialists count fully.** Disjoint relevant masks ⇒ zero
 //!    couplings ⇒ `Mag = m` (the member count).
-//! 4. **Irrelevant agents add ≈ 0.** `rel_i = 0` ⇒ `i` couples `1.0` one-way to
-//!    everyone ⇒ Möbius weight `0` ⇒ no diversity contribution.
-//! 5. **`required == 0` ⇒ every agent is vacuously mutual-`1.0`** ⇒ `Mag = 1`
-//!    for any non-empty coalition ⇒ the join margin is `0` ⇒ decline (mirrors
-//!    the AIF arm's "nothing required ⇒ no reason to join").
+//! 4. **Irrelevant agents are excluded.** An agent with `rel = 0` is dropped
+//!    from the member set before the magnitude computation, mirroring the AIF
+//!    arm (where such an agent leaves capability coverage unchanged): as a
+//!    candidate it produces join margin `0` ⇒ decline; as a member it produces
+//!    leave delta `0` ⇒ leave. Exclusion — not a vacuous `1.0` coupling — is
+//!    load-bearing: a one-way `1.0` coupling to every member would drive the
+//!    irrelevant agent's Möbius weight *negative* and collapse coalition
+//!    diversity (three disjoint specialists plus one irrelevant bystander would
+//!    score `1.0` instead of `3.0`, and the bystander's presence would eject a
+//!    unique specialist on leave).
+//! 5. **`required == 0` ⇒ every agent is irrelevant** ⇒ every coalition scores
+//!    `0` ⇒ the join margin is `0` ⇒ decline, and every member's leave delta is
+//!    `0` ⇒ leave (mirrors the AIF arm, whose coverage is pinned at `1.0` both
+//!    sides when nothing is required: join margin `0`, leave delta `0`).
 //! 6. **No cross-arm calibration.** The score is *raw* magnitude; only the
 //!    within-arm rank order is meaningful. The A/B metric that compares this arm
 //!    to `−G` is pre-registered on koalisi #7 — this policy does not attempt to
@@ -91,35 +103,42 @@ impl CouplingModel {
     ///
     /// With `rel_x = caps_x & required`, returns
     /// `popcount(rel_from & rel_to) / popcount(rel_from)` — the fraction of
-    /// `from`'s task-relevant capabilities that `to` also has. Returns `1.0`
-    /// when `rel_from == 0` (the source has nothing task-relevant to substitute,
-    /// so it is vacuously fully substitutable — see rationale point 4 in the
-    /// module docs). Because `rel_x` masks with `required`, capability
-    /// bits outside the task requirement are ignored, and `required == 0` yields
-    /// `1.0` for every pair (rationale point 5).
+    /// `from`'s task-relevant capabilities that `to` also has. Returns `0.0`
+    /// when `rel_from == 0`: an agent with nothing task-relevant has no
+    /// substitutability relation to express, and the mask pipeline excludes such
+    /// agents from the member set anyway (see rationale point 4 in the module
+    /// docs — a vacuous `1.0` here would collapse coalition diversity). Because
+    /// `rel_x` masks with `required`, capability bits outside the task
+    /// requirement are ignored, and `required == 0` yields `0.0` for every pair
+    /// (rationale point 5).
     #[must_use]
     pub fn coupling(from_caps: u32, to_caps: u32, required: u32) -> f64 {
         let rel_from = from_caps & required;
         let rel_to = to_caps & required;
         if rel_from == 0 {
-            return 1.0;
+            return 0.0;
         }
         f64::from((rel_from & rel_to).count_ones()) / f64::from(rel_from.count_ones())
     }
 }
 
 /// Deduplicate `agents` by [`AgentCapabilities::agent_id`] (first occurrence
-/// wins) and return their capability masks.
+/// wins), drop agents with no task-relevant capabilities
+/// (`capabilities & required == 0`), and return the survivors' capability masks.
 ///
 /// Upstream [`catgraph_magnitude::coalition_value`] errors on duplicate members,
 /// and a double-listed agent must not double-count toward diversity, so callers
-/// dedup before building couplings.
-fn dedup_masks(agents: &[&dyn AgentCapabilities]) -> Vec<u32> {
+/// dedup before building couplings. Irrelevant agents are excluded — not coupled
+/// vacuously — because a one-way `1.0` coupling to every member drives their
+/// Möbius weight negative and collapses the coalition's diversity (module docs,
+/// rationale point 4).
+fn relevant_masks(agents: &[&dyn AgentCapabilities], required: u32) -> Vec<u32> {
     let mut seen = std::collections::HashSet::new();
     let mut masks = Vec::with_capacity(agents.len());
     for a in agents {
-        if seen.insert(a.agent_id()) {
-            masks.push(a.capabilities());
+        let caps = a.capabilities();
+        if caps & required != 0 && seen.insert(a.agent_id()) {
+            masks.push(caps);
         }
     }
     masks
@@ -165,7 +184,8 @@ fn magnitude_of_masks(masks: &[u32], required: u32) -> Result<f64, CatgraphError
 /// `Mag(∅) = 0` (Leinster's convention, and consistent with every other koalisi
 /// value calculator returning `0.0` for an empty coalition). This is the
 /// call-site guard that keeps an empty member set from reaching upstream, which
-/// would error.
+/// would error. "Empty" includes a coalition whose members were *all* excluded
+/// as task-irrelevant by [`relevant_masks`] (e.g. when `required == 0`).
 fn magnitude_or_zero(masks: &[u32], required: u32) -> Result<f64, CatgraphError> {
     if masks.is_empty() {
         return Ok(0.0);
@@ -178,10 +198,13 @@ fn magnitude_or_zero(masks: &[u32], required: u32) -> Result<f64, CatgraphError>
 ///
 /// Because [`ValueCalculator::calculate_value`] has no context argument, the
 /// task's `required_capabilities` is stored as a field. Agents are deduplicated
-/// by `agent_id` (first occurrence wins) before scoring, so a double-listed
-/// agent does not double-count. An empty coalition scores `0.0`; on an upstream
-/// error it logs and returns [`f64::NEG_INFINITY`] (exact mirror of the AIF
-/// arm's `EfeValueCalculator`).
+/// by `agent_id` (first occurrence wins) and task-irrelevant agents
+/// (`capabilities & required == 0`) are excluded before scoring, so a
+/// double-listed agent does not double-count and a bystander with nothing
+/// task-relevant does not distort diversity. A coalition that is empty — or
+/// whose members are all task-irrelevant — scores `0.0`; on an upstream error
+/// it logs and returns [`f64::NEG_INFINITY`] (exact mirror of the AIF arm's
+/// `EfeValueCalculator`).
 #[derive(Debug, Clone, Copy)]
 pub struct MagnitudeValueCalculator {
     pub required_capabilities: u32,
@@ -189,11 +212,8 @@ pub struct MagnitudeValueCalculator {
 
 impl ValueCalculator for MagnitudeValueCalculator {
     fn calculate_value(&self, agents: &[&dyn AgentCapabilities]) -> f64 {
-        if agents.is_empty() {
-            return 0.0;
-        }
-        let masks = dedup_masks(agents);
-        match magnitude_of_masks(&masks, self.required_capabilities) {
+        let masks = relevant_masks(agents, self.required_capabilities);
+        match magnitude_or_zero(&masks, self.required_capabilities) {
             Ok(m) => m,
             Err(e) => {
                 tracing::warn!(error = %e, "magnitude value calculation failed");
@@ -215,37 +235,42 @@ pub struct MagnitudePolicy {
 }
 
 impl MagnitudePolicy {
-    /// Snapshot the deduped `(with, without)` capability-mask lists for a join
-    /// decision. `coalition` excludes `agent`; `with` is the deduped
-    /// `coalition + agent`, `without` is the deduped `coalition`. Returns owned
-    /// `Vec<u32>` so the async path can move them into the rayon closure.
+    /// Snapshot the deduped, task-relevant `(with, without)` capability-mask
+    /// lists for a join decision. `coalition` excludes `agent`; `with` is
+    /// `coalition + agent`, `without` is `coalition`, both deduped by `agent_id`
+    /// and with task-irrelevant agents excluded (see [`relevant_masks`]).
+    /// Returns owned `Vec<u32>` so the async path can move them into the rayon
+    /// closure.
     fn join_masks(
         agent: &dyn AgentCapabilities,
         coalition: &[&dyn AgentCapabilities],
+        required: u32,
     ) -> (Vec<u32>, Vec<u32>) {
-        let masks_without = dedup_masks(coalition);
+        let masks_without = relevant_masks(coalition, required);
         let mut with: Vec<&dyn AgentCapabilities> = coalition.to_vec();
         with.push(agent);
-        let masks_with = dedup_masks(&with);
+        let masks_with = relevant_masks(&with, required);
         (masks_with, masks_without)
     }
 
-    /// Snapshot the deduped `(in, out)` capability-mask lists for a leave
-    /// decision. `coalition` includes `agent`; `in` is the deduped coalition,
-    /// `out` is the deduped coalition with `agent` removed by `agent_id`.
+    /// Snapshot the deduped, task-relevant `(in, out)` capability-mask lists for
+    /// a leave decision. `coalition` includes `agent`; `in` is the coalition,
+    /// `out` is the coalition with `agent` removed by `agent_id`, both deduped
+    /// and with task-irrelevant agents excluded (see [`relevant_masks`]).
     /// Returns owned `Vec<u32>` for the async path.
     fn leave_masks(
         agent: &dyn AgentCapabilities,
         coalition: &[&dyn AgentCapabilities],
+        required: u32,
     ) -> (Vec<u32>, Vec<u32>) {
-        let masks_in = dedup_masks(coalition);
+        let masks_in = relevant_masks(coalition, required);
         let agent_id = agent.agent_id();
         let without: Vec<&dyn AgentCapabilities> = coalition
             .iter()
             .filter(|a| a.agent_id() != agent_id)
             .copied()
             .collect();
-        let masks_out = dedup_masks(&without);
+        let masks_out = relevant_masks(&without, required);
         (masks_in, masks_out)
     }
 
@@ -323,8 +348,8 @@ impl CoalitionDecisionPolicy for MagnitudePolicy {
         coalition: &[&dyn AgentCapabilities],
         ctx: &DecisionContext,
     ) -> Decision {
-        let (masks_with, masks_without) = Self::join_masks(agent, coalition);
         let required = ctx.required_capabilities;
+        let (masks_with, masks_without) = Self::join_masks(agent, coalition, required);
         let mag_with = magnitude_or_zero(&masks_with, required);
         let mag_without = magnitude_or_zero(&masks_without, required);
         Self::join_decision_from_values(mag_with, mag_without, self.join_margin)
@@ -343,8 +368,8 @@ impl CoalitionDecisionPolicy for MagnitudePolicy {
         coalition: &[&dyn AgentCapabilities],
         ctx: &DecisionContext,
     ) -> Decision {
-        let (masks_in, masks_out) = Self::leave_masks(agent, coalition);
         let required = ctx.required_capabilities;
+        let (masks_in, masks_out) = Self::leave_masks(agent, coalition, required);
         let mag_in = magnitude_or_zero(&masks_in, required);
         let mag_out = magnitude_or_zero(&masks_out, required);
         Self::leave_decision_from_values(mag_in, mag_out)
@@ -365,8 +390,8 @@ impl CoalitionDecisionPolicy for MagnitudePolicy {
         coalition: &'a [&'a dyn AgentCapabilities],
         ctx: &'a DecisionContext,
     ) -> Pin<Box<dyn Future<Output = Decision> + Send + 'a>> {
-        let (masks_with, masks_without) = Self::join_masks(agent, coalition);
         let required = ctx.required_capabilities;
+        let (masks_with, masks_without) = Self::join_masks(agent, coalition, required);
         let join_margin = self.join_margin;
 
         Box::pin(async move {
@@ -393,8 +418,8 @@ impl CoalitionDecisionPolicy for MagnitudePolicy {
         coalition: &'a [&'a dyn AgentCapabilities],
         ctx: &'a DecisionContext,
     ) -> Pin<Box<dyn Future<Output = Decision> + Send + 'a>> {
-        let (masks_in, masks_out) = Self::leave_masks(agent, coalition);
         let required = ctx.required_capabilities;
+        let (masks_in, masks_out) = Self::leave_masks(agent, coalition, required);
 
         Box::pin(async move {
             tokio_rayon::spawn(move || {
@@ -474,10 +499,10 @@ mod tests {
         // Required masking: the 0b001 bit lies outside required 0b100 and is
         // ignored, so both agents look identical on the task ⇒ 1.0.
         assert!((CouplingModel::coupling(0b101, 0b100, 0b100) - 1.0).abs() < EPS);
-        // rel_from == 0 (nothing task-relevant) ⇒ vacuous 1.0.
-        assert!((CouplingModel::coupling(0b1000, 0b111, 0b111) - 1.0).abs() < EPS);
-        // required == 0 ⇒ 1.0 for any pair.
-        assert!((CouplingModel::coupling(0b001, 0b010, 0) - 1.0).abs() < EPS);
+        // rel_from == 0 (nothing task-relevant) ⇒ no substitutability relation.
+        assert!(CouplingModel::coupling(0b1000, 0b111, 0b111).abs() < EPS);
+        // required == 0 ⇒ 0.0 for any pair (every agent is irrelevant).
+        assert!(CouplingModel::coupling(0b001, 0b010, 0).abs() < EPS);
     }
 
     // -----------------------------------------------------------------------
@@ -712,14 +737,95 @@ mod tests {
         );
 
         // Sole member: Mag 1.0 → 0.0 ⇒ delta = 1.0 > 0 ⇒ stay.
-        let solo: [&dyn AgentCapabilities; 1] = [&a0];
-        let sole = policy.should_leave(&a0, &solo, &ctx);
-        assert!(!sole.act, "sole member should stay (score={})", sole.score);
+        let solo_coalition: [&dyn AgentCapabilities; 1] = [&a0];
+        let d = policy.should_leave(&a0, &solo_coalition, &ctx);
+        assert!(!d.act, "sole member should stay (score={})", d.score);
         assert!(
-            (sole.score - 1.0).abs() < EPS,
-            "sole delta = {}, expected 1.0",
-            sole.score
+            (d.score - 1.0).abs() < EPS,
+            "sole-member delta = {}, expected 1.0",
+            d.score
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // 5b. Irrelevant agents are excluded, not vacuously coupled (review
+    // regression): a bystander with no task-relevant capabilities must neither
+    // collapse coalition diversity nor eject a unique specialist.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn irrelevant_bystander_neither_collapses_value_nor_corrupts_decisions() {
+        let calc = MagnitudeValueCalculator {
+            required_capabilities: 0b111,
+        };
+        let policy = MagnitudePolicy::default();
+        let ctx = DecisionContext {
+            required_capabilities: 0b111,
+        };
+
+        let a0 = TestAgent {
+            id: 0,
+            caps: 0b001,
+            trust: 50,
+        };
+        let a1 = TestAgent {
+            id: 1,
+            caps: 0b010,
+            trust: 50,
+        };
+        let a2 = TestAgent {
+            id: 2,
+            caps: 0b100,
+            trust: 50,
+        };
+        // All of x's capability bits lie outside required 0b111.
+        let bystander = TestAgent {
+            id: 3,
+            caps: 0b1000,
+            trust: 50,
+        };
+
+        // Value: the bystander is excluded, so diversity stays 3.0 (a vacuous
+        // 1.0 coupling would collapse this to 1.0 via a negative Möbius weight).
+        let with_bystander: [&dyn AgentCapabilities; 4] = [&a0, &a1, &a2, &bystander];
+        assert!(
+            (calc.calculate_value(&with_bystander) - 3.0).abs() < EPS,
+            "bystander must not distort diversity"
+        );
+
+        // Join: the bystander adds no task-relevant diversity ⇒ decline, ≈ 0.0.
+        let specialists: [&dyn AgentCapabilities; 3] = [&a0, &a1, &a2];
+        let join = policy.should_join(&bystander, &specialists, &ctx);
+        assert!(!join.act, "irrelevant candidate must not join");
+        assert!(join.score.abs() < EPS);
+
+        // Leave: a unique specialist stays despite the bystander's presence
+        // (pre-fix, the collapsed magnitude made delta 0 and ejected it) ...
+        let stay = policy.should_leave(&a0, &with_bystander, &ctx);
+        assert!(
+            !stay.act,
+            "unique specialist must stay despite bystander (score={})",
+            stay.score
+        );
+        assert!((stay.score - 1.0).abs() < EPS);
+
+        // ... while the bystander itself is redundant and leaves.
+        let leave = policy.should_leave(&bystander, &with_bystander, &ctx);
+        assert!(leave.act, "irrelevant member should leave");
+        assert!(leave.score.abs() < EPS);
+
+        // All-irrelevant coalition (required == 0 makes everyone irrelevant):
+        // value 0.0, and every member's leave delta is 0 ⇒ leave (AIF mirror).
+        let calc0 = MagnitudeValueCalculator {
+            required_capabilities: 0,
+        };
+        assert!(calc0.calculate_value(&specialists).abs() < EPS);
+        let ctx0 = DecisionContext {
+            required_capabilities: 0,
+        };
+        let leave0 = policy.should_leave(&a0, &specialists, &ctx0);
+        assert!(leave0.act, "required == 0 ⇒ every member is redundant");
+        assert!(leave0.score.abs() < EPS);
     }
 
     // -----------------------------------------------------------------------

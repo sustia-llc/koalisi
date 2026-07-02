@@ -37,8 +37,10 @@ use std::pin::Pin;
 ///
 /// `act` is the boolean recommendation (join, or leave, depending on which
 /// method produced it). `score` is the underlying scalar the decision was made
-/// from (a marginal value, or an expected-free-energy margin) — exposed so
-/// callers can rank candidates or apply their own thresholds.
+/// from (a marginal value, an expected-free-energy margin, or a
+/// coalition-magnitude margin) — exposed so callers can rank candidates or
+/// apply their own thresholds. Scores are only comparable *within* one policy;
+/// the decision arms are deliberately not calibrated against each other.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Decision {
     pub act: bool,
@@ -48,10 +50,10 @@ pub struct Decision {
 /// Context for a decision, independent of the candidate agent or coalition.
 ///
 /// `required_capabilities` is a capability bitmask describing what the task /
-/// coalition needs covered. Policies that reason about capability coverage
-/// (e.g. `AifDecisionPolicy`, feature `decision`) use it; value-only policies such as
-/// [`ThresholdPolicy`] currently ignore it (the base
-/// [`ValueCalculator`]s do not consult it).
+/// coalition needs covered. Policies that reason about capability coverage use
+/// it (`AifDecisionPolicy`, feature `decision`; `MagnitudePolicy`, feature
+/// `magnitude`); value-only policies such as [`ThresholdPolicy`] currently
+/// ignore it (the base [`ValueCalculator`]s do not consult it).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DecisionContext {
     pub required_capabilities: u32,
