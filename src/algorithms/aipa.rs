@@ -340,8 +340,10 @@ mod tests {
 
     #[test]
     fn test_generate_integer_partitions() {
-        // Test small values
-        assert_eq!(generate_integer_partitions(0), vec![vec![]]);
+        // Test small values. Element type is explicit so inference stays
+        // unambiguous even when a `serde_json` (`usize: PartialEq<Value>`) impl
+        // is linked into the test crate under downstream features (e.g. `durable`).
+        assert_eq!(generate_integer_partitions(0), vec![Vec::<usize>::new()]);
 
         let p1 = generate_integer_partitions(1);
         assert_eq!(p1, vec![vec![1]]);

@@ -13,3 +13,37 @@ history_capacity = 1024
 # Delivery strategy for the internal pubsubs: "guaranteed" | "best_effort".
 # Guaranteed gives FIFO determinism (used by tests). BestEffort drops on full mailbox.
 delivery_strategy = "guaranteed"
+
+# ---------------------------------------------------------------------------
+# Durable-messaging tier (feature `durable`) — consumed by the upstream
+# `surrealdb-live-message` crate's own global `SETTINGS` (a `LazyLock`).
+#
+# That crate loads `config/default.toml` from the *current working directory*
+# via the `config` crate, so when a koalisi `durable` test/example runs (cwd =
+# koalisi root) it reads THIS file. The `[sdb]` + `[docker]` sections below
+# satisfy the upstream `Settings` schema (host/port/image/tag/container_name/
+# namespace/database/username/password/endpoint, plus optional
+# `message_retention_secs` and an optional docker `platform`). koalisi's own
+# `Settings` (core::config) ignores these unknown sections.
+#
+# Feature-off builds never compile the upstream crate, so these keys are inert
+# then — they only matter when `--features durable` is active and Docker is up.
+# ---------------------------------------------------------------------------
+[docker]
+# platform is unset — Docker uses the host's native platform.
+# Override with DOCKER__PLATFORM=linux/amd64 if needed.
+
+[sdb]
+host = "127.0.0.1"
+port = 8000
+image = "surrealdb/surrealdb"
+tag = "v3.1.5"
+container_name = "koalisi_sdb_container"
+namespace = "main"
+database = "main"
+username = "root"
+password = "root"
+endpoint = "ws://127.0.0.1:8000"
+# Durable message-log retention window (seconds): the `message` CHANGEFEED
+# window (max replay-on-reconnect) and the age-out sweep. Default 24h.
+message_retention_secs = 86400

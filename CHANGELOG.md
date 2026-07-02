@@ -31,7 +31,7 @@ Planned work (tracked in [`CLAUDE.md`](./CLAUDE.md) §"Next steps"):
 - **Remote gateway hardening** — bounded buffer, cursor-based polling,
   stable wire schema, QUIC transport alongside TCP.
 
-### Changed (unreleased — issue [#6] messaging swap, K3 stage 1)
+### Changed (unreleased — issue [#6] messaging swap, K3)
 
 - **In-process actor seams swapped from kameo to `tokio::sync`** (hybrid, hot
   seams never touch a DB). The forex workers (`MarketMonitor`,
@@ -69,14 +69,49 @@ Planned work (tracked in [`CLAUDE.md`](./CLAUDE.md) §"Next steps"):
   `Swarm::{monitor,coordinator,sink}` return `*Handle`s (not kameo `ActorRef`s);
   `Swarm::{tick_bus,alert_bus}` return `&broadcast::Sender<_>` (call `.subscribe()`
   for a `Receiver`). `MonitorSnapshot` moved onto `MarketMonitor::snapshot`.
-- **`kameo` / `kameo_actors` deps stay in `Cargo.toml`** (stage 2 removes them);
-  the `remote` gateway still uses kameo, with its alert subscription minimally
-  re-seated onto a `broadcast::Receiver` bridge task. `distributed.rs`,
-  `remote_integration.rs`, and the remote example are otherwise untouched.
-- **Hot-path bench** (`examples/hot_path_bench.rs`, pre-registered on both
-  runtimes): alert round-trip median 22.5 → 9.0 µs, p99 56.1 → 26.0 µs; ask
-  round-trip median 7.6 → 7.5 µs, p99 17.3 → 13.3 µs; throughput 77.2k →
-  120.2k ticks/sec. **Not regressed** (every metric improved).
+- **Remote gateway ported to raw libp2p; `kameo` + `kameo_actors` REMOVED**
+  (stage 2): `RemoteAlertGateway` is now a plain tokio task on the swarm's
+  `TaskTracker` speaking libp2p `request-response` (CBOR codec, protocol
+  `/koalisi/alerts/1`; wire enums `AlertRequest::{Poll, PeekCount, Clear}` /
+  `AlertResponse`), consuming the alert bus via `broadcast::Receiver`. mDNS
+  discovery unchanged; the protocol name is the service identity (no kameo
+  registry / `gateway_name`). New `RemoteAlertClient` (mDNS or explicit dial)
+  replaces the kameo `RemoteActorRef` lookup. Deltas: `Poll` still clones
+  without draining; `Clear` returns a bare ack (was a dropped count);
+  `RemoteHandle` is `{ local_peer_id, listen_addrs }`; the process-wide
+  `init_global()` constraint is gone (producer + client can share a process);
+  mDNS expiry no longer force-disconnects the peer (deliberate — an active
+  polling client keeps its connection; idle ones close via the 300s idle
+  timeout).
+  `remote = ["dep:libp2p"]`; libp2p features gain `request-response, cbor`.
+- **Durable decision messaging behind a new `durable` feature, off by default**
+  (stage 3): dep `surrealdb-live-message` git tag `v0.2.0` (SSH; cargo key
+  remapped via `package = "surrealdb_live_message"`) — the two-tier durable bus
+  (CHANGEFEED log + LIVE wake-up + `SHOW CHANGES` versionstamp-cursor catch-up;
+  at-least-once, restart-durable).
+  - Feature-independent tap: `CoalitionService::spawn_with_tap` emits plain
+    `DecisionRecord { coalition, agent_id, kind: Join|Leave, act, score }` on
+    every policy-consulted decision via non-blocking `try_send` (a full/closed
+    tap never stalls the decision path). No surrealdb types in core.
+  - `subsystems::durable` (gated): `DecisionEvent` (`SurrealValue` derive,
+    crate path pinned via `#[surreal(crate = "::surrealdb_types")]` — needs the
+    small `surrealdb-types` value crate), `DurableDecisionBus` wrapping the
+    upstream `Coalition<DecisionEvent>`, `spawn_decision_forwarder` (tap →
+    durable log-sink agent). Dynamic koalisi membership is recorded IN the
+    event stream (upstream agent sets are fixed at construction) — the event
+    log is the membership record, consistent with koalisi's event sourcing.
+  - Upstream `SETTINGS` resolves from the consumer's cwd (`config/default.toml`
+    + `RUN_MODE` overlay + env): koalisi's `config/default.toml` gains `[sdb]`
+    and `[docker]` sections (inert feature-off).
+  - `tests/durable_integration.rs`: container-backed (bollard/Docker) proof
+    that a decision published while the consumer is down is replayed on
+    restart — **the pre-registered "durable messaging survives restart"
+    acceptance**. `examples/durable_decisions.rs` shows the end-to-end story.
+- **Hot-path bench** (`examples/hot_path_bench.rs`, run on both runtimes —
+  see `docs/k3-hot-path-bench.md`): alert round-trip median 22.5 → 9.0 µs,
+  p99 56.1 → 26.0 µs; ask round-trip median 7.6 → 7.5 µs, p99 17.3 → 13.3 µs;
+  throughput 77.2k → 120.2k ticks/sec. **Not regressed** (every metric
+  improved) — the pre-registered acceptance.
 
 ### Changed (unreleased — issue [#4] catgraph backend, K1)
 
