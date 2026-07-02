@@ -1,40 +1,18 @@
 //! Drive the swarm with a "live" tick stream (scripted, deterministic) and
 //! print the resulting opportunity stream.
 //!
-//! Subscribes a custom listener actor to the alert pubsub so the example
-//! shows the standard kameo pubsub subscription pattern.
+//! Subscribes a listener task to the alert broadcast so the example shows the
+//! standard post-K3 subscription pattern: `swarm.alert_bus().subscribe()`
+//! returns a `broadcast::Receiver` immediately — no actor to spawn first, and
+//! no "subscribe before the publisher starts" ordering gotcha.
 
 use std::time::Duration;
 
 use anyhow::Result;
-use kameo::error::Infallible;
-use kameo::prelude::*;
-use kameo_actors::{DeliveryStrategy, pubsub::Subscribe};
+use tokio_util::sync::CancellationToken;
 
-use koalisi::market::{ArbitrageOpportunity, Pair, Tick, Triangle};
+use koalisi::market::{Pair, Tick, Triangle};
 use koalisi::subsystems::swarm::{Swarm, SwarmConfig};
-
-#[derive(Default)]
-struct PrintListener;
-
-impl Actor for PrintListener {
-    type Args = Self;
-    type Error = Infallible;
-    async fn on_start(s: Self::Args, _r: ActorRef<Self>) -> Result<Self, Self::Error> {
-        Ok(s)
-    }
-}
-
-impl Message<ArbitrageOpportunity> for PrintListener {
-    type Reply = ();
-    async fn handle(
-        &mut self,
-        opp: ArbitrageOpportunity,
-        _ctx: &mut Context<Self, Self::Reply>,
-    ) -> Self::Reply {
-        println!("[live listener] {opp}");
-    }
-}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -49,13 +27,17 @@ async fn main() -> Result<()> {
         triangles: vec![triangle],
         threshold_bps: 5.0,
         history_capacity: 64,
-        delivery_strategy: DeliveryStrategy::Guaranteed,
     })
     .await?;
 
-    // Wire up a custom listener to the alert pubsub.
-    let listener = PrintListener::spawn(PrintListener);
-    swarm.alert_bus().ask(Subscribe(listener.clone())).await?;
+    // Subscribe a listener task to the alert broadcast. It runs on the swarm's
+    // TaskTracker under a child cancellation token, so `Swarm::shutdown()`
+    // drains it.
+    let mut alert_rx = swarm.alert_bus().subscribe();
+    let listener_token = swarm.cancellation_token().child_token();
+    swarm.task_tracker().spawn(async move {
+        listen(&mut alert_rx, listener_token).await;
+    });
 
     // Tick through a small scripted feed:
     //   t=0..3   aligned (no edge)
@@ -97,9 +79,23 @@ async fn main() -> Result<()> {
     let alerts = swarm.alerts().await?;
     println!("\ntotal alerts captured in sink: {}", alerts.len());
 
-    // Tidy up.
-    let _ = listener.stop_gracefully().await;
-    listener.wait_for_shutdown().await;
     swarm.shutdown().await;
     Ok(())
+}
+
+async fn listen(
+    rx: &mut tokio::sync::broadcast::Receiver<koalisi::market::ArbitrageOpportunity>,
+    token: CancellationToken,
+) {
+    loop {
+        tokio::select! {
+            biased;
+            _ = token.cancelled() => break,
+            r = rx.recv() => match r {
+                Ok(opp) => println!("[live listener] {opp}"),
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    }
 }

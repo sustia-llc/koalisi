@@ -22,7 +22,6 @@ use std::time::Duration;
 
 use futures::TryStreamExt;
 use kameo::prelude::*;
-use kameo_actors::DeliveryStrategy;
 use tokio::time::{sleep, timeout};
 
 use koalisi::market::{Pair, Tick, Triangle};
@@ -47,7 +46,6 @@ async fn remote_gateway_round_trips_opportunity() {
             triangles: vec![triangle],
             threshold_bps: 10.0,
             history_capacity: 32,
-            delivery_strategy: DeliveryStrategy::Guaranteed,
         })
         .await
         .unwrap();

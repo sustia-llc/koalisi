@@ -9,7 +9,6 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use kameo_actors::DeliveryStrategy;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 
@@ -17,7 +16,6 @@ use koalisi::market::{Pair, Triangle};
 use koalisi::subsystems::databento::{
     Pacing, PumpStats, mapper_from_fn, mbp1_to_tick, pump_dbn_file, spawn_dbn_pump,
 };
-use koalisi::subsystems::monitor::GetSnapshot;
 use koalisi::subsystems::swarm::{Swarm, SwarmConfig};
 
 fn p(s: &str) -> Pair {
@@ -49,7 +47,6 @@ async fn build_swarm() -> Swarm {
         triangles: vec![Triangle::new(p("EUR/USD"), p("GBP/USD"), p("EUR/GBP")).unwrap()],
         threshold_bps: 5.0,
         history_capacity: 64,
-        delivery_strategy: DeliveryStrategy::Guaranteed,
     })
     .await
     .unwrap()
@@ -127,7 +124,7 @@ async fn pump_dbn_file_routes_bundled_test_data() {
     let snap = swarm
         .monitor(&p("EUR/USD"))
         .unwrap()
-        .ask(GetSnapshot)
+        .snapshot()
         .await
         .unwrap();
     assert_eq!(

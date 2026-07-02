@@ -37,7 +37,6 @@ use std::time::Duration;
 use anyhow::{Result, anyhow};
 use futures::TryStreamExt;
 use kameo::prelude::*;
-use kameo_actors::DeliveryStrategy;
 use tokio::time::{interval, sleep};
 
 use koalisi::market::{Pair, Tick, Triangle};
@@ -79,7 +78,6 @@ async fn run_producer() -> Result<()> {
         triangles: vec![triangle],
         threshold_bps: 5.0,
         history_capacity: 256,
-        delivery_strategy: DeliveryStrategy::Guaranteed,
     })
     .await?;
 
@@ -163,7 +161,6 @@ async fn run_consumer() -> Result<()> {
         triangles: vec![placeholder_triangle],
         threshold_bps: 1_000_000.0, // never fire locally
         history_capacity: 1,
-        delivery_strategy: DeliveryStrategy::BestEffort,
     })
     .await?;
 

@@ -24,50 +24,17 @@
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use kameo::error::Infallible;
-use kameo::prelude::*;
-use kameo_actors::{DeliveryStrategy, pubsub::Subscribe};
-use tokio::sync::mpsc;
 
-use koalisi::market::{ArbitrageOpportunity, Pair, Tick, Triangle};
-use koalisi::subsystems::coordinator;
+use koalisi::market::{Pair, Tick, Triangle};
 use koalisi::subsystems::swarm::{Swarm, SwarmConfig};
 
-/// Runtime label printed in the table header. Commit A: "kameo".
-const RUNTIME: &str = "kameo";
+/// Runtime label printed in the table header. Commit B: "tokio".
+const RUNTIME: &str = "tokio";
 
 const ALERT_ITERS: usize = 500;
 const ASK_ITERS: usize = 10_000;
 const THROUGHPUT_TICKS: usize = 100_000;
 const WARMUP: usize = 50;
-
-// ---------------------------------------------------------------------------
-// Commit-A plumbing: a kameo listener actor forwarding receipt signals to a
-// tokio mpsc so the bench task can time alert arrival.
-// ---------------------------------------------------------------------------
-
-struct BenchListener {
-    tx: mpsc::UnboundedSender<()>,
-}
-
-impl Actor for BenchListener {
-    type Args = Self;
-    type Error = Infallible;
-    async fn on_start(s: Self::Args, _r: ActorRef<Self>) -> Result<Self, Self::Error> {
-        Ok(s)
-    }
-}
-
-impl Message<ArbitrageOpportunity> for BenchListener {
-    type Reply = ();
-    async fn handle(
-        &mut self,
-        _opp: ArbitrageOpportunity,
-        _ctx: &mut Context<Self, Self::Reply>,
-    ) -> Self::Reply {
-        let _ = self.tx.send(());
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Fixed market choreography (deterministic — no RNG).
@@ -139,14 +106,11 @@ async fn main() -> Result<()> {
         triangles: vec![triangle],
         threshold_bps: 10.0,
         history_capacity: 64,
-        delivery_strategy: DeliveryStrategy::Guaranteed,
     })
     .await?;
 
-    // ---- subscribe a listener to the alert bus (commit-A plumbing) ----
-    let (sig_tx, mut sig_rx) = mpsc::unbounded_channel::<()>();
-    let listener = BenchListener::spawn(BenchListener { tx: sig_tx });
-    swarm.alert_bus().ask(Subscribe(listener.clone())).await?;
+    // ---- subscribe a listener to the alert bus (commit-B plumbing) ----
+    let mut sig_rx = swarm.alert_bus().subscribe();
 
     // Seed all three quotes so the coordinator can resolve the triangle.
     swarm.feed_tick(legs.aligned_eu()).await?;
@@ -185,12 +149,12 @@ async fn main() -> Result<()> {
     // 2. Ask round-trip (coordinator Ping)
     // =====================================================================
     for _ in 0..WARMUP {
-        swarm.coordinator().ask(coordinator::Ping).await?;
+        swarm.coordinator().ping().await?;
     }
     let mut ask_samples: Vec<Duration> = Vec::with_capacity(ASK_ITERS);
     for _ in 0..ASK_ITERS {
         let start = Instant::now();
-        swarm.coordinator().ask(coordinator::Ping).await?;
+        swarm.coordinator().ping().await?;
         ask_samples.push(start.elapsed());
     }
     ask_samples.sort_unstable();
@@ -227,8 +191,6 @@ async fn main() -> Result<()> {
     );
 
     // Tidy up.
-    let _ = listener.stop_gracefully().await;
-    listener.wait_for_shutdown().await;
     swarm.shutdown().await;
     Ok(())
 }

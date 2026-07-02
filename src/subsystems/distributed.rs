@@ -36,7 +36,7 @@ use futures::StreamExt;
 use kameo::error::Infallible;
 use kameo::prelude::*;
 use kameo::remote;
-use kameo_actors::pubsub::Subscribe;
+use tokio::sync::broadcast;
 use libp2p::{
     PeerId, mdns, noise,
     swarm::{NetworkBehaviour, SwarmEvent},
@@ -251,9 +251,32 @@ pub async fn enable_remote_alerts(swarm: &Swarm, config: RemoteConfig) -> Result
         .task_tracker()
         .spawn(run_libp2p_swarm(libp2p_swarm, token));
 
-    // Build the gateway actor and wire it into both buses.
+    // Build the (still-kameo) gateway actor. Post-K3 (issue #6) the alert bus
+    // is a `tokio::sync::broadcast`, so instead of a kameo `PubSub` Subscribe we
+    // bridge a `broadcast::Receiver` into the gateway with a small task on the
+    // swarm's TaskTracker. Stage 2 rewrites the gateway off kameo entirely; this
+    // is the minimal seam swap to keep the remote feature compiling + working.
     let gateway = RemoteAlertGateway::spawn(RemoteAlertGateway::default());
-    swarm.alert_bus().ask(Subscribe(gateway.clone())).await?;
+    let mut alert_rx = swarm.alert_bus().subscribe();
+    let bridge_gateway = gateway.clone();
+    let bridge_token = swarm.cancellation_token().child_token();
+    swarm.task_tracker().spawn(async move {
+        loop {
+            tokio::select! {
+                biased;
+                _ = bridge_token.cancelled() => break,
+                r = alert_rx.recv() => match r {
+                    Ok(opp) => {
+                        let _ = bridge_gateway.tell(opp).await;
+                    }
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        tracing::warn!(skipped = n, "remote gateway lagged on alert broadcast");
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        }
+    });
     gateway.register(config.gateway_name.as_str()).await?;
 
     Ok(RemoteHandle {

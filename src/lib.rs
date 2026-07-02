@@ -13,8 +13,9 @@
 //!   expected-free-energy policy, and behind feature `magnitude` its categorical
 //!   A/B mirror scoring coalitions by enriched-category magnitude.
 //! - [`llm`] — Phase 5/6 LLM provider stub (real backends land later).
-//! - [`subsystems`] — forex-specific kameo actors (monitor, coordinator,
-//!   sink, swarm) and optional adapters (databento, libp2p remote).
+//! - [`subsystems`] — forex-specific worker tasks (monitor, coordinator,
+//!   sink, swarm) on `tokio::sync` seams, plus optional adapters (databento,
+//!   libp2p remote).
 //! - [`market`] — forex value types: `Pair`, `Tick`, `Quote`, `Triangle`,
 //!   `TickUpdate`, `ArbitrageOpportunity`.
 //!

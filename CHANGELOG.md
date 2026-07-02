@@ -31,6 +31,53 @@ Planned work (tracked in [`CLAUDE.md`](./CLAUDE.md) §"Next steps"):
 - **Remote gateway hardening** — bounded buffer, cursor-based polling,
   stable wire schema, QUIC transport alongside TCP.
 
+### Changed (unreleased — issue [#6] messaging swap, K3 stage 1)
+
+- **In-process actor seams swapped from kameo to `tokio::sync`** (hybrid, hot
+  seams never touch a DB). The forex workers (`MarketMonitor`,
+  `ArbitrageCoordinator`, `AlertSink`) are now plain state structs driven by
+  spawned tasks:
+  - **Pub/sub buses** (`tick_bus`, `alert_bus`) → `tokio::sync::broadcast`
+    (capacity 1024). Subscription is synchronous/immediate, so the old
+    "subscriber must be spawned before `Subscribe`" ordering gotcha is gone. A
+    subscriber that falls > capacity behind gets `RecvError::Lagged` and skips
+    the overflow (acceptable for ticks; alert consumers stay ahead).
+  - **Ask/tell** → `tokio::sync::mpsc` command enums with `oneshot`-correlated
+    replies; fire-and-forget ticks are plain mpsc sends. `Ping`/`GetQuotes`/
+    `GetAlerts` first *drain* the buffered broadcast so they remain deterministic
+    flush barriers (reproducing the old kameo FIFO-mailbox guarantee across the
+    two channels). `flush()` pings monitors → coordinator → sink in order.
+  - Handles (`MonitorHandle`, `CoordinatorHandle`, `SinkHandle`) wrap the mpsc
+    sender and expose typed async methods; `Swarm` wires the tasks under its
+    existing `CoalitionRuntime` `TaskTracker` + child cancellation tokens, so
+    the three-step shutdown (cancel → close → wait) drains the whole swarm in
+    one call.
+- **`CoalitionActor` → `CoalitionService`** (file keeps its `coalition_actor.rs`
+  name): the decision seam (issue #1) is now a task + mpsc/oneshot handle
+  (`join`/`leave`/`members`) instead of a kameo actor. Behavior identical — it
+  still owns the `CoalitionManager` + `Box<dyn CoalitionDecisionPolicy>` +
+  `DecisionContext` and consults the policy via its async offload before
+  mutating membership. The `CoalitionDecisionPolicy` surface is untouched.
+- **Thin task-restart layer** (`core::supervision::spawn_supervised`), replacing
+  kameo's `OneForOne`: a supervisor task rebuilds a fresh task instance from a
+  factory on panic, up to `restart_limit` restarts within a sliding `window`
+  (cancellation is not a failure). `examples/supervised_swarm.rs` is rewritten
+  on it — the old ActorId-reuse gotcha (gotcha #1) is obsolete; a restart is now
+  simply the factory building a new instance.
+- **API deltas**: `SwarmConfig` drops its `delivery_strategy` field (broadcast
+  has no selectable strategy; the `config` key is retained but ignored).
+  `Swarm::{monitor,coordinator,sink}` return `*Handle`s (not kameo `ActorRef`s);
+  `Swarm::{tick_bus,alert_bus}` return `&broadcast::Sender<_>` (call `.subscribe()`
+  for a `Receiver`). `MonitorSnapshot` moved onto `MarketMonitor::snapshot`.
+- **`kameo` / `kameo_actors` deps stay in `Cargo.toml`** (stage 2 removes them);
+  the `remote` gateway still uses kameo, with its alert subscription minimally
+  re-seated onto a `broadcast::Receiver` bridge task. `distributed.rs`,
+  `remote_integration.rs`, and the remote example are otherwise untouched.
+- **Hot-path bench** (`examples/hot_path_bench.rs`, pre-registered on both
+  runtimes): alert round-trip median 22.5 → 9.0 µs, p99 56.1 → 26.0 µs; ask
+  round-trip median 7.6 → 7.5 µs, p99 17.3 → 13.3 µs; throughput 77.2k →
+  120.2k ticks/sec. **Not regressed** (every metric improved).
+
 ### Changed (unreleased — issue [#4] catgraph backend, K1)
 
 - **Topology backend swapped**: `TemporalHypergraph`/`SharedGraph` re-backed

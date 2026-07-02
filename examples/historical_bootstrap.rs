@@ -5,9 +5,8 @@
 use anyhow::Result;
 
 use koalisi::market::{Pair, Tick, Triangle};
-use koalisi::subsystems::monitor::{GetSnapshot, MonitorSnapshot};
+use koalisi::subsystems::monitor::MonitorSnapshot;
 use koalisi::subsystems::swarm::{Swarm, SwarmConfig};
-use kameo_actors::DeliveryStrategy;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -24,7 +23,6 @@ async fn main() -> Result<()> {
         triangles: vec![triangle],
         threshold_bps: 5.0,
         history_capacity: 8,
-        delivery_strategy: DeliveryStrategy::Guaranteed,
     })
     .await?;
 
@@ -37,7 +35,7 @@ async fn main() -> Result<()> {
 
     // Inspect the monitor.
     let monitor = swarm.monitor(&pair).expect("EUR/USD monitor exists");
-    let snapshot: MonitorSnapshot = monitor.ask(GetSnapshot).await?;
+    let snapshot: MonitorSnapshot = monitor.snapshot().await?;
     println!(
         "{} → latest mid = {:.5}, history len = {} (capped at 8)",
         snapshot.pair,

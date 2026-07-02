@@ -3,7 +3,7 @@ name = "koalisi"
 version = "0.6.0"
 edition = "2024"
 rust-version = "1.88.0"
-description = "Reference implementation of agentic coalitions in Rust — kameo actors, temporal hypergraph topology, coalition algorithms, and optional Active Inference decision-making"
+description = "Reference implementation of agentic coalitions in Rust — tokio::sync task seams, temporal hypergraph topology, coalition algorithms, and optional Active Inference decision-making"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
