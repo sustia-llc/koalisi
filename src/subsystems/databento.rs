@@ -35,21 +35,16 @@ use crate::subsystems::swarm::{Swarm, SwarmFeeder};
 // ---------------------------------------------------------------------------
 
 /// Replay pacing strategy.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub enum Pacing {
     /// Pump every decoded record as fast as the decoder can produce it.
     /// Used by `swarm.replay_history(...)`-style bootstrap flows.
+    #[default]
     Asap,
     /// Pace by `ts_recv` deltas. `speed_factor == 1.0` matches wall-clock
     /// time to recorded time; `2.0` plays back at 2x speed; `0.5` at half
     /// speed. Non-positive values are treated as [`Pacing::Asap`].
     Realtime { speed_factor: f64 },
-}
-
-impl Default for Pacing {
-    fn default() -> Self {
-        Pacing::Asap
-    }
 }
 
 // ---------------------------------------------------------------------------
