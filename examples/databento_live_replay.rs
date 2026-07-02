@@ -10,7 +10,7 @@
 //! 2. `Pacing::Realtime { speed_factor }` paces records by their
 //!    `ts_recv` deltas. The bundled file's two records are ~nanoseconds
 //!    apart so we crank the factor up to keep total runtime sub-second.
-//! 3. A custom alert listener subscribed to `swarm.alert_bus()` so the
+//! 3. A custom alert listener task subscribed to `swarm.alert_bus()` so the
 //!    "live" semantics surface even without writing to the AlertSink.
 //!
 //! Run with:
@@ -21,39 +21,11 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-// `anyhow::Context` would shadow `kameo::Context` (the actor handler
-// parameter type), so import it anonymously for the `.context(...)`
-// extension method only.
-use anyhow::{Context as _, Result};
-use kameo::error::Infallible;
-use kameo::prelude::*;
-use kameo_actors::{DeliveryStrategy, pubsub::Subscribe};
+use anyhow::{Context, Result};
 
 use koalisi::market::{ArbitrageOpportunity, Pair, Triangle};
 use koalisi::subsystems::databento::{Pacing, mapper_from_fn, spawn_dbn_pump};
 use koalisi::subsystems::swarm::{Swarm, SwarmConfig};
-
-#[derive(Default)]
-struct PrintListener;
-
-impl Actor for PrintListener {
-    type Args = Self;
-    type Error = Infallible;
-    async fn on_start(s: Self::Args, _: ActorRef<Self>) -> Result<Self, Self::Error> {
-        Ok(s)
-    }
-}
-
-impl Message<ArbitrageOpportunity> for PrintListener {
-    type Reply = ();
-    async fn handle(
-        &mut self,
-        opp: ArbitrageOpportunity,
-        _: &mut Context<Self, Self::Reply>,
-    ) -> Self::Reply {
-        println!("[live listener] {opp}");
-    }
-}
 
 fn locate_test_data() -> Result<PathBuf> {
     let candidates = [
@@ -85,15 +57,30 @@ async fn main() -> Result<()> {
         triangles: vec![triangle],
         threshold_bps: 5.0,
         history_capacity: 256,
-        delivery_strategy: DeliveryStrategy::Guaranteed,
     })
     .await?;
 
-    // Subscribe a custom listener (printf-only) to the alert bus so we
-    // see opportunities the moment they're published, in addition to the
+    // Subscribe a custom listener task (printf-only) to the alert broadcast so
+    // we see opportunities the moment they're published, in addition to the
     // swarm's built-in `AlertSink`.
-    let listener = PrintListener::spawn(PrintListener);
-    swarm.alert_bus().ask(Subscribe(listener.clone())).await?;
+    let mut alert_rx = swarm.alert_bus().subscribe();
+    let listener_token = swarm.cancellation_token().child_token();
+    swarm.task_tracker().spawn(async move {
+        loop {
+            tokio::select! {
+                biased;
+                _ = listener_token.cancelled() => break,
+                r = alert_rx.recv() => match r {
+                    Ok(opp) => {
+                        let opp: ArbitrageOpportunity = opp;
+                        println!("[live listener] {opp}");
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        }
+    });
 
     // Mapper: round-robin between the three pairs so all three monitors
     // get a tick from the bundled 2-record file (which won't be enough
@@ -133,8 +120,6 @@ async fn main() -> Result<()> {
     let alerts = swarm.alerts().await?;
     println!("alerts emitted: {}", alerts.len());
 
-    let _ = listener.stop_gracefully().await;
-    listener.wait_for_shutdown().await;
     swarm.shutdown().await;
     Ok(())
 }

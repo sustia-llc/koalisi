@@ -1,4 +1,4 @@
-//! Two-role demo of the libp2p-based remote alert gateway.
+//! Two-role demo of the raw-libp2p remote alert gateway.
 //!
 //! Run the **producer** in one terminal:
 //! ```sh
@@ -10,43 +10,38 @@
 //! ROLE=consumer cargo run --features remote --example distributed_alert_consumer
 //! ```
 //!
-//! The producer assembles a swarm with a scripted feeder, enables the
-//! remote alert gateway, and stays up until `ctrl-c`. Consumers come up
-//! with their own libp2p peer (mDNS for local discovery), wait for the
-//! producer's gateway to appear in the registry, then poll it every few
-//! seconds and print everything new.
+//! The producer assembles a swarm with a scripted feeder, enables the remote
+//! alert gateway, and stays up until `ctrl-c`. Consumers come up with their own
+//! libp2p peer (mDNS for local discovery), wait for a gateway to appear, then
+//! poll it every few seconds and print everything new.
 //!
 //! What's exercised:
-//! - kameo's `remote::Behaviour` composed with `mdns` for discovery
-//! - `Swarm::shutdown()` cancelling the libp2p event-loop task on the
-//!   producer side (via the child cancellation token)
-//! - The full wire round-trip: gateway's `#[remote_message] PollOpportunities`
-//!   serialised over libp2p request-response → consumer deserialises into
-//!   `Vec<ArbitrageOpportunity>`
+//! - `request_response::cbor::Behaviour` composed with `mdns` for discovery
+//! - `Swarm::shutdown()` cancelling the libp2p gateway task on the producer
+//!   side (via the child cancellation token)
+//! - The full wire round-trip: `AlertRequest::Poll` serialised over libp2p
+//!   request-response → producer replies with `AlertResponse::Alerts` →
+//!   consumer deserialises into `Vec<ArbitrageOpportunity>`
 //!
-//! For single-host development, the producer's gateway is also
-//! findable from within its own process — this example doesn't exercise
-//! that path. See `tests/remote_integration.rs` for the in-process
-//! round-trip verification (skipping the two-terminal setup).
-//!
-//! Note: the producer/consumer roles share a single binary so the example
-//! list stays short. A production layout would split them.
+//! Note: the service identity is the protocol name `/koalisi/alerts/1`, not an
+//! actor-registry name, so any peer speaking the protocol answers. In the
+//! usual one-producer/one-consumer run the consumer polls the producer; if two
+//! consumers discover each other, a poll to a non-gateway peer simply fails and
+//! is skipped. The producer/consumer roles share one binary so the example list
+//! stays short; a production layout would split them.
 
 use std::time::Duration;
 
 use anyhow::{Result, anyhow};
-use futures::TryStreamExt;
-use kameo::prelude::*;
-use kameo_actors::DeliveryStrategy;
-use tokio::time::{interval, sleep};
+use tokio::time::interval;
 
 use koalisi::market::{Pair, Tick, Triangle};
 use koalisi::subsystems::distributed::{
-    PollOpportunities, RemoteAlertGateway, RemoteConfig, enable_remote_alerts,
+    PROTOCOL_NAME, RemoteAlertClient, RemoteConfig, enable_remote_alerts,
 };
 use koalisi::subsystems::swarm::{Swarm, SwarmConfig};
 
-const GATEWAY_NAME: &str = "forex_swarm_alerts";
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -79,26 +74,18 @@ async fn run_producer() -> Result<()> {
         triangles: vec![triangle],
         threshold_bps: 5.0,
         history_capacity: 256,
-        delivery_strategy: DeliveryStrategy::Guaranteed,
     })
     .await?;
 
-    let handle = enable_remote_alerts(
-        &swarm,
-        RemoteConfig {
-            gateway_name: GATEWAY_NAME.into(),
-            ..RemoteConfig::default()
-        },
-    )
-    .await?;
+    let handle = enable_remote_alerts(&swarm, RemoteConfig::default()).await?;
     println!("✓ producer up");
     println!("  peer id : {}", handle.local_peer_id);
-    println!("  gateway : '{GATEWAY_NAME}' registered");
+    println!("  gateway : '{PROTOCOL_NAME}' serving alerts");
     println!("  feeding scripted triangle (one arb every ~3s); ctrl-c to stop");
 
-    // Scripted feeder: alternates aligned and dislocated cross prices so
-    // an arbitrage opportunity fires every ~12 ticks. Same hysteresis
-    // dance as the original `examples/triangular_arbitrage.rs`.
+    // Scripted feeder: alternates aligned and dislocated cross prices so an
+    // arbitrage opportunity fires every ~12 ticks. Same hysteresis dance as the
+    // original `examples/triangular_arbitrage.rs`.
     let feeder = swarm.feeder();
     let feed_token = swarm.cancellation_token().child_token();
     swarm.task_tracker().spawn(async move {
@@ -152,59 +139,29 @@ async fn run_producer() -> Result<()> {
 // ---------------------------------------------------------------------------
 
 async fn run_consumer() -> Result<()> {
-    // The consumer still needs a libp2p swarm of its own to do
-    // discovery + RPC. The easiest way to spin one up with the same
-    // shape is to build an empty Swarm (no triangles) and reuse
-    // `enable_remote_alerts` — its libp2p side-effect (init_global +
-    // listen + event-loop task) is what we actually want here.
-    let placeholder_triangle =
-        Triangle::new("EUR/USD".parse()?, "GBP/USD".parse()?, "EUR/GBP".parse()?)?;
-    let swarm = Swarm::new(SwarmConfig {
-        triangles: vec![placeholder_triangle],
-        threshold_bps: 1_000_000.0, // never fire locally
-        history_capacity: 1,
-        delivery_strategy: DeliveryStrategy::BestEffort,
-    })
-    .await?;
-
-    let handle = enable_remote_alerts(
-        &swarm,
-        RemoteConfig {
-            // Different gateway name so consumers don't shadow the producer.
-            gateway_name: "forex_swarm_consumer_loopback".into(),
-            ..RemoteConfig::default()
-        },
-    )
-    .await?;
+    let mut client = RemoteAlertClient::connect(RemoteConfig::default()).await?;
     println!("✓ consumer up");
-    println!("  peer id : {}", handle.local_peer_id);
-    println!("  hunting for '{GATEWAY_NAME}' on the local network via mDNS ...");
+    println!("  peer id : {}", client.local_peer_id());
+    println!("  hunting for a gateway on the local network via mDNS ...");
 
-    // Poll every 3s. The first few iterations may show no producer
-    // (mDNS discovery has a small delay).
     let mut last_seen = 0usize;
-    let mut clock = interval(Duration::from_secs(3));
     loop {
-        clock.tick().await;
-        let mut found_any = false;
-        let mut peers = RemoteActorRef::<RemoteAlertGateway>::lookup_all(GATEWAY_NAME);
-        while let Some(peer) = peers.try_next().await? {
-            // Skip ourselves — our `enable_remote_alerts` call registered
-            // a loopback gateway too (under a different name, but
-            // belt-and-suspenders).
-            if peer.id().peer_id() == Some(&handle.local_peer_id) {
-                continue;
-            }
-            found_any = true;
-            match peer.ask(&PollOpportunities).send().await {
+        // Drive discovery + keep connections healthy for a few seconds.
+        client.pump(Duration::from_secs(3)).await;
+
+        let peers = client.connected_peers();
+        if peers.is_empty() {
+            println!("(no gateway found yet — make sure ROLE=producer is running)");
+            continue;
+        }
+
+        for peer in peers {
+            match client.poll(peer, REQUEST_TIMEOUT).await {
                 Ok(opps) => {
                     if opps.len() > last_seen {
                         println!(
                             "[peer {}] {} opportunities (prev {}):",
-                            peer.id()
-                                .peer_id()
-                                .map(|p| p.to_base58())
-                                .unwrap_or_else(|| "?".into()),
+                            peer.to_base58(),
                             opps.len(),
                             last_seen,
                         );
@@ -214,13 +171,8 @@ async fn run_consumer() -> Result<()> {
                         last_seen = opps.len();
                     }
                 }
-                Err(err) => eprintln!("ask failed: {err}"),
+                Err(err) => eprintln!("poll to {} failed (non-gateway peer?): {err}", peer.to_base58()),
             }
-        }
-        if !found_any {
-            println!("(no producer found yet — make sure ROLE=producer is running)");
-            // Give mDNS a moment on first iterations.
-            sleep(Duration::from_millis(500)).await;
         }
     }
 }

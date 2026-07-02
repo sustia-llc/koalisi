@@ -472,7 +472,9 @@ meet at the `src/llm/mod.rs` trait surface.
   (belief-aware join through the live actor). 86 tests `--features decision`.
 
 Cross-project plan (upstream `aif` + this Phase B): see
-`~/Documents/iwahi/tira/.claude/plans/aif-merge-koalisi-integration.md`.
+`~/Documents/sustia-llc/tira/.claude/plans/aif-merge-koalisi-integration.md`
+(tira's local checkout moved from `~/Documents/iwahi/tira` on 2026-07-02; the GitHub
+remote was always `sustia-llc/tira`).
 
 **K2 — magnitude decision arm ([#5](https://github.com/sustia-llc/koalisi/issues/5), DONE 2026-07-02).**
 Part of the coalition semantic-layer roadmap (Phase K, plan in

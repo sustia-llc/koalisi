@@ -37,8 +37,8 @@ pub use catgraph_applied::{HyperedgeIndex, VertexIndex};
 /// already part of the old bound (inherited from the dependency) and is now
 /// stated explicitly here because the new container does not supply it, while
 /// koalisi still needs it — the tokio-rayon offload
-/// (`HypergraphExecutor::run_job`) moves weights between threads and the kameo
-/// `CoalitionActor` requires `V`/`HE: Send + Sync`. Blanket-implemented for
+/// (`HypergraphExecutor::run_job`) moves weights between threads and the
+/// `CoalitionService` task requires `V`/`HE: Send + Sync`. Blanket-implemented for
 /// every qualifying type; test/example payloads that derive extra traits keep
 /// them harmlessly.
 pub trait VertexTrait: Copy + Eq + std::fmt::Debug + Send + Sync {}

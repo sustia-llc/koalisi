@@ -25,7 +25,6 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use kameo_actors::DeliveryStrategy;
 use tokio_util::sync::CancellationToken;
 
 use koalisi::market::{Pair, Triangle};
@@ -67,7 +66,6 @@ async fn main() -> Result<()> {
         triangles: vec![triangle],
         threshold_bps: 5.0,
         history_capacity: 256,
-        delivery_strategy: DeliveryStrategy::Guaranteed,
     })
     .await?;
 
@@ -94,7 +92,7 @@ async fn main() -> Result<()> {
     let snap = swarm
         .monitor(&"EUR/USD".parse()?)
         .unwrap()
-        .ask(koalisi::subsystems::monitor::GetSnapshot)
+        .snapshot()
         .await?;
     println!(
         "EUR/USD monitor: {} ticks in history (latest mid = {:.6})",

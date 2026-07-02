@@ -4,7 +4,6 @@
 //! market state.
 
 use anyhow::Result;
-use kameo_actors::DeliveryStrategy;
 
 use koalisi::market::{Pair, Tick, Triangle};
 use koalisi::subsystems::swarm::{Swarm, SwarmConfig};
@@ -22,7 +21,6 @@ async fn main() -> Result<()> {
         triangles: vec![triangle.clone()],
         threshold_bps: 10.0,
         history_capacity: 32,
-        delivery_strategy: DeliveryStrategy::Guaranteed,
     })
     .await?;
 

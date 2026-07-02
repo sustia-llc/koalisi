@@ -84,6 +84,7 @@ fn spawn_demo_feed(swarm: &Swarm, token: CancellationToken) -> tokio::task::Join
             let _ = m_eur_gbp
                 .tell(Tick::new(eur_gbp.clone(), eg - 0.0001, eg + 0.0001, now_ms))
                 .await;
+            // (`.tell` on a `MonitorHandle` is the fire-and-forget path.)
             t = t.wrapping_add(1);
         }
     })

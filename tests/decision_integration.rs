@@ -10,12 +10,9 @@
 
 use std::fmt::{Display, Formatter};
 
-use kameo::prelude::*;
 use koalisi::algorithms::AgentCapabilities;
 use koalisi::decision::DecisionContext;
-use koalisi::subsystems::coalition_actor::{
-    CoalitionActor, CoalitionActorArgs, JoinRequest, LeaveRequest, Members,
-};
+use koalisi::subsystems::coalition_actor::CoalitionService;
 use koalisi::topology::CoalitionManager;
 
 // ---------------------------------------------------------------------------
@@ -119,25 +116,16 @@ async fn threshold_policy_applies_join_through_actor() {
         .expect("add candidate");
 
     // join_threshold 0.0 ⇒ any positive marginal value joins.
-    let actor = CoalitionActor::spawn(CoalitionActorArgs {
+    let service = CoalitionService::spawn(
         manager,
-        policy: Box::new(ThresholdPolicy::new(AdditiveCalculator, 0.0, 0.0)),
-        ctx: DecisionContext::default(),
-    });
+        Box::new(ThresholdPolicy::new(AdditiveCalculator, 0.0, 0.0)),
+        DecisionContext::default(),
+    );
 
-    let decision = actor
-        .ask(JoinRequest {
-            agent: candidate,
-            coalition,
-        })
-        .await
-        .expect("decision");
+    let decision = service.join(candidate, coalition).await.expect("decision");
     assert!(decision.act, "positive marginal ⇒ join");
 
-    let members = actor
-        .ask(Members { coalition })
-        .await
-        .expect("members");
+    let members = service.members(coalition).await.expect("members");
     assert_eq!(members.len(), 2, "candidate was actually added");
     assert!(members.contains(&candidate));
 }
@@ -153,26 +141,17 @@ async fn threshold_policy_declines_join_through_actor() {
         .await
         .expect("add candidate");
 
-    // An unreachable join_threshold ⇒ the actor must NOT mutate membership.
-    let actor = CoalitionActor::spawn(CoalitionActorArgs {
+    // An unreachable join_threshold ⇒ the service must NOT mutate membership.
+    let service = CoalitionService::spawn(
         manager,
-        policy: Box::new(ThresholdPolicy::new(AdditiveCalculator, 1.0e9, 0.0)),
-        ctx: DecisionContext::default(),
-    });
+        Box::new(ThresholdPolicy::new(AdditiveCalculator, 1.0e9, 0.0)),
+        DecisionContext::default(),
+    );
 
-    let decision = actor
-        .ask(JoinRequest {
-            agent: candidate,
-            coalition,
-        })
-        .await
-        .expect("decision");
+    let decision = service.join(candidate, coalition).await.expect("decision");
     assert!(!decision.act, "unreachable threshold ⇒ decline");
 
-    let members = actor
-        .ask(Members { coalition })
-        .await
-        .expect("members");
+    let members = service.members(coalition).await.expect("members");
     assert_eq!(members.len(), 1, "declined join left membership unchanged");
     assert!(!members.contains(&candidate));
 }
@@ -193,25 +172,16 @@ async fn threshold_policy_forces_leave_through_actor() {
         .expect("seed second member");
 
     // A high leave_threshold forces leaving even a contributing member.
-    let actor = CoalitionActor::spawn(CoalitionActorArgs {
+    let service = CoalitionService::spawn(
         manager,
-        policy: Box::new(ThresholdPolicy::new(AdditiveCalculator, 0.0, 1.0e9)),
-        ctx: DecisionContext::default(),
-    });
+        Box::new(ThresholdPolicy::new(AdditiveCalculator, 0.0, 1.0e9)),
+        DecisionContext::default(),
+    );
 
-    let decision = actor
-        .ask(LeaveRequest {
-            agent: seed,
-            coalition,
-        })
-        .await
-        .expect("decision");
+    let decision = service.leave(seed, coalition).await.expect("decision");
     assert!(decision.act, "high leave threshold ⇒ leave");
 
-    let members = actor
-        .ask(Members { coalition })
-        .await
-        .expect("members");
+    let members = service.members(coalition).await.expect("members");
     assert_eq!(members.len(), 1, "seed actually removed");
     assert!(!members.contains(&seed));
 }
@@ -276,23 +246,14 @@ async fn aif_policy_join_non_degenerate_through_actor() {
             .add_agent(Worker::new(1, 0b001, 80))
             .await
             .expect("add candidate");
-        let actor = CoalitionActor::spawn(CoalitionActorArgs {
+        let service = CoalitionService::spawn(
             manager,
-            policy: Box::new(AifDecisionPolicy::default()),
+            Box::new(AifDecisionPolicy::default()),
             ctx,
-        });
-        let decision = actor
-            .ask(JoinRequest {
-                agent: candidate,
-                coalition,
-            })
-            .await
-            .expect("decision");
+        );
+        let decision = service.join(candidate, coalition).await.expect("decision");
         assert!(decision.act, "covering a new required bit lowers G ⇒ join");
-        let members = actor
-            .ask(Members { coalition })
-            .await
-            .expect("members");
+        let members = service.members(coalition).await.expect("members");
         assert_eq!(members.len(), 2, "candidate added");
     }
 
@@ -304,23 +265,14 @@ async fn aif_policy_join_non_degenerate_through_actor() {
             .add_agent(Worker::new(9, 0b010, 80))
             .await
             .expect("add redundant");
-        let actor = CoalitionActor::spawn(CoalitionActorArgs {
+        let service = CoalitionService::spawn(
             manager,
-            policy: Box::new(AifDecisionPolicy::default()),
+            Box::new(AifDecisionPolicy::default()),
             ctx,
-        });
-        let decision = actor
-            .ask(JoinRequest {
-                agent: redundant,
-                coalition,
-            })
-            .await
-            .expect("decision");
+        );
+        let decision = service.join(redundant, coalition).await.expect("decision");
         assert!(!decision.act, "redundant coverage ⇒ decline");
-        let members = actor
-            .ask(Members { coalition })
-            .await
-            .expect("members");
+        let members = service.members(coalition).await.expect("members");
         assert_eq!(members.len(), 1, "declined join left membership unchanged");
     }
 }
@@ -366,27 +318,14 @@ async fn belief_aware_join_through_actor() {
         CoalitionHistory::new(),
     );
 
-    let actor = CoalitionActor::spawn(CoalitionActorArgs {
-        manager,
-        policy: Box::new(policy),
-        ctx,
-    });
+    let service = CoalitionService::spawn(manager, Box::new(policy), ctx);
 
-    let decision = actor
-        .ask(JoinRequest {
-            agent: redundant,
-            coalition,
-        })
-        .await
-        .expect("decision");
+    let decision = service.join(redundant, coalition).await.expect("decision");
     assert!(
         decision.act,
-        "high trust+compat lets the redundant agent join through the actor"
+        "high trust+compat lets the redundant agent join through the service"
     );
-    let members = actor
-        .ask(Members { coalition })
-        .await
-        .expect("members");
+    let members = service.members(coalition).await.expect("members");
     assert_eq!(members.len(), 2, "belief-aware join was applied");
     assert!(members.contains(&redundant));
 }

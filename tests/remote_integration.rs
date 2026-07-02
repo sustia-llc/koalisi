@@ -1,53 +1,48 @@
-//! Integration test for the libp2p-based remote alert gateway.
+//! Integration test for the raw-libp2p remote alert gateway.
 //!
-//! Verifies the wire round-trip end-to-end:
-//! 1. Spawn the swarm with `enable_remote_alerts`.
+//! Verifies the wire round-trip end-to-end across two independent libp2p
+//! swarms in one process:
+//! 1. Spawn a producer swarm with `enable_remote_alerts` (mDNS off; it listens
+//!    on `127.0.0.1` and hands back the bound address).
 //! 2. Trigger a triangular arb signal via `feed_tick`.
-//! 3. From the same process, look up the gateway via `RemoteActorRef`
-//!    and ask `PollOpportunities` — the ask goes through libp2p
-//!    request-response (serialise → wire → deserialise → handle →
-//!    serialise reply → wire → deserialise) even though the destination
-//!    peer is ourselves.
-//! 4. Assert the round-tripped opportunity matches what was produced
-//!    locally.
+//! 3. Build a `RemoteAlertClient`, dial the producer's bound address, and ask
+//!    `PeekCount` / `Poll` — each goes through the CBOR request-response
+//!    protocol (serialise → wire → deserialise → handle → serialise reply →
+//!    wire → deserialise).
+//! 4. Assert the round-tripped opportunity matches what was produced.
 //!
-//! Single test file because `enable_remote_alerts` calls
-//! `kameo::remote::Behaviour::init_global()`, which is process-wide. If
-//! more remote tests are added later, they need to share a single
-//! libp2p swarm (or use `serial_test` + tear-down hooks).
+//! Note: the former actor-registry gateway used a process-wide global registry,
+//! so only ONE remote swarm could exist per process (see the old CLAUDE.md
+//! gotcha #9). That constraint is gone with raw request-response: this test
+//! stands up a producer AND a client in the same process, dialing over
+//! loopback, with no shared global registry.
 
 #![cfg(feature = "remote")]
 
 use std::time::Duration;
 
-use futures::TryStreamExt;
-use kameo::prelude::*;
-use kameo_actors::DeliveryStrategy;
-use tokio::time::{sleep, timeout};
+use tokio::time::timeout;
 
 use koalisi::market::{Pair, Tick, Triangle};
-use koalisi::subsystems::distributed::{
-    PeekOpportunityCount, PollOpportunities, RemoteAlertGateway, RemoteConfig, enable_remote_alerts,
-};
+use koalisi::subsystems::distributed::{RemoteAlertClient, RemoteConfig, enable_remote_alerts};
 use koalisi::subsystems::swarm::{Swarm, SwarmConfig};
 
 fn p(s: &str) -> Pair {
     s.parse().unwrap()
 }
 
-const GATEWAY_NAME: &str = "forex_swarm_alerts_test";
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[tokio::test]
 async fn remote_gateway_round_trips_opportunity() {
-    // Bound the whole test so a libp2p / mDNS hang can't lock CI.
+    // Bound the whole test so a libp2p hang can't lock CI.
     timeout(Duration::from_secs(20), async {
-        // ---------- Setup ----------
+        // ---------- Producer setup ----------
         let triangle = Triangle::new(p("EUR/USD"), p("GBP/USD"), p("EUR/GBP")).unwrap();
         let swarm = Swarm::new(SwarmConfig {
             triangles: vec![triangle],
             threshold_bps: 10.0,
             history_capacity: 32,
-            delivery_strategy: DeliveryStrategy::Guaranteed,
         })
         .await
         .unwrap();
@@ -55,16 +50,17 @@ async fn remote_gateway_round_trips_opportunity() {
         let handle = enable_remote_alerts(
             &swarm,
             RemoteConfig {
-                gateway_name: GATEWAY_NAME.into(),
                 listen_addr: "/ip4/127.0.0.1/tcp/0".into(),
-                enable_mdns: false, // not needed for loopback round-trip
+                enable_mdns: false, // dial explicitly over loopback
             },
         )
         .await
         .expect("enable_remote_alerts");
-
-        // Give the libp2p swarm a brief moment to finish listen + register.
-        sleep(Duration::from_millis(200)).await;
+        let gateway_addr = handle
+            .listen_addrs
+            .first()
+            .expect("gateway should have a bound listen address")
+            .clone();
 
         // ---------- Trigger one arbitrage opportunity ----------
         let eu = p("EUR/USD");
@@ -87,46 +83,35 @@ async fn remote_gateway_round_trips_opportunity() {
             .unwrap();
         // Flush the swarm so the sink + the gateway both see it.
         swarm.flush().await.unwrap();
+        // The gateway task consumes the alert off the broadcast bus on its own
+        // scheduler tick; give it a beat to buffer before we poll over the wire.
+        tokio::time::sleep(Duration::from_millis(200)).await;
 
-        // Direct (local) check: the gateway has the opportunity.
-        let local_count = handle
-            .gateway
-            .ask(koalisi::subsystems::distributed::PeekOpportunityCount)
+        // ---------- Consumer: dial + wire round-trip ----------
+        let mut client = RemoteAlertClient::connect(RemoteConfig {
+            listen_addr: "/ip4/127.0.0.1/tcp/0".into(),
+            enable_mdns: false,
+        })
+        .await
+        .expect("client connect");
+
+        let peer = client
+            .dial(gateway_addr, REQUEST_TIMEOUT)
             .await
-            .unwrap();
-        assert_eq!(local_count, 1, "gateway should have buffered 1 alert");
+            .expect("dial gateway");
 
-        // ---------- Remote round-trip ----------
-        // Find ourselves in the kameo registry and ask via the wire.
-        let mut remote_refs = RemoteActorRef::<RemoteAlertGateway>::lookup_all(GATEWAY_NAME);
-        let mut polled: Option<Vec<_>> = None;
-        let mut peeked: Option<u64> = None;
-        while let Some(remote_ref) = remote_refs.try_next().await.unwrap() {
-            // PeekOpportunityCount and PollOpportunities both go through
-            // serialise → libp2p request-response → deserialise.
-            peeked = Some(
-                remote_ref
-                    .ask(&PeekOpportunityCount)
-                    .send()
-                    .await
-                    .expect("remote ask: PeekOpportunityCount"),
-            );
-            polled = Some(
-                remote_ref
-                    .ask(&PollOpportunities)
-                    .send()
-                    .await
-                    .expect("remote ask: PollOpportunities"),
-            );
-        }
+        // PeekCount and Poll both go through serialise → request-response → wire.
+        let peeked = client
+            .peek_count(peer, REQUEST_TIMEOUT)
+            .await
+            .expect("remote PeekCount");
+        let polled = client.poll(peer, REQUEST_TIMEOUT).await.expect("remote Poll");
 
-        let peeked = peeked.expect("at least one remote peer in registry (loopback to self)");
-        let polled = polled.unwrap();
-        assert_eq!(peeked, 1, "remote PeekOpportunityCount should be 1");
+        assert_eq!(peeked, 1, "remote PeekCount should be 1");
         assert_eq!(
             polled.len(),
             1,
-            "remote PollOpportunities should round-trip the 1 buffered alert"
+            "remote Poll should round-trip the 1 buffered alert"
         );
         let opp = &polled[0];
         assert_eq!(opp.triangle.cross, eg, "cross pair should round-trip");
@@ -136,10 +121,25 @@ async fn remote_gateway_round_trips_opportunity() {
             opp.edge_bps
         );
 
+        // Poll is non-draining: a second Poll still sees the alert.
+        let polled_again = client
+            .poll(peer, REQUEST_TIMEOUT)
+            .await
+            .expect("second remote Poll");
+        assert_eq!(polled_again.len(), 1, "Poll must not drain the buffer");
+
+        // Clear drops the buffer; a subsequent Poll is empty.
+        client.clear(peer, REQUEST_TIMEOUT).await.expect("remote Clear");
+        let after_clear = client
+            .poll(peer, REQUEST_TIMEOUT)
+            .await
+            .expect("Poll after Clear");
+        assert!(after_clear.is_empty(), "buffer should be empty after Clear");
+
         // ---------- Shutdown ----------
-        // `Swarm::shutdown()` cancels the root token, which propagates to
-        // the child token feeding the libp2p event loop — that task exits
-        // and `task_tracker.wait()` drains.
+        // `Swarm::shutdown()` cancels the root token, which propagates to the
+        // child token feeding the gateway task — that task exits and
+        // `task_tracker.wait()` drains.
         swarm.shutdown().await;
     })
     .await

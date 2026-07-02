@@ -3,8 +3,8 @@
 //! Mirrors the style of `surrealdb-live-message`'s `integration_test.rs`:
 //! a single test driver builds the swarm, exercises every code path the
 //! library cares about, and asserts on observed alerts. No persistence is
-//! involved (POC); no Docker container either — kameo's mpsc + pubsub is
-//! the entire transport.
+//! involved (POC); no Docker container either — the in-process tokio::sync
+//! mpsc + broadcast buses are the entire transport.
 
 use std::time::Duration;
 use tokio::time::timeout;
@@ -12,7 +12,6 @@ use tokio::time::timeout;
 use koalisi::core::config::setup_logging;
 use koalisi::market::{Direction, Pair, Tick, Triangle};
 use koalisi::subsystems::swarm::{Swarm, SwarmConfig};
-use kameo_actors::DeliveryStrategy;
 
 fn p(s: &str) -> Pair {
     s.parse().unwrap()
@@ -26,7 +25,6 @@ async fn build_swarm() -> Swarm {
         triangles: vec![triangle],
         threshold_bps: 10.0,
         history_capacity: 64,
-        delivery_strategy: DeliveryStrategy::Guaranteed,
     })
     .await
     .expect("swarm assembly")
@@ -140,7 +138,6 @@ async fn end_to_end_triangular_arbitrage() {
 
 #[tokio::test]
 async fn monitor_snapshot_holds_full_history_within_capacity() {
-    use koalisi::subsystems::monitor::GetSnapshot;
     setup_logging();
 
     let swarm = build_swarm().await;
@@ -159,7 +156,7 @@ async fn monitor_snapshot_holds_full_history_within_capacity() {
     swarm.replay_history(ticks.clone()).await.unwrap();
 
     let monitor = swarm.monitor(&eu).unwrap();
-    let snap = monitor.ask(GetSnapshot).await.unwrap();
+    let snap = monitor.snapshot().await.unwrap();
     assert_eq!(snap.history.len(), 30);
     assert_eq!(snap.history[0].timestamp_ms, 0);
     assert_eq!(snap.history.last().unwrap().timestamp_ms, 29);
@@ -170,7 +167,6 @@ async fn monitor_snapshot_holds_full_history_within_capacity() {
 
 #[tokio::test]
 async fn monitor_ring_buffer_evicts_oldest_when_full() {
-    use koalisi::subsystems::monitor::GetSnapshot;
     setup_logging();
 
     let triangle = Triangle::new(p("EUR/USD"), p("GBP/USD"), p("EUR/GBP")).unwrap();
@@ -178,7 +174,6 @@ async fn monitor_ring_buffer_evicts_oldest_when_full() {
         triangles: vec![triangle],
         threshold_bps: 10.0,
         history_capacity: 5,
-        delivery_strategy: DeliveryStrategy::Guaranteed,
     })
     .await
     .unwrap();
@@ -189,7 +184,7 @@ async fn monitor_ring_buffer_evicts_oldest_when_full() {
         .collect();
     swarm.replay_history(ticks).await.unwrap();
 
-    let snap = swarm.monitor(&eu).unwrap().ask(GetSnapshot).await.unwrap();
+    let snap = swarm.monitor(&eu).unwrap().snapshot().await.unwrap();
     assert_eq!(snap.history.len(), 5);
     // Should contain timestamps 7..=11 (last 5 of 12).
     let stamps: Vec<i64> = snap.history.iter().map(|t| t.timestamp_ms).collect();
@@ -205,7 +200,6 @@ async fn swarm_rejects_empty_triangles() {
         triangles: vec![],
         threshold_bps: 5.0,
         history_capacity: 8,
-        delivery_strategy: DeliveryStrategy::Guaranteed,
     })
     .await;
     match result {
