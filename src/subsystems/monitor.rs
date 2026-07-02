@@ -14,7 +14,7 @@
 //! fire-and-forget ticks (`tell`) are a plain mpsc send; `feed` is an
 //! acknowledged tick that returns only after the monitor has ingested it and
 //! published the resulting `TickUpdate` (the deterministic-flush primitive the
-//! old kameo `ask(tick)` provided).
+//! old actor `ask(tick)` provided).
 
 use std::collections::VecDeque;
 

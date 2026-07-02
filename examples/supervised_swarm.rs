@@ -1,6 +1,6 @@
 //! Fault-tolerance demo for the swarm using the thin task-restart layer
-//! (`koalisi::core::supervision`, issue #6) that replaced kameo's `OneForOne`
-//! supervision.
+//! (`koalisi::core::supervision`, issue #6) that replaced the former
+//! actor-framework `OneForOne` supervision.
 //!
 //! A monitor worker is spawned via [`spawn_supervised`] with a
 //! `restart_limit(3, 5s)` budget. It processes ticks from a `broadcast` input
@@ -9,7 +9,7 @@
 //! `JoinHandle`, rebuilds a *fresh* worker from the factory, and the restarted
 //! worker keeps processing new ticks.
 //!
-//! This obsoletes the old kameo gotcha (supervised actors kept the same
+//! This obsoletes the old actor gotcha (supervised actors kept the same
 //! `ActorId` across restart, so `wait_for_shutdown` on the ref would hang):
 //! here a restart is simply the factory building a new task instance, and a
 //! shared progress counter shows liveness across the panic.
@@ -42,7 +42,7 @@ async fn main() -> Result<()> {
     let poison = Arc::new(AtomicBool::new(false));
 
     // Supervised monitor worker — restart_limit(3, 5s), mirroring the old
-    // kameo `OneForOne::restart_limit(3, Duration::from_secs(5))`.
+    // actor `OneForOne::restart_limit(3, Duration::from_secs(5))`.
     {
         let input = input.clone();
         let pair = pair.clone();

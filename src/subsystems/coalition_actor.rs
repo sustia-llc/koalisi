@@ -12,7 +12,7 @@
 //!
 //! ## Runtime shape (post-K3, issue #6)
 //!
-//! Formerly a kameo actor (`CoalitionActor`); now a plain task owning the
+//! Formerly an actor (`CoalitionActor`); now a plain task owning the
 //! `CoalitionManager` + policy + [`DecisionContext`], driven by a
 //! `tokio::sync::mpsc` command channel with `oneshot`-correlated replies. The
 //! file keeps its historical name (`coalition_actor.rs`); the type is

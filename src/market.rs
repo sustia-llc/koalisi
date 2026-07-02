@@ -1,8 +1,8 @@
 //! Forex market value types shared across the swarm.
 //!
 //! Everything in this module is `Clone`able plain data — no actor refs, no
-//! lifetimes. These are the messages flowing through the kameo mailboxes
-//! and pubsub broadcasts.
+//! lifetimes. These are the messages flowing through the task command
+//! channels and broadcast buses.
 
 use std::fmt;
 use std::str::FromStr;

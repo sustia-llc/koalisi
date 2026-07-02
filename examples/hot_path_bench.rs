@@ -2,8 +2,8 @@
 //!
 //! This is the *pre-registered baseline* harness: it measures the three
 //! latency-sensitive seams of the swarm and prints a small fixed-format
-//! table. It compiles and runs on BOTH the kameo runtime (commit A) and the
-//! post-swap tokio::sync runtime (commit B) with byte-comparable output — only
+//! table. It compiles and runs on BOTH the pre-swap actor runtime (commit A)
+//! and the post-swap tokio::sync runtime (commit B) with byte-comparable output — only
 //! the internal plumbing calls (subscription mechanism, coordinator ping)
 //! differ between the two; the measurement logic and the table format are
 //! identical.

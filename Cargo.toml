@@ -7,10 +7,6 @@ description = "Reference implementation of agentic coalitions in Rust — tokio:
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-# Kameo actor framework — local path while the upstream 0.20.0 is the working baseline.
-kameo = { path = "../../agentics/kameo" }
-kameo_actors = { path = "../../agentics/kameo/actors" }
-
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-stream = "0.1"
 tokio-util = { version = "0.7", features = ["rt"] }
@@ -44,10 +40,11 @@ catgraph-magnitude = { git = "ssh://git@github.com/sustia-llc/catgraph", tag = "
 dbn = { version = "0.58", features = ["async"], optional = true }
 time = { version = "0.3", optional = true, features = ["macros"] }
 
-# Optional: libp2p-based remote actor RPC. Enabled via `--features remote`.
-# We add libp2p directly because the swarm builder + `#[derive(NetworkBehaviour)]`
-# need to be visible in OUR code (not just transitively through kameo).
-libp2p = { version = "0.56", features = ["macros", "noise", "mdns", "tcp", "tokio", "yamux"], optional = true }
+# Optional: raw libp2p request-response transport for the remote alert gateway.
+# Enabled via `--features remote`. The gateway is a plain tokio task speaking a
+# hand-rolled CBOR request-response protocol (`/koalisi/alerts/1`) over
+# TCP+noise+yamux, with mDNS discovery — no actor framework involved.
+libp2p = { version = "0.56", features = ["macros", "noise", "mdns", "tcp", "tokio", "yamux", "request-response", "cbor"], optional = true }
 
 [features]
 default = []
@@ -56,7 +53,7 @@ decision = ["dep:aif"]
 # Categorical-magnitude coalition-decision strategy (pluggable, off by default).
 magnitude = ["dep:catgraph-magnitude"]
 databento = ["dep:dbn", "dep:time"]
-remote = ["kameo/remote", "dep:libp2p"]
+remote = ["dep:libp2p"]
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "test-util"] }

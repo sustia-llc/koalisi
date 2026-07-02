@@ -1,6 +1,7 @@
 //! Thin task-restart layer (issue #6).
 //!
-//! Replaces kameo's `OneForOne` supervision for the tokio::sync runtime. A
+//! Replaces the former actor-framework `OneForOne` supervision for the
+//! tokio::sync runtime. A
 //! *supervisor* task owns a `factory` closure that builds a fresh task instance
 //! on every (re)start. It spawns the inner future, awaits its `JoinHandle`, and:
 //!

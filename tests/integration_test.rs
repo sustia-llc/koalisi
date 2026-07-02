@@ -3,8 +3,8 @@
 //! Mirrors the style of `surrealdb-live-message`'s `integration_test.rs`:
 //! a single test driver builds the swarm, exercises every code path the
 //! library cares about, and asserts on observed alerts. No persistence is
-//! involved (POC); no Docker container either — kameo's mpsc + pubsub is
-//! the entire transport.
+//! involved (POC); no Docker container either — the in-process tokio::sync
+//! mpsc + broadcast buses are the entire transport.
 
 use std::time::Duration;
 use tokio::time::timeout;

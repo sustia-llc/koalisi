@@ -18,7 +18,7 @@
 //! channels, a `Ping`/`GetQuotes` handler first *drains* all currently-buffered
 //! ticks before replying — that makes `ping()` a true flush barrier (every tick
 //! sent before the ping is processed before the reply), reproducing the old
-//! kameo FIFO-mailbox guarantee across the two channels.
+//! actor FIFO-mailbox guarantee across the two channels.
 
 use std::collections::HashMap;
 

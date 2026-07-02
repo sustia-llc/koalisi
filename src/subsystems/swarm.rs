@@ -6,7 +6,7 @@
 //!
 //! ## Runtime shape (post-K3, issue #6)
 //!
-//! The former kameo actors are now plain tasks spawned on the runtime's
+//! The former actor-framework actors are now plain tasks spawned on the runtime's
 //! `TaskTracker`, each under a child of the runtime's root `CancellationToken`.
 //! The two pub/sub buses are `tokio::sync::broadcast` channels:
 //!
