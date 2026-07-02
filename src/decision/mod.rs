@@ -5,7 +5,7 @@
 //! *leave* a coalition it currently belongs to. The trait is object-safe so
 //! policies can be swapped behind a `Box<dyn CoalitionDecisionPolicy>`.
 //!
-//! Two implementations are provided:
+//! Three implementations are provided:
 //!
 //! - [`ThresholdPolicy`] (always available) — decides on the *marginal value*
 //!   an agent contributes, measured by any existing
@@ -14,6 +14,11 @@
 //!   energy from the Active Inference engine, where coalition membership
 //!   changes the agent's *observation model* (capability coverage of the
 //!   required capabilities). Higher coverage lowers expected free energy `G`.
+//! - `MagnitudePolicy` (feature `magnitude`) — the categorical A/B mirror of the
+//!   AIF arm: it scores a coalition by its *magnitude* (effective-member
+//!   diversity, via `catgraph`'s enriched-category magnitude) instead of `−G`,
+//!   mapping capability coverage onto directed substitutability couplings. The
+//!   two feature arms are independent — either, both, or neither may be enabled.
 //!
 //! # Membership conventions
 //!
@@ -223,6 +228,11 @@ pub use aif_policy::{
     AifDecisionPolicy, BridgeParams, CapabilityModel, CoalitionHistory, CompatibilityBeliefs,
     EfeValueCalculator, TrustBeliefs,
 };
+
+#[cfg(feature = "magnitude")]
+mod magnitude_policy;
+#[cfg(feature = "magnitude")]
+pub use magnitude_policy::{CouplingModel, MagnitudePolicy, MagnitudeValueCalculator};
 
 #[cfg(test)]
 mod tests {

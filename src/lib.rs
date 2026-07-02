@@ -9,8 +9,9 @@
 //!   `CoalitionManager`, time-travel queries, analytics.
 //! - [`algorithms`] — `ValueCalculator`, DCVC, AIPA partition search.
 //! - [`decision`] — coalition join/leave policies: `ThresholdPolicy` (always
-//!   available) and, behind feature `decision`, an Active Inference
-//!   expected-free-energy policy.
+//!   available), behind feature `decision` an Active Inference
+//!   expected-free-energy policy, and behind feature `magnitude` its categorical
+//!   A/B mirror scoring coalitions by enriched-category magnitude.
 //! - [`llm`] — Phase 5/6 LLM provider stub (real backends land later).
 //! - [`subsystems`] — forex-specific kameo actors (monitor, coordinator,
 //!   sink, swarm) and optional adapters (databento, libp2p remote).
