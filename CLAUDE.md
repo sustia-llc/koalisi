@@ -119,19 +119,19 @@ coalition_aif (decision — planned), and forex-arbitrage-swarm (runtime).
 - **Forex adapter** (preserved from forex-arbitrage-swarm):
 
 - **Core swarm**: `MarketMonitor` × N + `ArbitrageCoordinator` +
-  `AlertSink` + 2 `PubSub`s wired by `Swarm::new`, all under a single
-  `TaskTracker` + `CancellationToken`.
-- **`SwarmFeeder`** — clone-able feed handle (owns only the monitor
-  `ActorRef` map). Lets background tasks call `feed_tick` without
+  `AlertSink` tasks + 2 `broadcast` buses wired by `Swarm::new`, all under a
+  single `TaskTracker` + `CancellationToken` (K3: was kameo actors + PubSubs).
+- **`SwarmFeeder`** — clone-able feed handle (owns only the per-pair
+  `MonitorHandle` map). Lets background tasks call `feed_tick` without
   borrowing the `Swarm`.
 - **Examples (7 total)**:
   - `historical_bootstrap` — single-pair history replay, ring-buffer inspection
   - `live_pubsub` — scripted feed + user listener subscribed to the alert bus
   - `triangular_arbitrage` — full triangle, fires +45.25 bps and −72.06 bps signals
-  - `supervised_swarm` — kameo `OneForOne` supervisor with `restart_limit(3, 5s)` + oneshot ready handshake (mirror of `sdb_server.rs` pattern)
+  - `supervised_swarm` — `core::supervision::spawn_supervised` restart demo (K3; panic → factory rebuild → liveness proof)
   - `databento_historical` *(feature `databento`)* — decode bundled `.dbn.zst`, pump asap
   - `databento_live_replay` *(feature `databento`)* — `spawn_dbn_pump` on `swarm.task_tracker()` with `Pacing::Realtime`
-  - `distributed_alert_consumer` *(feature `remote`)* — single binary with `ROLE=producer` / `ROLE=consumer`; libp2p + mDNS discovery; remote `PollOpportunities` ask via wire
+  - `distributed_alert_consumer` *(feature `remote`)* — single binary with `ROLE=producer` / `ROLE=consumer`; libp2p + mDNS discovery; `AlertRequest::Poll` via `RemoteAlertClient` (K3: raw request-response, was kameo remote ask)
 - **Databento adapter** (`subsystems::databento`, feature-gated):
   - `Pacing::{Asap, Realtime { speed_factor }}`
   - `SymbolMapper = Arc<dyn Fn(u32, Option<&str>) -> Option<Pair> + Send + Sync>`
@@ -159,7 +159,7 @@ coalition_aif (decision — planned), and forex-arbitrage-swarm (runtime).
 
 ```
 koalisi/
-├── Cargo.toml                              path deps: kameo; git tag deps: catgraph-applied v0.1.1 (topology), aif + catgraph-magnitude (optional)
+├── Cargo.toml                              git tag deps: catgraph-applied v0.1.1 (topology); aif, catgraph-magnitude, surrealdb-live-message v0.2.0 (optional); no path deps since K3
 ├── README.md                               user-facing
 ├── CLAUDE.md                               THIS FILE
 ├── config/{default,development,test}.toml  coalition threshold, history capacity; [sdb]+[docker] for the durable feature's upstream SETTINGS (cwd-resolved)
@@ -275,7 +275,7 @@ These cost time during the build; future-me should not relearn them.
    - The `remote` feature is intentionally a *publish-to-outside-world* boundary, NOT a replacement for the local mpsc hot path.
    - Rationale: local `ask` is sub-μs (see `kameo/benches/overhead.rs`); `remote::ask` adds rmp-serde encode/decode + libp2p `request-response` over yamux + noise + network I/O — ≅10μs loopback, ≅10µs–1ms real network. Default `remote::messaging::Config::request_timeout` is **10 seconds**, sized for the network, not for actor-internal calls.
    - Trait-bound asymmetry: local needs `Send + 'static`. Remote needs `Send + 'static + Serialize + DeserializeOwned` on messages, `Serialize` on `Reply::Ok` and `Reply::Error`, `#[derive(RemoteActor)]` on the actor, `#[remote_message]` on each exposed handler. Strictly more, not less.
-   - The hybrid we settled on: `MarketMonitor` → `tick_bus` → `Coordinator` → `alert_bus` → `AlertSink` is all local mpsc. A separate `RemoteAlertGateway` actor subscribes to `alert_bus` AND is remote-registered. Off-process consumers (`RemoteActorRef::<RemoteAlertGateway>::lookup(name).ask(&PollOpportunities)`) get alerts without ever touching the hot path.
+   - The hybrid we settled on (K3 wording): monitors → `tick_bus` → coordinator → `alert_bus` → sink is all local tokio channels. A separate gateway TASK subscribes to `alert_bus` and answers libp2p `request-response` asks (`AlertRequest::Poll` etc. via `RemoteAlertClient`). Off-process consumers get alerts without ever touching the hot path.
 
 9. **~~`kameo::remote::Behaviour::init_global()` is process-wide.~~ OBSOLETE since K3 (#6)** — no global init; producer + client coexist in one process (the remote test does exactly that). Kept for history:
    - Called once inside `enable_remote_alerts`. Calling it twice in the same process (e.g., from two integration tests in a single binary) will conflict.
@@ -286,9 +286,8 @@ These cost time during the build; future-me should not relearn them.
     - Without `remote`: sync, just returns `Result<(), RegistryError>` (no `.await`).
     - With `remote`: returns a future that resolves once libp2p propagates the registration.
 
-11. **libp2p `#[derive(NetworkBehaviour)]` requires the `macros` feature.**
-    - kameo enables libp2p with `cbor, kad, noise, mdns, quic, request-response, tcp, tokio, yamux`, but NOT `macros`. Our `Cargo.toml` adds libp2p directly with `macros` so `SwarmBehaviour` derive works.
-    - Generated event-enum naming: `#[derive(NetworkBehaviour)] struct SwarmBehaviour {...}` produces `SwarmBehaviourEvent`. Match on `SwarmEvent::Behaviour(SwarmBehaviourEvent::Mdns(…))`.
+11. **libp2p `#[derive(NetworkBehaviour)]` requires the `macros` feature** *(still true post-K3; koalisi now owns the full libp2p feature list: `macros, noise, mdns, tcp, tokio, yamux, request-response, cbor`).*
+    - Generated event-enum naming: `#[derive(NetworkBehaviour)] struct GatewayBehaviour {...}` produces `GatewayBehaviourEvent` (K3 names). Match on `SwarmEvent::Behaviour(GatewayBehaviourEvent::Mdns(…))`.
 
 12. **catgraph backend contracts (K1, #4) — rely on these, don't re-derive.**
     - **Stable, never-reused indices**: `VertexIndex`/`HyperedgeIndex` come from
@@ -524,7 +523,7 @@ meet at the `src/llm/mod.rs` trait surface.
 
 **Decision-layer follow-ups — DONE (issues #1, #2 closed; PR #3 merged to `main`):**
 - [#1](https://github.com/sustia-llc/koalisi/issues/1) — `CoalitionManager::{try_join,try_leave}_coalition`
-  (policy-gated, `where V: AgentCapabilities`) + `subsystems::coalition_actor::CoalitionActor`
+  (policy-gated, `where V: AgentCapabilities`) + `subsystems::coalition_actor::CoalitionService` (renamed from `CoalitionActor` in K3; same file)
   (kameo seam holding `Box<dyn CoalitionDecisionPolicy>` + `DecisionContext`). The actor's
   `JoinRequest`/`LeaveRequest` consult the policy via the async offload before mutating
   membership; `AifDecisionPolicy` is never named at the seam. `AgentCapabilities` gained a
@@ -783,44 +782,45 @@ path. Generate a synthetic file at runtime.
   built via `MetadataBuilder::mappings(...)`. Each `SymbolMapping`
   needs a date range covering the records' timestamps.
 
-### C. Remote gateway hardening  *(unblocked, low priority)*
+### C. Remote gateway hardening  *(unblocked, low priority — rewritten post-K3 for the raw-libp2p gateway)*
 - see /home/oryx/Documents/category/deep_causality/examples/avionics_examples/flight_envelope_monitor/README.md for a template for trade_envelope_monitor
-The POC remote gateway works (round-trip integration test green) but is
-minimal. To make it production-shaped:
+The K3 gateway (raw libp2p `request-response`, `/koalisi/alerts/1`) works
+(round-trip integration test green) but is minimal. To make it
+production-shaped:
 
-1. **Bounded buffer + size cap.** Replace `Vec<ArbitrageOpportunity>` in
-   `RemoteAlertGateway` with a `VecDeque` capped at e.g. `1024`; oldest
-   evicted on push. Consumers that lag forever should not OOM the producer.
-2. **Sequence numbers + cursor-based polling.** Add a monotonic `seq:
-   u64` field to each buffered alert; replace `PollOpportunities` with
-   `PollSince { last_seq: u64 } -> Vec<(u64, ArbitrageOpportunity)>`.
-   Consumers remember the last seq they saw and only fetch deltas.
+1. **Bounded buffer + size cap.** Replace the gateway task's
+   `Vec<ArbitrageOpportunity>` with a `VecDeque` capped at e.g. `1024`;
+   oldest evicted on push. Consumers that lag forever should not OOM the
+   producer.
+2. **Sequence numbers + cursor-based polling.** Add a monotonic `seq: u64`
+   to each buffered alert; add `AlertRequest::PollSince { last_seq }` →
+   `Vec<(u64, ArbitrageOpportunity)>`. Consumers fetch deltas only.
 3. **Stable wire schema.** `ArbitrageOpportunity` is currently the wire
-   type; this couples on-wire format to internal struct changes. Define a
-   `RemoteArbitrageOpportunityV1` in `distributed.rs` and convert at the
-   boundary.
-4. **Multiple gateways under one libp2p swarm.** `init_global()` is
-   one-shot per process; future work may want both an alert gateway AND,
-   say, a tick gateway. Factor the libp2p swarm setup out of
-   `enable_remote_alerts` so the same swarm hosts multiple registered
-   actors.
-5. **QUIC transport in addition to TCP.** `custom_swarm.rs` shows
-   `.with_quic()` as an additional transport. Useful for higher-RTT
-   links. Cheap to add.
+   type; define a `RemoteArbitrageOpportunityV1` in `distributed.rs` and
+   convert at the boundary.
+4. **Multiple protocols on one swarm.** With `init_global()` gone (K3),
+   this is now easy: add more `request_response` behaviours (e.g. a tick
+   protocol) to `GatewayBehaviour` — no process-wide constraint remains.
+5. **QUIC transport in addition to TCP.** `.with_quic()` as an additional
+   transport. Useful for higher-RTT links. Cheap to add.
+6. **mDNS-expired disconnects.** The K3 rewrite no longer calls
+   `disconnect_peer_id` on mDNS expiry (deliberate: an active polling
+   client keeps its connection; idle ones close via the 300s idle
+   timeout). Revisit if stale-peer connection buildup ever matters.
 
 ### D. Smaller nice-to-haves (optional)
 
-- **Metrics example** — subscribe a `metrics::Counter`-driven actor to
-  both pubsubs, scrape via `metrics-exporter-prometheus`. Requires
-  kameo's `metrics` feature.
+- **Metrics example** — subscribe a `metrics::Counter`-driven task to
+  both broadcast buses, scrape via `metrics-exporter-prometheus` (post-K3:
+  plain `metrics` crate; no runtime-framework feature needed).
 - **Multi-triangle stress test** — verify `coordinator.triangles: Vec<Triangle>`
   scales: 10 triangles, 30 unique pairs, all sharing some legs. Adversarial
   pricing that flips multiple triangles at once.
 - **Bid/ask-aware execution model** — replace mid-price arithmetic with
   realistic execution costs (you cross the spread on each leg). Triangle
   `edge_bps` becomes signed by direction and net of spread.
-- **Switch off path deps when kameo 0.20.0 is on crates.io** — the API
-  surface we use is stable (we now use both `remote` and default features).
+- ~~Switch off path deps when kameo 0.20.0 is on crates.io~~ — moot since
+  K3 (#6): kameo was removed entirely, not version-bumped.
 
 ## Open questions (jot anything here as it comes up)
 

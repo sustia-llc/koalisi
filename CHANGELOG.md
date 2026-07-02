@@ -79,7 +79,10 @@ Planned work (tracked in [`CLAUDE.md`](./CLAUDE.md) §"Next steps"):
   replaces the kameo `RemoteActorRef` lookup. Deltas: `Poll` still clones
   without draining; `Clear` returns a bare ack (was a dropped count);
   `RemoteHandle` is `{ local_peer_id, listen_addrs }`; the process-wide
-  `init_global()` constraint is gone (producer + client can share a process).
+  `init_global()` constraint is gone (producer + client can share a process);
+  mDNS expiry no longer force-disconnects the peer (deliberate — an active
+  polling client keeps its connection; idle ones close via the 300s idle
+  timeout).
   `remote = ["dep:libp2p"]`; libp2p features gain `request-response, cbor`.
 - **Durable decision messaging behind a new `durable` feature, off by default**
   (stage 3): dep `surrealdb-live-message` git tag `v0.2.0` (SSH; cargo key

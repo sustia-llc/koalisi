@@ -55,7 +55,7 @@ libp2p = { version = "0.56", features = ["macros", "noise", "mdns", "tcp", "toki
 surrealdb-live-message = { git = "ssh://git@github.com/sustia-llc/surrealdb-live-message", tag = "v0.2.0", package = "surrealdb_live_message", optional = true }
 # `#[derive(SurrealValue)]` on koalisi's durable `DecisionEvent` emits absolute
 # `::surrealdb_types` paths, so the trait crate must be a direct dep. Version
-# unifies with the one `surrealdb-live-message` pulls (3.1.5) so the derived impl
+# unifies with the one `surrealdb-live-message` pulls (resolved 3.2.0) so the derived impl
 # satisfies its `Coalition<T>: SurrealValue` bound. Pure-value types crate, no DB
 # engine; only compiled under `durable`.
 surrealdb-types = { version = "3.1.5", optional = true }
