@@ -50,11 +50,11 @@ Planned work (tracked in [`CLAUDE.md`](./CLAUDE.md) §"Next steps"):
   churn 8 vs 113, oracle regret 0.1156 vs 0.3757 — but median per-decision
   latency 4.37 µs vs 1.48 µs, so the pre-committed **verdict is
   `FALSIFIED (latency)`** (criterion 1 pass, criterion 2 fail; nothing tuned).
-- **Upstream find:** the battery surfaced a debug-only panic in
+- **Upstream find (resolved):** the battery surfaced a debug-only panic in
   `catgraph-magnitude v0.1.0` (over-strict triangle-inequality `debug_assert`,
-  ULP noise on non-dyadic couplings) — filed catgraph#29, fix proposed in
-  catgraph PR #30 (pending merge → `v0.1.1`, then a koalisi dep bump). The
-  harness runs `--release` (also required for the latency criterion).
+  ULP noise on non-dyadic couplings) — filed catgraph#29, fixed by catgraph
+  PR #30, tagged `v0.1.1`. **koalisi dep bumped `v0.1.0` → `v0.1.1`**; debug
+  builds run clean. The harness runs `--release` for the latency criterion.
 
 [#7]: https://github.com/sustia-llc/koalisi/issues/7
 
