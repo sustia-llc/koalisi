@@ -33,10 +33,19 @@ coalition_aif (decision — planned), and forex-arbitrage-swarm (runtime).
 - `rust-v2:rust-dev-v2` / `rust-v2:rust-practical` — primary Rust agents per
   the user CLAUDE.md routing rules.
 
-## Current state — 2026-05-29
+## Current state — 2026-07-02
 
 ### Done
 
+- **Magnitude decision arm (K2, issue #5)**: `MagnitudePolicy` +
+  `MagnitudeValueCalculator` behind a new `magnitude` feature — the categorical
+  A/B mirror of the AIF arm, backed by `catgraph_magnitude::coalition_value`
+  (git tag `v0.1.0`, SSH URL — catgraph is private, same rationale as `aif`;
+  pinned `t = 1`). Capabilities map to directed substitutability couplings
+  `A(i→j) = |rel_i ∩ rel_j| / |rel_i|`; clones skeletalize into one effective
+  agent; **task-irrelevant agents (`rel == 0`) are excluded** (a vacuous 1.0
+  coupling collapses diversity — review-confirmed). Feature-independent of
+  `decision`; either, both, or neither may be enabled. See Phase 6 §K2 below.
 - **Decision layer (Phase 6, B0–B7) — v0.6.0**: pluggable `CoalitionDecisionPolicy`
   + always-available `ThresholdPolicy`; optional `decision` feature bridging `u32`
   capabilities to the `aif` AIF engine (`EfeValueCalculator`, `AifDecisionPolicy`)
@@ -83,7 +92,10 @@ coalition_aif (decision — planned), and forex-arbitrage-swarm (runtime).
 - **Tests passing**:
   | Suite | Tests | Command |
   |---|---|---|
-  | Default | 6 unit + 5 integration | `cargo test` |
+  | Default | 67 | `cargo test` |
+  | `--features decision` | 86 | `cargo test --features decision` |
+  | `--features magnitude` | 76 | `cargo test --features magnitude` |
+  | `--features decision,magnitude` | 95 | `cargo test --features decision,magnitude` |
   | `--features databento` | + 4 databento integration | `cargo test --features databento` |
   | `--features remote` | + 1 remote integration | `cargo test --features remote` |
   | All 7 examples | exit 0 | see Reproducers below |
@@ -120,11 +132,18 @@ koalisi/
 │   │   ├── value_calculation.rs            ValueCalculator + 4 calculators
 │   │   ├── dcvc.rs                         DCVCDistributor, WorkloadShare
 │   │   └── aipa.rs                         Integer partitions, bounds, best-partition + 10 unit tests
+│   ├── decision/
+│   │   ├── mod.rs                          CoalitionDecisionPolicy + ThresholdPolicy (always compiled)
+│   │   ├── aif_policy.rs                   AifDecisionPolicy + EfeValueCalculator (feature `decision`)
+│   │   └── magnitude_policy.rs             MagnitudePolicy + MagnitudeValueCalculator + CouplingModel (feature `magnitude`)
+│   ├── llm/
+│   │   └── mod.rs                          LlmProvider trait + StubLlmProvider (Phase 5 anchor)
 │   └── subsystems/
 │       ├── monitor.rs                      MarketMonitor (Tick, GetSnapshot, Ping)
 │       ├── coordinator.rs                  ArbitrageCoordinator (TickUpdate, GetQuotes, Ping)
 │       ├── sink.rs                         AlertSink (ArbitrageOpportunity, GetAlerts, DrainAlerts, Ping)
 │       ├── swarm.rs                        Swarm (wraps CoalitionRuntime) + SwarmConfig + SwarmFeeder
+│       ├── coalition_actor.rs              CoalitionActor (policy-gated membership seam, issue #1)
 │       ├── databento.rs                    DBN adapter (feature `databento`)
 │       └── distributed.rs                  RemoteAlertGateway + libp2p wiring (feature `remote`)
 ├── examples/
@@ -211,7 +230,7 @@ These cost time during the build; future-me should not relearn them.
 All assume `cwd = koalisi/`.
 
 ```sh
-# === default features (57 tests) ===
+# === default features (67 tests) ===
 timeout 60s  cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target
 timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example topology_coalition
 timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example algorithm_values
@@ -219,6 +238,12 @@ timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-tar
 timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example historical_bootstrap
 timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example live_pubsub
 timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example supervised_swarm
+
+# === decision-layer feature combos (86 / 76 / 95 tests) ===
+timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision
+timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features magnitude
+timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision,magnitude
+timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision --example strategy_comparison
 
 # === with databento feature ===
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features databento
@@ -398,6 +423,35 @@ meet at the `src/llm/mod.rs` trait surface.
 
 Cross-project plan (upstream `aif` + this Phase B): see
 `~/Documents/iwahi/tira/.claude/plans/aif-merge-koalisi-integration.md`.
+
+**K2 — magnitude decision arm ([#5](https://github.com/sustia-llc/koalisi/issues/5), DONE 2026-07-02).**
+Part of the coalition semantic-layer roadmap (Phase K, plan in
+`~/Documents/tsondru/tsondru-notes/catgraph/plans/2026-07-01-coalition-semantic-layer.md`).
+The categorical A/B mirror of the AIF arm, behind feature `magnitude`
+(independent of `decision` — either, both, or neither):
+- Dep: `catgraph-magnitude = { git = "ssh://git@github.com/sustia-llc/catgraph",
+  tag = "v0.1.0", optional = true }`. SSH not HTTPS (catgraph is private; the
+  issue-#5 pinned dep line says HTTPS but cargo's libgit2 can't authenticate —
+  same story as `aif`/tira). `coalition_value` = magnitude at pinned `t = 1`;
+  the t-sweep belongs to the K4 A/B harness (#7).
+- **Mapping (the semantic heart)**: directed substitutability
+  `A(i→j) = |rel_i ∩ rel_j| / |rel_i|`, `rel = caps & required`. Clones
+  (identical relevant masks) are mutually 1.0 ⇒ upstream skeletalizes them into
+  ONE effective agent (deliberate — mirrors AIF clone degeneracy); subsumed
+  agents get Möbius weight 0; disjoint specialists count fully (`Mag = m`).
+- **Gotcha (review-caught, hand-verified)**: task-irrelevant agents
+  (`rel == 0`) must be EXCLUDED from the member set, not vacuously coupled at
+  1.0 — a one-way 1.0 coupling to every member drives the bystander's Möbius
+  weight negative and *collapses* diversity (3 specialists + 1 bystander ⇒ 1.0,
+  and the bystander's presence ejects a unique specialist on leave). Regression
+  test: `irrelevant_bystander_neither_collapses_value_nor_corrupts_decisions`.
+- Join iff `Mag(with) − Mag(without) > join_margin`; leave iff removing the
+  agent doesn't lower Mag (exact AIF dual). Upstream `CatgraphError` ⇒
+  policy-level decline / `-∞` value, never a panic. Async offloads the whole
+  `O(m³)` computation to rayon (not just the final eval as in the AIF arm).
+- No cross-arm scalar calibration (pinned): only within-arm rank order matters;
+  the A/B outcome metric is pre-registered on
+  [#7](https://github.com/sustia-llc/koalisi/issues/7) (K4 consumes this arm).
 
 ### Phase 7: Persistence  *(planned — gated, see above; was Phase 5, moved last)*
 

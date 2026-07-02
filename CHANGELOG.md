@@ -31,6 +31,43 @@ Planned work (tracked in [`CLAUDE.md`](./CLAUDE.md) §"Next steps"):
 - **Remote gateway hardening** — bounded buffer, cursor-based polling,
   stable wire schema, QUIC transport alongside TCP.
 
+### Added (unreleased — issue [#5] magnitude decision arm, K2)
+
+- **`MagnitudePolicy` — the categorical A/B mirror of the AIF arm** ([#5],
+  new feature `magnitude`, independent of `decision`): coalition join/leave
+  decisions scored by **coalition magnitude** (effective-member diversity)
+  instead of expected free energy.
+  - New dep `catgraph-magnitude` (git tag `v0.1.0`, SSH URL — catgraph is
+    private, same rationale as the `aif` dep; never a path dep). Feature-off
+    builds compile none of it.
+  - `src/decision/magnitude_policy.rs`: `MagnitudeValueCalculator` (impl
+    `ValueCalculator`; value = `catgraph_magnitude::coalition_value` at the
+    pinned `t = 1` Shannon-diversity arm) + `MagnitudePolicy` (impl
+    `CoalitionDecisionPolicy`, sync + rayon-offloaded async — the whole
+    `O(m³)` magnitude computation runs on the rayon pool) + `CouplingModel`
+    (the mapping, public for direct testing).
+  - **The capabilities→coupling mapping** (the semantic heart): directed
+    substitutability `A(i→j) = |rel_i ∩ rel_j| / |rel_i|` over
+    required-masked capability bits. Capability clones are mutually coupled
+    at `1.0` and **skeletalize** into one effective agent (deliberate mirror
+    of the AIF arm's clone degeneracy); subsumed agents get Möbius weight 0;
+    disjoint specialists count fully. **Task-irrelevant agents
+    (`rel == 0`) are excluded from the member set** — a vacuous `1.0`
+    coupling would drive their Möbius weight negative and collapse coalition
+    diversity (code-review finding, hand-verified: 3 specialists + 1
+    bystander scored 1.0 instead of 3.0 and ejected a unique specialist on
+    leave).
+  - Upstream `CatgraphError`s are policy-level outcomes (decline / `-∞`
+    value), never panics. Dedup by `agent_id` before every upstream call.
+  - Tests: 9 unit (upstream seam pins — chain `0.7/0.5 ⇒ Mag(1) = 1.80`,
+    mutual-1.0 skeletalization ⇒ `1.0`; mapping table; hand-computed
+    calculator values `3.0`/`4/3`/`1.0`; join/leave mirrors; bystander
+    regression; Err path; async ≡ sync incl. through
+    `Box<dyn CoalitionDecisionPolicy>`). Suite: 67 default / 76 `magnitude`
+    / 86 `decision` (unchanged) / 95 both.
+
+[#5]: https://github.com/sustia-llc/koalisi/issues/5
+
 ### Added (unreleased — issue [#1] decision wiring)
 
 - **Live decision call site** ([#1]): the `AifDecisionPolicy` / async-offload

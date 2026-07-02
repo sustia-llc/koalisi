@@ -5,7 +5,7 @@
 //! *leave* a coalition it currently belongs to. The trait is object-safe so
 //! policies can be swapped behind a `Box<dyn CoalitionDecisionPolicy>`.
 //!
-//! Two implementations are provided:
+//! Three implementations are provided:
 //!
 //! - [`ThresholdPolicy`] (always available) — decides on the *marginal value*
 //!   an agent contributes, measured by any existing
@@ -14,6 +14,11 @@
 //!   energy from the Active Inference engine, where coalition membership
 //!   changes the agent's *observation model* (capability coverage of the
 //!   required capabilities). Higher coverage lowers expected free energy `G`.
+//! - `MagnitudePolicy` (feature `magnitude`) — the categorical A/B mirror of the
+//!   AIF arm: it scores a coalition by its *magnitude* (effective-member
+//!   diversity, via `catgraph`'s enriched-category magnitude) instead of `−G`,
+//!   mapping capability coverage onto directed substitutability couplings. The
+//!   two feature arms are independent — either, both, or neither may be enabled.
 //!
 //! # Membership conventions
 //!
@@ -32,8 +37,10 @@ use std::pin::Pin;
 ///
 /// `act` is the boolean recommendation (join, or leave, depending on which
 /// method produced it). `score` is the underlying scalar the decision was made
-/// from (a marginal value, or an expected-free-energy margin) — exposed so
-/// callers can rank candidates or apply their own thresholds.
+/// from (a marginal value, an expected-free-energy margin, or a
+/// coalition-magnitude margin) — exposed so callers can rank candidates or
+/// apply their own thresholds. Scores are only comparable *within* one policy;
+/// the decision arms are deliberately not calibrated against each other.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Decision {
     pub act: bool,
@@ -43,10 +50,10 @@ pub struct Decision {
 /// Context for a decision, independent of the candidate agent or coalition.
 ///
 /// `required_capabilities` is a capability bitmask describing what the task /
-/// coalition needs covered. Policies that reason about capability coverage
-/// (e.g. `AifDecisionPolicy`, feature `decision`) use it; value-only policies such as
-/// [`ThresholdPolicy`] currently ignore it (the base
-/// [`ValueCalculator`]s do not consult it).
+/// coalition needs covered. Policies that reason about capability coverage use
+/// it (`AifDecisionPolicy`, feature `decision`; `MagnitudePolicy`, feature
+/// `magnitude`); value-only policies such as [`ThresholdPolicy`] currently
+/// ignore it (the base [`ValueCalculator`]s do not consult it).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DecisionContext {
     pub required_capabilities: u32,
@@ -223,6 +230,11 @@ pub use aif_policy::{
     AifDecisionPolicy, BridgeParams, CapabilityModel, CoalitionHistory, CompatibilityBeliefs,
     EfeValueCalculator, TrustBeliefs,
 };
+
+#[cfg(feature = "magnitude")]
+mod magnitude_policy;
+#[cfg(feature = "magnitude")]
+pub use magnitude_policy::{CouplingModel, MagnitudePolicy, MagnitudeValueCalculator};
 
 #[cfg(test)]
 mod tests {
