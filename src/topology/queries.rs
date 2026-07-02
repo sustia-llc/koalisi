@@ -3,7 +3,7 @@
 use super::event_log::EventLog;
 use super::events::TemporalEvent;
 use super::timestamp::{TimeRange, Timestamp};
-use hypergraph::{HyperedgeIndex, VertexIndex};
+use catgraph_applied::{HyperedgeIndex, VertexIndex};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 

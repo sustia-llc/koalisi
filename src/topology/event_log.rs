@@ -2,7 +2,7 @@
 
 use super::events::{EventStats, SnapshotId, TemporalEvent};
 use super::timestamp::{TimeRange, Timestamp};
-use hypergraph::{HyperedgeIndex, VertexIndex};
+use catgraph_applied::{HyperedgeIndex, VertexIndex};
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Debug;
 

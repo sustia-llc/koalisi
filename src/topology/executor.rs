@@ -1,6 +1,6 @@
 //! Rayon ↔ tokio bridge for the topology layer.
 //!
-//! The underlying `hypergraph::Hypergraph` is `Send + Sync` but operates
+//! The underlying `catgraph_applied::Hypergraph` is `Send + Sync` but operates
 //! synchronously on a `std::sync::RwLock`. We don't want to hold the std
 //! lock across `.await`, so all graph mutations run on a dedicated rayon
 //! pool via `tokio_rayon::AsyncThreadPool`, then the future returned to

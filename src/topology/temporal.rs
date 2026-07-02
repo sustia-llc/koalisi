@@ -5,8 +5,8 @@ use super::event_log::EventLog;
 use super::events::{SnapshotId, TemporalEvent};
 use super::timestamp::{Clock, TimeRange, Timestamp};
 use super::executor::EXEC;
-use hypergraph::errors::HypergraphError;
-use hypergraph::{HyperedgeTrait, Hypergraph, HyperedgeIndex, VertexIndex, VertexTrait};
+use super::{HyperedgeTrait, VertexTrait};
+use catgraph_applied::{HyperedgeIndex, Hypergraph, HypergraphError, VertexIndex};
 
 pub type SharedGraph<V, HE> = std::sync::Arc<std::sync::RwLock<Hypergraph<V, HE>>>;
 use std::collections::BTreeMap;
@@ -102,15 +102,16 @@ where
     // =========================================================================
 
     /// Add a vertex and record the event.
-    pub async fn add_vertex(&self, weight: V) -> TemporalResult<VertexIndex, V, HE> {
+    pub async fn add_vertex(&self, weight: V) -> TemporalResult<VertexIndex> {
         let timestamp = self.clock.tick();
         let weight_clone = weight;
         let graph = self.graph.clone();
 
+        // K1: `add_vertex` is infallible on the catgraph backend (returns the
+        // fresh `VertexIndex`, not a `Result`).
         let index = EXEC
             .run_job(move || graph.write().unwrap().add_vertex(weight_clone))
-            .await
-            .map_err(TemporalError::from)?;
+            .await;
 
         self.events.write().await.append(TemporalEvent::VertexAdded {
             timestamp,
@@ -122,7 +123,7 @@ where
     }
 
     /// Remove a vertex and record the event.
-    pub async fn remove_vertex(&self, index: VertexIndex) -> TemporalResult<(), V, HE> {
+    pub async fn remove_vertex(&self, index: VertexIndex) -> TemporalResult<()> {
         let timestamp = self.clock.tick();
         let graph = self.graph.clone();
 
@@ -130,9 +131,9 @@ where
         let weight = EXEC
             .run_job(move || {
                 let mut g = graph.write().unwrap();
-                let weight = *g.get_vertex_weight(index)?;
+                let weight = g.get_vertex_weight(index)?;
                 g.remove_vertex(index)?;
-                Ok::<V, HypergraphError<V, HE>>(weight)
+                Ok::<V, HypergraphError>(weight)
             })
             .await
             .map_err(TemporalError::from)?;
@@ -151,7 +152,7 @@ where
         &self,
         index: VertexIndex,
         new_weight: V,
-    ) -> TemporalResult<(), V, HE> {
+    ) -> TemporalResult<()> {
         let timestamp = self.clock.tick();
         let graph = self.graph.clone();
         let new_weight_clone = new_weight;
@@ -160,9 +161,9 @@ where
         let old_weight = EXEC
             .run_job(move || {
                 let mut g = graph.write().unwrap();
-                let old_weight = *g.get_vertex_weight(index)?;
+                let old_weight = g.get_vertex_weight(index)?;
                 g.update_vertex_weight(index, new_weight_clone)?;
-                Ok::<V, HypergraphError<V, HE>>(old_weight)
+                Ok::<V, HypergraphError>(old_weight)
             })
             .await
             .map_err(TemporalError::from)?;
@@ -182,7 +183,7 @@ where
         &self,
         vertices: Vec<VertexIndex>,
         weight: HE,
-    ) -> TemporalResult<HyperedgeIndex, V, HE> {
+    ) -> TemporalResult<HyperedgeIndex> {
         let timestamp = self.clock.tick();
         let weight_clone = weight;
         let vertices_clone = vertices.clone();
@@ -204,7 +205,7 @@ where
     }
 
     /// Remove a hyperedge and record the event.
-    pub async fn remove_hyperedge(&self, index: HyperedgeIndex) -> TemporalResult<(), V, HE> {
+    pub async fn remove_hyperedge(&self, index: HyperedgeIndex) -> TemporalResult<()> {
         let timestamp = self.clock.tick();
         let graph = self.graph.clone();
 
@@ -213,9 +214,9 @@ where
             .run_job(move || {
                 let mut g = graph.write().unwrap();
                 let vertices = g.get_hyperedge_vertices(index)?;
-                let weight = *g.get_hyperedge_weight(index)?;
+                let weight = g.get_hyperedge_weight(index)?;
                 g.remove_hyperedge(index)?;
-                Ok::<(Vec<VertexIndex>, HE), HypergraphError<V, HE>>((vertices, weight))
+                Ok::<(Vec<VertexIndex>, HE), HypergraphError>((vertices, weight))
             })
             .await
             .map_err(TemporalError::from)?;
@@ -235,7 +236,7 @@ where
         &self,
         index: HyperedgeIndex,
         new_weight: HE,
-    ) -> TemporalResult<(), V, HE> {
+    ) -> TemporalResult<()> {
         let timestamp = self.clock.tick();
         let graph = self.graph.clone();
         let new_weight_clone = new_weight;
@@ -244,9 +245,9 @@ where
         let old_weight = EXEC
             .run_job(move || {
                 let mut g = graph.write().unwrap();
-                let old_weight = *g.get_hyperedge_weight(index)?;
+                let old_weight = g.get_hyperedge_weight(index)?;
                 g.update_hyperedge_weight(index, new_weight_clone)?;
-                Ok::<HE, HypergraphError<V, HE>>(old_weight)
+                Ok::<HE, HypergraphError>(old_weight)
             })
             .await
             .map_err(TemporalError::from)?;
@@ -266,7 +267,7 @@ where
         &self,
         index: HyperedgeIndex,
         new_vertices: Vec<VertexIndex>,
-    ) -> TemporalResult<(), V, HE> {
+    ) -> TemporalResult<()> {
         let timestamp = self.clock.tick();
         let graph = self.graph.clone();
         let new_vertices_clone = new_vertices.clone();
@@ -277,7 +278,7 @@ where
                 let mut g = graph.write().unwrap();
                 let old_vertices = g.get_hyperedge_vertices(index)?;
                 g.update_hyperedge_vertices(index, new_vertices_clone)?;
-                Ok::<Vec<VertexIndex>, HypergraphError<V, HE>>(old_vertices)
+                Ok::<Vec<VertexIndex>, HypergraphError>(old_vertices)
             })
             .await
             .map_err(TemporalError::from)?;
@@ -305,9 +306,9 @@ where
         &self,
         index: HyperedgeIndex,
         mutator: F,
-    ) -> TemporalResult<(), V, HE>
+    ) -> TemporalResult<()>
     where
-        F: FnOnce(Vec<VertexIndex>) -> Result<Vec<VertexIndex>, TemporalError<V, HE>>
+        F: FnOnce(Vec<VertexIndex>) -> Result<Vec<VertexIndex>, TemporalError>
             + Send
             + 'static,
     {
@@ -321,7 +322,7 @@ where
                 let new_vertices = mutator(old_vertices.clone())?;
                 g.update_hyperedge_vertices(index, new_vertices.clone())
                     .map_err(TemporalError::from)?;
-                Ok::<_, TemporalError<V, HE>>((old_vertices, new_vertices))
+                Ok::<_, TemporalError>((old_vertices, new_vertices))
             })
             .await?;
 
@@ -342,7 +343,7 @@ where
     pub async fn reverse_hyperedge(
         &self,
         index: HyperedgeIndex,
-    ) -> TemporalResult<Vec<VertexIndex>, V, HE> {
+    ) -> TemporalResult<Vec<VertexIndex>> {
         let timestamp = self.clock.tick();
         let graph = self.graph.clone();
 
@@ -353,7 +354,7 @@ where
                 let old_vertices = g.get_hyperedge_vertices(index)?;
                 g.reverse_hyperedge(index)?;
                 let new_vertices = g.get_hyperedge_vertices(index)?;
-                Ok::<(Vec<VertexIndex>, Vec<VertexIndex>), HypergraphError<V, HE>>((
+                Ok::<(Vec<VertexIndex>, Vec<VertexIndex>), HypergraphError>((
                     old_vertices,
                     new_vertices,
                 ))
@@ -372,9 +373,9 @@ where
     }
 
     /// Join hyperedges and record the event.
-    pub async fn join_hyperedges(&self, indices: Vec<HyperedgeIndex>) -> TemporalResult<(), V, HE> {
+    pub async fn join_hyperedges(&self, indices: Vec<HyperedgeIndex>) -> TemporalResult<()> {
         if indices.len() < 2 {
-            return Err(TemporalError::Hypergraph(HypergraphError::HyperedgesInvalidJoin));
+            return Err(TemporalError::Hypergraph(HypergraphError::InvalidJoin));
         }
 
         let timestamp = self.clock.tick();
@@ -389,7 +390,7 @@ where
                 let mut g = graph.write().unwrap();
                 g.join_hyperedges(&indices_clone)?;
                 let new_vertices = g.get_hyperedge_vertices(target_index)?;
-                Ok::<Vec<VertexIndex>, HypergraphError<V, HE>>(new_vertices)
+                Ok::<Vec<VertexIndex>, HypergraphError>(new_vertices)
             })
             .await
             .map_err(TemporalError::from)?;
@@ -410,7 +411,7 @@ where
         hyperedge_index: HyperedgeIndex,
         vertices: Vec<VertexIndex>,
         target: VertexIndex,
-    ) -> TemporalResult<Vec<VertexIndex>, V, HE> {
+    ) -> TemporalResult<Vec<VertexIndex>> {
         let timestamp = self.clock.tick();
         let graph = self.graph.clone();
         let vertices_clone = vertices.clone();
@@ -422,7 +423,7 @@ where
                 let old_vertices = g.get_hyperedge_vertices(hyperedge_index)?;
                 let new_vertices =
                     g.contract_hyperedge_vertices(hyperedge_index, vertices_clone, target)?;
-                Ok::<(Vec<VertexIndex>, Vec<VertexIndex>), HypergraphError<V, HE>>((
+                Ok::<(Vec<VertexIndex>, Vec<VertexIndex>), HypergraphError>((
                     old_vertices,
                     new_vertices,
                 ))
@@ -443,20 +444,21 @@ where
     }
 
     /// Clear all hyperedges and record the event.
-    pub async fn clear_hyperedges(&self) -> TemporalResult<(), V, HE> {
+    pub async fn clear_hyperedges(&self) -> TemporalResult<()> {
         let timestamp = self.clock.tick();
         let graph = self.graph.clone();
 
-        // Get count and clear atomically in single write lock
+        // Get count and clear atomically in single write lock.
+        // K1: `clear_hyperedges` is infallible on the catgraph backend (returns
+        // `()`, not `Result`), so the closure yields the count directly.
         let count = EXEC
             .run_job(move || {
                 let mut g = graph.write().unwrap();
                 let count = g.count_hyperedges();
-                g.clear_hyperedges()?;
-                Ok::<usize, HypergraphError<V, HE>>(count)
+                g.clear_hyperedges();
+                count
             })
-            .await
-            .map_err(TemporalError::from)?;
+            .await;
 
         self.events
             .write()
@@ -467,7 +469,7 @@ where
     }
 
     /// Clear the entire graph and record the event.
-    pub async fn clear(&self) -> TemporalResult<(), V, HE> {
+    pub async fn clear(&self) -> TemporalResult<()> {
         let timestamp = self.clock.tick();
         let graph = self.graph.clone();
 
@@ -499,9 +501,9 @@ where
     pub async fn get_vertex_weight(
         &self,
         index: VertexIndex,
-    ) -> TemporalResult<V, V, HE> {
+    ) -> TemporalResult<V> {
         let graph = self.graph.clone();
-        EXEC.run_job(move || graph.read().unwrap().get_vertex_weight(index).copied())
+        EXEC.run_job(move || graph.read().unwrap().get_vertex_weight(index))
             .await
             .map_err(TemporalError::from)
     }
@@ -510,9 +512,9 @@ where
     pub async fn get_hyperedge_weight(
         &self,
         index: HyperedgeIndex,
-    ) -> TemporalResult<HE, V, HE> {
+    ) -> TemporalResult<HE> {
         let graph = self.graph.clone();
-        EXEC.run_job(move || graph.read().unwrap().get_hyperedge_weight(index).copied())
+        EXEC.run_job(move || graph.read().unwrap().get_hyperedge_weight(index))
             .await
             .map_err(TemporalError::from)
     }
@@ -521,7 +523,7 @@ where
     pub async fn get_hyperedge_vertices(
         &self,
         index: HyperedgeIndex,
-    ) -> TemporalResult<Vec<VertexIndex>, V, HE> {
+    ) -> TemporalResult<Vec<VertexIndex>> {
         let graph = self.graph.clone();
         EXEC.run_job(move || graph.read().unwrap().get_hyperedge_vertices(index))
             .await

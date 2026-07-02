@@ -204,6 +204,37 @@ async fn agent_joins_leaves_coalition() {
     assert_eq!(members.len(), 2);
 }
 
+/// K1 behavior-delta guard (catgraph backend, divergence #1): re-joining an
+/// agent that is already a member is a successful no-op that leaves membership
+/// unchanged — this is the `join_coalition` idempotency the docstring promises.
+///
+/// On the previous yamafaktory backend the unchanged member-list write errored
+/// (`HyperedgeWeightUnchanged`-style), so this exact call returned `Err`. The
+/// catgraph container makes a no-op `update_hyperedge_vertices` return `Ok`,
+/// making the documented idempotency actually hold.
+#[tokio::test]
+async fn rejoin_existing_member_is_idempotent() {
+    let manager = CoalitionManager::<Agent, Coalition>::empty();
+
+    let a1 = manager.add_agent(Agent::new("a1", 5)).await.unwrap();
+    let a2 = manager.add_agent(Agent::new("a2", 3)).await.unwrap();
+
+    let c1 = manager
+        .form_coalition(vec![a1, a2], Coalition::new("alpha", 10, 100))
+        .await
+        .unwrap();
+
+    let before = manager.coalition_members(c1).await.unwrap();
+    assert_eq!(before.len(), 2);
+
+    // a1 is already a member: the re-join must succeed (not error) and leave
+    // the membership vector exactly as it was.
+    manager.join_coalition(a1, c1).await.unwrap();
+
+    let after = manager.coalition_members(c1).await.unwrap();
+    assert_eq!(after, before, "re-join of an existing member must not mutate membership");
+}
+
 #[tokio::test]
 async fn merge_coalitions() {
     let manager = CoalitionManager::<Agent, Coalition>::empty();

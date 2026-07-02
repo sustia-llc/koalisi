@@ -13,7 +13,8 @@ When you bump the project's behaviour, also:
 
 **koalisi** — a reference implementation of agentic coalitions in Rust.
 Four-layer architecture: Core (CoalitionRuntime, lifecycle), Topology
-(temporal hypergraph via hypergraph v4.2.0, event sourcing, CoalitionManager,
+(temporal hypergraph via `catgraph_applied::Hypergraph` since K1 — was
+yamafaktory hypergraph v4.2.0 — event sourcing, CoalitionManager,
 time-travel queries, analytics), Algorithms (DCVC workload distribution,
 AIPA partition search, pluggable value calculators), and Runtime (kameo
 actors, PubSub buses, remote gateway). The forex triangular arbitrage
@@ -23,20 +24,39 @@ coalition_aif (decision — planned), and forex-arbitrage-swarm (runtime).
 
 ## Available tooling for this project
 
-- **`graph` plugin v2.0.1** (`~/.claude/plugins/cache/sustia-claude-code-plugins/graph/2.0.1/`)
-  ships a `hypergraph` agent plus six hypergraph skills tracking
-  hypergraph v4.2.0 HEAD: `hypergraph-core`, `hypergraph-mutations`,
-  `hypergraph-algorithms`, `hypergraph-analytics`, `hypergraph-projections`,
-  `hypergraph-persistence`. Use them when working on `src/topology/` or
-  planning Phase 5 (the `hypergraph-persistence` skill maps directly onto
-  the planned `PersistentHypergraph` integration).
+- **`causality` (DeepCausality) plugin** — the relevant graph tooling since K1
+  (#4): koalisi's topology backend is `catgraph_applied::Hypergraph` (plain
+  `Vec`/`HashMap` container — read its module docs at the pinned catgraph tag
+  for the contract), and catgraph itself builds on the DeepCausality substrate
+  (`deep_causality_num` `Zero`/`One`; `ultragraph` for catgraph's graph
+  algorithms, Track A). Use `causality:causality-applied` (skills
+  `causality:causal-graphs` — ultragraph — and `causality:data-structures`)
+  for substrate-level questions, and `causality:causality-theory` for the
+  algebraic layer (`Rig`, HKT/witnesses) catgraph's enrichment sits on.
+- ~~`graph` plugin v2.0.1~~ (yamafaktory hypergraph skills) — **OBSOLETE for
+  `src/topology/` since K1**; historical reference only (pre-K1 semantics, the
+  dropped `PersistentHypergraph` idea — see the Phase 7 note).
 - `rust-v2:rust-dev-v2` / `rust-v2:rust-practical` — primary Rust agents per
   the user CLAUDE.md routing rules.
+- `surrealdb:surrealdb-rust-v3` / `surrealdb:surrealdb-search` /
+  `surrealdb:surrealql-language` — for K3 (#6) surrealdb-live-message work,
+  per the user CLAUDE.md routing rules.
 
 ## Current state — 2026-07-02
 
 ### Done
 
+- **catgraph backend swap (K1, issue #4)**: `TemporalHypergraph`/`SharedGraph`
+  re-backed on `catgraph_applied::Hypergraph` (git tag `v0.1.1`, the
+  catgraph#23 container); yamafaktory `hypergraph` v4.2.0 dep **dropped**.
+  Direct swap (approved deviation — no feature flag; parity by commits).
+  API deltas: `TemporalError`/`TemporalResult` lost their unused `<V, HE>`
+  generics; `VertexTrait`/`HyperedgeTrait` are koalisi-local blanket aliases
+  (`Copy + Eq + Debug + Send + Sync`); no-op updates now `Ok` (try_join
+  idempotency finally true — guard test); clears infallible. K4 backend-parity
+  re-run committed (`docs/ab-report-K4-catgraph.md`): quality numbers and both
+  verdicts byte-identical to the yamafaktory report. See §"Worth flagging"
+  entry 12 for the index/idempotency contract.
 - **A/B harness (K4, issue #7)**: `examples/strategy_comparison.rs` Part 2 —
   the pre-registered AIF-vs-magnitude battery (30 SplitMix64 seeds, PRIMARY =
   completion-rate × coverage-efficiency, oracle regret ≤ 8-agent pools, churn +
@@ -106,10 +126,10 @@ coalition_aif (decision — planned), and forex-arbitrage-swarm (runtime).
 - **Tests passing**:
   | Suite | Tests | Command |
   |---|---|---|
-  | Default | 67 | `cargo test` |
-  | `--features decision` | 86 | `cargo test --features decision` |
-  | `--features magnitude` | 76 | `cargo test --features magnitude` |
-  | `--features decision,magnitude` | 95 | `cargo test --features decision,magnitude` |
+  | Default | 68 | `cargo test` |
+  | `--features decision` | 87 | `cargo test --features decision` |
+  | `--features magnitude` | 77 | `cargo test --features magnitude` |
+  | `--features decision,magnitude` | 96 | `cargo test --features decision,magnitude` |
   | `--features databento` | + 4 databento integration | `cargo test --features databento` |
   | `--features remote` | + 1 remote integration | `cargo test --features remote` |
   | All 7 examples | exit 0 | see Reproducers below |
@@ -118,7 +138,7 @@ coalition_aif (decision — planned), and forex-arbitrage-swarm (runtime).
 
 ```
 koalisi/
-├── Cargo.toml                              path deps: kameo, git dep: hypergraph v4.2.0
+├── Cargo.toml                              path deps: kameo; git tag deps: catgraph-applied v0.1.1 (topology), aif + catgraph-magnitude (optional)
 ├── README.md                               user-facing
 ├── CLAUDE.md                               THIS FILE
 ├── config/{default,development,test}.toml  coalition threshold, history capacity, delivery
@@ -239,12 +259,27 @@ These cost time during the build; future-me should not relearn them.
     - kameo enables libp2p with `cbor, kad, noise, mdns, quic, request-response, tcp, tokio, yamux`, but NOT `macros`. Our `Cargo.toml` adds libp2p directly with `macros` so `SwarmBehaviour` derive works.
     - Generated event-enum naming: `#[derive(NetworkBehaviour)] struct SwarmBehaviour {...}` produces `SwarmBehaviourEvent`. Match on `SwarmEvent::Behaviour(SwarmBehaviourEvent::Mdns(…))`.
 
+12. **catgraph backend contracts (K1, #4) — rely on these, don't re-derive.**
+    - **Stable, never-reused indices**: `VertexIndex`/`HyperedgeIndex` come from
+      monotonic counters and survive removals AND `clear()` — the event-sourced
+      replay stores raw indices and depends on this.
+    - **No-op updates return `Ok`** (yamafaktory errored `…Unchanged`):
+      `try_join_coalition` re-join is genuinely idempotent now; the guard test
+      is `rejoin_existing_member_is_idempotent`. Don't add code that relies on
+      an `Err` to detect "already present".
+    - `add_vertex`/`clear`/`clear_hyperedges` are infallible; weights are
+      `Copy`, read by value. Hyperedges are ORDERED `Vec<VertexIndex>` with
+      duplicates allowed — dedup before handing member lists to
+      `catgraph_magnitude::coalition_value` (it errors on duplicates).
+    - Full contract: module docs of `catgraph-applied/src/hypergraph.rs` at the
+      pinned tag.
+
 ## Reproducers
 
 All assume `cwd = koalisi/`.
 
 ```sh
-# === default features (67 tests) ===
+# === default features (68 tests) ===
 timeout 60s  cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target
 timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example topology_coalition
 timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example algorithm_values
@@ -507,15 +542,22 @@ except latency — SplitMix64 inline, no `rand` dep).
 
 ### Phase 7: Persistence  *(planned — gated, see above; was Phase 5, moved last)*
 
-Feature-gated persistence using hypergraph v4.2.0's `PersistentHypergraph`
-for graph state plus an `EventStore` trait for temporal event durability.
-Default impl: append-only file log with `rmp-serde`. Moved to the end of
-the pipeline so the SwarmAgentic optimisation traces (Phase 5) and
+> **K1 impact (2026-07-02): the original `PersistentHypergraph` approach is
+> OBSOLETE.** It came from yamafaktory hypergraph v4.2.0, which K1 (#4)
+> dropped; `catgraph_applied::Hypergraph` deliberately has no serde/persistence
+> (upstream design). Phase 7 must re-plan graph-state durability — likely
+> event-log-only (the `EventStore` trait below + point-in-time reconstruction
+> already covers state rebuild), or a catgraph-side snapshot format. Also note
+> K3's surrealdb-live-message direction seeds the message-event stream side.
+
+Feature-gated persistence via an `EventStore` trait for temporal event
+durability. Default impl: append-only file log with `rmp-serde`. Moved to the
+end of the pipeline so the SwarmAgentic optimisation traces (Phase 5) and
 Active Inference belief states (Phase 6) inform the persistence schema
 before we commit to a wire format. See `.claude/plans/` for the
-original design (still applicable; new requirement is that
-`EventStore` must also be able to durably record SwarmAgentic particle
-lineages and EFE belief snapshots).
+original design (graph-snapshot part superseded per the K1 note; new
+requirement is that `EventStore` must also be able to durably record
+SwarmAgentic particle lineages and EFE belief snapshots).
 
 ### Downstream: nautilus_trader bridge  *(separate project)*
 

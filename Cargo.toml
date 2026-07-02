@@ -22,8 +22,10 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 config = { version = "0.15", default-features = false, features = ["toml"] }
 serde = { version = "1.0", features = ["derive"] }
 
-# Hypergraph — directed hypergraph data structure (topology layer)
-hypergraph = { git = "https://github.com/yamafaktory/hypergraph", tag = "v4.2.0" }
+# Topology backend: catgraph's CRUD hypergraph container (the K1 re-back,
+# catgraph#23 design). SSH URL (not HTTPS) because catgraph is private and git
+# here is SSH-only — same rationale as `aif` / `catgraph-magnitude`.
+catgraph-applied = { git = "ssh://git@github.com/sustia-llc/catgraph", tag = "v0.1.1" }
 rayon = "1.12"
 tokio-rayon = "2.1"
 

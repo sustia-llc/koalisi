@@ -31,6 +31,39 @@ Planned work (tracked in [`CLAUDE.md`](./CLAUDE.md) §"Next steps"):
 - **Remote gateway hardening** — bounded buffer, cursor-based polling,
   stable wire schema, QUIC transport alongside TCP.
 
+### Changed (unreleased — issue [#4] catgraph backend, K1)
+
+- **Topology backend swapped**: `TemporalHypergraph`/`SharedGraph` re-backed
+  from yamafaktory `hypergraph` v4.2.0 onto `catgraph_applied::Hypergraph`
+  (git tag `v0.1.1` — the catgraph#23 container, purpose-built from koalisi's
+  call-site survey). Direct swap, no feature flag (staging deviation approved
+  on [#4]); the yamafaktory dep is **dropped**. `CoalitionManager` / decision
+  seams unchanged; tokio-rayon executor path intact.
+- **API deltas**:
+  - `TemporalError`/`TemporalResult` drop their `<V, HE>` generics (they
+    existed solely for yamafaktory's generic error; catgraph's
+    `HypergraphError` is non-generic).
+  - `topology::{VertexTrait, HyperedgeTrait}` are now koalisi-local
+    blanket-impl aliases: `Copy + Eq + Debug + Send + Sync` (relaxed from the
+    old backend's additional `Display + Hash` and `Into<usize>`; `Send + Sync`
+    carried over, now explicit).
+  - Behavior: no-op updates return `Ok` (yamafaktory errored `…Unchanged`) —
+    `CoalitionManager::try_join_coalition`'s documented idempotency is now
+    true, guarded by `rejoin_existing_member_is_idempotent`; clears are
+    infallible.
+- **K4 backend-parity re-run (pre-registered on [#7])**:
+  `docs/ab-report-K4-catgraph.md` — every per-seed quality number, churn,
+  oracle, t-sweep value and both verdicts byte-identical to the yamafaktory
+  report; only the backend header + machine-varying latency lines differ.
+  Parity: PASS (as predicted — the decision path never touches the topology
+  backend).
+- Suite grows by the idempotency guard test: 68 default / 87 `decision` /
+  77 `magnitude` / 96 both / +4 `databento` / +1 `remote`. Also fixed a
+  pre-existing `clippy::derivable_impls` on `databento::Pacing` (0-warning
+  parity restored under current clippy).
+
+[#4]: https://github.com/sustia-llc/koalisi/issues/4
+
 ### Added (unreleased — issue [#7] A/B harness, K4)
 
 - **Pre-registered A/B harness** ([#7], `examples/strategy_comparison.rs`, now

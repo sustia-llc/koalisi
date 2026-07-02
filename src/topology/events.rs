@@ -1,7 +1,7 @@
 //! Event types for the temporal hypergraph event log.
 
 use super::timestamp::Timestamp;
-use hypergraph::{HyperedgeIndex, VertexIndex};
+use catgraph_applied::{HyperedgeIndex, VertexIndex};
 use std::fmt::Debug;
 
 /// A unique identifier for a snapshot.
