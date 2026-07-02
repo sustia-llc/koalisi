@@ -16,9 +16,12 @@ Four-layer architecture: Core (CoalitionRuntime, lifecycle), Topology
 (temporal hypergraph via `catgraph_applied::Hypergraph` since K1 — was
 yamafaktory hypergraph v4.2.0 — event sourcing, CoalitionManager,
 time-travel queries, analytics), Algorithms (DCVC workload distribution,
-AIPA partition search, pluggable value calculators), and Runtime (kameo
-actors, PubSub buses, remote gateway). The forex triangular arbitrage
-domain is preserved as a working adapter; the architecture is domain-agnostic.
+AIPA partition search, pluggable value calculators), and Runtime (since K3:
+tokio tasks with mpsc/oneshot command handles + broadcast buses — kameo is
+gone — plus a thin task-restart layer, a raw-libp2p remote gateway, and an
+optional SurrealDB-backed durable decision log). The forex triangular
+arbitrage domain is preserved as a working adapter; the architecture is
+domain-agnostic.
 Evolved from four prior projects: dynamo (topology), coalesce (algorithms),
 coalition_aif (decision — planned), and forex-arbitrage-swarm (runtime).
 
@@ -46,6 +49,23 @@ coalition_aif (decision — planned), and forex-arbitrage-swarm (runtime).
 
 ### Done
 
+- **Messaging swap (K3, issue #6) — kameo GONE**: the runtime layer is pure
+  `tokio::sync` (hybrid — hot seams never touch a DB). Workers
+  (`MarketMonitor`/`ArbitrageCoordinator`/`AlertSink`) are tasks over mpsc
+  command enums with oneshot-correlated replies + `*Handle` wrappers;
+  `tick_bus`/`alert_bus` are `broadcast` (cap 1024, `Lagged` skips overflow);
+  `Ping`/`GetQuotes`/`GetAlerts` drain-then-reply as deterministic flush
+  barriers. `CoalitionActor` → `CoalitionService` (same file). Thin restart
+  layer `core::supervision::spawn_supervised` (factory rebuild on panic,
+  sliding-window restart budget). Remote gateway ported to raw libp2p
+  `request-response` (`/koalisi/alerts/1`, CBOR; `RemoteAlertClient`; no
+  `init_global`). NEW `durable` feature (off by default):
+  `surrealdb-live-message` v0.2.0 two-tier bus; `CoalitionService` decision
+  tap (`DecisionRecord`, feature-independent) → `subsystems::durable`
+  forwarder → restart-durable decision log; container-backed restart test.
+  Bench: every hot-path metric improved (`docs/k3-hot-path-bench.md`,
+  alert RTT median 22.5 → 9.0 µs, throughput +56%). See §"Worth flagging"
+  entries 13–14; gotchas 1/2/6/9/10 are obsolete.
 - **catgraph backend swap (K1, issue #4)**: `TemporalHypergraph`/`SharedGraph`
   re-backed on `catgraph_applied::Hypergraph` (git tag `v0.1.1`, the
   catgraph#23 container); yamafaktory `hypergraph` v4.2.0 dep **dropped**.
@@ -126,13 +146,14 @@ coalition_aif (decision — planned), and forex-arbitrage-swarm (runtime).
 - **Tests passing**:
   | Suite | Tests | Command |
   |---|---|---|
-  | Default | 68 | `cargo test` |
-  | `--features decision` | 87 | `cargo test --features decision` |
-  | `--features magnitude` | 77 | `cargo test --features magnitude` |
-  | `--features decision,magnitude` | 96 | `cargo test --features decision,magnitude` |
+  | Default | 77 | `cargo test` |
+  | `--features decision` | 96 | `cargo test --features decision` |
+  | `--features magnitude` | 86 | `cargo test --features magnitude` |
+  | `--features decision,magnitude` | 105 | `cargo test --features decision,magnitude` |
+  | `--features durable` | 78 (+1 container-backed restart test; needs Docker) | `cargo test --features durable` |
   | `--features databento` | + 4 databento integration | `cargo test --features databento` |
   | `--features remote` | + 1 remote integration | `cargo test --features remote` |
-  | All 7 examples | exit 0 | see Reproducers below |
+  | All examples | exit 0 | see Reproducers below |
 
 ### File inventory
 
@@ -141,7 +162,7 @@ koalisi/
 ├── Cargo.toml                              path deps: kameo; git tag deps: catgraph-applied v0.1.1 (topology), aif + catgraph-magnitude (optional)
 ├── README.md                               user-facing
 ├── CLAUDE.md                               THIS FILE
-├── config/{default,development,test}.toml  coalition threshold, history capacity, delivery
+├── config/{default,development,test}.toml  coalition threshold, history capacity; [sdb]+[docker] for the durable feature's upstream SETTINGS (cwd-resolved)
 ├── src/
 │   ├── lib.rs                              module surface + re-exports
 │   ├── main.rs                             daemon binary with scripted live feed
@@ -149,7 +170,8 @@ koalisi/
 │   ├── core/
 │   │   ├── mod.rs                          re-exports
 │   │   ├── config.rs                       Settings + CoalitionSettings + setup_logging
-│   │   └── runtime.rs                      CoalitionRuntime (TaskTracker + CancellationToken)
+│   │   ├── runtime.rs                      CoalitionRuntime (TaskTracker + CancellationToken)
+│   │   └── supervision.rs                  spawn_supervised (K3 task-restart layer, replaces kameo OneForOne)
 │   ├── topology/
 │   │   ├── mod.rs                          re-exports + hypergraph type re-exports
 │   │   ├── timestamp.rs                    Timestamp, TimeRange, Clock + 8 unit tests
@@ -173,27 +195,36 @@ koalisi/
 │   ├── llm/
 │   │   └── mod.rs                          LlmProvider trait + StubLlmProvider (Phase 5 anchor)
 │   └── subsystems/
-│       ├── monitor.rs                      MarketMonitor (Tick, GetSnapshot, Ping)
-│       ├── coordinator.rs                  ArbitrageCoordinator (TickUpdate, GetQuotes, Ping)
-│       ├── sink.rs                         AlertSink (ArbitrageOpportunity, GetAlerts, DrainAlerts, Ping)
-│       ├── swarm.rs                        Swarm (wraps CoalitionRuntime) + SwarmConfig + SwarmFeeder
-│       ├── coalition_actor.rs              CoalitionActor (policy-gated membership seam, issue #1)
+│       ├── monitor.rs                      MarketMonitor task + MonitorHandle (feed/tell/snapshot/ping)
+│       ├── coordinator.rs                  ArbitrageCoordinator task + CoordinatorHandle (broadcast tick_bus in, alert_bus out)
+│       ├── sink.rs                         AlertSink task + SinkHandle (get/drain alerts, ping)
+│       ├── swarm.rs                        Swarm (wraps CoalitionRuntime) + SwarmConfig + SwarmFeeder (mpsc senders)
+│       ├── coalition_actor.rs              CoalitionService + handle (policy-gated membership seam, #1) + DecisionRecord tap (K3)
+│       ├── durable.rs                      DecisionEvent + DurableDecisionBus + forwarder (feature `durable`, K3)
 │       ├── databento.rs                    DBN adapter (feature `databento`)
-│       └── distributed.rs                  RemoteAlertGateway + libp2p wiring (feature `remote`)
+│       └── distributed.rs                  raw-libp2p request-response alert gateway + RemoteAlertClient (feature `remote`)
 ├── examples/
 │   ├── topology_coalition.rs               coalition lifecycle + time-travel queries
 │   ├── algorithm_values.rs                 value calculators + DCVC + AIPA
 │   ├── historical_bootstrap.rs             single-pair history replay
-│   ├── live_pubsub.rs                      scripted feed + user listener
+│   ├── live_pubsub.rs                      scripted feed + broadcast listener
 │   ├── triangular_arbitrage.rs             full triangle, fires arb signals
-│   ├── supervised_swarm.rs                 kameo supervisor + restart
+│   ├── supervised_swarm.rs                 spawn_supervised restart demo (K3)
+│   ├── hot_path_bench.rs                   K3 latency bench (run --release)
+│   ├── strategy_comparison.rs              divergence demo + K4 A/B battery (features decision,magnitude)
+│   ├── durable_decisions.rs                durable decision log end-to-end (feature `durable`)
 │   ├── databento_historical.rs             (feature `databento`)
 │   ├── databento_live_replay.rs            (feature `databento`)
-│   └── distributed_alert_consumer.rs       (feature `remote`)
+│   └── distributed_alert_consumer.rs       ROLE=producer/consumer over libp2p rr (feature `remote`)
+├── docs/
+│   ├── ab-report-K4-{yamafaktory,catgraph}.md   K4 A/B + backend-parity reports
+│   └── k3-hot-path-bench.md                K3 kameo-vs-tokio bench evidence
 └── tests/
-    ├── topology_test.rs                    11 tests
+    ├── topology_test.rs                    12 tests
     ├── algorithms_test.rs                  15 tests
     ├── integration_test.rs                 5 tests (forex)
+    ├── decision_integration.rs             4–6 tests (feature-dependent)
+    ├── durable_integration.rs              1 container-backed restart test (feature `durable`)
     ├── databento_integration.rs            4 tests (feature `databento`)
     └── remote_integration.rs               1 test (feature `remote`)
 ```
@@ -202,12 +233,12 @@ koalisi/
 
 These cost time during the build; future-me should not relearn them.
 
-1. **kameo supervised actors keep the same `ActorId` across restart.**
+1. **~~kameo supervised actors keep the same `ActorId` across restart.~~ OBSOLETE since K3 (#6)** — kameo is gone; restarts are `core::supervision::spawn_supervised` factory rebuilds (no id identity at all). Kept for history:
    - In `examples/supervised_swarm.rs` the original monitor (id=#2) panics, gets restarted, and the NEW actor is also id=#2.
    - `monitor.wait_for_shutdown()` therefore HANGS on a supervised actor — from the ref's perspective the actor only blips down and back up; "shutdown" never finalises.
    - Workaround: after `tell(ForcePanic)`, do a brief sleep + `supervisor.ask(Ping)` to confirm the supervisor is alive. The original `monitor` ref still works against the restarted instance because the id is preserved.
 
-2. **`anyhow::Context` shadows `kameo::Context`.**
+2. **~~`anyhow::Context` shadows `kameo::Context`.~~ OBSOLETE since K3 (#6)** — kameo is gone. Kept for history:
    - kameo's prelude exports `Context<Self, Reply>` (the actor handler parameter type).
    - anyhow exports a `Context` trait for `.context("…")?` on `Result`.
    - `use anyhow::{Context, ...}` + `use kameo::prelude::*` → compile error "expected a type, found a trait" on `_: &mut Context<Self, Self::Reply>`.
@@ -219,7 +250,7 @@ These cost time during the build; future-me should not relearn them.
    - Sufficient to verify the adapter pipeline; insufficient to fire triangular arb signals (only one leg).
    - The `SymbolMapper` signature is `Fn(u32, Option<&str>) -> Option<Pair>` so production users can swap in a forex-bearing DBN file with their own mapping.
 
-4. **Path dependencies on kameo.**
+4. **~~Path dependencies on kameo.~~ OBSOLETE since K3 (#6)** — both kameo deps removed. Kept for history:
    - `Cargo.toml` references `../../agentics/kameo` and `../../agentics/kameo/actors`.
    - This breaks if either repo moves. When the upstream `kameo 0.20.0` stabilises on crates.io with the API we're using, switch to a version dep.
 
@@ -231,7 +262,7 @@ These cost time during the build; future-me should not relearn them.
      4. `../databento-rs/tests/data/test_data.mbp-1.dbn.zst`
    - Tests "skip with diagnostic" (print + pass) if not found, so CI without the file still goes green.
 
-6. **PubSub `Subscribe` requires the subscriber to be alive.**
+6. **~~PubSub `Subscribe` requires the subscriber to be alive.~~ OBSOLETE since K3 (#6)** — buses are `tokio::sync::broadcast`; `subscribe()` is synchronous and order-free. Kept for history:
    - `swarm.alert_bus().ask(Subscribe(listener))` panics/errors if `listener` hasn't been spawned yet.
    - All current examples spawn the listener first, then subscribe — keep that order.
 
@@ -240,17 +271,17 @@ These cost time during the build; future-me should not relearn them.
    - Wrap with `timeout 30s` (or 60s, 120s as appropriate) so a hang in a freshly-built binary is killed cleanly, not just the shell wrapper.
    - Pattern: `timeout 30s cargo run --manifest-path Cargo.toml --target-dir /tmp/… --example foo 2>/dev/null ; echo "exit=$?"`. Exit 124 = unix `timeout` fired.
 
-8. **libp2p remote actor RPC: hybrid, NOT hot-path.**
+8. **libp2p remote RPC: hybrid, NOT hot-path** *(updated K3 — the gateway is now raw libp2p `request-response`, protocol `/koalisi/alerts/1`, CBOR; the rationale below still holds with "kameo remote ask" replaced by "libp2p rr round-trip").*
    - The `remote` feature is intentionally a *publish-to-outside-world* boundary, NOT a replacement for the local mpsc hot path.
    - Rationale: local `ask` is sub-μs (see `kameo/benches/overhead.rs`); `remote::ask` adds rmp-serde encode/decode + libp2p `request-response` over yamux + noise + network I/O — ≅10μs loopback, ≅10µs–1ms real network. Default `remote::messaging::Config::request_timeout` is **10 seconds**, sized for the network, not for actor-internal calls.
    - Trait-bound asymmetry: local needs `Send + 'static`. Remote needs `Send + 'static + Serialize + DeserializeOwned` on messages, `Serialize` on `Reply::Ok` and `Reply::Error`, `#[derive(RemoteActor)]` on the actor, `#[remote_message]` on each exposed handler. Strictly more, not less.
    - The hybrid we settled on: `MarketMonitor` → `tick_bus` → `Coordinator` → `alert_bus` → `AlertSink` is all local mpsc. A separate `RemoteAlertGateway` actor subscribes to `alert_bus` AND is remote-registered. Off-process consumers (`RemoteActorRef::<RemoteAlertGateway>::lookup(name).ask(&PollOpportunities)`) get alerts without ever touching the hot path.
 
-9. **`kameo::remote::Behaviour::init_global()` is process-wide.**
+9. **~~`kameo::remote::Behaviour::init_global()` is process-wide.~~ OBSOLETE since K3 (#6)** — no global init; producer + client coexist in one process (the remote test does exactly that). Kept for history:
    - Called once inside `enable_remote_alerts`. Calling it twice in the same process (e.g., from two integration tests in a single binary) will conflict.
    - For now: one `remote_integration` test only. Future remote tests need to share the libp2p swarm, OR use `serial_test` + tear-down hooks.
 
-10. **`ActorRef::register` returns `Result<(), RegistryError>`; with the `remote` feature it becomes `async`.**
+10. **~~`ActorRef::register` / registry names~~ OBSOLETE since K3 (#6)** — no registry; the rr protocol name is the service identity. Kept for history:
     - Signature is `register(impl Into<Arc<str>>)`. Passing `&String` doesn't work — `&String` does not impl `Into<Arc<str>>`. Pass `&str` (via `.as_str()` or `&literal`).
     - Without `remote`: sync, just returns `Result<(), RegistryError>` (no `.await`).
     - With `remote`: returns a future that resolves once libp2p propagates the registration.
@@ -274,12 +305,46 @@ These cost time during the build; future-me should not relearn them.
     - Full contract: module docs of `catgraph-applied/src/hypergraph.rs` at the
       pinned tag.
 
+13. **K3 runtime contracts (tokio::sync seams).**
+    - **Broadcast buses**: `tick_bus`/`alert_bus` are `broadcast::Sender` (cap
+      1024); a subscriber > capacity behind gets `RecvError::Lagged` and skips
+      the overflow. `Swarm::{tick_bus,alert_bus}` return `&Sender` — call
+      `.subscribe()`.
+    - **Flush barriers**: `Ping`/`GetQuotes`/`GetAlerts` handlers DRAIN the
+      buffered broadcast before replying, and `flush()` pings monitors →
+      coordinator → sink in order — that reconstruction of kameo's FIFO-mailbox
+      guarantee is what keeps the integration tests deterministic. Don't
+      "optimize" the drain away.
+    - **`MonitorHandle::feed` is acknowledged** (the old ask barrier);
+      `::tell` is fire-and-forget. `SwarmFeeder::feed_tick` uses `feed`.
+    - **Restart layer**: `spawn_supervised` rebuilds from the factory on PANIC
+      only (token cancellation is not a failure); sliding-window
+      `restart_limit`; exceeding gives up + cancels the child token.
+
+14. **`durable` feature gotchas (surrealdb-live-message v0.2.0).**
+    - **Upstream `SETTINGS` resolves from the CONSUMER's cwd**: `config/default`
+      (required) + `config/{RUN_MODE}` + env. koalisi's `config/default.toml`
+      carries `[sdb]` + `[docker]` for it (inert feature-off). Running durable
+      tests/examples from another cwd breaks settings resolution.
+    - **`SurrealValue` derive emits absolute crate paths**: koalisi pins
+      `#[surreal(crate = "::surrealdb_types")]` on `DecisionEvent` (hence the
+      small gated `surrealdb-types` dep). Without the pin the derive resolves
+      `::surrealdb::types`, which koalisi doesn't depend on.
+    - **Linking `serde_json` (via surrealdb) makes untyped empty-vec asserts
+      ambiguous** (`impl PartialEq<Value> for usize`): write
+      `vec![Vec::<usize>::new()]`, not `vec![vec![]]` — bit aipa tests once.
+    - **The decision tap never blocks**: `try_send` + drop-with-warn on
+      full/closed. Durability is at-least-once from the tap ONWARD; a dropped
+      tap record is a koalisi-side loss (size the channel accordingly).
+    - Docker required for the container-backed test; upstream's
+      `SurrealDBContainer` (bollard) manages the instance.
+
 ## Reproducers
 
 All assume `cwd = koalisi/`.
 
 ```sh
-# === default features (68 tests) ===
+# === default features (77 tests) ===
 timeout 60s  cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target
 timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example topology_coalition
 timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example algorithm_values
@@ -288,11 +353,18 @@ timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-tar
 timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example live_pubsub
 timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example supervised_swarm
 
-# === decision-layer feature combos (86 / 76 / 95 tests) ===
+# === decision-layer feature combos (96 / 86 / 105 tests) ===
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features magnitude
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision,magnitude
 timeout 120s cargo run --release --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision,magnitude --example strategy_comparison
+
+# === K3 hot-path bench (release; see docs/k3-hot-path-bench.md) ===
+timeout 120s cargo run --release --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example hot_path_bench
+
+# === with durable feature (needs Docker; container-backed restart test) ===
+timeout 300s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features durable
+timeout 120s cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features durable --example durable_decisions
 
 # === with databento feature ===
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features databento
@@ -541,6 +613,20 @@ except latency — SplitMix64 inline, no `rand` dep).
 - Exploratory t-sweep lives in the example (`TSweepMagnitudePolicy`), NOT the
   library — t = 1 stays the pinned stable arm (catgraph #22). Sweep medians
   were flat (0.4428–0.4490 across t ∈ {0.5, 1, 2, 10}).
+
+**K3 — messaging swap ([#6](https://github.com/sustia-llc/koalisi/issues/6), DONE 2026-07-02).**
+Hybrid per the pin: hot seams on `tokio::sync` (broadcast buses, mpsc/oneshot
+handles, drain-based flush barriers), kameo + kameo_actors REMOVED, thin
+restart layer (`core::supervision`), remote gateway on raw libp2p
+`request-response`, and the `durable` feature (off by default) putting the
+decision-event stream on `surrealdb-live-message` v0.2.0's two-tier
+restart-durable bus (tag cut for K3 — the #6 pin's "v0.1.0" was stale; the
+restart-durability acceptance needs the v0.2.0 cursor-replay bus). Acceptance
+evidence: `docs/k3-hot-path-bench.md` (every hot-path metric improved) +
+`tests/durable_integration.rs` (container-backed restart replay). Gotchas 13–14.
+The durable decision log seeds Phase 7's message-event stream (retention sweep
+is a bounded window, NOT a full event store — Phase 7 still owns real
+durability).
 
 ### Phase 7: Persistence  *(planned — gated, see above; was Phase 5, moved last)*
 

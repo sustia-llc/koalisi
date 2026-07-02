@@ -10,9 +10,11 @@ actor-based runtime orchestration.
 
 ```
 ┌─────────────────────────────────────────────────┐
-│  Runtime Layer (kameo actors)                    │
-│  PubSub buses, TaskTracker, CancellationToken,  │
-│  three-step shutdown, libp2p remote gateway      │
+│  Runtime Layer (tokio tasks)                     │
+│  broadcast buses, mpsc/oneshot handles,          │
+│  TaskTracker + CancellationToken three-step      │
+│  shutdown, task-restart supervision, libp2p      │
+│  remote gateway, optional durable decision log   │
 ├─────────────────────────────────────────────────┤
 │  Algorithm Layer                                 │
 │  DCVC workload distribution, AIPA partition      │
@@ -36,7 +38,7 @@ actor-based runtime orchestration.
 | `topology` | Temporal hypergraph with event sourcing, `CoalitionManager`, time-travel queries, analytics |
 | `algorithms` | `ValueCalculator` trait + 4 calculators, `DCVCDistributor`, AIPA partition search |
 | `decision` | `CoalitionDecisionPolicy` trait + always-available `ThresholdPolicy`; optional Active Inference strategy (`EfeValueCalculator`, `AifDecisionPolicy`) behind the `decision` feature; optional categorical-magnitude strategy (`MagnitudeValueCalculator`, `MagnitudePolicy`) behind the `magnitude` feature |
-| `subsystems` | Forex-specific kameo actors (monitor, coordinator, sink, swarm) |
+| `subsystems` | Forex-specific tokio task workers (monitor, coordinator, sink, swarm), libp2p remote gateway (`remote`), durable decision log (`durable`) |
 | `market` | Forex value types (Pair, Tick, Quote, Triangle, ArbitrageOpportunity) |
 
 ## Quick start
@@ -105,20 +107,22 @@ cargo run --features remote --example distributed_alert_consumer
 ## Tests
 
 ```sh
-cargo test                                 # 68 tests (core + topology + algorithms + decision + forex)
-cargo test --features decision             # 87 tests (+ Active Inference decision strategy)
-cargo test --features magnitude            # 77 tests (+ categorical-magnitude decision strategy)
-cargo test --features decision,magnitude   # 96 tests (both decision arms)
+cargo test                                 # 77 tests (core + topology + algorithms + decision + forex)
+cargo test --features decision             # 96 tests (+ Active Inference decision strategy)
+cargo test --features magnitude            # 86 tests (+ categorical-magnitude decision strategy)
+cargo test --features decision,magnitude   # 105 tests (both decision arms)
+cargo test --features durable              # + container-backed restart-durability test (needs Docker)
 cargo test --features databento            # + 4 databento integration tests
 cargo test --features remote               # + 1 remote integration test
 ```
 
 ## Dependencies
 
-- [kameo](https://github.com/tqwewe/kameo) — actor framework (path dep, pre-0.20.0)
 - [catgraph-applied](https://github.com/sustia-llc/catgraph) (tag `v0.1.1`) — CRUD hypergraph container backing the topology layer (the K1 re-back; replaced yamafaktory `hypergraph` v4.2.0)
 - tokio + tokio-util — async runtime + lifecycle primitives
 - rayon + tokio-rayon — CPU-bound graph operations bridge
+- [surrealdb-live-message](https://github.com/sustia-llc/surrealdb-live-message) (tag `v0.2.0`, **optional**, feature `durable`) — two-tier restart-durable message bus for the coalition decision log
+- libp2p (**optional**, feature `remote`) — request-response alert gateway + mDNS discovery
 - [aif](https://github.com/sustia-llc/tira) (tag `aif-v0.5.0`, **optional**, feature `decision`) — active-inference engine for the AIF decision strategy; pulls `nalgebra` only when the feature is enabled
 - [catgraph-magnitude](https://github.com/sustia-llc/catgraph) (tag `v0.1.1`, **optional**, feature `magnitude`) — enriched-category coalition magnitude for the categorical decision strategy
 
