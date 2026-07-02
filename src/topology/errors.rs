@@ -2,18 +2,17 @@
 
 use super::events::SnapshotId;
 use super::timestamp::Timestamp;
-use hypergraph::errors::HypergraphError;
-use std::fmt::Debug;
+use catgraph_applied::HypergraphError;
 
 /// Errors that can occur during temporal hypergraph operations.
+///
+/// K1 (sustia-llc/koalisi#4): the underlying [`HypergraphError`] is now
+/// non-generic, so this type no longer carries the `<V, HE>` weight parameters
+/// either — every variant is weight-independent.
 #[derive(Debug)]
-pub enum TemporalError<V, HE>
-where
-    V: Copy + Debug + Eq,
-    HE: Copy + Debug + Eq,
-{
+pub enum TemporalError {
     /// An error from the underlying hypergraph.
-    Hypergraph(HypergraphError<V, HE>),
+    Hypergraph(HypergraphError),
 
     /// The requested timestamp is in the future.
     TimestampInFuture {
@@ -49,14 +48,10 @@ where
     EmptyCoalition,
 }
 
-impl<V, HE> std::fmt::Display for TemporalError<V, HE>
-where
-    V: Copy + Debug + Eq,
-    HE: Copy + Debug + Eq,
-{
+impl std::fmt::Display for TemporalError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Hypergraph(e) => write!(f, "Hypergraph error: {:?}", e),
+            Self::Hypergraph(e) => write!(f, "Hypergraph error: {}", e),
             Self::TimestampInFuture { requested, current } => {
                 write!(
                     f,
@@ -90,22 +85,13 @@ where
     }
 }
 
-impl<V, HE> std::error::Error for TemporalError<V, HE>
-where
-    V: Copy + Debug + Eq,
-    HE: Copy + Debug + Eq,
-{
-}
+impl std::error::Error for TemporalError {}
 
-impl<V, HE> From<HypergraphError<V, HE>> for TemporalError<V, HE>
-where
-    V: Copy + Debug + Eq,
-    HE: Copy + Debug + Eq,
-{
-    fn from(e: HypergraphError<V, HE>) -> Self {
+impl From<HypergraphError> for TemporalError {
+    fn from(e: HypergraphError) -> Self {
         Self::Hypergraph(e)
     }
 }
 
 /// Result type for temporal operations.
-pub type TemporalResult<T, V, HE> = Result<T, TemporalError<V, HE>>;
+pub type TemporalResult<T> = Result<T, TemporalError>;

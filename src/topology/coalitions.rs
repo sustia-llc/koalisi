@@ -10,7 +10,8 @@ use super::temporal::TemporalHypergraph;
 use super::timestamp::{TimeRange, Timestamp};
 use crate::algorithms::AgentCapabilities;
 use crate::decision::{CoalitionDecisionPolicy, Decision, DecisionContext};
-use hypergraph::{HyperedgeIndex, HyperedgeTrait, VertexIndex, VertexTrait};
+use super::{HyperedgeTrait, VertexTrait};
+use catgraph_applied::{HyperedgeIndex, VertexIndex};
 use std::collections::HashMap;
 
 /// Manages coalitions (hyperedges) of agents (vertices) in a temporal hypergraph.
@@ -79,7 +80,7 @@ where
     // =========================================================================
 
     /// Add an agent to the system.
-    pub async fn add_agent(&self, agent: V) -> TemporalResult<VertexIndex, V, HE> {
+    pub async fn add_agent(&self, agent: V) -> TemporalResult<VertexIndex> {
         self.graph.add_vertex(agent).await
     }
 
@@ -87,12 +88,12 @@ where
     ///
     /// Note: This does not automatically remove the agent from coalitions.
     /// The coalitions will retain references to the removed agent index.
-    pub async fn remove_agent(&self, agent: VertexIndex) -> TemporalResult<(), V, HE> {
+    pub async fn remove_agent(&self, agent: VertexIndex) -> TemporalResult<()> {
         self.graph.remove_vertex(agent).await
     }
 
     /// Get an agent's weight/data.
-    pub async fn get_agent(&self, agent: VertexIndex) -> TemporalResult<V, V, HE> {
+    pub async fn get_agent(&self, agent: VertexIndex) -> TemporalResult<V> {
         self.graph.get_vertex_weight(agent).await
     }
 
@@ -101,7 +102,7 @@ where
         &self,
         agent: VertexIndex,
         new_data: V,
-    ) -> TemporalResult<(), V, HE> {
+    ) -> TemporalResult<()> {
         self.graph.update_vertex_weight(agent, new_data).await
     }
 
@@ -116,7 +117,7 @@ where
         &self,
         agents: Vec<VertexIndex>,
         coalition: HE,
-    ) -> TemporalResult<HyperedgeIndex, V, HE> {
+    ) -> TemporalResult<HyperedgeIndex> {
         self.graph.add_hyperedge(agents, coalition).await
     }
 
@@ -126,7 +127,7 @@ where
     pub async fn dissolve_coalition(
         &self,
         coalition: HyperedgeIndex,
-    ) -> TemporalResult<(), V, HE> {
+    ) -> TemporalResult<()> {
         self.graph.remove_hyperedge(coalition).await
     }
 
@@ -138,7 +139,7 @@ where
         &self,
         agent: VertexIndex,
         coalition: HyperedgeIndex,
-    ) -> TemporalResult<(), V, HE> {
+    ) -> TemporalResult<()> {
         self.graph
             .update_hyperedge_vertices_try(coalition, move |mut members| {
                 if !members.contains(&agent) {
@@ -158,7 +159,7 @@ where
         &self,
         agent: VertexIndex,
         coalition: HyperedgeIndex,
-    ) -> TemporalResult<(), V, HE> {
+    ) -> TemporalResult<()> {
         self.graph
             .update_hyperedge_vertices_try(coalition, move |members| {
                 let new_members: Vec<VertexIndex> =
@@ -173,7 +174,7 @@ where
     }
 
     /// Get the coalition's weight/data.
-    pub async fn get_coalition(&self, coalition: HyperedgeIndex) -> TemporalResult<HE, V, HE> {
+    pub async fn get_coalition(&self, coalition: HyperedgeIndex) -> TemporalResult<HE> {
         self.graph.get_hyperedge_weight(coalition).await
     }
 
@@ -182,7 +183,7 @@ where
         &self,
         coalition: HyperedgeIndex,
         new_data: HE,
-    ) -> TemporalResult<(), V, HE> {
+    ) -> TemporalResult<()> {
         self.graph
             .update_hyperedge_weight(coalition, new_data)
             .await
@@ -192,7 +193,7 @@ where
     pub async fn coalition_members(
         &self,
         coalition: HyperedgeIndex,
-    ) -> TemporalResult<Vec<VertexIndex>, V, HE> {
+    ) -> TemporalResult<Vec<VertexIndex>> {
         self.graph.get_hyperedge_vertices(coalition).await
     }
 
@@ -203,7 +204,7 @@ where
     pub async fn merge_coalitions(
         &self,
         coalitions: Vec<HyperedgeIndex>,
-    ) -> TemporalResult<(), V, HE> {
+    ) -> TemporalResult<()> {
         self.graph.join_hyperedges(coalitions).await
     }
 
@@ -420,7 +421,7 @@ where
     HE: HyperedgeTrait + Clone + 'static,
 {
     /// Fetch the (Copy/Clone) weights of `members`, preserving order.
-    async fn agent_weights(&self, members: &[VertexIndex]) -> TemporalResult<Vec<V>, V, HE> {
+    async fn agent_weights(&self, members: &[VertexIndex]) -> TemporalResult<Vec<V>> {
         let mut weights = Vec::with_capacity(members.len());
         for &idx in members {
             weights.push(self.get_agent(idx).await?);
@@ -446,7 +447,7 @@ where
         coalition: HyperedgeIndex,
         policy: &dyn CoalitionDecisionPolicy,
         ctx: &DecisionContext,
-    ) -> TemporalResult<Decision, V, HE> {
+    ) -> TemporalResult<Decision> {
         let agent_weight = self.get_agent(agent).await?;
 
         // `should_join` convention: `coalition` excludes the candidate.
@@ -489,7 +490,7 @@ where
         coalition: HyperedgeIndex,
         policy: &dyn CoalitionDecisionPolicy,
         ctx: &DecisionContext,
-    ) -> TemporalResult<Decision, V, HE> {
+    ) -> TemporalResult<Decision> {
         // `should_leave` convention: `coalition` includes the agent.
         let members = self.coalition_members(coalition).await?;
         let weights = self.agent_weights(&members).await?;

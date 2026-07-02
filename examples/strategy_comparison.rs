@@ -755,7 +755,7 @@ fn print_report(
 
     println!("# koalisi #7 — categorical-magnitude vs Active-Inference A/B report");
     println!();
-    println!("_{REPORT_DATE} · yamafaktory backend, pre-K1 · release build_");
+    println!("_{REPORT_DATE} · catgraph backend (post-K1) · release build_");
     println!();
     println!("Pre-registered A/B harness (koalisi #7). AIF expected-free-energy arm");
     println!("(`AifDecisionPolicy`) vs categorical-magnitude arm (`MagnitudePolicy`, t = 1).");
