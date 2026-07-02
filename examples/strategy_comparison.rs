@@ -8,9 +8,9 @@
 //! **Why `--release`:** the latency criterion (Part 2) is only meaningful on
 //! optimized builds. Additionally, `catgraph-magnitude v0.1.0` has a
 //! debug-only over-strict triangle-inequality `debug_assert` that panics on
-//! the battery's non-dyadic couplings (catgraph #29, fixed by catgraph PR #30
-//! → `v0.1.1`; koalisi dep bump pending) — release builds compile it out and
-//! are unaffected either way.
+//! the battery's non-dyadic couplings (catgraph #29; fix proposed in catgraph
+//! PR #30, pending merge → `v0.1.1`, after which koalisi bumps the dep) —
+//! release builds compile it out and are unaffected either way.
 //!
 //! # Part 1 — single-scenario divergence demo (Threshold vs AIF)
 //!
@@ -844,7 +844,8 @@ fn print_report(
     println!(
         "_Release build required: the latency criterion needs optimized code, and \
          `catgraph-magnitude v0.1.0` debug builds panic on an over-strict triangle \
-         `debug_assert` (catgraph #29; fixed in v0.1.1 — koalisi dep bump pending)._"
+         `debug_assert` (catgraph #29; fix proposed in catgraph PR #30, pending \
+         merge → v0.1.1, after which koalisi bumps the dep)._"
     );
 }
 

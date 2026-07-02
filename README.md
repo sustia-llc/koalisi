@@ -96,7 +96,7 @@ cargo run --example live_pubsub
 cargo run --example supervised_swarm
 
 # Feature-gated
-cargo run --features decision --example strategy_comparison   # AIF vs non-AIF join decision
+cargo run --release --features decision,magnitude --example strategy_comparison   # divergence demo + AIF-vs-magnitude A/B report (#7)
 cargo run --features databento --example databento_historical
 cargo run --features databento --example databento_live_replay
 cargo run --features remote --example distributed_alert_consumer

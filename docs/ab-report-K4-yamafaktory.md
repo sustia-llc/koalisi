@@ -57,7 +57,7 @@ Pre-registered A/B harness (koalisi #7). AIF expected-free-energy arm
 |--------|----:|----------:|
 | primary | 0.1898 · 0.1585 | 0.4469 · 0.1087 |
 | churn | 113.00 · 67.75 | 8.00 · 4.50 |
-| latency µs | 1.482 · 0.113 | 4.370 · 4.106 |
+| latency µs | 1.448 · 0.150 | 4.642 · 4.847 |
 
 _Latency: same hardware, both arms warm, sync path — the only machine-varying numbers in this report._
 
@@ -66,7 +66,7 @@ _Latency: same hardware, both arms warm, sync path — the only machine-varying 
 ## Verdict
 
 - Criterion 1 (non-inferiority): mag median 0.4469 ≥ 0.95 × aif median 0.1898 (PASS); mag strictly inferior in 0/30 seeds ≤ 40% (PASS). → PASS
-- Criterion 2 (latency): mag median 4.370 µs < aif median 1.482 µs → FAIL
+- Criterion 2 (latency): mag median 4.642 µs < aif median 1.448 µs → FAIL
 
 **VERDICT: FALSIFIED (latency)**
 
@@ -90,4 +90,4 @@ cargo run --release --manifest-path Cargo.toml --target-dir /tmp/koalisi-target 
   --features decision,magnitude --example strategy_comparison
 ```
 
-_Release build required: the latency criterion needs optimized code, and `catgraph-magnitude v0.1.0` debug builds panic on an over-strict triangle `debug_assert` (catgraph #29; fixed in v0.1.1 — koalisi dep bump pending)._
+_Release build required: the latency criterion needs optimized code, and `catgraph-magnitude v0.1.0` debug builds panic on an over-strict triangle `debug_assert` (catgraph #29; fix proposed in catgraph PR #30, pending merge → v0.1.1, after which koalisi bumps the dep)._
