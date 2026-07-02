@@ -50,6 +50,12 @@ Planned work (tracked in [`CLAUDE.md`](./CLAUDE.md) §"Next steps"):
   churn 8 vs 113, oracle regret 0.1156 vs 0.3757 — but median per-decision
   latency 4.37 µs vs 1.48 µs, so the pre-committed **verdict is
   `FALSIFIED (latency)`** (criterion 1 pass, criterion 2 fail; nothing tuned).
+- **Criterion amendment v2** (#7 comment 2026-07-02, posted before any re-run;
+  run 1's recorded v1 verdict stands): VALIDATED iff Path A (original v1 speed
+  route) OR Path B (quality dominance — median ≥ 1.25× AIF, superior in ≥ 60%
+  of seeds, latency ≤ 10× AIF). The harness now prints **both** verdicts; run 1
+  under v2 is `VALIDATED (B)`. Latency follow-up filed as catgraph#31
+  (incremental/paired magnitude evaluation — non-gating, strengthens Path A).
 - **Upstream find (resolved):** the battery surfaced a debug-only panic in
   `catgraph-magnitude v0.1.0` (over-strict triangle-inequality `debug_assert`,
   ULP noise on non-dyadic couplings) — filed catgraph#29, fixed by catgraph

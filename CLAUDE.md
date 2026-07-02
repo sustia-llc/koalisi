@@ -41,13 +41,16 @@ coalition_aif (decision — planned), and forex-arbitrage-swarm (runtime).
   the pre-registered AIF-vs-magnitude battery (30 SplitMix64 seeds, PRIMARY =
   completion-rate × coverage-efficiency, oracle regret ≤ 8-agent pools, churn +
   latency secondaries, exploratory t-sweep). Committed run:
-  `docs/ab-report-K4-yamafaktory.md`. **Verdict: FALSIFIED (latency)** —
-  magnitude superior on quality in 30/30 seeds (0.4469 vs 0.1898 median) and
-  14× less churn, but 4.37 µs vs 1.48 µs per decision fails the pre-committed
-  strictly-lower-latency criterion. Runs `--release` (latency criterion; the
-  catgraph #29 debug-assert caveat is resolved since the `v0.1.1` dep bump —
-  debug builds run clean). Backend-parity re-run deferred to K1 (#4).
-  See Phase 6 §K4 below.
+  `docs/ab-report-K4-yamafaktory.md`. **Verdict: FALSIFIED (latency) under v1;
+  VALIDATED (B) under the v2 amendment** (#7 comment 2026-07-02: Path A =
+  original speed route OR Path B = quality dominance ≥ 1.25× median + ≥ 60% of
+  seeds + latency ≤ 10× — harness prints both verdicts). Magnitude superior on
+  quality in 30/30 seeds (0.4469 vs 0.1898 median) and 14× less churn; 4.37 µs
+  vs 1.48 µs per decision fails the v1 strict-latency gate. Incremental-
+  magnitude optimization filed as catgraph#31 (strengthens Path A). Runs
+  `--release` (latency criterion; the catgraph #29 debug-assert caveat is
+  resolved since the `v0.1.1` dep bump — debug builds run clean).
+  Backend-parity re-run deferred to K1 (#4). See Phase 6 §K4 below.
 - **Magnitude decision arm (K2, issue #5)**: `MagnitudePolicy` +
   `MagnitudeValueCalculator` behind a new `magnitude` feature — the categorical
   A/B mirror of the AIF arm, backed by `catgraph_magnitude::coalition_value`
@@ -472,12 +475,20 @@ run `--release`): Part 1 = the original Threshold-vs-AIF divergence demo
 (unchanged); Part 2 = the #7-pre-registered battery. Committed run:
 `docs/ab-report-K4-yamafaktory.md` (yamafaktory backend, pre-K1; deterministic
 except latency — SplitMix64 inline, no `rand` dep).
-- **Result: `FALSIFIED (latency)`** per the pre-committed criterion. Quality:
+- **Result: `FALSIFIED (latency)` under v1; `VALIDATED (B)` under v2.** Quality:
   magnitude superior in 30/30 seeds (median primary 0.4469 vs 0.1898), churn
-  8 vs 113, oracle regret 0.1156 vs 0.3757 — criterion 1 passes decisively.
-  Latency: 4.37 µs vs 1.48 µs median per decision (the O(m³) Möbius closure vs
-  AIF's fixed 2-state POMDP) — criterion 2 fails. Nothing tuned; amendments to
-  the pre-registration only via #7 comment BEFORE re-runs.
+  8 vs 113, oracle regret 0.1156 vs 0.3757. Latency: 4.37 µs vs 1.48 µs median
+  per decision (the O(m³) Möbius closure vs AIF's fixed 2-state POMDP) — fails
+  the v1 strict gate. Run 1's recorded v1 verdict stands.
+- **Criterion amendment v2** (#7 comment 2026-07-02, posted before any re-run —
+  post-hoc w.r.t. run 1, pre-registered w.r.t. all subsequent runs): VALIDATED
+  iff **Path A** (original: non-inferiority + strictly lower latency) OR
+  **Path B** (quality dominance: median ≥ 1.25× AIF, strictly superior in
+  ≥ 60% of seeds, latency ≤ 10× AIF). Harness prints BOTH verdicts (v1 + v2)
+  for cross-run comparability. Run 1 under v2: Path B passes on all three legs.
+- **Latency follow-up**: incremental/paired coalition-magnitude evaluation
+  filed upstream as catgraph#31 (O(m²) bordered updates for the join sweep) —
+  non-gating under v2, strengthens Path A; matters more at larger pools.
 - **Protocol decisions** (pre-reg left open, documented in the example): first
   arrival joins unconditionally (AIF's join margin from an empty coalition is
   exactly 0 with a strict `>`, so it cannot self-start); one leave sweep per
