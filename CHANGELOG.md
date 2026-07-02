@@ -31,6 +31,33 @@ Planned work (tracked in [`CLAUDE.md`](./CLAUDE.md) §"Next steps"):
 - **Remote gateway hardening** — bounded buffer, cursor-based polling,
   stable wire schema, QUIC transport alongside TCP.
 
+### Added (unreleased — issue [#7] A/B harness, K4)
+
+- **Pre-registered A/B harness** ([#7], `examples/strategy_comparison.rs`, now
+  `required-features = ["decision", "magnitude"]`): Part 1 keeps the original
+  Threshold-vs-AIF divergence demo unchanged; Part 2 benchmarks
+  `AifDecisionPolicy` vs `MagnitudePolicy` over the #7-pre-registered battery —
+  30 SplitMix64-seeded instances (no `rand` dep), pools of 4–16 agents over an
+  8-bit capability universe, 20-task streams with seeded arrival orders,
+  unconditional first-arrival bootstrap (AIF cannot self-start from empty),
+  one leave sweep. PRIMARY = completion-rate × coverage-efficiency; oracle
+  regret (brute force, pools ≤ 8); churn + warm sync-path latency secondaries;
+  exploratory t-sweep (t ∈ {0.5, 1, 2, 10}) via an example-local policy — the
+  library arm stays pinned at t = 1.
+- **Committed report** `docs/ab-report-K4-yamafaktory.md` (yamafaktory backend,
+  pre-K1, release build; deterministic except latency). Result: magnitude arm
+  superior on the primary metric in **30/30 seeds** (median 0.4469 vs 0.1898),
+  churn 8 vs 113, oracle regret 0.1156 vs 0.3757 — but median per-decision
+  latency 4.37 µs vs 1.48 µs, so the pre-committed **verdict is
+  `FALSIFIED (latency)`** (criterion 1 pass, criterion 2 fail; nothing tuned).
+- **Upstream find:** the battery surfaced a debug-only panic in
+  `catgraph-magnitude v0.1.0` (over-strict triangle-inequality `debug_assert`,
+  ULP noise on non-dyadic couplings) — filed catgraph#29, fix proposed in
+  catgraph PR #30 (pending merge → `v0.1.1`, then a koalisi dep bump). The
+  harness runs `--release` (also required for the latency criterion).
+
+[#7]: https://github.com/sustia-llc/koalisi/issues/7
+
 ### Added (unreleased — issue [#5] magnitude decision arm, K2)
 
 - **`MagnitudePolicy` — the categorical A/B mirror of the AIF arm** ([#5],
