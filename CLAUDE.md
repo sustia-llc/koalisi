@@ -24,15 +24,23 @@ coalition_aif (decision — planned), and forex-arbitrage-swarm (runtime).
 
 ## Available tooling for this project
 
-- **`graph` plugin v2.0.1** (`~/.claude/plugins/cache/sustia-claude-code-plugins/graph/2.0.1/`)
-  ships a `hypergraph` agent plus six skills tracking **yamafaktory**
-  hypergraph v4.2.0. **STALE for `src/topology/` since K1 (#4)** — the backend
-  is now `catgraph_applied::Hypergraph` (read its module docs at the catgraph
-  tag instead). The skills remain useful only as historical reference for the
-  pre-K1 semantics and for the now-obsolete `PersistentHypergraph` idea (see
-  the Phase 7 note).
+- **`causality` (DeepCausality) plugin** — the relevant graph tooling since K1
+  (#4): koalisi's topology backend is `catgraph_applied::Hypergraph` (plain
+  `Vec`/`HashMap` container — read its module docs at the pinned catgraph tag
+  for the contract), and catgraph itself builds on the DeepCausality substrate
+  (`deep_causality_num` `Zero`/`One`; `ultragraph` for catgraph's graph
+  algorithms, Track A). Use `causality:causality-applied` (skills
+  `causality:causal-graphs` — ultragraph — and `causality:data-structures`)
+  for substrate-level questions, and `causality:causality-theory` for the
+  algebraic layer (`Rig`, HKT/witnesses) catgraph's enrichment sits on.
+- ~~`graph` plugin v2.0.1~~ (yamafaktory hypergraph skills) — **OBSOLETE for
+  `src/topology/` since K1**; historical reference only (pre-K1 semantics, the
+  dropped `PersistentHypergraph` idea — see the Phase 7 note).
 - `rust-v2:rust-dev-v2` / `rust-v2:rust-practical` — primary Rust agents per
   the user CLAUDE.md routing rules.
+- `surrealdb:surrealdb-rust-v3` / `surrealdb:surrealdb-search` /
+  `surrealdb:surrealql-language` — for K3 (#6) surrealdb-live-message work,
+  per the user CLAUDE.md routing rules.
 
 ## Current state — 2026-07-02
 
