@@ -18,7 +18,7 @@ actor-based runtime orchestration.
 │  DCVC workload distribution, AIPA partition      │
 │  search, pluggable value calculators             │
 ├─────────────────────────────────────────────────┤
-│  Topology Layer (hypergraph v4.2.0)             │
+│  Topology Layer (catgraph-applied Hypergraph)   │
 │  Temporal hypergraph, event sourcing,            │
 │  CoalitionManager, time-travel queries,          │
 │  analytics                                       │
@@ -35,7 +35,7 @@ actor-based runtime orchestration.
 | `core` | `CoalitionRuntime` (lifecycle), settings, logging |
 | `topology` | Temporal hypergraph with event sourcing, `CoalitionManager`, time-travel queries, analytics |
 | `algorithms` | `ValueCalculator` trait + 4 calculators, `DCVCDistributor`, AIPA partition search |
-| `decision` | `CoalitionDecisionPolicy` trait + always-available `ThresholdPolicy`; optional Active Inference strategy (`EfeValueCalculator`, `AifDecisionPolicy`) behind the `decision` feature |
+| `decision` | `CoalitionDecisionPolicy` trait + always-available `ThresholdPolicy`; optional Active Inference strategy (`EfeValueCalculator`, `AifDecisionPolicy`) behind the `decision` feature; optional categorical-magnitude strategy (`MagnitudeValueCalculator`, `MagnitudePolicy`) behind the `magnitude` feature |
 | `subsystems` | Forex-specific kameo actors (monitor, coordinator, sink, swarm) |
 | `market` | Forex value types (Pair, Tick, Quote, Triangle, ArbitrageOpportunity) |
 
@@ -105,19 +105,22 @@ cargo run --features remote --example distributed_alert_consumer
 ## Tests
 
 ```sh
-cargo test                      # 63 tests (core + topology + algorithms + decision + forex)
-cargo test --features decision  # 73 tests (+ Active Inference decision strategy)
-cargo test --features databento # + 4 databento integration tests
-cargo test --features remote    # + 1 remote integration test
+cargo test                                 # 68 tests (core + topology + algorithms + decision + forex)
+cargo test --features decision             # 87 tests (+ Active Inference decision strategy)
+cargo test --features magnitude            # 77 tests (+ categorical-magnitude decision strategy)
+cargo test --features decision,magnitude   # 96 tests (both decision arms)
+cargo test --features databento            # + 4 databento integration tests
+cargo test --features remote               # + 1 remote integration test
 ```
 
 ## Dependencies
 
 - [kameo](https://github.com/tqwewe/kameo) — actor framework (path dep, pre-0.20.0)
-- [hypergraph](https://github.com/yamafaktory/hypergraph) v4.2.0 — directed hypergraph data structure
+- [catgraph-applied](https://github.com/sustia-llc/catgraph) (tag `v0.1.1`) — CRUD hypergraph container backing the topology layer (the K1 re-back; replaced yamafaktory `hypergraph` v4.2.0)
 - tokio + tokio-util — async runtime + lifecycle primitives
 - rayon + tokio-rayon — CPU-bound graph operations bridge
-- [aif](https://github.com/sustia-llc/tira) (tag `aif-v0.4.0`, **optional**, feature `decision`) — active-inference engine for the AIF decision strategy; pulls `nalgebra` only when the feature is enabled
+- [aif](https://github.com/sustia-llc/tira) (tag `aif-v0.5.0`, **optional**, feature `decision`) — active-inference engine for the AIF decision strategy; pulls `nalgebra` only when the feature is enabled
+- [catgraph-magnitude](https://github.com/sustia-llc/catgraph) (tag `v0.1.1`, **optional**, feature `magnitude`) — enriched-category coalition magnitude for the categorical decision strategy
 
 ## Origin
 
