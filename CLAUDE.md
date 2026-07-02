@@ -44,13 +44,14 @@ coalition_aif (decision — planned), and forex-arbitrage-swarm (runtime).
   `docs/ab-report-K4-yamafaktory.md`. **Verdict: FALSIFIED (latency)** —
   magnitude superior on quality in 30/30 seeds (0.4469 vs 0.1898 median) and
   14× less churn, but 4.37 µs vs 1.48 µs per decision fails the pre-committed
-  strictly-lower-latency criterion. Runs `--release` (latency + the catgraph
-  #29 debug-assert caveat). Backend-parity re-run deferred to K1 (#4).
+  strictly-lower-latency criterion. Runs `--release` (latency criterion; the
+  catgraph #29 debug-assert caveat is resolved since the `v0.1.1` dep bump —
+  debug builds run clean). Backend-parity re-run deferred to K1 (#4).
   See Phase 6 §K4 below.
 - **Magnitude decision arm (K2, issue #5)**: `MagnitudePolicy` +
   `MagnitudeValueCalculator` behind a new `magnitude` feature — the categorical
   A/B mirror of the AIF arm, backed by `catgraph_magnitude::coalition_value`
-  (git tag `v0.1.0`, SSH URL — catgraph is private, same rationale as `aif`;
+  (git tag `v0.1.1`, SSH URL — catgraph is private, same rationale as `aif`;
   pinned `t = 1`). Capabilities map to directed substitutability couplings
   `A(i→j) = |rel_i ∩ rel_j| / |rel_i|`; clones skeletalize into one effective
   agent; **task-irrelevant agents (`rel == 0`) are excluded** (a vacuous 1.0
@@ -441,7 +442,8 @@ Part of the coalition semantic-layer roadmap (Phase K, plan in
 The categorical A/B mirror of the AIF arm, behind feature `magnitude`
 (independent of `decision` — either, both, or neither):
 - Dep: `catgraph-magnitude = { git = "ssh://git@github.com/sustia-llc/catgraph",
-  tag = "v0.1.0", optional = true }`. SSH not HTTPS (catgraph is private; the
+  tag = "v0.1.1", optional = true }` (shipped at `v0.1.0`; bumped for the
+  catgraph#29 triangle-tolerance fix). SSH not HTTPS (catgraph is private; the
   issue-#5 pinned dep line says HTTPS but cargo's libgit2 can't authenticate —
   same story as `aif`/tira). `coalition_value` = magnitude at pinned `t = 1`;
   the t-sweep belongs to the K4 A/B harness (#7).
@@ -480,11 +482,12 @@ except latency — SplitMix64 inline, no `rand` dep).
   arrival joins unconditionally (AIF's join margin from an empty coalition is
   exactly 0 with a strict `>`, so it cannot self-start); one leave sweep per
   task, all removals count as churn; latency measured on the sync path, warm.
-- **Upstream find**: the battery's non-dyadic couplings trip a debug-only
-  over-strict triangle-inequality `debug_assert` in `catgraph-magnitude v0.1.0`
-  (ULP noise: `−ln(a·b)` vs `−ln a + −ln b`) — catgraph#29, fix in catgraph
-  PR #30 (pending merge → `v0.1.1`, then bump the koalisi dep and debug builds
-  are clean again). Release builds unaffected.
+- **Upstream find (RESOLVED)**: the battery's non-dyadic couplings tripped a
+  debug-only over-strict triangle-inequality `debug_assert` in
+  `catgraph-magnitude v0.1.0` (ULP noise: `−ln(a·b)` vs `−ln a + −ln b`) —
+  catgraph#29, fixed by catgraph PR #30 (merged, tagged `v0.1.1`); koalisi dep
+  bumped to `v0.1.1` and debug builds run clean. Release builds were never
+  affected. `--release` remains required for the latency criterion only.
 - **Deferred (pre-registered)**: backend-parity re-run after K1 (#4) lands —
   same battery on the catgraph backend, results must match within noise.
 - Exploratory t-sweep lives in the example (`TSweepMagnitudePolicy`), NOT the
