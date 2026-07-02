@@ -62,7 +62,7 @@ futures = "0.3"
 
 [[example]]
 name = "strategy_comparison"
-required-features = ["decision"]
+required-features = ["decision", "magnitude"]
 
 [[example]]
 name = "databento_historical"

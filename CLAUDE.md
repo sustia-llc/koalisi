@@ -37,6 +37,16 @@ coalition_aif (decision — planned), and forex-arbitrage-swarm (runtime).
 
 ### Done
 
+- **A/B harness (K4, issue #7)**: `examples/strategy_comparison.rs` Part 2 —
+  the pre-registered AIF-vs-magnitude battery (30 SplitMix64 seeds, PRIMARY =
+  completion-rate × coverage-efficiency, oracle regret ≤ 8-agent pools, churn +
+  latency secondaries, exploratory t-sweep). Committed run:
+  `docs/ab-report-K4-yamafaktory.md`. **Verdict: FALSIFIED (latency)** —
+  magnitude superior on quality in 30/30 seeds (0.4469 vs 0.1898 median) and
+  14× less churn, but 4.37 µs vs 1.48 µs per decision fails the pre-committed
+  strictly-lower-latency criterion. Runs `--release` (latency + the catgraph
+  #29 debug-assert caveat). Backend-parity re-run deferred to K1 (#4).
+  See Phase 6 §K4 below.
 - **Magnitude decision arm (K2, issue #5)**: `MagnitudePolicy` +
   `MagnitudeValueCalculator` behind a new `magnitude` feature — the categorical
   A/B mirror of the AIF arm, backed by `catgraph_magnitude::coalition_value`
@@ -243,7 +253,7 @@ timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-tar
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features magnitude
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision,magnitude
-timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision --example strategy_comparison
+timeout 120s cargo run --release --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision,magnitude --example strategy_comparison
 
 # === with databento feature ===
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features databento
@@ -386,10 +396,11 @@ engine from the `tira` repo and bridges to it.
   the rayon pool via `tokio_rayon::spawn(..).await` — callable from a kameo handler
   without blocking the tokio worker. The async methods are on the trait via boxed
   futures, so `Box<dyn CoalitionDecisionPolicy>` callers reach the non-blocking path.
-- **A/B proof:** `examples/strategy_comparison.rs` (`required-features = ["decision"]`)
-  runs one join scenario under both `ThresholdPolicy(Synergistic)` and
-  `AifDecisionPolicy` and prints their divergence (Threshold joins on raw marginal
-  value; AIF declines when coverage doesn't improve).
+- **A/B proof:** `examples/strategy_comparison.rs` Part 1 (since K4 the example
+  is `required-features = ["decision", "magnitude"]`) runs one join scenario
+  under both `ThresholdPolicy(Synergistic)` and `AifDecisionPolicy` and prints
+  their divergence (Threshold joins on raw marginal value; AIF declines when
+  coverage doesn't improve). Part 2 is the K4 battery — see §K4 below.
 - **Tests:** feature-off 30; feature-on 40 (monotonicity, coverage helper,
   non-degeneracy + degeneracy guards, leave, EfeValueCalculator ordering,
   ThresholdPolicy join/leave + object-safety + high-threshold, sync/async equivalence,
@@ -452,6 +463,33 @@ The categorical A/B mirror of the AIF arm, behind feature `magnitude`
 - No cross-arm scalar calibration (pinned): only within-arm rank order matters;
   the A/B outcome metric is pre-registered on
   [#7](https://github.com/sustia-llc/koalisi/issues/7) (K4 consumes this arm).
+
+**K4 — A/B harness ([#7](https://github.com/sustia-llc/koalisi/issues/7), DONE 2026-07-02).**
+`examples/strategy_comparison.rs` (`required-features = ["decision", "magnitude"]`,
+run `--release`): Part 1 = the original Threshold-vs-AIF divergence demo
+(unchanged); Part 2 = the #7-pre-registered battery. Committed run:
+`docs/ab-report-K4-yamafaktory.md` (yamafaktory backend, pre-K1; deterministic
+except latency — SplitMix64 inline, no `rand` dep).
+- **Result: `FALSIFIED (latency)`** per the pre-committed criterion. Quality:
+  magnitude superior in 30/30 seeds (median primary 0.4469 vs 0.1898), churn
+  8 vs 113, oracle regret 0.1156 vs 0.3757 — criterion 1 passes decisively.
+  Latency: 4.37 µs vs 1.48 µs median per decision (the O(m³) Möbius closure vs
+  AIF's fixed 2-state POMDP) — criterion 2 fails. Nothing tuned; amendments to
+  the pre-registration only via #7 comment BEFORE re-runs.
+- **Protocol decisions** (pre-reg left open, documented in the example): first
+  arrival joins unconditionally (AIF's join margin from an empty coalition is
+  exactly 0 with a strict `>`, so it cannot self-start); one leave sweep per
+  task, all removals count as churn; latency measured on the sync path, warm.
+- **Upstream find**: the battery's non-dyadic couplings trip a debug-only
+  over-strict triangle-inequality `debug_assert` in `catgraph-magnitude v0.1.0`
+  (ULP noise: `−ln(a·b)` vs `−ln a + −ln b`) — catgraph#29, fix in catgraph
+  PR #30 (pending merge → `v0.1.1`, then bump the koalisi dep and debug builds
+  are clean again). Release builds unaffected.
+- **Deferred (pre-registered)**: backend-parity re-run after K1 (#4) lands —
+  same battery on the catgraph backend, results must match within noise.
+- Exploratory t-sweep lives in the example (`TSweepMagnitudePolicy`), NOT the
+  library — t = 1 stays the pinned stable arm (catgraph #22). Sweep medians
+  were flat (0.4428–0.4490 across t ∈ {0.5, 1, 2, 10}).
 
 ### Phase 7: Persistence  *(planned — gated, see above; was Phase 5, moved last)*
 
