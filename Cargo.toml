@@ -46,6 +46,20 @@ time = { version = "0.3", optional = true, features = ["macros"] }
 # TCP+noise+yamux, with mDNS discovery — no actor framework involved.
 libp2p = { version = "0.56", features = ["macros", "noise", "mdns", "tcp", "tokio", "yamux", "request-response", "cbor"], optional = true }
 
+# Optional: durable coalition decision messaging (two-tier SurrealDB bus:
+# CHANGEFEED log + LIVE wake-up + cursor catch-up; at-least-once,
+# restart-durable). Enabled via `--features durable`. Feature-off builds pull
+# NONE of this (and none of surrealdb/nalgebra). SSH URL — same rationale as the
+# other sustia-llc git deps. Upstream's package name is `surrealdb_live_message`
+# (underscores); the readable hyphen key is remapped via `package = ...`.
+surrealdb-live-message = { git = "ssh://git@github.com/sustia-llc/surrealdb-live-message", tag = "v0.2.0", package = "surrealdb_live_message", optional = true }
+# `#[derive(SurrealValue)]` on koalisi's durable `DecisionEvent` emits absolute
+# `::surrealdb_types` paths, so the trait crate must be a direct dep. Version
+# unifies with the one `surrealdb-live-message` pulls (3.1.5) so the derived impl
+# satisfies its `Coalition<T>: SurrealValue` bound. Pure-value types crate, no DB
+# engine; only compiled under `durable`.
+surrealdb-types = { version = "3.1.5", optional = true }
+
 [features]
 default = []
 # Active Inference coalition-decision strategy (pluggable, off by default).
@@ -54,6 +68,8 @@ decision = ["dep:aif"]
 magnitude = ["dep:catgraph-magnitude"]
 databento = ["dep:dbn", "dep:time"]
 remote = ["dep:libp2p"]
+# Durable coalition decision-event bus on surrealdb-live-message (off by default).
+durable = ["dep:surrealdb-live-message", "dep:surrealdb-types"]
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "test-util"] }
@@ -75,6 +91,10 @@ required-features = ["databento"]
 name = "distributed_alert_consumer"
 required-features = ["remote"]
 
+[[example]]
+name = "durable_decisions"
+required-features = ["durable"]
+
 [[test]]
 name = "databento_integration"
 required-features = ["databento"]
@@ -82,3 +102,7 @@ required-features = ["databento"]
 [[test]]
 name = "remote_integration"
 required-features = ["remote"]
+
+[[test]]
+name = "durable_integration"
+required-features = ["durable"]

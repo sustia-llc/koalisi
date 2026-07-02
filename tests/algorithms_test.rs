@@ -146,7 +146,9 @@ fn dcvc_empty() {
 
 #[test]
 fn integer_partitions() {
-    assert_eq!(generate_integer_partitions(0), vec![vec![]]);
+    // Explicit element type keeps inference unambiguous when a `serde_json`
+    // (`usize: PartialEq<Value>`) impl is linked under the `durable` feature.
+    assert_eq!(generate_integer_partitions(0), vec![Vec::<usize>::new()]);
     assert_eq!(generate_integer_partitions(1).len(), 1);
     assert_eq!(generate_integer_partitions(4).len(), 5);
     assert_eq!(partition_count(5), 7);

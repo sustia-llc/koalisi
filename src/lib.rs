@@ -37,6 +37,8 @@ pub mod subsystems {
     pub mod databento;
     #[cfg(feature = "remote")]
     pub mod distributed;
+    #[cfg(feature = "durable")]
+    pub mod durable;
     pub mod monitor;
     pub mod sink;
     pub mod swarm;
