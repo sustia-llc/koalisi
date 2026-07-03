@@ -45,10 +45,22 @@ coalition_aif (decision — planned), and forex-arbitrage-swarm (runtime).
   `surrealdb:surrealql-language` — for K3 (#6) surrealdb-live-message work,
   per the user CLAUDE.md routing rules.
 
-## Current state — 2026-07-02
+## Current state — 2026-07-03
 
 ### Done
 
+- **Evaluator hot path (K6, issue #14) — magnitude arm on
+  `CoalitionEvaluator`**: dep `catgraph-magnitude` bumped to `v0.2.0`
+  (catgraph#31); `MagnitudePolicy`/`MagnitudeValueCalculator` hold a
+  membership-keyed evaluator cache (`Arc<Mutex<…>>`, keyed
+  `(required, member masks)`, `REGISTRY_CAP = 256` candidate registry
+  retained across rebuilds). Decisions bit-frozen via the knife-edge fresh
+  fallback (`KNIFE_EDGE_REL_BAND = 1e-6`); K4 re-run
+  (`docs/ab-report-K4-catgraph-evaluator.md`) seed-for-seed identical on
+  quality columns, latency 3.915 → 3.658 µs — Path A missed, dual verdict
+  unchanged (`FALSIFIED (latency)` / `VALIDATED (B)`), per-decision profile
+  committed as the catgraph#33 evidence. Both types lost `Copy` (use `new`).
+  See §"Worth flagging" entry 15 and §K6 below.
 - **Messaging swap (K3, issue #6) — kameo GONE**: the runtime layer is pure
   `tokio::sync` (hybrid — hot seams never touch a DB). Workers
   (`MarketMonitor`/`ArbitrageCoordinator`/`AlertSink`) are tasks over mpsc
@@ -148,8 +160,8 @@ coalition_aif (decision — planned), and forex-arbitrage-swarm (runtime).
   |---|---|---|
   | Default | 77 | `cargo test` |
   | `--features decision` | 96 | `cargo test --features decision` |
-  | `--features magnitude` | 86 | `cargo test --features magnitude` |
-  | `--features decision,magnitude` | 105 | `cargo test --features decision,magnitude` |
+  | `--features magnitude` | 93 | `cargo test --features magnitude` |
+  | `--features decision,magnitude` | 112 | `cargo test --features decision,magnitude` |
   | `--features durable` | 78 (+1 container-backed restart test; needs Docker) | `cargo test --features durable` |
   | `--features databento` | + 4 databento integration | `cargo test --features databento` |
   | `--features remote` | + 1 remote integration | `cargo test --features remote` |
@@ -159,7 +171,7 @@ coalition_aif (decision — planned), and forex-arbitrage-swarm (runtime).
 
 ```
 koalisi/
-├── Cargo.toml                              git tag deps: catgraph-applied v0.1.1 (topology); aif, catgraph-magnitude, surrealdb-live-message v0.2.0 (optional); no path deps since K3
+├── Cargo.toml                              git tag deps: catgraph-applied + catgraph-magnitude v0.2.0 in lockstep (one checkout — K6); aif, surrealdb-live-message (optional); no path deps since K3
 ├── README.md                               user-facing
 ├── CLAUDE.md                               THIS FILE
 ├── config/{default,development,test}.toml  coalition threshold, history capacity; [sdb]+[docker] for the durable feature's upstream SETTINGS (cwd-resolved)
@@ -191,7 +203,7 @@ koalisi/
 │   ├── decision/
 │   │   ├── mod.rs                          CoalitionDecisionPolicy + ThresholdPolicy (always compiled)
 │   │   ├── aif_policy.rs                   AifDecisionPolicy + EfeValueCalculator (feature `decision`)
-│   │   └── magnitude_policy.rs             MagnitudePolicy + MagnitudeValueCalculator + CouplingModel (feature `magnitude`)
+│   │   └── magnitude_policy.rs             MagnitudePolicy + MagnitudeValueCalculator + CouplingModel + CoalitionEvaluator cache (K6) (feature `magnitude`)
 │   ├── llm/
 │   │   └── mod.rs                          LlmProvider trait + StubLlmProvider (Phase 5 anchor)
 │   └── subsystems/
@@ -218,6 +230,7 @@ koalisi/
 │   └── distributed_alert_consumer.rs       ROLE=producer/consumer over libp2p rr (feature `remote`)
 ├── docs/
 │   ├── ab-report-K4-{yamafaktory,catgraph}.md   K4 A/B + backend-parity reports
+│   ├── ab-report-K4-catgraph-evaluator.md  K6 post-optimization re-run + parity + latency profile (#33 evidence)
 │   └── k3-hot-path-bench.md                K3 kameo-vs-tokio bench evidence
 └── tests/
     ├── topology_test.rs                    12 tests
@@ -337,6 +350,33 @@ These cost time during the build; future-me should not relearn them.
       tap record is a koalisi-side loss (size the channel accordingly).
     - Docker required for the container-backed test; upstream's
       `SurrealDBContainer` (bollard) manages the instance.
+
+15. **K6 evaluator-cache contracts (magnitude arm, #14) — rely on these.**
+    - **Rank-order identity does NOT freeze decisions.** The catgraph#31
+      amendment guarantees `value_with` ranks candidates identically to fresh,
+      but `MagnitudePolicy` compares margins against an absolute threshold
+      (`> join_margin`, default 0): candidates with *mathematically zero*
+      margins (subsumed/redundant masks — the majority of declines) are decided
+      by ±1e-16 float noise, and incremental noise ≠ fresh noise. The
+      **knife-edge fresh fallback** (`KNIFE_EDGE_REL_BAND = 1e-6` rel) recomputes
+      the `with` side fresh inside the band — that is what keeps the battery
+      seed-for-seed reproducible. Never remove it while decision behavior is
+      pinned; widening the band only costs latency, narrowing it risks flips.
+    - **`base_value()` bit-identity survives pool extension**: extra candidate
+      agents/couplings in the evaluator pool don't perturb the base coalition
+      (restrict-then-close drops them) — pinned by
+      `base_value_bit_identical_with_nonempty_registry`.
+    - **Registry retention is measured, not aesthetic**: scoping the candidate
+      registry to one `required` degenerates to rebuild-per-decision on
+      arrival-sweep streams (each task = fresh requirement, each candidate seen
+      once) and regressed the battery median BELOW the pre-K6 baseline
+      (4.90 vs 3.915 µs). Retained-with-cap (256) is the measured optimum.
+      Evaluator construction ≈ 10–15× a plain `coalition_value` (cache
+      extraction + coupling HashMap) — catgraph#33 territory, don't "fix" it
+      downstream.
+    - `MagnitudePolicy`/`MagnitudeValueCalculator` are no longer `Copy`;
+      `Clone` SHARES the cache (Arc). One instance per concurrent
+      membership-stream, or accept rebuild thrash (correct, just slower).
 
 ## Reproducers
 
@@ -554,7 +594,8 @@ The categorical A/B mirror of the AIF arm, behind feature `magnitude`
 (independent of `decision` — either, both, or neither):
 - Dep: `catgraph-magnitude = { git = "ssh://git@github.com/sustia-llc/catgraph",
   tag = "v0.1.1", optional = true }` (shipped at `v0.1.0`; bumped for the
-  catgraph#29 triangle-tolerance fix). SSH not HTTPS (catgraph is private; the
+  catgraph#29 triangle-tolerance fix; **K6 (#14) bumped again to `v0.2.0`**
+  for the catgraph#31 `CoalitionEvaluator`). SSH not HTTPS (catgraph is private; the
   issue-#5 pinned dep line says HTTPS but cargo's libgit2 can't authenticate —
   same story as `aif`/tira). `coalition_value` = magnitude at pinned `t = 1`;
   the t-sweep belongs to the K4 A/B harness (#7).
@@ -612,6 +653,23 @@ except latency — SplitMix64 inline, no `rand` dep).
 - Exploratory t-sweep lives in the example (`TSweepMagnitudePolicy`), NOT the
   library — t = 1 stays the pinned stable arm (catgraph #22). Sweep medians
   were flat (0.4428–0.4490 across t ∈ {0.5, 1, 2, 10}).
+
+**K6 — evaluator hot path ([#14](https://github.com/sustia-llc/koalisi/issues/14), DONE 2026-07-03).**
+Adopted catgraph `v0.2.0`'s `CoalitionEvaluator` (catgraph#31) in the magnitude
+arm: membership-keyed cache in `MagnitudePolicy`/`MagnitudeValueCalculator`
+(interior mutability — the seams are `&self`), `should_join` = cached
+`base_value()` + one `value_with(x)`, leave stays fresh (upstream non-goal;
+variant B measured slower, ships opt-in via `with_evaluator_leave`).
+Decisions bit-frozen: knife-edge fresh fallback (see gotcha 15 — the #31
+rank-order contract is insufficient at a zero threshold; found by the
+pre-registered parity gate, 16/8068 flips before the fix). Re-run
+`docs/ab-report-K4-catgraph-evaluator.md`: quality columns seed-for-seed
+identical to the K1 parity report; latency 3.915 → 3.658 µs vs AIF 1.387 —
+**Path A missed** (dual verdict unchanged: v1 `FALSIFIED (latency)`, v2
+`VALIDATED (B)`), residual-cost profile committed as the pre-registered
+catgraph#33 evidence (construction ~30 µs ≈ 10–15× fresh; knife-edge tax
+5.05 µs on ~62% of hits; pure hit path 1.35 µs ≈ AIF parity — the mechanism
+works where it applies).
 
 **K3 — messaging swap ([#6](https://github.com/sustia-llc/koalisi/issues/6), DONE 2026-07-02).**
 Hybrid per the pin: hot seams on `tokio::sync` (broadcast buses, mpsc/oneshot

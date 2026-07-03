@@ -1,0 +1,188 @@
+# koalisi #7 — categorical-magnitude vs Active-Inference A/B report
+
+_2026-07-03 · catgraph backend · `CoalitionEvaluator` hot path (post-#14) · release build_
+
+Pre-registered A/B harness (koalisi #7). AIF expected-free-energy arm
+(`AifDecisionPolicy`) vs categorical-magnitude arm (`MagnitudePolicy`, t = 1).
+
+## Protocol
+
+- **Seeds:** 30 instances, seeds `0..30`, inline SplitMix64 (no `rand`).
+- **Pool:** `n = 4 + next()%13` agents (n ∈ [4,16]); caps = k ∈ [1,4] distinct bits of an 8-bit universe; trust = 20 + next()%80.
+- **Task stream:** T = 20 tasks; required = r ∈ [1,5] distinct bits of the universe.
+- **Decision stream:** seeded Fisher–Yates arrival order (drawn once per task); first arrival joins unconditionally (bootstrap); subsequent arrivals via `should_join`; one leave sweep in arrival order via `should_leave`.
+- **completed(task):** union of members' caps covers `required` fully.
+- **coverage_eff(task):** (covered bits / required bits) / member_count, 0 if empty.
+- **PRIMARY(seed):** completion_rate × mean_cov_eff (stream-level product).
+- **Churn(seed):** total leave-sweep removals over the stream.
+
+## Per-seed results
+
+| seed | n | aif_primary | mag_primary | aif_churn | mag_churn | oracle_primary |
+|-----:|--:|------------:|------------:|----------:|----------:|---------------:|
+| 0 | 13 | 0.3100 | 0.3407 | 158 | 4 | — |
+| 1 | 10 | 0.2600 | 0.5462 | 98 | 7 | — |
+| 2 | 12 | 0.0506 | 0.3118 | 80 | 15 | — |
+| 3 | 13 | 0.2042 | 0.4767 | 141 | 10 | — |
+| 4 | 11 | 0.2071 | 0.3847 | 112 | 6 | — |
+| 5 | 14 | 0.1450 | 0.4834 | 131 | 9 | — |
+| 6 | 9 | 0.0425 | 0.1169 | 76 | 11 | — |
+| 7 | 15 | 0.3467 | 0.4793 | 189 | 4 | — |
+| 8 | 15 | 0.1167 | 0.4185 | 121 | 11 | — |
+| 9 | 8 | 0.1161 | 0.1614 | 84 | 4 | 0.2770 |
+| 10 | 12 | 0.2113 | 0.4560 | 119 | 8 | — |
+| 11 | 9 | 0.1673 | 0.5259 | 82 | 12 | — |
+| 12 | 10 | 0.2031 | 0.4575 | 102 | 7 | — |
+| 13 | 14 | 0.3400 | 0.5000 | 178 | 5 | — |
+| 14 | 7 | 0.0852 | 0.3455 | 59 | 10 | 0.4608 |
+| 15 | 13 | 0.1467 | 0.4400 | 114 | 9 | — |
+| 16 | 8 | 0.2550 | 0.4171 | 82 | 6 | 0.7333 |
+| 17 | 5 | 0.0258 | 0.0993 | 33 | 7 | 0.1925 |
+| 18 | 15 | 0.0900 | 0.3700 | 120 | 11 | — |
+| 19 | 13 | 0.2562 | 0.5152 | 153 | 7 | — |
+| 20 | 16 | 0.2687 | 0.4537 | 194 | 8 | — |
+| 21 | 13 | 0.0612 | 0.6096 | 83 | 13 | — |
+| 22 | 13 | 0.1896 | 0.4395 | 137 | 9 | — |
+| 23 | 11 | 0.0627 | 0.5363 | 67 | 14 | — |
+| 24 | 6 | 0.0984 | 0.3028 | 45 | 10 | 0.5667 |
+| 25 | 11 | 0.1900 | 0.5453 | 90 | 8 | — |
+| 26 | 15 | 0.2140 | 0.4625 | 156 | 7 | — |
+| 27 | 14 | 0.0863 | 0.4562 | 107 | 11 | — |
+| 28 | 13 | 0.3200 | 0.4384 | 162 | 4 | — |
+| 29 | 14 | 0.2375 | 0.3882 | 168 | 5 | — |
+
+## Aggregates (median · IQR)
+
+| metric | AIF | Magnitude |
+|--------|----:|----------:|
+| primary | 0.1898 · 0.1585 | 0.4469 · 0.1087 |
+| churn | 113.00 · 67.75 | 8.00 · 4.50 |
+| latency µs | 1.435 · 0.120 | 3.552 · 7.778 |
+
+_Latency: same hardware, both arms warm, sync path — the only machine-varying numbers in this report._
+
+**Oracle regret** (n ≤ 8, 5 eligible seeds): AIF median 0.3757, Magnitude median 0.1156.
+
+## Verdict
+
+### Original criterion (v1)
+
+- Criterion 1 (non-inferiority): mag median 0.4469 ≥ 0.95 × aif median 0.1898 (PASS); mag strictly inferior in 0/30 seeds ≤ 40% (PASS). → PASS
+- Criterion 2 (latency): mag median 3.552 µs < aif median 1.435 µs → FAIL
+
+**VERDICT (v1): FALSIFIED (latency)**
+
+### Amended criterion (v2 — #7 amendment, 2026-07-02)
+
+- Path B.1 (clear superiority): mag median 0.4469 ≥ 1.25 × aif median 0.1898 → PASS
+- Path B.2 (consistency): mag strictly superior in 30/30 seeds ≥ 60% → PASS
+- Path B.3 (bounded latency overhead): mag median 3.552 µs ≤ 10 × aif median 1.435 µs → PASS
+- Path A (v1 speed route): equals the v1 result → FAIL
+
+**VERDICT (v2): VALIDATED (B)**
+
+_Criterion history: run 1 (2026-07-02) was scored under v1 — FALSIFIED (latency) — and that recorded outcome stands; the v2 amendment (quality-dominance Path B with bounded ≤10× latency overhead, OR the original Path A) was posted on #7 before any subsequent run and governs re-runs (K1 backend parity, post-optimization)._
+
+_Falsification is a legitimate result; nothing was tuned to flip it (koalisi #7)._
+
+## t-sweep (exploratory, non-gating)
+
+Magnitude at scales t ∈ {0.5, 1.0, 2.0, 10.0}. t = 1.0 sanity-checks the stable arm (median 0.4469). Example-only policy — the library arm is pinned to t = 1 (catgraph #22).
+
+| t | magnitude primary median |
+|----:|-------------------------:|
+| 0.5 | 0.4490 |
+| 1.0 | 0.4469 |
+| 2.0 | 0.4468 |
+| 10.0 | 0.4428 |
+
+## Reproduce
+
+```sh
+cargo run --release --manifest-path Cargo.toml --target-dir /tmp/koalisi-target \
+  --features decision,magnitude --example strategy_comparison
+```
+
+_Release build required for the latency criterion (optimized code). Debug builds run clean since `catgraph-magnitude v0.1.1` (catgraph #29 fixed the over-strict triangle `debug_assert` that v0.1.0 tripped on this battery's non-dyadic couplings; the pinned dep is `v0.2.0` since koalisi #14)._
+
+## Seed-for-seed parity vs `ab-report-K4-catgraph.md` (the #14 acceptance gate)
+
+All 30 per-seed rows — `aif_primary`, `mag_primary`, `aif_churn`, `mag_churn`,
+`oracle_primary`, both arms — are **identical** to the committed K1
+backend-parity report. Latency is the only column that moved. Decision behavior
+is frozen: a lockstep probe over the same 30 instances compared every one of
+the **8068** magnitude-arm decisions against the pre-K6 fresh two-evaluation
+reference — **0 `act` mismatches**.
+
+Getting to zero required a **knife-edge fresh fallback**
+(`KNIFE_EDGE_REL_BAND = 1e-6` in `decision::magnitude_policy`): candidates
+whose true margin sits exactly at the decision threshold (subsumed / redundant
+masks at the default `join_margin = 0`) are decided by float noise under the
+fresh path (±2–7 × 10⁻¹⁶, either sign), and the incremental path's noise
+differs. The upstream catgraph#31 amendment's rank-order identity does **not**
+protect a margin-vs-threshold comparison, so margins inside the band recompute
+`Mag(S ∪ {x})` fresh — reproducing the committed noise bit-exactly (the cached
+`base_value()` side is bit-identical by the upstream contract, pinned by a
+populated-registry test). Without the fallback, 16/8068 decisions flipped and
+10/30 seeds diverged. The band is anchored to the threshold the decision
+actually compares against (`join_margin` on joins, `0` on leaves), so the
+guarantee holds for caller-set margins too.
+
+## Per-decision latency profile (residual cost — pre-registered #33 evidence)
+
+Instrumented probe over the same battery stream (release, quiet machine, sync
+path, the committed code), magnitude arm, decisions bucketed by
+evaluator-cache behaviour:
+
+| bucket | count | median µs | mean µs | p90 µs |
+|--------|------:|----------:|--------:|-------:|
+| join/rebuild+band | 551 | 30.161 | 34.118 | 61.021 |
+| join/rebuild+clear | 484 | 26.961 | 33.151 | 62.426 |
+| join/hit+band | 1764 | 5.051 | 5.943 | 9.767 |
+| join/hit+clear | 1100 | 1.268 | 2.578 | 5.607 |
+| join/excluded | 2053 | 0.302 | 4.939 | 16.815 |
+| join/empty | 488 | 0.286 | 0.824 | 1.762 |
+| leave/fresh (A) | 1628 | 5.549 | 6.604 | 12.641 |
+
+(`band` = knife-edge fallback taken; `clear` = decisive margin, pure
+incremental; `rebuild` = evaluator reconstructed on a membership/registry
+miss; `hit` = cached evaluator answered.)
+
+Decomposition of the Path-A miss (mag median 3.552 µs vs AIF 1.435 µs):
+
+1. **The pure incremental hit path (`hit+clear`, 1.27 µs median) is already at
+   AIF parity** — the catgraph#31 mechanism delivers when it applies. It
+   applies to ~14% of decisions on this stream.
+2. **The knife-edge population is the largest single tax**: 1764/2864 cache
+   hits (~62%) carry a threshold-exact margin and must pay a fresh `O(m³)`
+   evaluation to keep the frozen decisions (5.05 µs vs 1.27 µs). This is a
+   *decision-freeze* cost, not an evaluator defect — any incremental scheme
+   that does not reproduce fresh float noise pays it.
+3. **Evaluator construction costs ~10–15× a plain fresh evaluation**
+   (~27–30 µs vs ~2 µs): `CoalitionEvaluator::new` extracts and stores the
+   closed table, `μ`, weighting/coweighting vectors and a coupling `HashMap`
+   on top of the closure + inversion. Rebuilds are ~13% of decisions here.
+   Scratch buffers / leaner construction (catgraph#33) attack exactly this
+   term, plus the ~7 per-call allocations visible even on the 1.27 µs hit
+   path.
+4. **Leaves stay fresh by upstream design** (non-goal: max-product closures do
+   not downdate) — 5.55 µs × 20% of decisions. Measured alternative
+   (variant B, reduced-set evaluator per leave): worse overall (4.66–4.90 µs
+   median) — construction cost plus join-cache eviction dominate; variant A
+   (fresh) ships as the default, variant B stays opt-in
+   (`MagnitudePolicy::with_evaluator_leave`).
+
+Cache-design notes (measured, not speculated): scoping the candidate-mask
+registry to one `required` degenerates the cache to rebuild-per-decision on
+this stream (overall median 4.900 µs — worse than the 3.915 µs pre-K6
+baseline) because each task draws a fresh requirement and each candidate
+arrives once. The shipped design retains the registry across requirements
+(couplings are recomputed from raw masks at build time) under a
+`REGISTRY_CAP = 256` bound, which keeps post-warm-up joins on the hit path.
+
+## Reproduce (this report)
+
+Battery: the standard reproduce command above. The parity and profile numbers
+come from temporary instrumented probes (same stream, same build flags) whose
+sources are attached to koalisi #14; they are not part of the shipped example
+set.

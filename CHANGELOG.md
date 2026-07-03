@@ -31,6 +31,54 @@ Planned work (tracked in [`CLAUDE.md`](./CLAUDE.md) §"Next steps"):
 - **Remote gateway hardening** — bounded buffer, cursor-based polling,
   stable wire schema, QUIC transport alongside TCP.
 
+### Changed (unreleased — issue [#14] evaluator hot path, K6)
+
+- **Magnitude decision hot path adopts `catgraph_magnitude::CoalitionEvaluator`**
+  ([#14], downstream of catgraph#31, dep bumped `v0.1.1` → `v0.2.0`;
+  `catgraph-applied` bumped in lockstep — the tag split made cargo compile the
+  catgraph repo twice, and the upstream `v0.1.1 → v0.2.0` delta touches only
+  `catgraph-magnitude`, so the topology crate is source-identical).
+  `MagnitudePolicy` and `MagnitudeValueCalculator` hold a membership-keyed
+  evaluator cache behind interior mutability (`Arc<Mutex<…>>` — the
+  `CoalitionDecisionPolicy`/`ValueCalculator` seams take `&self`): a join
+  against an unchanged coalition answers `Mag(S ∪ {x})` via the `O(m²)`
+  incremental `value_with` instead of two fresh `O(m³)` evaluations, keyed on
+  `(required, ordered member masks)` with a `REGISTRY_CAP`-bounded (256)
+  candidate-mask registry retained across rebuilds (measured: scoping the
+  registry to one requirement degenerates to rebuild-per-decision and regresses
+  below the pre-K6 baseline).
+- **Decision behavior is bit-frozen** — the K4 battery re-run
+  (`docs/ab-report-K4-catgraph-evaluator.md`) matches
+  `ab-report-K4-catgraph.md` seed-for-seed on every quality column, and a
+  lockstep probe found 0/8068 `act` divergences. This required a **knife-edge
+  fresh fallback** (`KNIFE_EDGE_REL_BAND = 1e-6` relative): mathematically-zero
+  margins (subsumed/redundant candidates) are decided by float noise under the
+  fresh path, and the upstream rank-order-identity contract does not protect a
+  sign-vs-zero threshold comparison — in-band margins recompute the `with` side
+  fresh, reproducing the committed noise bit-exactly (16/8068 decisions flipped
+  without it). `base_value()` is bit-identical by the upstream contract, pinned
+  by a populated-registry test.
+- **Latency**: mag median 3.915 → 3.658 µs (AIF 1.387 µs) — Path A (v1 speed
+  route) still missed, dual verdict `FALSIFIED (latency)` / `VALIDATED (B)`
+  unchanged. Per-decision profile committed in the report (the pre-registered
+  catgraph#33 evidence): the pure incremental hit path is at AIF parity
+  (1.35 µs) but ~62% of cache hits are knife-edge (decision-freeze tax, 5.05 µs)
+  and evaluator construction costs ~10–15× a plain fresh evaluation (~30 µs,
+  the #33 scratch-buffer target). Leave path stays fresh (upstream non-goal;
+  the reduced-set-evaluator variant B measured slower and ships opt-in via
+  `MagnitudePolicy::with_evaluator_leave`).
+- **API**: `MagnitudePolicy` / `MagnitudeValueCalculator` lose `Copy` (the
+  cache is an `Arc`; `Clone` shares it) and gain `new` constructors — struct
+  literals no longer work outside the crate. `t = 1` stays pinned; the
+  capability→coupling mapping, join/leave rules, and battery protocol are
+  untouched.
+- Suite: 77 default / 96 `decision` / 93 `magnitude` / 112 both (+7 magnitude
+  tests: seeded decision-equality guards for both leave variants, cache
+  invalidation, shared-clone-cache, populated-registry bit-identity, knife-edge
+  flip regression, error-path plumbing).
+
+[#14]: https://github.com/sustia-llc/koalisi/issues/14
+
 ### Changed (unreleased — issue [#6] messaging swap, K3)
 
 - **In-process actor seams swapped from kameo to `tokio::sync`** (hybrid, hot
