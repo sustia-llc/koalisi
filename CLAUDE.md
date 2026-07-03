@@ -710,6 +710,21 @@ the SPRT-suitable stream; SPRT itself stays downstream). Acceptance held:
 coalition formation runs on synthetic non-financial data with no databento dep
 (`tests/ingestion_integration.rs`, `examples/synthetic_ingestion.rs`).
 
+**Post-K salvage — magnitude trajectory over the event log
+([#18](https://github.com/sustia-llc/koalisi/issues/18), OPEN, unscheduled).**
+Fold-in salvage from the superseded `tsondru/catgraph-coalition` (decision
+2026-07-03; see `tsondru-notes/catgraph/docs/refresh-candidates.md` triage
+banner — salvage split across catgraph#53 / catgraph#36-addendum / this):
+a temporal-analytics query that replays coalition membership at sample points
+along the event-sourced history and evaluates the pinned t=1
+`coalition_value` (or `CoalitionEvaluator` where the membership delta allows
+the incremental path) — a diversity-over-time series per coalition.
+Re-express against koalisi's own `TemporalQueries`/`TemporalAnalytics` API;
+do NOT copy the legacy impl (it was bound to the old SurrealDB live-query
+transport). Natural affinity with the Phase 7 persistence re-plan (both
+consume the event log); sequence at the user's call. Anchors: BV 2025 §3.5;
+catgraph #22/#23/#31.
+
 **K3 — messaging swap ([#6](https://github.com/sustia-llc/koalisi/issues/6), DONE 2026-07-02).**
 Hybrid per the pin: hot seams on `tokio::sync` (broadcast buses, mpsc/oneshot
 handles, drain-based flush barriers), kameo + kameo_actors REMOVED, thin

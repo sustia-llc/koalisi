@@ -30,6 +30,12 @@ Planned work (tracked in [`CLAUDE.md`](./CLAUDE.md) §"Next steps"):
 - **Synthetic DBN file** for end-to-end arb signal demo.
 - **Remote gateway hardening** — bounded buffer, cursor-based polling,
   stable wire schema, QUIC transport alongside TCP.
+- **Magnitude trajectory over the event log** ([#18]) — `magnitude_history`
+  salvage from the superseded `catgraph-coalition`: replay membership along
+  the temporal event log and evaluate the t=1 coalition value per sample
+  (feature `magnitude`; affinity with the Phase 7 persistence re-plan).
+
+[#18]: https://github.com/sustia-llc/koalisi/issues/18
 
 ### Added/Changed (unreleased — issue [#8] domain-neutral ingestion, K5)
 
