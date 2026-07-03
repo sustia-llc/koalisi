@@ -37,8 +37,9 @@ actor-based runtime orchestration.
 | `core` | `CoalitionRuntime` (lifecycle), settings, logging |
 | `topology` | Temporal hypergraph with event sourcing, `CoalitionManager`, time-travel queries, analytics |
 | `algorithms` | `ValueCalculator` trait + 4 calculators, `DCVCDistributor`, AIPA partition search |
+| `ingest` | Domain-neutral ingestion (K5): `Sample`/`DataSource` traits, generic `SampleMonitor<S>`, `Pacing` + `pump_source`, synthetic NEST-shaped multi-resolution and tauhokohoko-shaped sensor-event fixture sources (seeded, no credentials) |
 | `decision` | `CoalitionDecisionPolicy` trait + always-available `ThresholdPolicy`; optional Active Inference strategy (`EfeValueCalculator`, `AifDecisionPolicy`) behind the `decision` feature; optional categorical-magnitude strategy (`MagnitudeValueCalculator`, `MagnitudePolicy`) behind the `magnitude` feature |
-| `subsystems` | Forex-specific tokio task workers (monitor, coordinator, sink, swarm), libp2p remote gateway (`remote`), durable decision log (`durable`) |
+| `subsystems` | Forex-specific tokio task workers (monitor = `SampleMonitor<Tick>`, coordinator, sink, swarm), databento adapter (`databento`), libp2p remote gateway (`remote`), durable decision log (`durable`) |
 | `market` | Forex value types (Pair, Tick, Quote, Triangle, ArbitrageOpportunity) |
 
 ## Quick start
@@ -107,10 +108,10 @@ cargo run --features remote --example distributed_alert_consumer
 ## Tests
 
 ```sh
-cargo test                                 # 77 tests (core + topology + algorithms + decision + forex)
-cargo test --features decision             # 96 tests (+ Active Inference decision strategy)
-cargo test --features magnitude            # 93 tests (+ categorical-magnitude decision strategy)
-cargo test --features decision,magnitude   # 112 tests (both decision arms)
+cargo test                                 # 87 tests (core + topology + algorithms + decision + ingestion + forex)
+cargo test --features decision             # 106 tests (+ Active Inference decision strategy)
+cargo test --features magnitude            # 103 tests (+ categorical-magnitude decision strategy)
+cargo test --features decision,magnitude   # 122 tests (both decision arms)
 cargo test --features durable              # + container-backed restart-durability test (needs Docker)
 cargo test --features databento            # + 4 databento integration tests
 cargo test --features remote               # + 1 remote integration test

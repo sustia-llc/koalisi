@@ -8,6 +8,9 @@
 //! - [`topology`] — temporal hypergraph, event sourcing,
 //!   `CoalitionManager`, time-travel queries, analytics.
 //! - [`algorithms`] — `ValueCalculator`, DCVC, AIPA partition search.
+//! - [`ingest`] — domain-neutral ingestion: the `Sample` trait, the generic
+//!   `SampleMonitor` (which `MarketMonitor` instantiates), a `DataSource` pump,
+//!   and seeded synthetic fixtures (NEST- and tauhokohoko-shaped).
 //! - [`decision`] — coalition join/leave policies: `ThresholdPolicy` (always
 //!   available), behind feature `decision` an Active Inference
 //!   expected-free-energy policy, and behind feature `magnitude` its categorical
@@ -26,6 +29,7 @@
 pub mod algorithms;
 pub mod core;
 pub mod decision;
+pub mod ingest;
 pub mod llm;
 pub mod market;
 pub mod topology;
@@ -45,6 +49,7 @@ pub mod subsystems {
 }
 
 pub use decision::{CoalitionDecisionPolicy, Decision, DecisionContext, ThresholdPolicy};
+pub use ingest::{DataSource, Sample, SampleMonitor, SampleUpdate};
 pub use market::{ArbitrageOpportunity, Direction, Pair, Quote, Tick, TickUpdate, Triangle};
 pub use subsystems::swarm::{Swarm, SwarmConfig, SwarmFeeder};
 pub use core::CoalitionRuntime;

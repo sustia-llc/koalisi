@@ -62,8 +62,8 @@ impl ArbitrageCoordinator {
     /// Ingest a `TickUpdate`, returning any arbitrage opportunities that fire
     /// as a result (usually zero or one). Preserves the exact firing +
     /// hysteresis semantics of the original actor.
-    pub fn ingest(&mut self, update: TickUpdate) -> Vec<ArbitrageOpportunity> {
-        self.quotes.insert(update.pair.clone(), update.quote);
+    pub fn ingest(&mut self, update: &TickUpdate) -> Vec<ArbitrageOpportunity> {
+        self.quotes.insert(update.key.clone(), update.view);
 
         let mut opps = Vec::new();
         for idx in 0..self.triangles.len() {
@@ -190,7 +190,7 @@ fn drain_ticks(
     loop {
         match tick_rx.try_recv() {
             Ok(update) => {
-                for opp in coordinator.ingest(update) {
+                for opp in coordinator.ingest(&update) {
                     let _ = alert_bus.send(opp);
                 }
             }
@@ -240,7 +240,7 @@ async fn coordinator_loop(
             },
             recv = tick_rx.recv(), if tick_open => match recv {
                 Ok(update) => {
-                    for opp in coordinator.ingest(update) {
+                    for opp in coordinator.ingest(&update) {
                         let _ = alert_bus.send(opp);
                     }
                 }
@@ -272,8 +272,8 @@ mod tests {
     fn update(pair: &str, bid: f64, ask: f64, ts: i64) -> TickUpdate {
         let t = Tick::new(p(pair), bid, ask, ts);
         TickUpdate {
-            pair: t.pair.clone(),
-            quote: t.quote(),
+            key: t.pair.clone(),
+            view: t.quote(),
         }
     }
 
@@ -284,29 +284,29 @@ mod tests {
         let synthetic = 1.10 / 1.30;
 
         // Aligned bootstrap → no fire.
-        assert!(c.ingest(update("EUR/USD", 1.0998, 1.1002, 0)).is_empty());
-        assert!(c.ingest(update("GBP/USD", 1.2998, 1.3002, 0)).is_empty());
+        assert!(c.ingest(&update("EUR/USD", 1.0998, 1.1002, 0)).is_empty());
+        assert!(c.ingest(&update("GBP/USD", 1.2998, 1.3002, 0)).is_empty());
         assert!(
-            c.ingest(update("EUR/GBP", synthetic - 0.0001, synthetic + 0.0001, 0))
+            c.ingest(&update("EUR/GBP", synthetic - 0.0001, synthetic + 0.0001, 0))
                 .is_empty()
         );
 
         // Dislocate → exactly one alert.
-        let opps = c.ingest(update("EUR/GBP", 0.8499, 0.8501, 1_000));
+        let opps = c.ingest(&update("EUR/GBP", 0.8499, 0.8501, 1_000));
         assert_eq!(opps.len(), 1);
         assert_eq!(opps[0].direction, Direction::BuySyntheticSellActual);
         assert_eq!(opps[0].detected_at_ms, 1_000);
 
         // Re-feed same dislocation → hysteresis suppresses.
-        assert!(c.ingest(update("EUR/GBP", 0.8499, 0.8501, 1_100)).is_empty());
+        assert!(c.ingest(&update("EUR/GBP", 0.8499, 0.8501, 1_100)).is_empty());
 
         // Re-align → rearm (no fire).
         assert!(
-            c.ingest(update("EUR/GBP", synthetic - 0.0001, synthetic + 0.0001, 2_000))
+            c.ingest(&update("EUR/GBP", synthetic - 0.0001, synthetic + 0.0001, 2_000))
                 .is_empty()
         );
         // Flip the other way → second, opposite-sign alert.
-        let opps = c.ingest(update("EUR/GBP", 0.8400, 0.8402, 3_000));
+        let opps = c.ingest(&update("EUR/GBP", 0.8400, 0.8402, 3_000));
         assert_eq!(opps.len(), 1);
         assert_eq!(opps[0].direction, Direction::SellSyntheticBuyActual);
         assert!(opps[0].edge_bps < -50.0);

@@ -49,6 +49,20 @@ coalition_aif (decision — planned), and forex-arbitrage-swarm (runtime).
 
 ### Done
 
+- **Domain-neutral ingestion (K5, issue #8)**: new `src/ingest/` (always
+  compiled, zero new deps) — `Sample` trait (`Key`/`View`/`timestamp_ms`),
+  generic `SampleMonitor<S>` (the MarketMonitor logic, verbatim-generic; K3
+  contracts unchanged), `DataSource` + domain-neutral `Pacing` +
+  `pump_source`/`spawn_source_pump` (`PumpStats { fed, dropped }`), and two
+  seeded fixture sources: NEST-shaped `MultiResolutionSource` (per-series
+  `step_ms`, global timestamp merge) and tauhokohoko-shaped
+  `SensorEventSource` (changepoint mean shift, SPRT-suitable). Forex is now
+  the instantiation: `MarketMonitor = SampleMonitor<Tick>`,
+  `TickUpdate = SampleUpdate<Tick>` (**breaking**: fields `pair` → `key`,
+  `quote` → `view`); databento stays a feature-gated adapter (own pump, shares
+  `ingest::Pacing`). Acceptance: `tests/ingestion_integration.rs` +
+  `examples/synthetic_ingestion.rs` run coalition formation on synthetic
+  non-financial data, no databento dep.
 - **Evaluator hot path (K6, issue #14) — magnitude arm on
   `CoalitionEvaluator`**: dep `catgraph-magnitude` bumped to `v0.2.0`
   (catgraph#31); `MagnitudePolicy`/`MagnitudeValueCalculator` hold a
@@ -158,11 +172,11 @@ coalition_aif (decision — planned), and forex-arbitrage-swarm (runtime).
 - **Tests passing**:
   | Suite | Tests | Command |
   |---|---|---|
-  | Default | 77 | `cargo test` |
-  | `--features decision` | 96 | `cargo test --features decision` |
-  | `--features magnitude` | 93 | `cargo test --features magnitude` |
-  | `--features decision,magnitude` | 112 | `cargo test --features decision,magnitude` |
-  | `--features durable` | 78 (+1 container-backed restart test; needs Docker) | `cargo test --features durable` |
+  | Default | 87 | `cargo test` |
+  | `--features decision` | 106 | `cargo test --features decision` |
+  | `--features magnitude` | 103 | `cargo test --features magnitude` |
+  | `--features decision,magnitude` | 122 | `cargo test --features decision,magnitude` |
+  | `--features durable` | 88 (+1 container-backed restart test; needs Docker) | `cargo test --features durable` |
   | `--features databento` | + 4 databento integration | `cargo test --features databento` |
   | `--features remote` | + 1 remote integration | `cargo test --features remote` |
   | All examples | exit 0 | see Reproducers below |
@@ -178,7 +192,7 @@ koalisi/
 ├── src/
 │   ├── lib.rs                              module surface + re-exports
 │   ├── main.rs                             daemon binary with scripted live feed
-│   ├── market.rs                           Pair/Tick/Quote/Triangle/TickUpdate/Opportunity + 6 unit tests
+│   ├── market.rs                           Pair/Tick/Quote/Triangle/Opportunity + `impl Sample for Tick`; TickUpdate = SampleUpdate<Tick> alias (K5) + 6 unit tests
 │   ├── core/
 │   │   ├── mod.rs                          re-exports
 │   │   ├── config.rs                       Settings + CoalitionSettings + setup_logging
@@ -204,10 +218,16 @@ koalisi/
 │   │   ├── mod.rs                          CoalitionDecisionPolicy + ThresholdPolicy (always compiled)
 │   │   ├── aif_policy.rs                   AifDecisionPolicy + EfeValueCalculator (feature `decision`)
 │   │   └── magnitude_policy.rs             MagnitudePolicy + MagnitudeValueCalculator + CouplingModel + CoalitionEvaluator cache (K6) (feature `magnitude`)
+│   ├── ingest/                             K5 (#8): domain-neutral ingestion layer (always compiled, no new deps)
+│   │   ├── mod.rs                          re-exports
+│   │   ├── sample.rs                       Sample trait (Key routing + timestamp_ms + View)
+│   │   ├── monitor.rs                      SampleMonitor<S> + SampleUpdate/Snapshot + handle + spawn (the generic MarketMonitor; K3 contracts verbatim)
+│   │   ├── source.rs                       DataSource trait + Pacing + PumpStats + pump_source/spawn_source_pump
+│   │   └── synthetic.rs                    MultiResolutionSource (NEST-shaped) + SensorEventSource (tauhokohoko-shaped, changepoint)
 │   ├── llm/
 │   │   └── mod.rs                          LlmProvider trait + StubLlmProvider (Phase 5 anchor)
 │   └── subsystems/
-│       ├── monitor.rs                      MarketMonitor task + MonitorHandle (feed/tell/snapshot/ping)
+│       ├── monitor.rs                      forex aliases: MarketMonitor = SampleMonitor<Tick> etc. + spawn_monitor (K5)
 │       ├── coordinator.rs                  ArbitrageCoordinator task + CoordinatorHandle (broadcast tick_bus in, alert_bus out)
 │       ├── sink.rs                         AlertSink task + SinkHandle (get/drain alerts, ping)
 │       ├── swarm.rs                        Swarm (wraps CoalitionRuntime) + SwarmConfig + SwarmFeeder (mpsc senders)
@@ -222,6 +242,7 @@ koalisi/
 │   ├── live_pubsub.rs                      scripted feed + broadcast listener
 │   ├── triangular_arbitrage.rs             full triangle, fires arb signals
 │   ├── supervised_swarm.rs                 spawn_supervised restart demo (K3)
+│   ├── synthetic_ingestion.rs              K5 demo: NEST + sensor fixtures through generic monitors (default features)
 │   ├── hot_path_bench.rs                   K3 latency bench (run --release)
 │   ├── strategy_comparison.rs              divergence demo + K4 A/B battery (features decision,magnitude)
 │   ├── durable_decisions.rs                durable decision log end-to-end (feature `durable`)
@@ -239,6 +260,7 @@ koalisi/
     ├── decision_integration.rs             4–6 tests (feature-dependent)
     ├── durable_integration.rs              1 container-backed restart test (feature `durable`)
     ├── databento_integration.rs            4 tests (feature `databento`)
+    ├── ingestion_integration.rs            3 tests (K5: synthetic sources → monitors → coalition formation; default features)
     └── remote_integration.rs               1 test (feature `remote`)
 ```
 
@@ -383,7 +405,7 @@ These cost time during the build; future-me should not relearn them.
 All assume `cwd = koalisi/`.
 
 ```sh
-# === default features (77 tests) ===
+# === default features (87 tests) ===
 timeout 60s  cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target
 timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example topology_coalition
 timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example algorithm_values
@@ -391,8 +413,9 @@ timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-tar
 timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example historical_bootstrap
 timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example live_pubsub
 timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example supervised_swarm
+timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example synthetic_ingestion
 
-# === decision-layer feature combos (96 / 86 / 105 tests) ===
+# === decision-layer feature combos (106 / 103 / 122 tests) ===
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features magnitude
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision,magnitude
@@ -670,6 +693,22 @@ identical to the K1 parity report; latency 3.915 → 3.658 µs vs AIF 1.387 —
 catgraph#33 evidence (construction ~30 µs ≈ 10–15× fresh; knife-edge tax
 5.05 µs on ~62% of hits; pure hit path 1.35 µs ≈ AIF parity — the mechanism
 works where it applies).
+
+**K5 — domain-neutral ingestion ([#8](https://github.com/sustia-llc/koalisi/issues/8), DONE 2026-07-03).**
+De-financed the ingestion layer: `src/ingest/` is the real implementation
+(`Sample`, `SampleMonitor<S>` — the MarketMonitor logic verbatim-generic with
+the K3 contracts intact — `DataSource`, domain-neutral `Pacing`,
+`pump_source`), forex is the instantiation (`MarketMonitor =
+SampleMonitor<Tick>`, `TickUpdate = SampleUpdate<Tick>`; fields `pair` → `key`,
+`quote` → `view` — the one breaking rename), databento stays a feature-gated
+adapter (own DBN pump — its `PumpStats` fields are asserted by its tests —
+sharing only `ingest::Pacing`). Two seeded fixture sources anchor the roadmap
+drivers: NEST-shaped `MultiResolutionSource` (per-series `step_ms`, global
+timestamp-order merge — the planning-period ↔ hourly gap) and
+tauhokohoko-shaped `SensorEventSource` (per-sensor changepoint mean shift —
+the SPRT-suitable stream; SPRT itself stays downstream). Acceptance held:
+coalition formation runs on synthetic non-financial data with no databento dep
+(`tests/ingestion_integration.rs`, `examples/synthetic_ingestion.rs`).
 
 **K3 — messaging swap ([#6](https://github.com/sustia-llc/koalisi/issues/6), DONE 2026-07-02).**
 Hybrid per the pin: hot seams on `tokio::sync` (broadcast buses, mpsc/oneshot

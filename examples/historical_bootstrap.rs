@@ -38,7 +38,7 @@ async fn main() -> Result<()> {
     let snapshot: MonitorSnapshot = monitor.snapshot().await?;
     println!(
         "{} → latest mid = {:.5}, history len = {} (capped at 8)",
-        snapshot.pair,
+        snapshot.key,
         snapshot.latest.unwrap().mid,
         snapshot.history.len()
     );
