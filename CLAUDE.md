@@ -454,7 +454,7 @@ ROLE=consumer timeout 60s cargo run --manifest-path Cargo.toml --target-dir /tmp
 > dynamics that *generate* the events can settle before we commit to a
 > durable storage format).
 
-### Phase 5: SwarmAgentic-style optimisation  *(planned — gated, see above)*
+### Phase 5: SwarmAgentic-style optimisation  *(planned — gated, see above; tracked: [#20](https://github.com/sustia-llc/koalisi/issues/20))*
 
 Lift the SwarmAgentic framework (Zhang et al., 2025 — see
 `docs/SwarmAgentic-summary.md` for full paper digest) into koalisi as a
@@ -739,7 +739,7 @@ The durable decision log seeds Phase 7's message-event stream (retention sweep
 is a bounded window, NOT a full event store — Phase 7 still owns real
 durability).
 
-### Phase 7: Persistence  *(planned — gated, see above; was Phase 5, moved last)*
+### Phase 7: Persistence  *(planned — gated, see above; was Phase 5, moved last; RE-PLAN tracked: [#21](https://github.com/sustia-llc/koalisi/issues/21))*
 
 > **K1 impact (2026-07-02): the original `PersistentHypergraph` approach is
 > OBSOLETE.** It came from yamafaktory hypergraph v4.2.0, which K1 (#4)
@@ -769,7 +769,7 @@ Salmon Prisoner's Dilemma simulator using koalisi's coalition primitives
 with deep_causality's CSM/EPP/Teloid/Uncertain layers. See
 `~/Documents/tauhokohoko/tauhokohoko/requirements/causal-context-architecture.md`.
 
-### Legacy: Databento `LiveClient` integration  **(blocked: needs `DATABENTO_API_KEY`)**
+### Legacy: Databento `LiveClient` integration  **(blocked: needs `DATABENTO_API_KEY`; tracked: [#22](https://github.com/sustia-llc/koalisi/issues/22))**
 
 The `LiveClient` is databento's real-time websocket-style subscriber.
 Same kameo wiring as the DBN-file adapter — only the source changes.
@@ -852,7 +852,7 @@ the canonical loop shape — use it as template.
 - Take a hardcoded `HashMap<u32, Pair>` from the caller (simpler but
   inflexible).
 
-### B. Synthetic DBN file for end-to-end arb signal demo  *(unblocked)*
+### B. Synthetic DBN file for end-to-end arb signal demo  *(unblocked; tracked: [#23](https://github.com/sustia-llc/koalisi/issues/23))*
 
 The bundled fixture isn't forex and only has 2 records, so the existing
 databento examples can't show the full "DBN decode → triangle arb fires"
@@ -894,7 +894,7 @@ path. Generate a synthetic file at runtime.
   built via `MetadataBuilder::mappings(...)`. Each `SymbolMapping`
   needs a date range covering the records' timestamps.
 
-### C. Remote gateway hardening  *(unblocked, low priority — rewritten post-K3 for the raw-libp2p gateway)*
+### C. Remote gateway hardening  *(unblocked, low priority — rewritten post-K3 for the raw-libp2p gateway; tracked: [#24](https://github.com/sustia-llc/koalisi/issues/24))*
 - see /home/oryx/Documents/category/deep_causality/examples/avionics_examples/flight_envelope_monitor/README.md for a template for trade_envelope_monitor
 The K3 gateway (raw libp2p `request-response`, `/koalisi/alerts/1`) works
 (round-trip integration test green) but is minimal. To make it
@@ -920,7 +920,7 @@ production-shaped:
    client keeps its connection; idle ones close via the 300s idle
    timeout). Revisit if stale-peer connection buildup ever matters.
 
-### D. Smaller nice-to-haves (optional)
+### D. Smaller nice-to-haves (optional; tracked: [#25](https://github.com/sustia-llc/koalisi/issues/25) metrics, [#26](https://github.com/sustia-llc/koalisi/issues/26) multi-triangle stress, [#27](https://github.com/sustia-llc/koalisi/issues/27) bid/ask execution)
 
 - **Metrics example** — subscribe a `metrics::Counter`-driven task to
   both broadcast buses, scrape via `metrics-exporter-prometheus` (post-K3:
@@ -935,6 +935,11 @@ production-shaped:
   K3 (#6): kameo was removed entirely, not version-bumped.
 
 ## Open questions (jot anything here as it comes up)
+
+> Both current questions are folded into issues: the databento feature split
+> into [#22](https://github.com/sustia-llc/koalisi/issues/22) (LiveClient), the
+> hysteresis semantics into [#26](https://github.com/sustia-llc/koalisi/issues/26)
+> (multi-triangle stress). Kept below for context.
 
 - Whether the `databento` feature should split into `databento-file` and
   `databento-live` so users who only want the file adapter don't pull

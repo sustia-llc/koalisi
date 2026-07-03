@@ -14,28 +14,42 @@ Phase ordering reshuffled: Persistence moved to Phase 7 (last) so the
 SwarmAgentic particle traces and Active Inference belief states inform
 the persistence schema before we commit to a wire format.
 
-Planned work (tracked in [`CLAUDE.md`](./CLAUDE.md) §"Next steps"):
+Planned work — all issue-tracked as of 2026-07-03 (details in
+[`CLAUDE.md`](./CLAUDE.md) §"Next steps"):
 
-- **Phase 5 — SwarmAgentic-style optimisation**: language-driven PSO
-  meta-layer that evolves coalition designs. Five integration ideas
-  (configurator, failure-aware velocity ↔ EFE bridge, ValueCalculator
-  feedback weights, AIPA + population hybrid, cross-model
-  transferability). Depends on the new `LlmProvider` stub. *(Stub
-  trait already in place — see "Added" below.)*
-- **Phase 7 — Persistence**: feature-gated `PersistentHypergraph` from
-  hypergraph v4.2.0 + an append-only `EventStore` trait. Must also
-  durably record SwarmAgentic particle lineages and EFE belief
-  snapshots.
-- **Databento `LiveClient` integration** *(blocked on `DATABENTO_API_KEY`)*.
-- **Synthetic DBN file** for end-to-end arb signal demo.
-- **Remote gateway hardening** — bounded buffer, cursor-based polling,
-  stable wire schema, QUIC transport alongside TCP.
+- **Phase 5 — SwarmAgentic-style optimisation** ([#20], **gated** on the
+  user's design input #2): language-driven PSO meta-layer that evolves
+  coalition designs. Five integration ideas (configurator, failure-aware
+  velocity ↔ EFE bridge, ValueCalculator feedback weights, AIPA +
+  population hybrid, cross-model transferability). `LlmProvider` stub in
+  place.
+- **Phase 7 — Persistence RE-PLAN** ([#21], gated + deliberately last): the
+  original `PersistentHypergraph` design is obsolete since K1; what survives
+  is the append-only `EventStore` idea, which must also durably record
+  SwarmAgentic particle lineages and EFE belief snapshots. K3's durable
+  decision log seeds the message-event side.
 - **Magnitude trajectory over the event log** ([#18]) — `magnitude_history`
   salvage from the superseded `catgraph-coalition`: replay membership along
   the temporal event log and evaluate the t=1 coalition value per sample
-  (feature `magnitude`; affinity with the Phase 7 persistence re-plan).
+  (feature `magnitude`; affinity with the Phase 7 re-plan).
+- **Databento `LiveClient` integration** ([#22], *blocked on
+  `DATABENTO_API_KEY`*).
+- **Synthetic DBN file** for the end-to-end arb signal demo ([#23]).
+- **Remote gateway hardening** ([#24]) — bounded buffer, cursor-based
+  polling, stable wire schema, QUIC transport alongside TCP.
+- **Nice-to-haves**: metrics/prometheus example ([#25]), multi-triangle
+  stress test + hysteresis semantics ([#26]), bid/ask-aware execution
+  model ([#27]).
 
 [#18]: https://github.com/sustia-llc/koalisi/issues/18
+[#20]: https://github.com/sustia-llc/koalisi/issues/20
+[#21]: https://github.com/sustia-llc/koalisi/issues/21
+[#22]: https://github.com/sustia-llc/koalisi/issues/22
+[#23]: https://github.com/sustia-llc/koalisi/issues/23
+[#24]: https://github.com/sustia-llc/koalisi/issues/24
+[#25]: https://github.com/sustia-llc/koalisi/issues/25
+[#26]: https://github.com/sustia-llc/koalisi/issues/26
+[#27]: https://github.com/sustia-llc/koalisi/issues/27
 
 ### Added/Changed (unreleased — issue [#8] domain-neutral ingestion, K5)
 
