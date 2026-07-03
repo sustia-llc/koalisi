@@ -8,8 +8,8 @@
 //! **Why `--release`:** the latency criterion (Part 2) is only meaningful on
 //! optimized builds. (Historical note: `catgraph-magnitude v0.1.0` also had a
 //! debug-only over-strict triangle-inequality `debug_assert` that panicked on
-//! the battery's non-dyadic couplings — catgraph #29, fixed in `v0.1.1`, which
-//! koalisi now depends on; debug builds run clean.)
+//! the battery's non-dyadic couplings — catgraph #29, fixed in `v0.1.1`;
+//! koalisi pins `v0.2.0` since #14, and debug builds run clean.)
 //!
 //! # Part 1 — single-scenario divergence demo (Threshold vs AIF)
 //!
@@ -92,8 +92,10 @@ use koalisi::decision::{
     MagnitudePolicy, ThresholdPolicy,
 };
 
-/// Hardcoded pre-registration date — deterministic, never read from the clock.
-const REPORT_DATE: &str = "2026-07-02";
+/// Hardcoded report date — deterministic, never read from the clock. Bumped
+/// manually per committed run (2026-07-02 = K4 initial + K1 backend parity;
+/// 2026-07-03 = K6 post-optimization re-run, koalisi #14).
+const REPORT_DATE: &str = "2026-07-03";
 /// Number of seeded instances (seeds `0..SEEDS`).
 const SEEDS: u64 = 30;
 /// Tasks per instance.
@@ -755,7 +757,9 @@ fn print_report(
 
     println!("# koalisi #7 — categorical-magnitude vs Active-Inference A/B report");
     println!();
-    println!("_{REPORT_DATE} · catgraph backend (post-K1) · release build_");
+    println!(
+        "_{REPORT_DATE} · catgraph backend · `CoalitionEvaluator` hot path (post-#14) · release build_"
+    );
     println!();
     println!("Pre-registered A/B harness (koalisi #7). AIF expected-free-energy arm");
     println!("(`AifDecisionPolicy`) vs categorical-magnitude arm (`MagnitudePolicy`, t = 1).");
@@ -886,9 +890,10 @@ fn print_report(
     println!();
     println!(
         "_Release build required for the latency criterion (optimized code). \
-         Debug builds run clean since the `catgraph-magnitude v0.1.1` dep \
-         (catgraph #29 fixed the over-strict triangle `debug_assert` that \
-         v0.1.0 tripped on this battery's non-dyadic couplings)._"
+         Debug builds run clean since `catgraph-magnitude v0.1.1` (catgraph #29 \
+         fixed the over-strict triangle `debug_assert` that v0.1.0 tripped on \
+         this battery's non-dyadic couplings; the pinned dep is `v0.2.0` since \
+         koalisi #14)._"
     );
 }
 

@@ -109,8 +109,8 @@ cargo run --features remote --example distributed_alert_consumer
 ```sh
 cargo test                                 # 77 tests (core + topology + algorithms + decision + forex)
 cargo test --features decision             # 96 tests (+ Active Inference decision strategy)
-cargo test --features magnitude            # 86 tests (+ categorical-magnitude decision strategy)
-cargo test --features decision,magnitude   # 105 tests (both decision arms)
+cargo test --features magnitude            # 93 tests (+ categorical-magnitude decision strategy)
+cargo test --features decision,magnitude   # 112 tests (both decision arms)
 cargo test --features durable              # + container-backed restart-durability test (needs Docker)
 cargo test --features databento            # + 4 databento integration tests
 cargo test --features remote               # + 1 remote integration test
@@ -118,13 +118,13 @@ cargo test --features remote               # + 1 remote integration test
 
 ## Dependencies
 
-- [catgraph-applied](https://github.com/sustia-llc/catgraph) (tag `v0.1.1`) — CRUD hypergraph container backing the topology layer (the K1 re-back; replaced yamafaktory `hypergraph` v4.2.0)
+- [catgraph-applied](https://github.com/sustia-llc/catgraph) (tag `v0.2.0`, kept in lockstep with catgraph-magnitude — one repo, one checkout) — CRUD hypergraph container backing the topology layer (the K1 re-back; replaced yamafaktory `hypergraph` v4.2.0)
 - tokio + tokio-util — async runtime + lifecycle primitives
 - rayon + tokio-rayon — CPU-bound graph operations bridge
 - [surrealdb-live-message](https://github.com/sustia-llc/surrealdb-live-message) (tag `v0.2.0`, **optional**, feature `durable`) — two-tier restart-durable message bus for the coalition decision log
 - libp2p (**optional**, feature `remote`) — request-response alert gateway + mDNS discovery
 - [aif](https://github.com/sustia-llc/tira) (tag `aif-v0.5.0`, **optional**, feature `decision`) — active-inference engine for the AIF decision strategy; pulls `nalgebra` only when the feature is enabled
-- [catgraph-magnitude](https://github.com/sustia-llc/catgraph) (tag `v0.1.1`, **optional**, feature `magnitude`) — enriched-category coalition magnitude for the categorical decision strategy
+- [catgraph-magnitude](https://github.com/sustia-llc/catgraph) (tag `v0.2.0`, **optional**, feature `magnitude`) — enriched-category coalition magnitude for the categorical decision strategy
 
 ## Origin
 
