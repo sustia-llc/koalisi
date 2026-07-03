@@ -441,20 +441,26 @@ ROLE=consumer timeout 60s cargo run --manifest-path Cargo.toml --target-dir /tmp
 
 ## Next steps
 
-> **GATE — 2026-05-27 (1 of 2 design inputs received).** Input #1
-> landed: integrate SwarmAgentic-style optimisation as the new Phase 5
-> (was Persistence). One more design input still pending before
-> implementation begins on any of Phases 5–7. The LLM stub in
-> `src/llm/mod.rs` is the only code anchor in place so far; everything
-> else is plan-only.
->
-> Reordering: Phase 5 = SwarmAgentic features (was nothing), Phase 6 =
-> Decision layer / Active Inference (unchanged scope, moved up), Phase 7
-> = Persistence (was Phase 5, moved last so the SwarmAgentic + EFE
-> dynamics that *generate* the events can settle before we commit to a
-> durable storage format).
+> **GATE — RESOLVED 2026-07-03 (2 of 2 design inputs received).**
+> Input #1 (2026-05-27): integrate SwarmAgentic-style optimisation as
+> the new Phase 5 (was Persistence); reordering Phase 5 = SwarmAgentic,
+> Phase 6 = Decision layer (moved up, since SHIPPED + K2/K4/K6), Phase 7
+> = Persistence (moved last so the dynamics that *generate* the events
+> settle before committing to a durable storage format).
+> Input #2 (2026-07-03): the driver-derived design-goals payload from
+> the tauhokohoko + NEST requirement surveys — recorded in full on
+> [#20](https://github.com/sustia-llc/koalisi/issues/20) (Phase 5
+> reframe: NEST-H4 slow-loop calibration copilot; koalisi-AIF ≠
+> NEST-AIF pinned) and
+> [#21](https://github.com/sustia-llc/koalisi/issues/21) (Phase 7
+> requirements: append-only + crypto-deletion + bilateral federation +
+> portable format + EffectLog-compatible traces + FAIR provenance).
+> **Status: the Phase 7 RE-PLAN (#21) is unblocked and may proceed.
+> Phase 5 implementation stays HELD until NEST's 2026-07-09 working
+> session assigns Year-1 ownership** (plan/scaffolding only until then;
+> the LLM stub in `src/llm/mod.rs` remains the only code anchor).
 
-### Phase 5: SwarmAgentic-style optimisation  *(planned — gated, see above; tracked: [#20](https://github.com/sustia-llc/koalisi/issues/20))*
+### Phase 5: SwarmAgentic-style optimisation  *(planned — input #2 recorded, implementation HELD until post-2026-07-09; tracked: [#20](https://github.com/sustia-llc/koalisi/issues/20))*
 
 Lift the SwarmAgentic framework (Zhang et al., 2025 — see
 `docs/SwarmAgentic-summary.md` for full paper digest) into koalisi as a
@@ -739,7 +745,7 @@ The durable decision log seeds Phase 7's message-event stream (retention sweep
 is a bounded window, NOT a full event store — Phase 7 still owns real
 durability).
 
-### Phase 7: Persistence  *(planned — gated, see above; was Phase 5, moved last; RE-PLAN tracked: [#21](https://github.com/sustia-llc/koalisi/issues/21))*
+### Phase 7: Persistence  *(RE-PLAN UNBLOCKED 2026-07-03 — requirements recorded on [#21](https://github.com/sustia-llc/koalisi/issues/21); was Phase 5, moved last)*
 
 > **K1 impact (2026-07-02): the original `PersistentHypergraph` approach is
 > OBSOLETE.** It came from yamafaktory hypergraph v4.2.0, which K1 (#4)
@@ -765,9 +771,19 @@ separate `koalisi-nautilus` bridge project. Not a koalisi feature.
 
 ### Downstream: tauhokohoko integration  *(separate project)*
 
-Salmon Prisoner's Dilemma simulator using koalisi's coalition primitives
-with deep_causality's CSM/EPP/Teloid/Uncertain layers. See
-`~/Documents/tauhokohoko/tauhokohoko/requirements/causal-context-architecture.md`.
+**Framing corrected 2026-07-03** (requirements survey for design input #2):
+the earlier note here ("Salmon PD simulator using koalisi's coalition
+primitives") overstated koalisi's role. tauhokohoko's actual M2 design frames
+the salmon domain as **causal-model validation on DeepCausality directly**
+(CausaloidGraph with temporal lagged effects + CEL access gates + Teloid
+deontics) — no coalition formation, AIF-EFE, or magnitude requirement appears
+anywhere in its specs. koalisi's earliest possible entry is the post-M2,
+currently-unfunded Phase A demo. What tauhokohoko DOES impose on koalisi is
+the Phase 7 persistence constraint set (IDSov: append-only + crypto-deletion
++ bilateral federation + portability — recorded on
+[#21](https://github.com/sustia-llc/koalisi/issues/21)). See
+`~/Documents/tauhokohoko/tauhokohoko/requirements/causal-context-architecture.md`
+and `deliverables/m2-onchain-governance/design-doc.md`.
 
 ### Legacy: Databento `LiveClient` integration  **(blocked: needs `DATABENTO_API_KEY`; tracked: [#22](https://github.com/sustia-llc/koalisi/issues/22))**
 

@@ -7,12 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Design input #1 of 2 landed: SwarmAgentic-style optimisation becomes
-the new Phase 5 (see `docs/SwarmAgentic-summary.md`). One more design
-input still pending before any of Phases 5–7 begin implementation.
-Phase ordering reshuffled: Persistence moved to Phase 7 (last) so the
-SwarmAgentic particle traces and Active Inference belief states inform
-the persistence schema before we commit to a wire format.
+Both gated design inputs are now recorded (gate RESOLVED 2026-07-03).
+Input #1 (2026-05-27): SwarmAgentic-style optimisation becomes the new
+Phase 5 (see `docs/SwarmAgentic-summary.md`); Persistence moved to
+Phase 7 (last) so the particle traces and belief states inform the
+persistence schema before committing to a wire format. Input #2
+(2026-07-03): driver-derived design goals from the tauhokohoko + NEST
+requirement surveys — Phase 7 gets the IDSov persistence constraint set
+(append-only + crypto-deletion + bilateral federation + portable
+format + EffectLog-compatible traces + FAIR provenance; recorded on
+[#21]), Phase 5 is reframed as NEST's slow-loop AI-for-AI calibration
+copilot (recorded on [#20]). The Phase 7 re-plan is unblocked; Phase 5
+implementation is held until NEST's 2026-07-09 working session assigns
+Year-1 ownership.
 
 Planned work — all issue-tracked as of 2026-07-03 (details in
 [`CLAUDE.md`](./CLAUDE.md) §"Next steps"):
