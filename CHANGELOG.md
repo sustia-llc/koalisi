@@ -31,6 +31,59 @@ Planned work (tracked in [`CLAUDE.md`](./CLAUDE.md) §"Next steps"):
 - **Remote gateway hardening** — bounded buffer, cursor-based polling,
   stable wire schema, QUIC transport alongside TCP.
 
+### Added/Changed (unreleased — issue [#8] domain-neutral ingestion, K5)
+
+- **New `src/ingest/` module (always compiled, zero new deps)** ([#8]): the
+  ingestion layer is now domain-neutral; forex is one instantiation.
+  - `Sample` trait (`Key` routing + `timestamp_ms` + distilled `View`) and
+    `SampleMonitor<S>` — the former `MarketMonitor` logic ported
+    verbatim-generic (ring-buffer window, latest view, publish-on-ingest,
+    wrong-key drop-with-warn). The K3 runtime contracts carry over unchanged:
+    `feed` = acknowledged ingest-then-publish flush primitive, `tell` =
+    fire-and-forget, `Ping` = mailbox barrier, broadcast publish errors
+    ignored.
+  - `DataSource` trait (time-ordered pull; async-fn-in-trait,
+    dyn-incompatible by design), domain-neutral `Pacing::{Asap, Realtime}`
+    (moved out of the databento adapter, re-exported there), and
+    `pump_source`/`spawn_source_pump` — key-routed feeding with
+    `PumpStats { fed, dropped }` and token cancellation.
+  - **Synthetic fixture sources** (deterministic inline SplitMix64, no `rand`,
+    no credentials): `MultiResolutionSource` — NEST-shaped multi-resolution
+    numeric series (per-series `step_ms`, merged in global timestamp order;
+    models the planning-period ↔ hourly resolution gap) — and
+    `SensorEventSource` — tauhokohoko-shaped sensor-event streams with a
+    configurable changepoint (mean shift after `shift_at`), the SPRT-suitable
+    shape. Fixtures only; SPRT itself stays downstream.
+- **Forex re-expressed atop the generic core (breaking)**: `MarketMonitor` /
+  `MonitorHandle` / `MonitorSnapshot` are now type aliases of the generic
+  types; `TickUpdate` is `SampleUpdate<Tick>` — field renames `pair` → `key`,
+  `quote` → `view` ripple through consumers. Runtime behaviour, method names
+  and error strings are identical; the triangular-arbitrage domain example
+  stays fully working (its examples + integration tests are the guard).
+  databento remains a feature-gated adapter; its DBN pump is unchanged (its
+  `PumpStats` keeps the decode-oriented fields its tests assert) and now
+  shares `ingest::Pacing`.
+- **Acceptance (#8)**: coalition/topology tests and the A/B harness run on
+  synthetic non-financial data with no databento dependency —
+  `tests/ingestion_integration.rs` (default features) pumps both fixture
+  shapes through generic monitors and drives `CoalitionManager` +
+  `ThresholdPolicy` from sensor-derived capabilities;
+  `examples/synthetic_ingestion.rs` demos both shapes end-to-end.
+- **Hot-path no-regression evidence** (review-driven): `Sample::key` returns
+  `&Self::Key` — an earlier owned-key draft cloned the key per ingested tick
+  (two `String` allocs for `Pair`) and measurably bumped the K3 bench's alert
+  RTT median to ~11.9 µs; the by-ref design restores exact pre-K5 allocation
+  parity, re-measured at 8.90 µs / 118.7k ticks/s vs the committed K3 baseline
+  9.02 µs / 120.2k (`docs/k3-hot-path-bench.md`) — within run noise.
+  Signature notes: `pump_source`/`spawn_source_pump` are hasher-generic
+  (`H: BuildHasher`), the synthetic sources take `&[…Spec]`, and
+  `ArbitrageCoordinator::ingest` takes `&TickUpdate`.
+- Suite: 87 default / 106 `decision` / 103 `magnitude` / 122 both (+10:
+  5 synthetic-source, 2 pump, 3 ingestion-integration; the 2 monitor unit
+  tests moved to the generic module).
+
+[#8]: https://github.com/sustia-llc/koalisi/issues/8
+
 ### Changed (unreleased — issue [#14] evaluator hot path, K6)
 
 - **Magnitude decision hot path adopts `catgraph_magnitude::CoalitionEvaluator`**

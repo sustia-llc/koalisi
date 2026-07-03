@@ -31,21 +31,15 @@ use crate::market::{Pair, Tick};
 use crate::subsystems::swarm::{Swarm, SwarmFeeder};
 
 // ---------------------------------------------------------------------------
-// Pacing
+// Pacing (moved to the domain-neutral ingestion layer, issue #8)
 // ---------------------------------------------------------------------------
 
-/// Replay pacing strategy.
-#[derive(Debug, Clone, Copy, Default)]
-pub enum Pacing {
-    /// Pump every decoded record as fast as the decoder can produce it.
-    /// Used by `swarm.replay_history(...)`-style bootstrap flows.
-    #[default]
-    Asap,
-    /// Pace by `ts_recv` deltas. `speed_factor == 1.0` matches wall-clock
-    /// time to recorded time; `2.0` plays back at 2x speed; `0.5` at half
-    /// speed. Non-positive values are treated as [`Pacing::Asap`].
-    Realtime { speed_factor: f64 },
-}
+/// Replay pacing strategy — `Asap` or `Realtime { speed_factor }`.
+///
+/// Re-exported from [`crate::ingest`] for continuity: the type moved to the
+/// domain-neutral ingestion layer in K5 (issue #8). The databento pump still
+/// paces on the DBN `ts_recv` (nanoseconds), so it consumes only the enum shape.
+pub use crate::ingest::Pacing;
 
 // ---------------------------------------------------------------------------
 // Symbol mapper
@@ -70,6 +64,11 @@ where
 // ---------------------------------------------------------------------------
 
 /// Outcome counters returned by the pump.
+///
+/// Distinct from the ingestion layer's [`ingest::PumpStats`](crate::ingest::PumpStats)
+/// (`fed`/`dropped`): the databento adapter keeps its own richer, decode-oriented
+/// counters (records decoded, MBP-1 subset, unmapped, feed errors), which the
+/// integration tests assert on — so the two are deliberately not unified.
 #[derive(Debug, Default, Clone)]
 pub struct PumpStats {
     /// Total records decoded (any rtype).

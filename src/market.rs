@@ -10,6 +10,8 @@ use std::str::FromStr;
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 
+use crate::ingest::{Sample, SampleUpdate};
+
 // ---------------------------------------------------------------------------
 // Pair
 // ---------------------------------------------------------------------------
@@ -89,6 +91,27 @@ impl Tick {
     }
 }
 
+/// Forex instantiation of the domain-neutral ingestion [`Sample`] (issue #8):
+/// a tick's routing key is its [`Pair`] and its distilled view is a [`Quote`].
+/// This is what makes `MarketMonitor = SampleMonitor<Tick>` and
+/// `TickUpdate = SampleUpdate<Tick>`.
+impl Sample for Tick {
+    type Key = Pair;
+    type View = Quote;
+
+    fn key(&self) -> &Pair {
+        &self.pair
+    }
+
+    fn timestamp_ms(&self) -> i64 {
+        self.timestamp_ms
+    }
+
+    fn view(&self) -> Quote {
+        self.quote()
+    }
+}
+
 /// A monitor's distilled view of a pair: the latest bid/ask/mid + when it
 /// was observed.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -108,11 +131,11 @@ pub struct Quote {
 /// This is the "collaboration signal": no individual monitor decides if
 /// there's an arbitrage. They report observations; the coordinator combines
 /// them.
-#[derive(Debug, Clone)]
-pub struct TickUpdate {
-    pub pair: Pair,
-    pub quote: Quote,
-}
+///
+/// Since issue #8 this is an alias for the generic
+/// [`SampleUpdate`]`<`[`Tick`]`>`: the former `pair` / `quote` fields are now
+/// the generic `key` / `view` fields (`key: Pair`, `view: Quote`).
+pub type TickUpdate = SampleUpdate<Tick>;
 
 // ---------------------------------------------------------------------------
 // Triangle
