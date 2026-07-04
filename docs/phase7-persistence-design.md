@@ -191,8 +191,12 @@ impossible without breaking chain verification.
 **Decision.** `TemporalEvent<V,HE>` does NOT gain serde derives. A versioned
 wire mirror (`WireTopologyEvent`, 13 variants, serde-derived, raw `u64`
 index/timestamp fields, generic over serializable weight projections) lives
-at the persistence boundary, with `From<&TemporalEvent<V,HE>>` and a
-fallible inverse.
+at the persistence boundary, with a conversion from `&TemporalEvent<V,HE>`
+and a fallible inverse (shipped in P7.2 as inherent
+`from_event`/`try_into_event` on `WireTopologyEvent<VW, HW>` rather than
+`From`/`TryFrom` impls — the `V: Into<VW>` projection bounds sit better on
+inherent fns; the identity projection `VW = V` works for any serde-capable
+weight type).
 
 - Same deliberate call already made at the K3 boundary
   (`DecisionRecord` → `DecisionEvent` in `durable.rs`).
@@ -359,10 +363,15 @@ Design points:
 API; it replays into the existing in-memory machinery:
 
 ```rust
-/// Decode Topology-stream frames in [range] back into TemporalEvent and
-/// append into a fresh in-memory EventLog. All existing consumers —
-/// TemporalQueries, TemporalAnalytics, #18 magnitude_history — run unchanged.
-fn replay_into_event_log<V, HE>(...) -> Result<EventLog<V, HE>, PersistenceError>;
+/// Decode Topology-stream frames back into TemporalEvent and append into a
+/// fresh in-memory EventLog. All existing consumers — TemporalQueries,
+/// TemporalAnalytics, #18 magnitude_history — run unchanged.
+/// (Shipped in P7.2 with weight-projection generics per §4, reading from
+/// `from` to the stream head; requires a quiescent pipeline.)
+fn replay_into_event_log<V, HE, VW, HW>(
+    store: &dyn EventStore,
+    from: SequenceNo,
+) -> Result<EventLog<V, HE>, PersistenceError>;
 ```
 
 Consequences:

@@ -49,6 +49,20 @@ coalition_aif (decision — planned), and forex-arbitrage-swarm (runtime).
 
 ### Done
 
+- **P7.2 topology projection + replay (#30) — v0.9.0**: the event log now
+  persists and replays. Always-compiled optional **event tap** on
+  `TemporalHypergraph` (`with_event_tap`; try_send drop-with-warn; `Clone`
+  shares it; taps UNDER the events write guard ⇒ tap order == log order
+  under concurrency); `WireTopologyEvent<VW,HW>` serde mirror (13 variants,
+  raw u64 fields, `WIRE_TOPOLOGY_SCHEMA_VERSION`, inherent
+  `from_event`/`try_into_event`, identity projection `VW = V`);
+  `spawn_topology_forwarder` (tap → CBOR payload → P7.1 store writer;
+  lossless drop-to-drain vs prompt token-cancel shutdown — gotcha 18);
+  `replay_into_event_log(store, from)` rebuilds a fresh `EventLog` all
+  existing queries run on unchanged. **The pre-registered #18 parity gate
+  held**: `magnitude_history` live vs replayed exactly equal
+  (`tests/replay_parity.rs`). Suites 87 / 107 persistence / 130
+  persistence,magnitude / 128 (frozen arms untouched).
 - **P7.1 persistence core (#29) — v0.8.0**: new `src/persistence/` behind
   feature `persistence` (deps `ciborium` + `sha2`, gated; default build
   unchanged). The signed-off §6 `EventStore` trait
@@ -212,7 +226,8 @@ coalition_aif (decision — planned), and forex-arbitrage-swarm (runtime).
   | `--features decision` | 106 | `cargo test --features decision` |
   | `--features magnitude` | 109 | `cargo test --features magnitude` |
   | `--features decision,magnitude` | 128 | `cargo test --features decision,magnitude` |
-  | `--features persistence` | 102 (+8 unit, +7 integration) | `cargo test --features persistence` |
+  | `--features persistence` | 107 (+13 unit, +10 integration) | `cargo test --features persistence` |
+  | `--features persistence,magnitude` | 130 (incl. the #18/#30 replay parity gate) | `cargo test --features persistence,magnitude` |
   | `--features durable` | 88 (+1 container-backed restart test; needs Docker) | `cargo test --features durable` |
   | `--features databento` | + 4 databento integration | `cargo test --features databento` |
   | `--features remote` | + 1 remote integration | `cargo test --features remote` |
@@ -269,7 +284,10 @@ koalisi/
 │   │   ├── errors.rs                       PersistenceError (hand-rolled; StreamWedged; P7.3/P7.5 anchor variants)
 │   │   ├── chain.rs                        FrameV1 (private serde mirror), FRAME_VERSION, hashing, back-link check
 │   │   ├── store.rs                        EventStore trait + FileEventStore (segments, rotation, torn-tail recovery, wedge)
-│   │   └── writer.rs                       spawn_store_writer (spawn_blocking, drain-on-cancel)
+│   │   ├── writer.rs                       spawn_store_writer (spawn_blocking, drain-on-cancel)
+│   │   ├── wire.rs                         WireTopologyEvent<VW,HW> (13-variant serde mirror, u64 fields) + schema version (#30)
+│   │   ├── tee.rs                          spawn_topology_forwarder (tap → CBOR → store writer; shutdown disciplines) (#30)
+│   │   └── replay.rs                       replay_into_event_log (batched read → fresh EventLog; quiescence precondition) (#30)
 │   └── subsystems/
 │       ├── monitor.rs                      forex aliases: MarketMonitor = SampleMonitor<Tick> etc. + spawn_monitor (K5)
 │       ├── coordinator.rs                  ArbitrageCoordinator task + CoordinatorHandle (broadcast tick_bus in, alert_bus out)
@@ -308,6 +326,8 @@ koalisi/
     ├── ingestion_integration.rs            3 tests (K5: synthetic sources → monitors → coalition formation; default features)
     ├── magnitude_trajectory.rs             6 tests (#18: hand-computed trajectory semantics; feature `magnitude`)
     ├── persistence_integration.rs          7 tests (#29: roundtrip, rotation+reopen, tamper, torn tail, sealed opaque, writer drain, bounds; feature `persistence`)
+    ├── topology_replay.rs                  3 tests (#30: 13-variant round-trip, reconstruction equality, schema/Sealed rejection; feature `persistence`)
+    ├── replay_parity.rs                    1 test (#30: magnitude_history live == replayed — THE parity gate; features `persistence,magnitude`)
     └── remote_integration.rs               1 test (feature `remote`)
 ```
 
@@ -493,6 +513,25 @@ These cost time during the build; future-me should not relearn them.
       opaquely); `Lineage` is reserved until #20 unholds; open slurps whole
       segments + keeps 8 B/record offsets — fine at P7.1 scale.
 
+18. **P7.2 tap/replay contracts (#30) — rely on these.**
+    - **Tap fires UNDER the events write guard** (all 13 `record_event`
+      sites + the SnapshotMarker site): tap order is always identical to
+      log order, even with concurrent mutators sharing a cloned graph —
+      the property the replay "same events, same order" guarantee and the
+      parity gate rest on. Don't "optimize" the tap out of the guard.
+    - **Install the tap BEFORE the first mutation** if downstream needs the
+      full history — pre-tap events are never mirrored.
+    - **Shutdown discipline**: lossless = drop the tap sender → forwarder
+      drains → writer drains → `tracker.wait()`. Cancelling a shared token
+      is PROMPT teardown: both tasks stop and an in-flight record can be
+      dropped after acceptance (still at-most-once). Pick one; don't mix.
+    - **Replay requires a quiescent pipeline** — replaying while a writer
+      is appending silently yields a prefix, not an error.
+    - Wire conversions are inherent `from_event`/`try_into_event` (NOT
+      `From`/`TryFrom` impls — deliberate, §4 note); `schema_version >
+      WIRE_TOPOLOGY_SCHEMA_VERSION` and `Sealed` payloads on the Topology
+      stream are replay errors.
+
 ## Reproducers
 
 All assume `cwd = koalisi/`.
@@ -517,8 +556,9 @@ timeout 120s cargo run --release --manifest-path Cargo.toml --target-dir /tmp/ko
 # === K3 hot-path bench (release; see docs/k3-hot-path-bench.md) ===
 timeout 120s cargo run --release --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example hot_path_bench
 
-# === with persistence feature (P7.1 event store, 102 tests) ===
+# === with persistence feature (P7.1 store + P7.2 replay, 107 tests) ===
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features persistence
+timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features persistence,magnitude   # 130, incl. the replay parity gate
 
 # === with durable feature (needs Docker; container-backed restart test) ===
 timeout 300s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features durable
@@ -867,16 +907,17 @@ Implementation phasing (**signed off + FILED 2026-07-04; #21 CLOSED**):
 log (feature `persistence`, deps ciborium + sha2) — **DONE v0.8.0
 (2026-07-04; ciborium picked over minicbor per §17)** ·
 [#30](https://github.com/sustia-llc/koalisi/issues/30) P7.2 topology
-projection + replay (pre-registered #18 `magnitude_history` parity gate) ·
+projection + replay — **DONE v0.9.0 (2026-07-04; the pre-registered #18
+`magnitude_history` parity gate held)** ·
 [#31](https://github.com/sustia-llc/koalisi/issues/31) P7.3 sealing +
 revocation registry ·
 [#32](https://github.com/sustia-llc/koalisi/issues/32) P7.4 decision/belief
 streams · [#33](https://github.com/sustia-llc/koalisi/issues/33) P7.5
-federation manifests + FAIR provenance. Sequencing: #29 first, then #30/#31
-may parallelize, then #32, then #33. Open calls in §17 (**KEK granularity
-for bilateral records needs tauhokohoko input BEFORE #31's belief
-sealing**; SHA-256 vs BLAKE3; ciborium vs minicbor; ciphertext reclamation;
-cross-federation EventRef addressing).
+federation manifests + FAIR provenance. Remaining sequencing: #31 next
+(**blocked on the tauhokohoko KEK-granularity answer for belief sealing**),
+then #32, then #33. Open calls in §17 (SHA-256 vs BLAKE3; ciphertext
+reclamation; cross-federation EventRef addressing — resolve at #33;
+ciborium-vs-minicbor RESOLVED at #29).
 
 ### Downstream: nautilus_trader bridge  *(separate project)*
 

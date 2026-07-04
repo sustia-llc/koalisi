@@ -33,9 +33,9 @@ Planned work — all issue-tracked as of 2026-07-03 (details in
 - **Phase 7 — Persistence implementation** (filed 2026-07-04 as [#29]–[#33]
   after sign-off of the [#21] design doc shipped in 0.7.0 — see
   `docs/phase7-persistence-design.md` §16): ~~[#29] core chained log~~
-  (DONE 0.8.0), [#30] topology projection + replay (#18 parity gate),
-  [#31] sealing + revocation registry, [#32] decision/belief streams,
-  [#33] federation manifests + FAIR provenance.
+  (DONE 0.8.0), ~~[#30] topology projection + replay~~ (DONE 0.9.0 —
+  #18 parity gate held), [#31] sealing + revocation registry, [#32]
+  decision/belief streams, [#33] federation manifests + FAIR provenance.
 - **Databento `LiveClient` integration** ([#22], *blocked on
   `DATABENTO_API_KEY`*).
 - **Synthetic DBN file** for the end-to-end arb signal demo ([#23]).
@@ -59,6 +59,40 @@ Planned work — all issue-tracked as of 2026-07-03 (details in
 [#31]: https://github.com/sustia-llc/koalisi/issues/31
 [#32]: https://github.com/sustia-llc/koalisi/issues/32
 [#33]: https://github.com/sustia-llc/koalisi/issues/33
+
+## [0.9.0] — 2026-07-04
+
+### Added (issue [#30] P7.2 topology projection + replay)
+
+- **Event tap on `TemporalHypergraph`** (always compiled, inert by default):
+  `with_event_tap(mpsc::Sender<TemporalEvent<V,HE>>)` — non-blocking
+  `try_send`, drop-with-warn (the K3 tap contract); `Clone` shares the tap;
+  every append site taps **under the events write guard**, so tap order is
+  always identical to log order even with concurrent mutators. Zero change
+  to untapped behavior (default/frozen suites byte-identical).
+- **Wire projection** ([#30], feature `persistence`):
+  `WireTopologyEvent<VW, HW>` — serde mirror of all 13 `TemporalEvent`
+  variants with raw `u64` indices/timestamps and
+  `WIRE_TOPOLOGY_SCHEMA_VERSION = 1`; inherent
+  `from_event`/`try_into_event` conversions (`V: Into<VW>` /
+  `VW: TryInto<V>`; identity projection `VW = V` for serde-capable weight
+  types). Domain types still gain no serde (§4 discipline).
+- **Topology forwarder** `spawn_topology_forwarder`: tap → wire → CBOR
+  payload → `Record` on the `Topology` stream via the P7.1 store writer.
+  Backpressured internal hop; documented lossless (drop-tap-then-drain) vs
+  prompt (token-cancel, may drop in-flight) shutdown disciplines.
+- **`replay_into_event_log(store, from)`**: batched Topology-stream read to
+  head → decode → rebuild a fresh `EventLog` that all existing consumers
+  (`TemporalQueries`, `TemporalAnalytics`, `magnitude_history`) run on
+  unchanged — the §7 one-query-path guarantee. Rejects future
+  `schema_version` and `Sealed` payloads; requires a quiescent pipeline
+  (documented).
+- **Acceptance held**: all-13-variant round-trip through the store;
+  point-in-time reconstruction equality live-vs-replayed; and the
+  pre-registered #18 **parity gate** — `magnitude_history` over a replayed
+  log is exactly equal to the live series (`tests/replay_parity.rs`,
+  features `persistence,magnitude`). Suites: 87 default / 107 `persistence`
+  / 130 `persistence,magnitude` / 128 `decision,magnitude`.
 
 ## [0.8.0] — 2026-07-04
 
@@ -901,6 +935,7 @@ Initial POC release.
   binaries cleanly.
 
 [Unreleased]: #unreleased
+[0.9.0]: #090--2026-07-04
 [0.8.0]: #080--2026-07-04
 [0.7.0]: #070--2026-07-04
 [0.6.0]: #060--2026-05-29
