@@ -32,6 +32,8 @@ pub mod decision;
 pub mod ingest;
 pub mod llm;
 pub mod market;
+#[cfg(feature = "persistence")]
+pub mod persistence;
 pub mod topology;
 
 pub mod subsystems {

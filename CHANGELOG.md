@@ -32,10 +32,10 @@ Planned work — all issue-tracked as of 2026-07-03 (details in
   place.
 - **Phase 7 — Persistence implementation** (filed 2026-07-04 as [#29]–[#33]
   after sign-off of the [#21] design doc shipped in 0.7.0 — see
-  `docs/phase7-persistence-design.md` §16): [#29] core chained log, [#30]
-  topology projection + replay (#18 parity gate), [#31] sealing +
-  revocation registry, [#32] decision/belief streams, [#33] federation
-  manifests + FAIR provenance.
+  `docs/phase7-persistence-design.md` §16): ~~[#29] core chained log~~
+  (DONE 0.8.0), [#30] topology projection + replay (#18 parity gate),
+  [#31] sealing + revocation registry, [#32] decision/belief streams,
+  [#33] federation manifests + FAIR provenance.
 - **Databento `LiveClient` integration** ([#22], *blocked on
   `DATABENTO_API_KEY`*).
 - **Synthetic DBN file** for the end-to-end arb signal demo ([#23]).
@@ -59,6 +59,44 @@ Planned work — all issue-tracked as of 2026-07-03 (details in
 [#31]: https://github.com/sustia-llc/koalisi/issues/31
 [#32]: https://github.com/sustia-llc/koalisi/issues/32
 [#33]: https://github.com/sustia-llc/koalisi/issues/33
+
+## [0.8.0] — 2026-07-04
+
+### Added (issue [#29] P7.1 persistence core — first Phase 7 implementation phase)
+
+- **New `src/persistence/` module behind feature `persistence`** ([#29];
+  deps `ciborium` + `sha2`, both gated — default build unchanged; ciborium
+  picked over minicbor per design-doc §17, the §3 hash-over-stored-bytes
+  contract makes encoder determinism non-load-bearing):
+  - The signed-off §6 surface verbatim: `EventStore` trait
+    (`append`/`read_from`/`head`/`verify`), envelope types (`StreamId` ×6
+    incl. reserved `Lineage`, `SequenceNo`, `RecordHash`, `Payload::{Plain,
+    Sealed}`, `EventRef`, `Record`, `StoredRecord`, `StreamHead`),
+    `PersistenceError` (hand-rolled, incl. review-added `StreamWedged`).
+  - `FileEventStore`: CBOR frames via a private `FrameV1` mirror (public
+    types stay serde-free), per-stream segment directories, u32-LE
+    length-prefixed frames, SHA-256 chain over the exact stored frame bytes
+    (length prefix excluded — verification never re-encodes), segment
+    rotation with cross-segment chain continuity, torn-tail truncation at
+    the last segment's tail only, tail re-verification on open,
+    **wedge-on-write-failure** (append after a failed write returns
+    `StreamWedged`; reopening re-scans and recovers), bounded random-access
+    frame reads (corrupted length prefix cannot force a giant allocation).
+  - `spawn_store_writer`: mpsc-fed writer task — `spawn_blocking` appends,
+    biased cancellation, drain-on-cancel. **At-most-once from the tee
+    onward** (a failed append is logged and dropped; K3's cursor-replay
+    at-least-once has no P7.1 analogue).
+  - `Payload::Sealed` is schema-only until P7.3 (round-tripped opaquely);
+    `Lineage` waits for [#20].
+- Design doc truth-sync in the same PR: §3 hash-input clarification (prefix
+  excluded), §6 gains `StreamWedged` + `FileStoreConfig`, writer-seam
+  delivery corrected to at-most-once.
+- Tests: +8 unit (envelope/chain/store wedge contract) and +7 integration
+  (`tests/persistence_integration.rs`: roundtrip, rotation + reopen,
+  tamper detection, torn-tail recovery, sealed opaque round-trip, writer
+  drain-on-cancel, empty/bounds semantics). Suites: 87 default / 102
+  `persistence` / 128 `decision,magnitude` (default and existing suites
+  unchanged).
 
 ## [0.7.0] — 2026-07-04
 
@@ -863,6 +901,7 @@ Initial POC release.
   binaries cleanly.
 
 [Unreleased]: #unreleased
+[0.8.0]: #080--2026-07-04
 [0.7.0]: #070--2026-07-04
 [0.6.0]: #060--2026-05-29
 [0.5.0]: #050--2026-05-27
