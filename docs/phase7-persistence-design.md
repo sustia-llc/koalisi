@@ -145,11 +145,12 @@ profile; a weaker archival argument. **Rejected: JSON-lines** as the store
 format (verbose, float round-trip hazards); it survives as a human-readable
 *export/debug view* only.
 
-**Hash contract (load-bearing):** the chain hashes the **exact stored frame
-bytes** (length-prefixed), never a re-encoding. Verification therefore never
-depends on encoder determinism across implementations or decades;
-deterministic CBOR is a reproducibility bonus, not a correctness
-requirement.
+**Hash contract (load-bearing):** frames are stored length-prefixed
+(`[u32 LE frame_len][frame_bytes]`), and the chain hashes the **exact frame
+bytes as stored, EXCLUDING the u32 length prefix** — the prefix is framing, not
+content — never a re-encoding. Verification therefore never depends on encoder
+determinism across implementations or decades; deterministic CBOR is a
+reproducibility bonus, not a correctness requirement.
 
 ## 4. Record model
 
@@ -319,6 +320,9 @@ pub enum PersistenceError {
     ManifestInvalid(String),
     ManifestRevoked(String),
     StreamEmpty(StreamId),
+    /// A failed write left the in-memory index desynced from disk; the stream
+    /// refuses appends until the store is reopened (P7.1, §6 write-path safety).
+    StreamWedged(StreamId),
 }
 // + manual Display / std::error::Error / From<io::Error>, per topology::errors convention.
 ```
@@ -330,16 +334,24 @@ Design points:
   durable bus already uses (versionstamp cursors). Hashes are for integrity
   and anchoring, not addressing.
 - **Sync trait + writer task.** The trait is synchronous; the hot path never
-  touches it. A spawned writer task consumes an mpsc channel — exactly the
+  touches it. A spawned writer task consumes an mpsc channel — the
   `DecisionRecord` tap pattern (non-blocking `try_send`, drop-with-warn,
-  K3 gotcha 14 semantics): durability is at-least-once from the tee onward,
-  and the graph-mutation/decision hot paths stay as fast as today.
+  K3 gotcha 14 semantics), with the blocking `append` offloaded via
+  `spawn_blocking`. Delivery is **at-most-once from the tee onward**: a full
+  channel drops (producer side) and a failed `append` is logged and dropped
+  (single attempt, and the stream wedges until reopen). The K3 durable bus's
+  at-least-once came from CHANGEFEED cursor replay, which has no P7.1 analogue —
+  durable retry/replay is later-phase work. The graph-mutation/decision hot
+  paths stay as fast as today.
 - Typed adapters sit above the trait: `TopologyStore` (wire conversion +
   replay, §7), `DecisionStore` (causal parents, §11), and
   `spawn_store_writer` for the async seam.
 - Default impl (P7.1): `FileEventStore` — segmented frame files
-  (length-prefix + frame bytes), new segment per N records with tail-hash
-  continuity across files, crash-tail recovery on open.
+  (length-prefix + frame bytes), new segment per N records (`FileStoreConfig {
+  segment_max_records }`, default 1024) with tail-hash continuity across files,
+  crash-tail recovery on open. A write-path I/O failure **wedges** the stream
+  (`StreamWedged`) rather than appending at a stale offset; reopening the store
+  re-scans, truncates the torn tail, and resumes.
 
 ## 7. Replay and query integration (the #18 co-design)
 

@@ -1,6 +1,6 @@
 [package]
 name = "koalisi"
-version = "0.7.0"
+version = "0.8.0"
 edition = "2024"
 rust-version = "1.88.0"
 description = "Reference implementation of agentic coalitions in Rust — tokio::sync task seams, temporal hypergraph topology, coalition algorithms, and optional Active Inference decision-making"
@@ -64,6 +64,11 @@ surrealdb-live-message = { git = "ssh://git@github.com/sustia-llc/surrealdb-live
 # engine; only compiled under `durable`.
 surrealdb-types = { version = "3.1.5", optional = true }
 
+# Optional: Phase 7 persistence core (feature `persistence`). CBOR frames via
+# ciborium + SHA-256 chaining via sha2. Feature-off builds pull neither.
+ciborium = { version = "0.2", optional = true }
+sha2 = { version = "0.10", optional = true }
+
 [features]
 default = []
 # Active Inference coalition-decision strategy (pluggable, off by default).
@@ -74,6 +79,8 @@ databento = ["dep:dbn", "dep:time"]
 remote = ["dep:libp2p"]
 # Durable coalition decision-event bus on surrealdb-live-message (off by default).
 durable = ["dep:surrealdb-live-message", "dep:surrealdb-types"]
+# Phase 7 persistence core: portable hash-chained event log (off by default).
+persistence = ["dep:ciborium", "dep:sha2"]
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "test-util"] }
@@ -114,3 +121,7 @@ required-features = ["remote"]
 [[test]]
 name = "durable_integration"
 required-features = ["durable"]
+
+[[test]]
+name = "persistence_integration"
+required-features = ["persistence"]
