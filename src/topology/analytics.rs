@@ -11,6 +11,11 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+#[cfg(feature = "magnitude")]
+use crate::algorithms::AgentCapabilities;
+#[cfg(feature = "magnitude")]
+use crate::decision::{magnitude_or_zero, relevant_masks};
+
 /// Represents changes between two timestamps.
 #[derive(Debug, Clone)]
 pub struct GraphDelta<V, HE>
@@ -105,11 +110,35 @@ where
     }
 }
 
+/// One point on a coalition's magnitude trajectory: the coalition's diversity
+/// (its pinned `t = 1` [`catgraph_magnitude::coalition_value`]) at a
+/// change-relevant timestamp, alongside the number of members whose weight
+/// resolved at that instant.
+///
+/// `member_count` is the count of resolved members **before** relevance
+/// filtering / skeletalization, so a redundant clone joining shows the count
+/// rise while `magnitude` stays flat (see
+/// [`TemporalAnalytics::magnitude_history`]).
+#[cfg(feature = "magnitude")]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MagnitudePoint {
+    /// The timestamp this diversity value applies from (until the next point).
+    pub timestamp: Timestamp,
+    /// Coalition magnitude at `timestamp`, pinned `t = 1`. `f64::NEG_INFINITY`
+    /// if the upstream magnitude computation errored (logged), `0.0` for a
+    /// dissolved or wholly task-irrelevant coalition.
+    pub magnitude: f64,
+    /// Members whose weight resolved at `timestamp`, counted before relevance
+    /// filtering and skeletalization.
+    pub member_count: usize,
+}
+
 /// Temporal analytics functions for analyzing graph evolution.
 ///
-/// Several `pub(crate)` methods are anchors for Phase 5 (persistence) and
-/// Phase 6 (decision layer); they have no in-crate callers yet and carry
-/// `#[allow(dead_code)]` until those phases land.
+/// Several `pub(crate)` methods are anchors for Phase 7 (persistence — was
+/// Phase 5 before the roadmap reorder; Phase 6, the decision layer, shipped);
+/// they have no in-crate callers yet and carry `#[allow(dead_code)]` until
+/// Phase 7 lands.
 pub struct TemporalAnalytics;
 
 impl TemporalAnalytics {
@@ -179,9 +208,11 @@ impl TemporalAnalytics {
                     new_weight,
                     ..
                 } => {
-                    delta
-                        .hyperedges_weight_updated
-                        .push((*index, old_weight.clone(), new_weight.clone()));
+                    delta.hyperedges_weight_updated.push((
+                        *index,
+                        old_weight.clone(),
+                        new_weight.clone(),
+                    ));
                 }
                 TemporalEvent::HyperedgeVerticesUpdated {
                     index,
@@ -189,9 +220,11 @@ impl TemporalAnalytics {
                     new_vertices,
                     ..
                 } => {
-                    delta
-                        .hyperedges_vertices_updated
-                        .push((*index, old_vertices.clone(), new_vertices.clone()));
+                    delta.hyperedges_vertices_updated.push((
+                        *index,
+                        old_vertices.clone(),
+                        new_vertices.clone(),
+                    ));
                 }
                 TemporalEvent::HyperedgeReversed { index, .. } => {
                     delta.hyperedges_reversed.push(*index);
@@ -238,9 +271,102 @@ impl TemporalAnalytics {
         delta
     }
 
+    /// Replay a coalition (hyperedge) along the event-sourced history and emit
+    /// its magnitude trajectory: one [`MagnitudePoint`] per change-relevant
+    /// timestamp, evaluating the pinned `t = 1`
+    /// [`catgraph_magnitude::coalition_value`] fresh at each point.
+    ///
+    /// At every sample the coalition's current members are resolved to their
+    /// vertex weights, mapped through the same bystander-excluding
+    /// `relevant_masks` contract the [`crate::decision`] magnitude arm uses,
+    /// and scored. `member_count` reports the resolved-member count *before*
+    /// relevance filtering / skeletalization, so a redundant clone joining
+    /// raises the count while `magnitude` stays flat.
+    ///
+    /// # Sampling (change-driven step function)
+    ///
+    /// Sampling is change-driven, not fixed-resolution: a point is emitted only
+    /// where the task-relevant mask multiset *may* change — a membership event
+    /// for `hyperedge` (a [`TemporalEvent::HyperedgeReversed`] is skipped: it
+    /// only reorders members, leaving the multiset unchanged), a
+    /// [`TemporalEvent::VertexWeightUpdated`] / [`TemporalEvent::VertexRemoved`]
+    /// on a current member, or a clear while the coalition is live. The result
+    /// is a step function; a consumer wanting fixed resolution resamples it. All
+    /// events at a shared timestamp are folded before the point is taken (the
+    /// same peek-ahead flush the sibling series functions use), so a
+    /// multi-event instant yields one settled point.
+    ///
+    /// # Window semantics
+    ///
+    /// `range` is resolved like the sibling series functions (unbounded start →
+    /// EPOCH, unbounded end → last event timestamp). A baseline point is emitted
+    /// at the resolved start if the coalition is live there (so a window opened
+    /// after formation still reports the standing diversity); change points are
+    /// taken for `start < ts <= end` (inclusive end). A dissolution inside the
+    /// window (removal, source-join, or clear) emits a terminal point that
+    /// evaluates to `0.0` with `member_count == 0`.
+    ///
+    /// # Notes
+    ///
+    /// - `t = 1` is pinned upstream; there is no `t` parameter (a `t`-sweep is a
+    ///   separate, sweep-shaped concern).
+    /// - The incremental [`catgraph_magnitude::CoalitionEvaluator`] is
+    ///   deliberately **not** used: consecutive samples differ in member set by
+    ///   construction, so the evaluator's base key would miss every sample and a
+    ///   rebuild costs ≈ 10–15× one fresh evaluation — the trajectory access
+    ///   pattern does not fit the incremental path. Revisit only for a
+    ///   sweep-shaped variant.
+    /// - Members whose weight is missing from the reconstructed vertex-weight
+    ///   map (e.g. the vertex was removed) are skipped and not counted.
+    /// - An upstream magnitude error at a point is logged and recorded as
+    ///   `f64::NEG_INFINITY` (never a panic), mirroring the decision arm.
+    /// - Sampling runs under one read guard; the guard is released before the
+    ///   `O(m³)` magnitude evaluations, which run in a single
+    ///   [`tokio_rayon::spawn`] offload.
+    #[cfg(feature = "magnitude")]
+    pub async fn magnitude_history<V, HE>(
+        events: &Arc<RwLock<EventLog<V, HE>>>,
+        hyperedge: HyperedgeIndex,
+        required_capabilities: u32,
+        range: &TimeRange,
+    ) -> Vec<MagnitudePoint>
+    where
+        V: Clone + std::fmt::Debug + AgentCapabilities + 'static,
+        HE: Clone + std::fmt::Debug + 'static,
+    {
+        // Sample under one read guard (released when this returns), then evaluate
+        // every point's O(m³) magnitude fresh at t = 1 in a single rayon offload
+        // (CoalitionEvaluator deliberately not used — see fn docs).
+        let samples =
+            collect_magnitude_samples(events, hyperedge, required_capabilities, range).await;
+        tokio_rayon::spawn(move || {
+            samples
+                .into_iter()
+                .map(|(timestamp, masks, member_count)| {
+                    let magnitude = match magnitude_or_zero(&masks, required_capabilities) {
+                        Ok(m) => m,
+                        Err(e) => {
+                            tracing::warn!(error = %e, "magnitude trajectory point computation failed");
+                            f64::NEG_INFINITY
+                        }
+                    };
+                    MagnitudePoint {
+                        timestamp,
+                        magnitude,
+                        member_count,
+                    }
+                })
+                .collect()
+        })
+        .await
+    }
+
     /// Resolve a time range against the actual event log, defaulting unbounded
     /// ends to EPOCH (start) and the last event's timestamp (end).
-    #[allow(dead_code)]
+    ///
+    /// Live caller under `magnitude` (`collect_magnitude_samples`); otherwise
+    /// reachable only from the `#[allow(dead_code)]` phase-anchor series fns.
+    #[cfg_attr(not(feature = "magnitude"), allow(dead_code))]
     fn resolve_window<V, HE>(
         events_guard: &EventLog<V, HE>,
         range: &TimeRange,
@@ -544,4 +670,218 @@ impl TemporalAnalytics {
         }
         counts
     }
+}
+
+/// Single chronological pass for [`TemporalAnalytics::magnitude_history`]: under
+/// one read guard, replay the event log to produce the settled samples
+/// `(timestamp, task-relevant member masks, resolved-member count)`. The guard
+/// is released when this returns, before the caller's magnitude evaluations.
+#[cfg(feature = "magnitude")]
+async fn collect_magnitude_samples<V, HE>(
+    events: &Arc<RwLock<EventLog<V, HE>>>,
+    hyperedge: HyperedgeIndex,
+    required: u32,
+    range: &TimeRange,
+) -> Vec<(Timestamp, Vec<u32>, usize)>
+where
+    V: Clone + std::fmt::Debug + AgentCapabilities + 'static,
+    HE: Clone + std::fmt::Debug + 'static,
+{
+    let events_guard = events.read().await;
+    let (start, end) = TemporalAnalytics::resolve_window(&events_guard, range);
+
+    let mut weights: HashMap<VertexIndex, V> = HashMap::new();
+    let mut members: Option<Vec<VertexIndex>> = None;
+    let mut samples: Vec<(Timestamp, Vec<u32>, usize)> = Vec::new();
+
+    let all = events_guard.events();
+    let mut idx = 0;
+
+    // Fold every event at or before the window start into the baseline state,
+    // then emit a baseline point if the coalition is live at start.
+    while idx < all.len() && all[idx].timestamp() <= start {
+        apply_event_to_state(&all[idx], hyperedge, &mut weights, &mut members);
+        idx += 1;
+    }
+    if start <= end && members.is_some() {
+        let (masks, count) = snapshot_masks(members.as_deref(), &weights, required);
+        samples.push((start, masks, count));
+    }
+
+    // Change-driven sampling over (start, end]. Process every event at a
+    // timestamp before sampling so a multi-event timestamp yields one settled
+    // point.
+    while idx < all.len() {
+        let ts = all[idx].timestamp();
+        if ts > end {
+            break;
+        }
+        let mut change_relevant = false;
+        while idx < all.len() && all[idx].timestamp() == ts {
+            if is_change_relevant(&all[idx], hyperedge, members.as_deref()) {
+                change_relevant = true;
+            }
+            apply_event_to_state(&all[idx], hyperedge, &mut weights, &mut members);
+            idx += 1;
+        }
+        if change_relevant {
+            let (masks, count) = snapshot_masks(members.as_deref(), &weights, required);
+            samples.push((ts, masks, count));
+        }
+    }
+
+    samples
+}
+
+/// Fold one event into the running `magnitude_history` state: the vertex-weight
+/// map and this hyperedge's membership.
+///
+/// The membership fold mirrors [`crate::topology::queries`]'s
+/// `hyperedge_vertices_at` (including the [`TemporalEvent::HyperedgesJoined`]
+/// target-vs-source disambiguation) with **one deliberate divergence**: a
+/// [`TemporalEvent::HyperedgesCleared`] or [`TemporalEvent::GraphCleared`]
+/// dissolves the coalition (`members` → `None`). The point-in-time query has no
+/// clear handling because it stops at a single timestamp; a trajectory must
+/// reflect the dissolution as a terminal `0.0` point.
+#[cfg(feature = "magnitude")]
+fn apply_event_to_state<V, HE>(
+    event: &TemporalEvent<V, HE>,
+    hyperedge: HyperedgeIndex,
+    weights: &mut HashMap<VertexIndex, V>,
+    members: &mut Option<Vec<VertexIndex>>,
+) where
+    V: Clone + std::fmt::Debug,
+    HE: Clone + std::fmt::Debug,
+{
+    match event {
+        TemporalEvent::VertexAdded { index, weight, .. } => {
+            weights.insert(*index, weight.clone());
+        }
+        TemporalEvent::VertexWeightUpdated {
+            index, new_weight, ..
+        } => {
+            weights.insert(*index, new_weight.clone());
+        }
+        TemporalEvent::VertexRemoved { index, .. } => {
+            weights.remove(index);
+        }
+        TemporalEvent::GraphCleared { .. } => {
+            weights.clear();
+            *members = None; // deliberate divergence from hyperedge_vertices_at
+        }
+        TemporalEvent::HyperedgeAdded {
+            index, vertices, ..
+        } if *index == hyperedge => {
+            *members = Some(vertices.clone());
+        }
+        TemporalEvent::HyperedgeVerticesUpdated {
+            index,
+            new_vertices,
+            ..
+        } if *index == hyperedge => {
+            *members = Some(new_vertices.clone());
+        }
+        TemporalEvent::HyperedgeReversed {
+            index,
+            new_vertices,
+            ..
+        } if *index == hyperedge => {
+            // Order-only: not a sample point, but the fold keeps membership accurate.
+            *members = Some(new_vertices.clone());
+        }
+        TemporalEvent::VerticesContracted {
+            hyperedge_index,
+            new_vertices,
+            ..
+        } if *hyperedge_index == hyperedge => {
+            *members = Some(new_vertices.clone());
+        }
+        TemporalEvent::HyperedgesJoined {
+            target_index,
+            source_indices,
+            new_vertices,
+            ..
+        } => {
+            if *target_index == hyperedge {
+                *members = Some(new_vertices.clone());
+            } else if source_indices.contains(&hyperedge) {
+                *members = None;
+            }
+        }
+        TemporalEvent::HyperedgeRemoved { index, .. } if *index == hyperedge => {
+            *members = None;
+        }
+        TemporalEvent::HyperedgesCleared { .. } => {
+            *members = None; // deliberate divergence from hyperedge_vertices_at
+        }
+        _ => {}
+    }
+}
+
+/// Whether `event` may change this coalition's task-relevant mask multiset, and
+/// so warrants a [`MagnitudePoint`].
+///
+/// A [`TemporalEvent::HyperedgeReversed`] is excluded: it only reorders members.
+/// Vertex weight updates / removals count only when the vertex is a current
+/// member; clears count only while the coalition is live (they yield a terminal
+/// dissolution point).
+#[cfg(feature = "magnitude")]
+fn is_change_relevant<V, HE>(
+    event: &TemporalEvent<V, HE>,
+    hyperedge: HyperedgeIndex,
+    members: Option<&[VertexIndex]>,
+) -> bool
+where
+    V: Clone + std::fmt::Debug,
+    HE: Clone + std::fmt::Debug,
+{
+    match event {
+        TemporalEvent::HyperedgeAdded { index, .. }
+        | TemporalEvent::HyperedgeVerticesUpdated { index, .. }
+        | TemporalEvent::HyperedgeRemoved { index, .. } => *index == hyperedge,
+        TemporalEvent::VerticesContracted {
+            hyperedge_index, ..
+        } => *hyperedge_index == hyperedge,
+        TemporalEvent::HyperedgesJoined {
+            target_index,
+            source_indices,
+            ..
+        } => *target_index == hyperedge || source_indices.contains(&hyperedge),
+        TemporalEvent::VertexWeightUpdated { index, .. }
+        | TemporalEvent::VertexRemoved { index, .. } => members.is_some_and(|m| m.contains(index)),
+        TemporalEvent::HyperedgesCleared { .. } | TemporalEvent::GraphCleared { .. } => {
+            members.is_some()
+        }
+        _ => false,
+    }
+}
+
+/// Snapshot the current coalition state into `(task-relevant member masks,
+/// resolved-member count)` for one [`MagnitudePoint`].
+///
+/// Members whose weight is not in `weights` are skipped and not counted;
+/// `member_count` is the resolved-member count *before* [`relevant_masks`]
+/// applies bystander exclusion and dedup.
+#[cfg(feature = "magnitude")]
+fn snapshot_masks<V>(
+    members: Option<&[VertexIndex]>,
+    weights: &HashMap<VertexIndex, V>,
+    required: u32,
+) -> (Vec<u32>, usize)
+where
+    V: AgentCapabilities,
+{
+    let Some(member_indices) = members else {
+        return (Vec::new(), 0);
+    };
+    let resolved: Vec<&V> = member_indices
+        .iter()
+        .filter_map(|v| weights.get(v))
+        .collect();
+    let member_count = resolved.len();
+    let refs: Vec<&dyn AgentCapabilities> = resolved
+        .iter()
+        .map(|w| *w as &dyn AgentCapabilities)
+        .collect();
+    (relevant_masks(&refs, required), member_count)
 }

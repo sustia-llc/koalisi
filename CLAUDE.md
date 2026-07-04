@@ -45,10 +45,32 @@ coalition_aif (decision — planned), and forex-arbitrage-swarm (runtime).
   `surrealdb:surrealql-language` — for K3 (#6) surrealdb-live-message work,
   per the user CLAUDE.md routing rules.
 
-## Current state — 2026-07-03
+## Current state — 2026-07-04
 
 ### Done
 
+- **Phase 7 persistence DESIGN (#21) — v0.7.0**: the RE-PLAN deliverable is
+  `docs/phase7-persistence-design.md` (design only; NO EventStore code ships
+  in 0.7.0). Layered: portable CBOR append-only hash-chained log = source of
+  truth, K3 `durable` bus demoted to optional rebuildable projection.
+  Envelope records (`Plain | Sealed` payloads, `parents: Vec<EventRef>` DAG)
+  over six independently chained streams (Topology/Decisions/Beliefs/
+  Lineage-reserved/Registry/Provenance); crypto-deletion = per-subject KEK
+  destruction, keystore OUTSIDE the log; revocation = appended Registry
+  events; bilateral manifest-gated federation (NOT the buses/gateway); FAIR
+  provenance stream. Implementation phased **P7.1–P7.5 as follow-up issues**
+  (doc §16); open calls in §17 (KEK granularity needs tauhokohoko input).
+  Satisfies the #21 payload [R1]–[R9]; pin-conformance-reviewed.
+- **Magnitude trajectory (#18) — v0.7.0**: `TemporalAnalytics::
+  magnitude_history` + `MagnitudePoint` (feature `magnitude`) — change-driven
+  replay of coalition membership + member weights over the event log,
+  pinned-t=1 fresh `coalition_value` per sample point (CoalitionEvaluator
+  deliberately NOT used — see gotcha 16), one read-guard pass + one
+  tokio_rayon offload. `relevant_masks`/`magnitude_or_zero` promoted
+  `pub(crate)` (visibility+docs only; decision arms untouched). 6 seeded
+  tests in `tests/magnitude_trajectory.rs`. Independent of the EventStore
+  build-out; P7.2's parity gate replays the log and must reproduce this
+  series.
 - **Domain-neutral ingestion (K5, issue #8)**: new `src/ingest/` (always
   compiled, zero new deps) — `Sample` trait (`Key`/`View`/`timestamp_ms`),
   generic `SampleMonitor<S>` (the MarketMonitor logic, verbatim-generic; K3
@@ -174,8 +196,8 @@ coalition_aif (decision — planned), and forex-arbitrage-swarm (runtime).
   |---|---|---|
   | Default | 87 | `cargo test` |
   | `--features decision` | 106 | `cargo test --features decision` |
-  | `--features magnitude` | 103 | `cargo test --features magnitude` |
-  | `--features decision,magnitude` | 122 | `cargo test --features decision,magnitude` |
+  | `--features magnitude` | 109 | `cargo test --features magnitude` |
+  | `--features decision,magnitude` | 128 | `cargo test --features decision,magnitude` |
   | `--features durable` | 88 (+1 container-backed restart test; needs Docker) | `cargo test --features durable` |
   | `--features databento` | + 4 databento integration | `cargo test --features databento` |
   | `--features remote` | + 1 remote integration | `cargo test --features remote` |
@@ -206,7 +228,7 @@ koalisi/
 │   │   ├── errors.rs                       TemporalError, TemporalResult
 │   │   ├── temporal.rs                     TemporalHypergraph<V, HE>, SharedGraph, Snapshot
 │   │   ├── queries.rs                      TemporalQueries (point-in-time state)
-│   │   ├── analytics.rs                    TemporalAnalytics, GraphDelta
+│   │   ├── analytics.rs                    TemporalAnalytics, GraphDelta + magnitude_history/MagnitudePoint (#18, feature `magnitude`)
 │   │   ├── coalitions.rs                   CoalitionManager (form/join/leave/dissolve/merge)
 │   │   └── executor.rs                     HypergraphExecutor (rayon↔tokio bridge)
 │   ├── algorithms/
@@ -217,7 +239,7 @@ koalisi/
 │   ├── decision/
 │   │   ├── mod.rs                          CoalitionDecisionPolicy + ThresholdPolicy (always compiled)
 │   │   ├── aif_policy.rs                   AifDecisionPolicy + EfeValueCalculator (feature `decision`)
-│   │   └── magnitude_policy.rs             MagnitudePolicy + MagnitudeValueCalculator + CouplingModel + CoalitionEvaluator cache (K6) (feature `magnitude`)
+│   │   └── magnitude_policy.rs             MagnitudePolicy + MagnitudeValueCalculator + CouplingModel + CoalitionEvaluator cache (K6) (feature `magnitude`); relevant_masks/magnitude_or_zero pub(crate) for #18
 │   ├── ingest/                             K5 (#8): domain-neutral ingestion layer (always compiled, no new deps)
 │   │   ├── mod.rs                          re-exports
 │   │   ├── sample.rs                       Sample trait (Key routing + timestamp_ms + View)
@@ -252,6 +274,7 @@ koalisi/
 ├── docs/
 │   ├── ab-report-K4-{yamafaktory,catgraph}.md   K4 A/B + backend-parity reports
 │   ├── ab-report-K4-catgraph-evaluator.md  K6 post-optimization re-run + parity + latency profile (#33 evidence)
+│   ├── phase7-persistence-design.md        Phase 7 EventStore design (#21 deliverable; P7.1–P7.5 phasing)
 │   └── k3-hot-path-bench.md                K3 kameo-vs-tokio bench evidence
 └── tests/
     ├── topology_test.rs                    12 tests
@@ -261,6 +284,7 @@ koalisi/
     ├── durable_integration.rs              1 container-backed restart test (feature `durable`)
     ├── databento_integration.rs            4 tests (feature `databento`)
     ├── ingestion_integration.rs            3 tests (K5: synthetic sources → monitors → coalition formation; default features)
+    ├── magnitude_trajectory.rs             6 tests (#18: hand-computed trajectory semantics; feature `magnitude`)
     └── remote_integration.rs               1 test (feature `remote`)
 ```
 
@@ -400,6 +424,29 @@ These cost time during the build; future-me should not relearn them.
       `Clone` SHARES the cache (Arc). One instance per concurrent
       membership-stream, or accept rebuild thrash (correct, just slower).
 
+16. **`magnitude_history` (#18) trajectory contracts — rely on these.**
+    - **Fresh eval per sample, NOT `CoalitionEvaluator`**: consecutive
+      trajectory samples differ in member set by construction, so the
+      evaluator's `(required, member_masks)` base key misses every sample and
+      each rebuild costs ≈10–15× one fresh eval (gotcha 15's measured
+      number). Don't "optimize" it back in; revisit only for a sweep-shaped
+      variant (many candidates against one fixed base).
+    - **Clears divergence is deliberate**: `HyperedgesCleared`/`GraphCleared`
+      dissolve the trajectory (`members → None`, terminal `0.0` point) even
+      though `TemporalQueries::hyperedge_vertices_at` ignores them — the
+      point-in-time query structurally cannot see clear events
+      (`hyperedge_index()` returns `None` for both), while the trajectory
+      walks the full unfiltered log. Commented at both sites; don't
+      "reconcile" by breaking either.
+    - **Change-driven sampling semantics**: baseline point at resolved window
+      start iff live; change points for `start < ts <= end`;
+      `HyperedgeReversed` folds membership but never samples (order-only);
+      multi-event timestamps settle before sampling; members with unresolved
+      weights are skipped and uncounted; `member_count` is pre-dedup /
+      pre-relevance (so clone joins show count↑ magnitude-flat =
+      skeletalization); upstream `CatgraphError` ⇒ warn + `NEG_INFINITY`
+      point, never a panic.
+
 ## Reproducers
 
 All assume `cwd = koalisi/`.
@@ -455,10 +502,12 @@ ROLE=consumer timeout 60s cargo run --manifest-path Cargo.toml --target-dir /tmp
 > [#21](https://github.com/sustia-llc/koalisi/issues/21) (Phase 7
 > requirements: append-only + crypto-deletion + bilateral federation +
 > portable format + EffectLog-compatible traces + FAIR provenance).
-> **Status: the Phase 7 RE-PLAN (#21) is unblocked and may proceed.
-> Phase 5 implementation stays HELD until NEST's 2026-07-09 working
-> session assigns Year-1 ownership** (plan/scaffolding only until then;
-> the LLM stub in `src/llm/mod.rs` remains the only code anchor).
+> **Status: the Phase 7 RE-PLAN (#21) is DONE — design doc shipped v0.7.0
+> (2026-07-04, `docs/phase7-persistence-design.md`); implementation is
+> follow-up issues P7.1–P7.5. Phase 5 implementation stays HELD until
+> NEST's 2026-07-09 working session assigns Year-1 ownership** (plan/
+> scaffolding only until then; the LLM stub in `src/llm/mod.rs` remains
+> the only code anchor).
 
 ### Phase 5: SwarmAgentic-style optimisation  *(planned — input #2 recorded, implementation HELD until post-2026-07-09; tracked: [#20](https://github.com/sustia-llc/koalisi/issues/20))*
 
@@ -717,7 +766,10 @@ coalition formation runs on synthetic non-financial data with no databento dep
 (`tests/ingestion_integration.rs`, `examples/synthetic_ingestion.rs`).
 
 **Post-K salvage — magnitude trajectory over the event log
-([#18](https://github.com/sustia-llc/koalisi/issues/18), OPEN, unscheduled).**
+([#18](https://github.com/sustia-llc/koalisi/issues/18), DONE 2026-07-04, v0.7.0).**
+Shipped as `TemporalAnalytics::magnitude_history` + `MagnitudePoint`
+(feature `magnitude`) — see §Current state and gotcha 16 for the contracts.
+Original salvage note kept below for provenance:
 Fold-in salvage from the superseded `tsondru/catgraph-coalition` (decision
 2026-07-03; see `tsondru-notes/catgraph/docs/refresh-candidates.md` triage
 banner — salvage split across catgraph#53 / catgraph#36-addendum / this):
@@ -745,24 +797,29 @@ The durable decision log seeds Phase 7's message-event stream (retention sweep
 is a bounded window, NOT a full event store — Phase 7 still owns real
 durability).
 
-### Phase 7: Persistence  *(RE-PLAN UNBLOCKED 2026-07-03 — requirements recorded on [#21](https://github.com/sustia-llc/koalisi/issues/21); was Phase 5, moved last)*
+### Phase 7: Persistence  *(DESIGN SHIPPED 2026-07-04, v0.7.0 — [#21](https://github.com/sustia-llc/koalisi/issues/21); implementation = follow-up issues P7.1–P7.5)*
 
-> **K1 impact (2026-07-02): the original `PersistentHypergraph` approach is
-> OBSOLETE.** It came from yamafaktory hypergraph v4.2.0, which K1 (#4)
-> dropped; `catgraph_applied::Hypergraph` deliberately has no serde/persistence
-> (upstream design). Phase 7 must re-plan graph-state durability — likely
-> event-log-only (the `EventStore` trait below + point-in-time reconstruction
-> already covers state rebuild), or a catgraph-side snapshot format. Also note
-> K3's surrealdb-live-message direction seeds the message-event stream side.
+**The design of record is `docs/phase7-persistence-design.md`** — it
+supersedes both the original `.claude/plans/` design (graph-snapshot half
+dead since K1; `EventStore` idea survived) and the rmp-serde default (CBOR
+won on the RFC 8949 deterministic-encoding profile; user-confirmed).
+Summary: layered (portable CBOR append-only hash-chained log = source of
+truth; `durable` bus = optional projection); envelope records with
+`Plain | Sealed` payloads and causal `parents` over six independent streams;
+crypto-deletion = per-subject KEK destruction (keystore outside the log);
+revocation = appended Registry events; bilateral manifest-gated federation;
+FAIR provenance; Lineage stream schema-reserved for Phase 5 (#20).
+`TemporalQueries`/analytics plug in via `replay_into_event_log` — one query
+path; P7.2's parity gate is `magnitude_history` over a replayed log ==
+in-memory series.
 
-Feature-gated persistence via an `EventStore` trait for temporal event
-durability. Default impl: append-only file log with `rmp-serde`. Moved to the
-end of the pipeline so the SwarmAgentic optimisation traces (Phase 5) and
-Active Inference belief states (Phase 6) inform the persistence schema
-before we commit to a wire format. See `.claude/plans/` for the
-original design (graph-snapshot part superseded per the K1 note; new
-requirement is that `EventStore` must also be able to durably record
-SwarmAgentic particle lineages and EFE belief snapshots).
+Implementation phasing (issues to file after doc sign-off — titles in doc
+§16): P7.1 core chained log · P7.2 topology projection + replay · P7.3
+sealing + revocation registry · P7.4 decision/belief streams · P7.5
+federation manifests + FAIR provenance. Open calls in §17 (KEK granularity
+for bilateral records needs tauhokohoko input; SHA-256 vs BLAKE3;
+ciborium vs minicbor; ciphertext reclamation; cross-federation EventRef
+addressing).
 
 ### Downstream: nautilus_trader bridge  *(separate project)*
 

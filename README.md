@@ -35,7 +35,7 @@ actor-based runtime orchestration.
 | Module | Description |
 |--------|-------------|
 | `core` | `CoalitionRuntime` (lifecycle), settings, logging |
-| `topology` | Temporal hypergraph with event sourcing, `CoalitionManager`, time-travel queries, analytics |
+| `topology` | Temporal hypergraph with event sourcing, `CoalitionManager`, time-travel queries, analytics (incl. `magnitude_history` coalition-diversity trajectories behind the `magnitude` feature) |
 | `algorithms` | `ValueCalculator` trait + 4 calculators, `DCVCDistributor`, AIPA partition search |
 | `ingest` | Domain-neutral ingestion (K5): `Sample`/`DataSource` traits, generic `SampleMonitor<S>`, `Pacing` + `pump_source`, synthetic NEST-shaped multi-resolution and tauhokohoko-shaped sensor-event fixture sources (seeded, no credentials) |
 | `decision` | `CoalitionDecisionPolicy` trait + always-available `ThresholdPolicy`; optional Active Inference strategy (`EfeValueCalculator`, `AifDecisionPolicy`) behind the `decision` feature; optional categorical-magnitude strategy (`MagnitudeValueCalculator`, `MagnitudePolicy`) behind the `magnitude` feature |
@@ -110,8 +110,8 @@ cargo run --features remote --example distributed_alert_consumer
 ```sh
 cargo test                                 # 87 tests (core + topology + algorithms + decision + ingestion + forex)
 cargo test --features decision             # 106 tests (+ Active Inference decision strategy)
-cargo test --features magnitude            # 103 tests (+ categorical-magnitude decision strategy)
-cargo test --features decision,magnitude   # 122 tests (both decision arms)
+cargo test --features magnitude            # 109 tests (+ categorical-magnitude decision strategy + trajectory analytics)
+cargo test --features decision,magnitude   # 128 tests (both decision arms)
 cargo test --features durable              # + container-backed restart-durability test (needs Docker)
 cargo test --features databento            # + 4 databento integration tests
 cargo test --features remote               # + 1 remote integration test

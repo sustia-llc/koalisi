@@ -180,7 +180,10 @@ impl<C: ValueCalculator + Send + Sync> CoalitionDecisionPolicy for ThresholdPoli
         // returning ±∞ on engine error); never join on a value we can't trust, and
         // never propagate NaN/±∞ as a score.
         if !marginal.is_finite() {
-            return Decision { act: false, score: 0.0 };
+            return Decision {
+                act: false,
+                score: 0.0,
+            };
         }
         Decision {
             act: marginal >= self.join_threshold,
@@ -214,7 +217,10 @@ impl<C: ValueCalculator + Send + Sync> CoalitionDecisionPolicy for ThresholdPoli
         // Non-finite ⇒ a calculator failed; don't eject on an untrustworthy value
         // and don't propagate NaN/±∞.
         if !marginal_of_staying.is_finite() {
-            return Decision { act: false, score: 0.0 };
+            return Decision {
+                act: false,
+                score: 0.0,
+            };
         }
         Decision {
             act: marginal_of_staying < self.leave_threshold,
@@ -235,6 +241,8 @@ pub use aif_policy::{
 mod magnitude_policy;
 #[cfg(feature = "magnitude")]
 pub use magnitude_policy::{CouplingModel, MagnitudePolicy, MagnitudeValueCalculator};
+#[cfg(feature = "magnitude")]
+pub(crate) use magnitude_policy::{magnitude_or_zero, relevant_masks};
 
 #[cfg(test)]
 mod tests {
@@ -350,6 +358,9 @@ mod tests {
         let full: [&dyn AgentCapabilities; 2] = [&a0, &a1];
         let sync_leave = policy.should_leave(&a0, &full, &ctx);
         let async_leave = policy.should_leave_async(&a0, &full, &ctx).await;
-        assert_eq!(sync_leave, async_leave, "default should_leave_async == sync");
+        assert_eq!(
+            sync_leave, async_leave,
+            "default should_leave_async == sync"
+        );
     }
 }

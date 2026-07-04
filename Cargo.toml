@@ -1,6 +1,6 @@
 [package]
 name = "koalisi"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2024"
 rust-version = "1.88.0"
 description = "Reference implementation of agentic coalitions in Rust — tokio::sync task seams, temporal hypergraph topology, coalition algorithms, and optional Active Inference decision-making"
@@ -98,6 +98,10 @@ required-features = ["remote"]
 [[example]]
 name = "durable_decisions"
 required-features = ["durable"]
+
+[[test]]
+name = "magnitude_trajectory"
+required-features = ["magnitude"]
 
 [[test]]
 name = "databento_integration"

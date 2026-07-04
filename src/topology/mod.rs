@@ -14,6 +14,8 @@ mod queries;
 mod temporal;
 mod timestamp;
 
+#[cfg(feature = "magnitude")]
+pub use analytics::MagnitudePoint;
 pub use analytics::{GraphDelta, TemporalAnalytics};
 pub use coalitions::CoalitionManager;
 pub use errors::{TemporalError, TemporalResult};
