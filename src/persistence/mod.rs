@@ -48,7 +48,10 @@
 mod chain;
 mod envelope;
 mod errors;
+mod replay;
 mod store;
+mod tee;
+mod wire;
 mod writer;
 
 pub use envelope::{
@@ -56,5 +59,8 @@ pub use envelope::{
     StreamHead, StreamId,
 };
 pub use errors::PersistenceError;
+pub use replay::replay_into_event_log;
 pub use store::{EventStore, FileEventStore, FileStoreConfig};
+pub use tee::spawn_topology_forwarder;
+pub use wire::{WIRE_TOPOLOGY_SCHEMA_VERSION, WireConversionError, WireTopologyEvent};
 pub use writer::spawn_store_writer;

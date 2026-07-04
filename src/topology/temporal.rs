@@ -3,17 +3,18 @@
 use super::errors::{TemporalError, TemporalResult};
 use super::event_log::EventLog;
 use super::events::{SnapshotId, TemporalEvent};
-use super::timestamp::{Clock, TimeRange, Timestamp};
 use super::executor::EXEC;
+use super::timestamp::{Clock, TimeRange, Timestamp};
 use super::{HyperedgeTrait, VertexTrait};
 use catgraph_applied::{HyperedgeIndex, Hypergraph, HypergraphError, VertexIndex};
 
 pub type SharedGraph<V, HE> = std::sync::Arc<std::sync::RwLock<Hypergraph<V, HE>>>;
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::sync::RwLock as StdRwLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::RwLock;
+use tokio::sync::mpsc;
 
 /// A snapshot marker at a point in time.
 ///
@@ -48,6 +49,13 @@ where
     clock: Clock,
     /// Counter for snapshot IDs.
     snapshot_counter: AtomicU64,
+    /// Optional event tap (Phase 7 / P7.2, sustia-llc/koalisi#30): when set,
+    /// every mutation recorded *after* installation mirrors its
+    /// [`TemporalEvent`] here for a downstream durability forwarder. `None` by
+    /// default; installed via [`with_event_tap`](Self::with_event_tap). `Clone`
+    /// SHARES the tap (the `Option<Sender>` is cloned), consistent with sharing
+    /// the `events` Arc.
+    event_tap: Option<mpsc::Sender<TemporalEvent<V, HE>>>,
 }
 
 impl<V, HE> TemporalHypergraph<V, HE>
@@ -63,6 +71,7 @@ where
             snapshots: Arc::new(RwLock::new(BTreeMap::new())),
             clock: Clock::new(),
             snapshot_counter: AtomicU64::new(0),
+            event_tap: None,
         }
     }
 
@@ -74,7 +83,71 @@ where
             snapshots: Arc::new(RwLock::new(BTreeMap::new())),
             clock: Clock::new(),
             snapshot_counter: AtomicU64::new(0),
+            event_tap: None,
         }
+    }
+
+    /// Install an event tap (Phase 7 / P7.2, sustia-llc/koalisi#30).
+    ///
+    /// After this call, every mutation this hypergraph records mirrors its
+    /// [`TemporalEvent`] to `tap` in addition to appending it to the in-memory
+    /// event log. Delivery is best-effort and non-blocking (a full or closed
+    /// tap logs and drops the event — the at-most-once tap contract; a slow or
+    /// absent forwarder never stalls or fails a mutation).
+    ///
+    /// Only mutations recorded *after* the tap is installed are tapped, so set
+    /// it **before** the first mutation if a downstream consumer needs the full
+    /// history (the P7.2 replay-parity tests do). `Clone` shares the tap.
+    #[must_use]
+    pub fn with_event_tap(mut self, tap: mpsc::Sender<TemporalEvent<V, HE>>) -> Self {
+        self.event_tap = Some(tap);
+        self
+    }
+
+    /// Mirror `event` to the installed tap, if any.
+    ///
+    /// Best-effort [`try_send`](mpsc::Sender::try_send): a full or closed tap
+    /// logs and drops (the at-most-once tap contract, CLAUDE.md gotchas 14/17) —
+    /// it never blocks or fails the mutation. The `event.clone()` happens ONLY
+    /// when a tap is installed; with no tap this is a single `Option` check.
+    fn tap_event(&self, event: &TemporalEvent<V, HE>) {
+        let Some(tap) = &self.event_tap else {
+            return;
+        };
+        match tap.try_send(event.clone()) {
+            Ok(()) => {}
+            Err(mpsc::error::TrySendError::Full(_)) => {
+                tracing::warn!(
+                    event_type = event.event_type(),
+                    "topology event tap full — dropping event (mutation unaffected)"
+                );
+            }
+            Err(mpsc::error::TrySendError::Closed(_)) => {
+                tracing::warn!(
+                    event_type = event.event_type(),
+                    "topology event tap closed — dropping event (mutation unaffected)"
+                );
+            }
+        }
+    }
+
+    /// Append `event` to the log and mirror it to the tap (if installed).
+    ///
+    /// The single append site every mutation method routes through. When no tap
+    /// is installed this is byte-for-byte the previous inline
+    /// `self.events.write().await.append(event)` — the tap clone happens only
+    /// under [`tap_event`](Self::tap_event) when a sender is present, so the
+    /// default (untapped) behaviour, ordering, and lock scope are unchanged.
+    ///
+    /// The tap fires while the events write guard is held: with concurrent
+    /// mutators (`Clone` shares the log and the tap), tap order is therefore
+    /// always identical to log order — the property `replay_into_event_log`'s
+    /// "same events, same order" guarantee rests on. `try_send` never blocks,
+    /// so the extra time under the guard is negligible.
+    async fn record_event(&self, event: TemporalEvent<V, HE>) {
+        let mut events = self.events.write().await;
+        self.tap_event(&event);
+        events.append(event);
     }
 
     /// Get the current logical timestamp.
@@ -113,11 +186,12 @@ where
             .run_job(move || graph.write().unwrap().add_vertex(weight_clone))
             .await;
 
-        self.events.write().await.append(TemporalEvent::VertexAdded {
+        self.record_event(TemporalEvent::VertexAdded {
             timestamp,
             index,
             weight,
-        });
+        })
+        .await;
 
         Ok(index)
     }
@@ -138,11 +212,12 @@ where
             .await
             .map_err(TemporalError::from)?;
 
-        self.events.write().await.append(TemporalEvent::VertexRemoved {
+        self.record_event(TemporalEvent::VertexRemoved {
             timestamp,
             index,
             weight,
-        });
+        })
+        .await;
 
         Ok(())
     }
@@ -168,12 +243,13 @@ where
             .await
             .map_err(TemporalError::from)?;
 
-        self.events.write().await.append(TemporalEvent::VertexWeightUpdated {
+        self.record_event(TemporalEvent::VertexWeightUpdated {
             timestamp,
             index,
             old_weight,
             new_weight,
-        });
+        })
+        .await;
 
         Ok(())
     }
@@ -190,16 +266,22 @@ where
         let graph = self.graph.clone();
 
         let index = EXEC
-            .run_job(move || graph.write().unwrap().add_hyperedge(vertices_clone, weight_clone))
+            .run_job(move || {
+                graph
+                    .write()
+                    .unwrap()
+                    .add_hyperedge(vertices_clone, weight_clone)
+            })
             .await
             .map_err(TemporalError::from)?;
 
-        self.events.write().await.append(TemporalEvent::HyperedgeAdded {
+        self.record_event(TemporalEvent::HyperedgeAdded {
             timestamp,
             index,
             vertices,
             weight,
-        });
+        })
+        .await;
 
         Ok(index)
     }
@@ -221,12 +303,13 @@ where
             .await
             .map_err(TemporalError::from)?;
 
-        self.events.write().await.append(TemporalEvent::HyperedgeRemoved {
+        self.record_event(TemporalEvent::HyperedgeRemoved {
             timestamp,
             index,
             vertices,
             weight,
-        });
+        })
+        .await;
 
         Ok(())
     }
@@ -252,12 +335,13 @@ where
             .await
             .map_err(TemporalError::from)?;
 
-        self.events.write().await.append(TemporalEvent::HyperedgeWeightUpdated {
+        self.record_event(TemporalEvent::HyperedgeWeightUpdated {
             timestamp,
             index,
             old_weight,
             new_weight,
-        });
+        })
+        .await;
 
         Ok(())
     }
@@ -283,15 +367,13 @@ where
             .await
             .map_err(TemporalError::from)?;
 
-        self.events
-            .write()
-            .await
-            .append(TemporalEvent::HyperedgeVerticesUpdated {
-                timestamp,
-                index,
-                old_vertices,
-                new_vertices,
-            });
+        self.record_event(TemporalEvent::HyperedgeVerticesUpdated {
+            timestamp,
+            index,
+            old_vertices,
+            new_vertices,
+        })
+        .await;
 
         Ok(())
     }
@@ -308,9 +390,7 @@ where
         mutator: F,
     ) -> TemporalResult<()>
     where
-        F: FnOnce(Vec<VertexIndex>) -> Result<Vec<VertexIndex>, TemporalError>
-            + Send
-            + 'static,
+        F: FnOnce(Vec<VertexIndex>) -> Result<Vec<VertexIndex>, TemporalError> + Send + 'static,
     {
         let timestamp = self.clock.tick();
         let graph = self.graph.clone();
@@ -318,7 +398,9 @@ where
         let (old_vertices, new_vertices) = EXEC
             .run_job(move || {
                 let mut g = graph.write().unwrap();
-                let old_vertices = g.get_hyperedge_vertices(index).map_err(TemporalError::from)?;
+                let old_vertices = g
+                    .get_hyperedge_vertices(index)
+                    .map_err(TemporalError::from)?;
                 let new_vertices = mutator(old_vertices.clone())?;
                 g.update_hyperedge_vertices(index, new_vertices.clone())
                     .map_err(TemporalError::from)?;
@@ -326,15 +408,13 @@ where
             })
             .await?;
 
-        self.events
-            .write()
-            .await
-            .append(TemporalEvent::HyperedgeVerticesUpdated {
-                timestamp,
-                index,
-                old_vertices,
-                new_vertices,
-            });
+        self.record_event(TemporalEvent::HyperedgeVerticesUpdated {
+            timestamp,
+            index,
+            old_vertices,
+            new_vertices,
+        })
+        .await;
 
         Ok(())
     }
@@ -362,12 +442,13 @@ where
             .await
             .map_err(TemporalError::from)?;
 
-        self.events.write().await.append(TemporalEvent::HyperedgeReversed {
+        self.record_event(TemporalEvent::HyperedgeReversed {
             timestamp,
             index,
             old_vertices,
             new_vertices: new_vertices.clone(),
-        });
+        })
+        .await;
 
         Ok(new_vertices)
     }
@@ -395,12 +476,13 @@ where
             .await
             .map_err(TemporalError::from)?;
 
-        self.events.write().await.append(TemporalEvent::HyperedgesJoined {
+        self.record_event(TemporalEvent::HyperedgesJoined {
             timestamp,
             target_index,
             source_indices,
             new_vertices,
-        });
+        })
+        .await;
 
         Ok(())
     }
@@ -431,14 +513,15 @@ where
             .await
             .map_err(TemporalError::from)?;
 
-        self.events.write().await.append(TemporalEvent::VerticesContracted {
+        self.record_event(TemporalEvent::VerticesContracted {
             timestamp,
             hyperedge_index,
             contracted_vertices: vertices,
             target_vertex: target,
             old_vertices,
             new_vertices: new_vertices.clone(),
-        });
+        })
+        .await;
 
         Ok(new_vertices)
     }
@@ -460,10 +543,8 @@ where
             })
             .await;
 
-        self.events
-            .write()
-            .await
-            .append(TemporalEvent::HyperedgesCleared { timestamp, count });
+        self.record_event(TemporalEvent::HyperedgesCleared { timestamp, count })
+            .await;
 
         Ok(())
     }
@@ -484,11 +565,12 @@ where
             })
             .await;
 
-        self.events.write().await.append(TemporalEvent::GraphCleared {
+        self.record_event(TemporalEvent::GraphCleared {
             timestamp,
             vertex_count,
             hyperedge_count,
-        });
+        })
+        .await;
 
         Ok(())
     }
@@ -498,10 +580,7 @@ where
     // =========================================================================
 
     /// Get the vertex weight.
-    pub async fn get_vertex_weight(
-        &self,
-        index: VertexIndex,
-    ) -> TemporalResult<V> {
+    pub async fn get_vertex_weight(&self, index: VertexIndex) -> TemporalResult<V> {
         let graph = self.graph.clone();
         EXEC.run_job(move || graph.read().unwrap().get_vertex_weight(index))
             .await
@@ -509,10 +588,7 @@ where
     }
 
     /// Get the hyperedge weight.
-    pub async fn get_hyperedge_weight(
-        &self,
-        index: HyperedgeIndex,
-    ) -> TemporalResult<HE> {
+    pub async fn get_hyperedge_weight(&self, index: HyperedgeIndex) -> TemporalResult<HE> {
         let graph = self.graph.clone();
         EXEC.run_job(move || graph.read().unwrap().get_hyperedge_weight(index))
             .await
@@ -557,14 +633,20 @@ where
     pub async fn create_snapshot(&self) -> SnapshotId {
         let timestamp = self.clock.tick();
         let id = SnapshotId(self.snapshot_counter.fetch_add(1, Ordering::Relaxed));
+        let marker = TemporalEvent::SnapshotMarker {
+            timestamp,
+            snapshot_id: id,
+        };
 
+        // The marker is a tapped record too (replay uses it as an accelerator).
+        // Tap under the events guard — same discipline as `record_event`, so
+        // tap order always matches log order — and compute the stored index
+        // under the same guard to keep it consistent under concurrent mutation.
         let event_index = {
             let mut events = self.events.write().await;
             let index = events.len();
-            events.append(TemporalEvent::SnapshotMarker {
-                timestamp,
-                snapshot_id: id,
-            });
+            self.tap_event(&marker);
+            events.append(marker);
             index
         };
 
@@ -672,9 +754,10 @@ where
             events: self.events.clone(),
             snapshots: self.snapshots.clone(),
             clock: Clock::starting_at(self.clock.current().value()),
-            snapshot_counter: AtomicU64::new(
-                self.snapshot_counter.load(Ordering::Acquire),
-            ),
+            snapshot_counter: AtomicU64::new(self.snapshot_counter.load(Ordering::Acquire)),
+            // Share the tap (clone the Option<Sender>), consistent with sharing
+            // the events Arc above.
+            event_tap: self.event_tap.clone(),
         }
     }
 }
