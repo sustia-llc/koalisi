@@ -30,11 +30,12 @@ Planned work — all issue-tracked as of 2026-07-03 (details in
   velocity ↔ EFE bridge, ValueCalculator feedback weights, AIPA +
   population hybrid, cross-model transferability). `LlmProvider` stub in
   place.
-- **Phase 7 — Persistence implementation** (P7.1–P7.5, follow-ups of the
-  [#21] design doc shipped in 0.7.0 — see
-  `docs/phase7-persistence-design.md` §16): core chained log, topology
-  projection + replay, sealing + revocation registry, decision/belief
-  streams, federation manifests + FAIR provenance.
+- **Phase 7 — Persistence implementation** (filed 2026-07-04 as [#29]–[#33]
+  after sign-off of the [#21] design doc shipped in 0.7.0 — see
+  `docs/phase7-persistence-design.md` §16): [#29] core chained log, [#30]
+  topology projection + replay (#18 parity gate), [#31] sealing +
+  revocation registry, [#32] decision/belief streams, [#33] federation
+  manifests + FAIR provenance.
 - **Databento `LiveClient` integration** ([#22], *blocked on
   `DATABENTO_API_KEY`*).
 - **Synthetic DBN file** for the end-to-end arb signal demo ([#23]).
@@ -53,6 +54,11 @@ Planned work — all issue-tracked as of 2026-07-03 (details in
 [#25]: https://github.com/sustia-llc/koalisi/issues/25
 [#26]: https://github.com/sustia-llc/koalisi/issues/26
 [#27]: https://github.com/sustia-llc/koalisi/issues/27
+[#29]: https://github.com/sustia-llc/koalisi/issues/29
+[#30]: https://github.com/sustia-llc/koalisi/issues/30
+[#31]: https://github.com/sustia-llc/koalisi/issues/31
+[#32]: https://github.com/sustia-llc/koalisi/issues/32
+[#33]: https://github.com/sustia-llc/koalisi/issues/33
 
 ## [0.7.0] — 2026-07-04
 

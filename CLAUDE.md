@@ -502,12 +502,12 @@ ROLE=consumer timeout 60s cargo run --manifest-path Cargo.toml --target-dir /tmp
 > [#21](https://github.com/sustia-llc/koalisi/issues/21) (Phase 7
 > requirements: append-only + crypto-deletion + bilateral federation +
 > portable format + EffectLog-compatible traces + FAIR provenance).
-> **Status: the Phase 7 RE-PLAN (#21) is DONE — design doc shipped v0.7.0
-> (2026-07-04, `docs/phase7-persistence-design.md`); implementation is
-> follow-up issues P7.1–P7.5. Phase 5 implementation stays HELD until
-> NEST's 2026-07-09 working session assigns Year-1 ownership** (plan/
-> scaffolding only until then; the LLM stub in `src/llm/mod.rs` remains
-> the only code anchor).
+> **Status: the Phase 7 RE-PLAN (#21) is DONE and CLOSED — design doc
+> shipped v0.7.0 (2026-07-04, `docs/phase7-persistence-design.md`), signed
+> off, implementation filed as #29–#33 (P7.1–P7.5). Phase 5 implementation
+> stays HELD until NEST's 2026-07-09 working session assigns Year-1
+> ownership** (plan/scaffolding only until then; the LLM stub in
+> `src/llm/mod.rs` remains the only code anchor).
 
 ### Phase 5: SwarmAgentic-style optimisation  *(planned — input #2 recorded, implementation HELD until post-2026-07-09; tracked: [#20](https://github.com/sustia-llc/koalisi/issues/20))*
 
@@ -813,13 +813,20 @@ FAIR provenance; Lineage stream schema-reserved for Phase 5 (#20).
 path; P7.2's parity gate is `magnitude_history` over a replayed log ==
 in-memory series.
 
-Implementation phasing (issues to file after doc sign-off — titles in doc
-§16): P7.1 core chained log · P7.2 topology projection + replay · P7.3
-sealing + revocation registry · P7.4 decision/belief streams · P7.5
-federation manifests + FAIR provenance. Open calls in §17 (KEK granularity
-for bilateral records needs tauhokohoko input; SHA-256 vs BLAKE3;
-ciborium vs minicbor; ciphertext reclamation; cross-federation EventRef
-addressing).
+Implementation phasing (**signed off + FILED 2026-07-04; #21 CLOSED**):
+[#29](https://github.com/sustia-llc/koalisi/issues/29) P7.1 core chained
+log (feature `persistence`, deps ciborium + sha2) ·
+[#30](https://github.com/sustia-llc/koalisi/issues/30) P7.2 topology
+projection + replay (pre-registered #18 `magnitude_history` parity gate) ·
+[#31](https://github.com/sustia-llc/koalisi/issues/31) P7.3 sealing +
+revocation registry ·
+[#32](https://github.com/sustia-llc/koalisi/issues/32) P7.4 decision/belief
+streams · [#33](https://github.com/sustia-llc/koalisi/issues/33) P7.5
+federation manifests + FAIR provenance. Sequencing: #29 first, then #30/#31
+may parallelize, then #32, then #33. Open calls in §17 (**KEK granularity
+for bilateral records needs tauhokohoko input BEFORE #31's belief
+sealing**; SHA-256 vs BLAKE3; ciborium vs minicbor; ciphertext reclamation;
+cross-federation EventRef addressing).
 
 ### Downstream: nautilus_trader bridge  *(separate project)*
 
