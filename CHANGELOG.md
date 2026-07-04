@@ -30,15 +30,11 @@ Planned work — all issue-tracked as of 2026-07-03 (details in
   velocity ↔ EFE bridge, ValueCalculator feedback weights, AIPA +
   population hybrid, cross-model transferability). `LlmProvider` stub in
   place.
-- **Phase 7 — Persistence RE-PLAN** ([#21], gated + deliberately last): the
-  original `PersistentHypergraph` design is obsolete since K1; what survives
-  is the append-only `EventStore` idea, which must also durably record
-  SwarmAgentic particle lineages and EFE belief snapshots. K3's durable
-  decision log seeds the message-event side.
-- **Magnitude trajectory over the event log** ([#18]) — `magnitude_history`
-  salvage from the superseded `catgraph-coalition`: replay membership along
-  the temporal event log and evaluate the t=1 coalition value per sample
-  (feature `magnitude`; affinity with the Phase 7 re-plan).
+- **Phase 7 — Persistence implementation** (P7.1–P7.5, follow-ups of the
+  [#21] design doc shipped in 0.7.0 — see
+  `docs/phase7-persistence-design.md` §16): core chained log, topology
+  projection + replay, sealing + revocation registry, decision/belief
+  streams, federation manifests + FAIR provenance.
 - **Databento `LiveClient` integration** ([#22], *blocked on
   `DATABENTO_API_KEY`*).
 - **Synthetic DBN file** for the end-to-end arb signal demo ([#23]).
@@ -58,7 +54,40 @@ Planned work — all issue-tracked as of 2026-07-03 (details in
 [#26]: https://github.com/sustia-llc/koalisi/issues/26
 [#27]: https://github.com/sustia-llc/koalisi/issues/27
 
-### Added/Changed (unreleased — issue [#8] domain-neutral ingestion, K5)
+## [0.7.0] — 2026-07-04
+
+### Added (issue [#21] Phase 7 persistence design + issue [#18] magnitude trajectory)
+
+- **`docs/phase7-persistence-design.md`** ([#21], the Phase 7 RE-PLAN
+  deliverable — design only, no `EventStore` code ships in 0.7.0): layered
+  architecture with a portable CBOR append-only hash-chained log as source
+  of truth (the K3 `durable` bus becomes an optional, rebuildable live
+  projection); envelope record model over six independently chained streams
+  (`Topology`/`Decisions`/`Beliefs`/`Lineage`(reserved, [#20])/`Registry`/
+  `Provenance`); crypto-deletion via per-subject KEK destruction with the
+  keystore outside the log (Stroh §7.4 data-layer pattern only); revocation
+  as appended `Registry` events; bilateral manifest-gated federation
+  (explicitly not the buses / libp2p gateway); EPP-`EffectLog`-shaped causal
+  parents on the envelope; FAIR run-provenance stream. Implementation is
+  phased P7.1–P7.5 as follow-up issues; open calls recorded in §17.
+- **`TemporalAnalytics::magnitude_history` + `MagnitudePoint`** ([#18],
+  feature `magnitude`): the magnitude-trajectory salvage — change-driven
+  replay of a coalition's membership + member weights along the
+  event-sourced history, evaluating the pinned `t = 1`
+  `catgraph_magnitude::coalition_value` fresh at each sample point
+  (`CoalitionEvaluator` deliberately not used: the trajectory access pattern
+  misses its base key at every sample, and a rebuild costs ≈10–15× one
+  fresh eval). Single chronological pass under one read guard; magnitude
+  evaluations in one `tokio_rayon` offload; upstream errors become
+  `NEG_INFINITY` points, never panics. `HyperedgesCleared`/`GraphCleared`
+  dissolve the trajectory (documented divergence from
+  `hyperedge_vertices_at`, which cannot see clear events). `relevant_masks`
+  and `magnitude_or_zero` promoted to `pub(crate)` (visibility + docs only —
+  decision-arm behavior untouched). 6 hand-computed seeded tests in
+  `tests/magnitude_trajectory.rs`; suites 87 default / 109 `magnitude` /
+  128 `decision,magnitude`.
+
+### Added/Changed (issue [#8] domain-neutral ingestion, K5)
 
 - **New `src/ingest/` module (always compiled, zero new deps)** ([#8]): the
   ingestion layer is now domain-neutral; forex is one instantiation.
@@ -111,7 +140,7 @@ Planned work — all issue-tracked as of 2026-07-03 (details in
 
 [#8]: https://github.com/sustia-llc/koalisi/issues/8
 
-### Changed (unreleased — issue [#14] evaluator hot path, K6)
+### Changed (issue [#14] evaluator hot path, K6)
 
 - **Magnitude decision hot path adopts `catgraph_magnitude::CoalitionEvaluator`**
   ([#14], downstream of catgraph#31, dep bumped `v0.1.1` → `v0.2.0`;
@@ -159,7 +188,7 @@ Planned work — all issue-tracked as of 2026-07-03 (details in
 
 [#14]: https://github.com/sustia-llc/koalisi/issues/14
 
-### Changed (unreleased — issue [#6] messaging swap, K3)
+### Changed (issue [#6] messaging swap, K3)
 
 - **In-process actor seams swapped from kameo to `tokio::sync`** (hybrid, hot
   seams never touch a DB). The forex workers (`MarketMonitor`,
@@ -241,7 +270,7 @@ Planned work — all issue-tracked as of 2026-07-03 (details in
   throughput 77.2k → 120.2k ticks/sec. **Not regressed** (every metric
   improved) — the pre-registered acceptance.
 
-### Changed (unreleased — issue [#4] catgraph backend, K1)
+### Changed (issue [#4] catgraph backend, K1)
 
 - **Topology backend swapped**: `TemporalHypergraph`/`SharedGraph` re-backed
   from yamafaktory `hypergraph` v4.2.0 onto `catgraph_applied::Hypergraph`
@@ -274,7 +303,7 @@ Planned work — all issue-tracked as of 2026-07-03 (details in
 
 [#4]: https://github.com/sustia-llc/koalisi/issues/4
 
-### Added (unreleased — issue [#7] A/B harness, K4)
+### Added (issue [#7] A/B harness, K4)
 
 - **Pre-registered A/B harness** ([#7], `examples/strategy_comparison.rs`, now
   `required-features = ["decision", "magnitude"]`): Part 1 keeps the original
@@ -307,7 +336,7 @@ Planned work — all issue-tracked as of 2026-07-03 (details in
 
 [#7]: https://github.com/sustia-llc/koalisi/issues/7
 
-### Added (unreleased — issue [#5] magnitude decision arm, K2)
+### Added (issue [#5] magnitude decision arm, K2)
 
 - **`MagnitudePolicy` — the categorical A/B mirror of the AIF arm** ([#5],
   new feature `magnitude`, independent of `decision`): coalition join/leave
@@ -344,7 +373,7 @@ Planned work — all issue-tracked as of 2026-07-03 (details in
 
 [#5]: https://github.com/sustia-llc/koalisi/issues/5
 
-### Added (unreleased — issue [#1] decision wiring)
+### Added (issue [#1] decision wiring)
 
 - **Live decision call site** ([#1]): the `AifDecisionPolicy` / async-offload
   primitives shipped in v0.6.0 now have a real seam.
@@ -371,7 +400,7 @@ Planned work — all issue-tracked as of 2026-07-03 (details in
 
 [#1]: https://github.com/sustia-llc/koalisi/issues/1
 
-### Added (unreleased — issue [#2] belief-aware scoring)
+### Added (issue [#2] belief-aware scoring)
 
 - **Trust / compatibility / history beliefs in the AIF decision path** ([#2],
   feature `decision`): the decision now reflects more than capability coverage.
@@ -400,7 +429,7 @@ Planned work — all issue-tracked as of 2026-07-03 (details in
 
 [#2]: https://github.com/sustia-llc/koalisi/issues/2
 
-### Added (unreleased — Phase 5 prep)
+### Added (Phase 5 prep)
 
 - **`koalisi::llm` stub module** (`src/llm/mod.rs`): defines the
   `LlmProvider` trait (`fn complete(&self, prompt: &str) -> impl
@@ -828,6 +857,8 @@ Initial POC release.
   binaries cleanly.
 
 [Unreleased]: #unreleased
+[0.7.0]: #070--2026-07-04
+[0.6.0]: #060--2026-05-29
 [0.5.0]: #050--2026-05-27
 [0.4.0]: #040--2026-05-26
 [0.3.0]: #030--2026-05-24
