@@ -49,6 +49,20 @@ coalition_aif (decision — planned), and forex-arbitrage-swarm (runtime).
 
 ### Done
 
+- **P7.1 persistence core (#29) — v0.8.0**: new `src/persistence/` behind
+  feature `persistence` (deps `ciborium` + `sha2`, gated; default build
+  unchanged). The signed-off §6 `EventStore` trait
+  (`append`/`read_from`/`head`/`verify`) over six independently hash-chained
+  streams; `FileEventStore` — CBOR frames via a private `FrameV1` mirror
+  (public envelope types serde-free), per-stream segment dirs
+  (`{first_seq:020}.seg`), SHA-256 over exact stored frame bytes (length
+  prefix excluded), rotation with cross-segment chain continuity, torn-tail
+  truncation at the last segment only, tail re-verification on open,
+  **wedge-on-write-failure** (`StreamWedged`; reopen recovers), bounded
+  random-access reads; `spawn_store_writer` (spawn_blocking appends, biased
+  cancel, drain-on-cancel). `Payload::Sealed` schema-only until P7.3;
+  Lineage reserved (#20). Writer seam is **at-most-once** from the tee
+  (K3's cursor-replay has no analogue here yet). See gotcha 17.
 - **Phase 7 persistence DESIGN (#21) — v0.7.0**: the RE-PLAN deliverable is
   `docs/phase7-persistence-design.md` (design only; NO EventStore code ships
   in 0.7.0). Layered: portable CBOR append-only hash-chained log = source of
@@ -198,6 +212,7 @@ coalition_aif (decision — planned), and forex-arbitrage-swarm (runtime).
   | `--features decision` | 106 | `cargo test --features decision` |
   | `--features magnitude` | 109 | `cargo test --features magnitude` |
   | `--features decision,magnitude` | 128 | `cargo test --features decision,magnitude` |
+  | `--features persistence` | 102 (+8 unit, +7 integration) | `cargo test --features persistence` |
   | `--features durable` | 88 (+1 container-backed restart test; needs Docker) | `cargo test --features durable` |
   | `--features databento` | + 4 databento integration | `cargo test --features databento` |
   | `--features remote` | + 1 remote integration | `cargo test --features remote` |
@@ -248,6 +263,13 @@ koalisi/
 │   │   └── synthetic.rs                    MultiResolutionSource (NEST-shaped) + SensorEventSource (tauhokohoko-shaped, changepoint)
 │   ├── llm/
 │   │   └── mod.rs                          LlmProvider trait + StubLlmProvider (Phase 5 anchor)
+│   ├── persistence/                        P7.1 (#29): chained event log (feature `persistence`)
+│   │   ├── mod.rs                          feature docs (hash contract, durability, at-most-once) + pub surface
+│   │   ├── envelope.rs                     StreamId/SequenceNo/RecordHash/Payload/EventRef/Record/StoredRecord/StreamHead
+│   │   ├── errors.rs                       PersistenceError (hand-rolled; StreamWedged; P7.3/P7.5 anchor variants)
+│   │   ├── chain.rs                        FrameV1 (private serde mirror), FRAME_VERSION, hashing, back-link check
+│   │   ├── store.rs                        EventStore trait + FileEventStore (segments, rotation, torn-tail recovery, wedge)
+│   │   └── writer.rs                       spawn_store_writer (spawn_blocking, drain-on-cancel)
 │   └── subsystems/
 │       ├── monitor.rs                      forex aliases: MarketMonitor = SampleMonitor<Tick> etc. + spawn_monitor (K5)
 │       ├── coordinator.rs                  ArbitrageCoordinator task + CoordinatorHandle (broadcast tick_bus in, alert_bus out)
@@ -285,6 +307,7 @@ koalisi/
     ├── databento_integration.rs            4 tests (feature `databento`)
     ├── ingestion_integration.rs            3 tests (K5: synthetic sources → monitors → coalition formation; default features)
     ├── magnitude_trajectory.rs             6 tests (#18: hand-computed trajectory semantics; feature `magnitude`)
+    ├── persistence_integration.rs          7 tests (#29: roundtrip, rotation+reopen, tamper, torn tail, sealed opaque, writer drain, bounds; feature `persistence`)
     └── remote_integration.rs               1 test (feature `remote`)
 ```
 
@@ -447,6 +470,29 @@ These cost time during the build; future-me should not relearn them.
       skeletalization); upstream `CatgraphError` ⇒ warn + `NEG_INFINITY`
       point, never a panic.
 
+17. **P7.1 persistence contracts (#29) — rely on these.**
+    - **Hash contract**: `RecordHash` = SHA-256 over the exact stored frame
+      bytes EXCLUDING the u32 LE length prefix; `prev_hash` lives inside the
+      NEXT frame. Verification re-reads disk bytes — it must NEVER re-encode
+      a decoded frame. On-disk algorithm change = `FRAME_VERSION` bump (the
+      in-memory `RecordHash.algorithm` tag is not on the wire).
+    - **Wedge-on-write-failure**: any write-path error inside `append` wedges
+      the stream — further appends return `StreamWedged` until the store is
+      REOPENED (open re-scans structure and truncates a torn tail; full-chain
+      check is an explicit `verify()`). Pre-write errors (encode, rotation
+      dir-creation) do NOT wedge. Don't "fix" the writer task to retry into a
+      wedged stream.
+    - **Torn-tail truncation happens ONLY at the last segment's tail**; a
+      short/invalid frame anywhere else is a hard `Decode` error — never
+      silent truncation mid-log.
+    - **The writer seam is at-most-once from the tee onward** (producer
+      try_send may drop per the tap contract; a failed append is warned and
+      dropped). K3's durable-bus at-least-once came from CHANGEFEED cursor
+      replay, which has NO P7.1 analogue — do not transcribe that claim.
+    - `Payload::Sealed` is schema-only until P7.3 (store round-trips it
+      opaquely); `Lineage` is reserved until #20 unholds; open slurps whole
+      segments + keeps 8 B/record offsets — fine at P7.1 scale.
+
 ## Reproducers
 
 All assume `cwd = koalisi/`.
@@ -462,7 +508,7 @@ timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-tar
 timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example supervised_swarm
 timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example synthetic_ingestion
 
-# === decision-layer feature combos (106 / 103 / 122 tests) ===
+# === decision-layer feature combos (106 / 109 / 128 tests) ===
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features magnitude
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision,magnitude
@@ -470,6 +516,9 @@ timeout 120s cargo run --release --manifest-path Cargo.toml --target-dir /tmp/ko
 
 # === K3 hot-path bench (release; see docs/k3-hot-path-bench.md) ===
 timeout 120s cargo run --release --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example hot_path_bench
+
+# === with persistence feature (P7.1 event store, 102 tests) ===
+timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features persistence
 
 # === with durable feature (needs Docker; container-backed restart test) ===
 timeout 300s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features durable
@@ -815,7 +864,8 @@ in-memory series.
 
 Implementation phasing (**signed off + FILED 2026-07-04; #21 CLOSED**):
 [#29](https://github.com/sustia-llc/koalisi/issues/29) P7.1 core chained
-log (feature `persistence`, deps ciborium + sha2) ·
+log (feature `persistence`, deps ciborium + sha2) — **DONE v0.8.0
+(2026-07-04; ciborium picked over minicbor per §17)** ·
 [#30](https://github.com/sustia-llc/koalisi/issues/30) P7.2 topology
 projection + replay (pre-registered #18 `magnitude_history` parity gate) ·
 [#31](https://github.com/sustia-llc/koalisi/issues/31) P7.3 sealing +
