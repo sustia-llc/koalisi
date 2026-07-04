@@ -472,7 +472,11 @@ impl CouplingModel {
 /// vacuously — because a one-way `1.0` coupling to every member drives their
 /// Möbius weight negative and collapses the coalition's diversity (module docs,
 /// rationale point 4).
-fn relevant_masks(agents: &[&dyn AgentCapabilities], required: u32) -> Vec<u32> {
+///
+/// `pub(crate)` because [`crate::topology::TemporalAnalytics::magnitude_history`]
+/// reuses the exact bystander-exclusion / dedup contract when it snapshots a
+/// coalition's members at a trajectory sample point.
+pub(crate) fn relevant_masks(agents: &[&dyn AgentCapabilities], required: u32) -> Vec<u32> {
     let mut seen = std::collections::HashSet::new();
     let mut masks = Vec::with_capacity(agents.len());
     for a in agents {
@@ -526,7 +530,11 @@ fn magnitude_of_masks(masks: &[u32], required: u32) -> Result<f64, CatgraphError
 /// call-site guard that keeps an empty member set from reaching upstream, which
 /// would error. "Empty" includes a coalition whose members were *all* excluded
 /// as task-irrelevant by [`relevant_masks`] (e.g. when `required == 0`).
-fn magnitude_or_zero(masks: &[u32], required: u32) -> Result<f64, CatgraphError> {
+///
+/// `pub(crate)` because [`crate::topology::TemporalAnalytics::magnitude_history`]
+/// evaluates each trajectory sample point through this same empty-guarded
+/// fresh-magnitude path.
+pub(crate) fn magnitude_or_zero(masks: &[u32], required: u32) -> Result<f64, CatgraphError> {
     if masks.is_empty() {
         return Ok(0.0);
     }
