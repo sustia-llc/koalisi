@@ -3,11 +3,9 @@
 //! koalisi's architecture is domain-agnostic, but its ingestion used to be
 //! finance-specific. This module decouples ingestion from the forex domain:
 //!
-//! - [`Sample`] — the time-ordered, keyed unit of ingestion (the generic form
-//!   of a forex `Tick`).
+//! - [`Sample`] — the time-ordered, keyed unit of ingestion.
 //! - [`SampleMonitor`] — a per-key ring-buffer worker publishing
-//!   [`SampleUpdate`]s to a `broadcast` bus. The forex `MarketMonitor` is now
-//!   `SampleMonitor<Tick>`.
+//!   [`SampleUpdate`]s to a `broadcast` bus.
 //! - [`DataSource`] + [`pump_source`] — a producer of time-ordered samples and
 //!   the generic pump that routes them into monitors by key. [`Pacing`] and its
 //!   replay semantics live here (domain-neutral).
@@ -15,10 +13,6 @@
 //!   downstream driver shapes: NEST-style multi-resolution numeric series
 //!   ([`MultiResolutionSource`]) and tauhokohoko-style ecological sensor streams
 //!   with a changepoint ([`SensorEventSource`]).
-//!
-//! Forex remains a fully-working domain example re-expressed atop this core (see
-//! [`market`](crate::market) and [`subsystems::monitor`](crate::subsystems::monitor)),
-//! not the core itself.
 
 pub mod monitor;
 pub mod sample;

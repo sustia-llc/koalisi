@@ -59,6 +59,56 @@ Planned work — all issue-tracked as of 2026-07-03 (details in
 [#31]: https://github.com/sustia-llc/koalisi/issues/31
 [#32]: https://github.com/sustia-llc/koalisi/issues/32
 [#33]: https://github.com/sustia-llc/koalisi/issues/33
+[#37]: https://github.com/sustia-llc/koalisi/issues/37
+[#38]: https://github.com/sustia-llc/koalisi/issues/38
+
+## [0.11.0] — 2026-07-14
+
+Second (and final) step of the de-financialisation pass begun in 0.10.0:
+koalisi is now a purely domain-agnostic coalition runtime. The forex
+triangular-arbitrage domain — which survived only as the runtime
+*demonstration* — is gone; the demonstrated runtime is now a synthetic,
+non-financial coalition-formation pipeline. ([#37])
+
+### Removed
+
+- **Forex domain deleted.** `src/market.rs` (`Pair`/`Tick`/`Quote`/`Triangle`/
+  `ArbitrageOpportunity`/`Direction`) and the arbitrage "swarm"
+  (`subsystems/{coordinator,sink,swarm,monitor}.rs`) are removed, along with
+  the `historical_bootstrap`, `live_pubsub`, `triangular_arbitrage`, and
+  `hot_path_bench` examples and `tests/integration_test.rs`. The domain-neutral
+  coalition core — `topology` (`CoalitionManager`), `algorithms`, `decision`,
+  `ingest`, and `subsystems::coalition_actor::CoalitionService` — is unchanged.
+- **`remote` feature deleted.** The raw-libp2p alert gateway
+  (`subsystems/distributed.rs`), its `distributed_alert_consumer` example, the
+  `remote_integration` test, and the `libp2p` dependency are removed. The
+  gateway subscribed to the (now-deleted) swarm's `alert_bus` and published
+  `ArbitrageOpportunity`; reframing it needs a domain-neutral coalition-event
+  broadcast surface that doesn't exist yet, so it was deferred to [#38] (a
+  domain-neutral remote coalition-event gateway) rather than reworked here.
+
+### Changed
+
+- **`examples/synthetic_ingestion.rs` is now the flagship demo**: after pumping
+  the two synthetic sources through generic `SampleMonitor`s, it forms a
+  coalition over the ingested sensor agents and drives a policy-gated join
+  through the `CoalitionService` seam — end-to-end coalition formation on
+  synthetic, non-financial data.
+- **`src/main.rs` rewritten** as a domain-neutral reference daemon: a
+  `CoalitionRuntime` forms a seed coalition of bit-capability agents and runs a
+  bounded, policy-gated join loop through `CoalitionService`, then shuts down on
+  ctrl-c.
+- **`examples/supervised_swarm.rs` → `examples/supervised_monitor.rs`**: the
+  `core::spawn_supervised` restart demo, ported from a forex `MarketMonitor` to
+  a generic `SampleMonitor<SensorEvent>` over synthetic data.
+
+### Migration
+
+The `databento` (0.10.0) and now `remote` cargo features and the public
+`subsystems::{swarm, coordinator, sink, monitor, distributed}` and `market`
+modules are gone. Market/trading work lives in the sibling
+[`biome`](https://github.com/sustia-llc/biome) project; the deleted forex code
+is recoverable from the `v0.10.0` tag.
 
 ## [0.10.0] — 2026-07-14
 

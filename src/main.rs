@@ -1,91 +1,159 @@
-//! Reference daemon: assemble a swarm, attach a scripted live feed, wait
-//! for ctrl-c, then drain cleanly.
+//! Reference daemon for koalisi — a domain-neutral coalition runtime.
+//!
+//! Assembles a [`CoalitionRuntime`], forms a seed coalition of synthetic agents
+//! whose capability masks are distinct bits (so a coalition's value is coverage
+//! diversity), then runs a bounded, policy-gated join loop that grows the
+//! coalition one candidate at a time through the [`CoalitionService`] seam —
+//! the same runtime seam the flagship `synthetic_ingestion` example uses. Waits
+//! for ctrl-c, then runs the runtime's three-step shutdown (cancel the root
+//! token, close the tracker, drain tracked tasks).
+
+use std::time::Duration;
 
 use anyhow::Result;
-use std::time::Duration;
 use tokio::time::interval;
 use tokio_util::sync::CancellationToken;
 
+use koalisi::algorithms::{AdditiveCalculator, AgentCapabilities};
+use koalisi::core::CoalitionRuntime;
 use koalisi::core::config::setup_logging;
-use koalisi::market::{Pair, Tick, Triangle};
-use koalisi::subsystems::swarm::{Swarm, SwarmConfig};
+use koalisi::decision::{DecisionContext, ThresholdPolicy};
+use koalisi::subsystems::coalition_actor::{CoalitionService, CoalitionServiceHandle};
+use koalisi::topology::{CoalitionManager, HyperedgeIndex, VertexIndex};
+
+/// A minimal domain-neutral agent: its capability mask is a single distinct bit,
+/// so a coalition's value comes from coverage diversity. `Copy + Eq + Debug`
+/// satisfies the topology `VertexTrait` blanket bound.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Agent {
+    id: usize,
+    caps: u32,
+    trust: u32,
+}
+
+impl AgentCapabilities for Agent {
+    fn agent_id(&self) -> usize {
+        self.id
+    }
+    fn capabilities(&self) -> u32 {
+        self.caps
+    }
+    fn trust_level(&self) -> u32 {
+        self.trust
+    }
+}
+
+/// A minimal coalition label (satisfies the topology `HyperedgeTrait` bound).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Team(u32);
+
+const AGENT_COUNT: usize = 6;
+const SEED_MEMBERS: usize = 2;
 
 #[tokio::main]
 async fn main() -> Result<()> {
     setup_logging();
 
-    let triangle = Triangle::new(
-        "EUR/USD".parse()?,
-        "GBP/USD".parse()?,
-        "EUR/GBP".parse()?,
-    )?;
-    let config = SwarmConfig::from_settings(vec![triangle]);
+    let runtime = CoalitionRuntime::new();
 
-    let swarm = Swarm::new(config).await?;
+    // A set of agents, each covering a distinct capability bit.
+    let agents: Vec<Agent> = (0..AGENT_COUNT)
+        .map(|id| Agent {
+            id,
+            caps: 1u32 << id,
+            trust: 50,
+        })
+        .collect();
 
-    // Spawn a scripted "live" feeder. In a real deployment this would be a
-    // websocket subscriber pumping ticks into `swarm.feed_tick(...)`.
-    let live_token = swarm.cancellation_token().child_token();
-    let tick_bus_handle = spawn_demo_feed(&swarm, live_token);
+    // Add every agent to the manager (the candidate vertices must exist before
+    // the manager is moved into the service), then form a seed coalition over
+    // the first `SEED_MEMBERS`.
+    let manager: CoalitionManager<Agent, Team> = CoalitionManager::empty();
+    let mut vertices = Vec::with_capacity(agents.len());
+    for a in &agents {
+        vertices.push(manager.add_agent(*a).await?);
+    }
+    let coalition = manager
+        .form_coalition(vertices[..SEED_MEMBERS].to_vec(), Team(1))
+        .await?;
+
+    // Spawn the policy-gated membership seam. A candidate that covers a fresh
+    // capability bit clears the additive marginal-value threshold and joins.
+    let required = (1u32 << AGENT_COUNT) - 1;
+    let service = CoalitionService::spawn(
+        manager,
+        Box::new(ThresholdPolicy::new(AdditiveCalculator, 0.0, 0.0)),
+        DecisionContext {
+            required_capabilities: required,
+        },
+    );
+
+    tracing::info!(
+        seed_members = SEED_MEMBERS,
+        candidates = AGENT_COUNT - SEED_MEMBERS,
+        "coalition runtime started"
+    );
+
+    // Background join loop on a child of the root token, tracked so shutdown
+    // drains it.
+    let candidates: Vec<VertexIndex> = vertices[SEED_MEMBERS..].to_vec();
+    let loop_token = runtime.cancellation_token().child_token();
+    let _join = runtime.task_tracker().spawn(join_loop(
+        service.clone(),
+        coalition,
+        candidates,
+        loop_token,
+    ));
 
     tokio::signal::ctrl_c().await?;
-    tracing::info!("ctrl-c received, shutting down.");
+    tracing::info!("ctrl-c received, shutting down");
 
-    // The token is owned by `swarm.cancellation_token()`; cancelling here
-    // (or letting `shutdown` cancel it) tells the feeder task to stop.
-    swarm.shutdown().await;
-    let _ = tick_bus_handle.await;
+    // Drop the daemon's own handle; the loop's clone releases when `shutdown`
+    // cancels the root token (draining the loop task), after which the service
+    // task exits on its now-closed command channel.
+    drop(service);
+    runtime.shutdown().await;
+    tracing::info!("shutdown clean");
     Ok(())
 }
 
-/// Spawns a scripted feeder that walks the EUR/USD, GBP/USD, EUR/GBP
-/// triangle around a slowly-drifting baseline. Yields control on the swarm
-/// cancellation token.
-fn spawn_demo_feed(swarm: &Swarm, token: CancellationToken) -> tokio::task::JoinHandle<()> {
-    // Capture only what we need for the spawn — concrete refs, no `&self`.
-    let eur_usd: Pair = "EUR/USD".parse().unwrap();
-    let gbp_usd: Pair = "GBP/USD".parse().unwrap();
-    let eur_gbp: Pair = "EUR/GBP".parse().unwrap();
-
-    let m_eur_usd = swarm.monitor(&eur_usd).unwrap().clone();
-    let m_gbp_usd = swarm.monitor(&gbp_usd).unwrap().clone();
-    let m_eur_gbp = swarm.monitor(&eur_gbp).unwrap().clone();
-
-    tokio::spawn(async move {
-        let mut clock = interval(Duration::from_millis(250));
-        let mut t = 0u64;
-        loop {
-            tokio::select! {
-                _ = token.cancelled() => {
-                    tracing::info!("demo feeder cancelled");
-                    return;
-                }
-                _ = clock.tick() => {}
-            }
-
-            // Drift the synthetic equilibrium and occasionally let the
-            // cross drift away from it.
-            let drift = (t as f64 * 0.0001).sin() * 0.0002;
-            let eu = 1.1000 + drift;
-            let gu = 1.3000 - drift * 0.5;
-            // synthetic EUR/GBP = eu / gu — start aligned, drift slightly
-            // every ~12 ticks to give the coordinator something to do.
-            let syn = eu / gu;
-            let cross_drift = if t % 12 == 11 { 0.0007 } else { 0.0 };
-            let eg = syn + cross_drift;
-            let now_ms = (t as i64) * 250;
-
-            let _ = m_eur_usd
-                .tell(Tick::new(eur_usd.clone(), eu - 0.0002, eu + 0.0002, now_ms))
-                .await;
-            let _ = m_gbp_usd
-                .tell(Tick::new(gbp_usd.clone(), gu - 0.0002, gu + 0.0002, now_ms))
-                .await;
-            let _ = m_eur_gbp
-                .tell(Tick::new(eur_gbp.clone(), eg - 0.0001, eg + 0.0001, now_ms))
-                .await;
-            // (`.tell` on a `MonitorHandle` is the fire-and-forget path.)
-            t = t.wrapping_add(1);
+/// Offer each candidate to the coalition once per interval tick, logging the
+/// policy decision. Idles until cancelled after the last candidate.
+async fn join_loop(
+    service: CoalitionServiceHandle,
+    coalition: HyperedgeIndex,
+    candidates: Vec<VertexIndex>,
+    token: CancellationToken,
+) {
+    let mut clock = interval(Duration::from_secs(2));
+    let mut next = 0usize;
+    loop {
+        tokio::select! {
+            biased;
+            () = token.cancelled() => return,
+            _ = clock.tick() => {}
         }
-    })
+
+        if next >= candidates.len() {
+            continue; // all candidates offered; idle until cancelled
+        }
+        let candidate = candidates[next];
+        next += 1;
+
+        match service.join(candidate, coalition).await {
+            Ok(decision) => tracing::info!(
+                agent = usize::from(candidate),
+                act = decision.act,
+                score = decision.score,
+                "policy-gated join decision"
+            ),
+            Err(e) => {
+                tracing::warn!(error = %e, "join failed; service gone");
+                return;
+            }
+        }
+        if let Ok(members) = service.members(coalition).await {
+            tracing::info!(size = members.len(), "coalition size");
+        }
+    }
 }

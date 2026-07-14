@@ -3,24 +3,22 @@
 //! ## Architecture
 //!
 //! - [`core`] — domain-agnostic coalition infrastructure:
-//!   [`CoalitionRuntime`](core::CoalitionRuntime) (TaskTracker +
-//!   CancellationToken + three-step shutdown), settings, logging.
+//!   [`CoalitionRuntime`](core::CoalitionRuntime) (`TaskTracker` +
+//!   `CancellationToken` + three-step shutdown), settings, logging.
 //! - [`topology`] — temporal hypergraph, event sourcing,
 //!   `CoalitionManager`, time-travel queries, analytics.
 //! - [`algorithms`] — `ValueCalculator`, DCVC, AIPA partition search.
 //! - [`ingest`] — domain-neutral ingestion: the `Sample` trait, the generic
-//!   `SampleMonitor` (which `MarketMonitor` instantiates), a `DataSource` pump,
-//!   and seeded synthetic fixtures (NEST- and tauhokohoko-shaped).
+//!   `SampleMonitor`, a `DataSource` pump, and seeded synthetic fixtures (NEST-
+//!   and tauhokohoko-shaped).
 //! - [`decision`] — coalition join/leave policies: `ThresholdPolicy` (always
 //!   available), behind feature `decision` an Active Inference
 //!   expected-free-energy policy, and behind feature `magnitude` its categorical
 //!   A/B mirror scoring coalitions by enriched-category magnitude.
 //! - [`llm`] — Phase 5/6 LLM provider stub (real backends land later).
-//! - [`subsystems`] — forex-specific worker tasks (monitor, coordinator,
-//!   sink, swarm) on `tokio::sync` seams, plus an optional libp2p remote
-//!   alert gateway.
-//! - [`market`] — forex value types: `Pair`, `Tick`, `Quote`, `Triangle`,
-//!   `TickUpdate`, `ArbitrageOpportunity`.
+//! - [`subsystems`] — the [`CoalitionService`](subsystems::coalition_actor::CoalitionService)
+//!   policy-gated membership seam (plus, behind feature `durable`, an optional
+//!   durable decision log).
 //!
 //! ## Quick start
 //!
@@ -31,25 +29,16 @@ pub mod core;
 pub mod decision;
 pub mod ingest;
 pub mod llm;
-pub mod market;
 #[cfg(feature = "persistence")]
 pub mod persistence;
 pub mod topology;
 
 pub mod subsystems {
     pub mod coalition_actor;
-    pub mod coordinator;
-    #[cfg(feature = "remote")]
-    pub mod distributed;
     #[cfg(feature = "durable")]
     pub mod durable;
-    pub mod monitor;
-    pub mod sink;
-    pub mod swarm;
 }
 
 pub use decision::{CoalitionDecisionPolicy, Decision, DecisionContext, ThresholdPolicy};
 pub use ingest::{DataSource, Sample, SampleMonitor, SampleUpdate};
-pub use market::{ArbitrageOpportunity, Direction, Pair, Quote, Tick, TickUpdate, Triangle};
-pub use subsystems::swarm::{Swarm, SwarmConfig, SwarmFeeder};
 pub use core::CoalitionRuntime;
