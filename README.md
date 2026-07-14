@@ -40,7 +40,7 @@ actor-based runtime orchestration.
 | `ingest` | Domain-neutral ingestion (K5): `Sample`/`DataSource` traits, generic `SampleMonitor<S>`, `Pacing` + `pump_source`, synthetic NEST-shaped multi-resolution and tauhokohoko-shaped sensor-event fixture sources (seeded, no credentials) |
 | `decision` | `CoalitionDecisionPolicy` trait + always-available `ThresholdPolicy`; optional Active Inference strategy (`EfeValueCalculator`, `AifDecisionPolicy`) behind the `decision` feature; optional categorical-magnitude strategy (`MagnitudeValueCalculator`, `MagnitudePolicy`) behind the `magnitude` feature |
 | `persistence` | Append-only event store (feature `persistence`): hash-chained streams, CBOR frame log (`FileEventStore`), crash-tail recovery, writer task; topology events tap in and replay back into a fresh `EventLog` all queries run on unchanged (P7.1 + P7.2) — see `docs/phase7-persistence-design.md` |
-| `subsystems` | Forex-specific tokio task workers (monitor = `SampleMonitor<Tick>`, coordinator, sink, swarm), databento adapter (`databento`), libp2p remote gateway (`remote`), durable decision log (`durable`) |
+| `subsystems` | Forex-specific tokio task workers (monitor = `SampleMonitor<Tick>`, coordinator, sink, swarm), libp2p remote gateway (`remote`), durable decision log (`durable`) |
 | `market` | Forex value types (Pair, Tick, Quote, Triangle, ArbitrageOpportunity) |
 
 ## Quick start
@@ -101,8 +101,6 @@ cargo run --example supervised_swarm
 
 # Feature-gated
 cargo run --release --features decision,magnitude --example strategy_comparison   # divergence demo + AIF-vs-magnitude A/B report (#7)
-cargo run --features databento --example databento_historical
-cargo run --features databento --example databento_live_replay
 cargo run --features remote --example distributed_alert_consumer
 ```
 
@@ -116,7 +114,6 @@ cargo test --features decision,magnitude   # 128 tests (both decision arms)
 cargo test --features persistence          # 107 tests (+ chained event store + topology replay)
 cargo test --features persistence,magnitude # 130 tests (incl. the live-vs-replayed parity gate)
 cargo test --features durable              # + container-backed restart-durability test (needs Docker)
-cargo test --features databento            # + 4 databento integration tests
 cargo test --features remote               # + 1 remote integration test
 ```
 

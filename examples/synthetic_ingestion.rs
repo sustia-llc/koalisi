@@ -1,5 +1,5 @@
 //! Domain-neutral ingestion demo (issue #8, K5) — no market data, no
-//! credentials, no databento feature.
+//! credentials, default features only.
 //!
 //! Builds the two synthetic sources that mirror koalisi's real downstream
 //! drivers, pumps them through generic `SampleMonitor`s on a `broadcast` bus,

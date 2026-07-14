@@ -60,6 +60,27 @@ Planned work — all issue-tracked as of 2026-07-03 (details in
 [#32]: https://github.com/sustia-llc/koalisi/issues/32
 [#33]: https://github.com/sustia-llc/koalisi/issues/33
 
+## [0.10.0] — 2026-07-14
+
+### Removed
+
+- **Databento (DBN) adapter dropped.** koalisi is a domain-agnostic
+  coalition runtime; the market-data decode path is now owned entirely by
+  the sibling [`biome`](https://github.com/sustia-llc/biome) project (which
+  carries its own `load_prices_dbn`). Deleted: `subsystems/databento.rs`
+  (the MBP-1 → `Tick` `SwarmFeeder` pump), the `databento_historical` and
+  `databento_live_replay` examples, and `tests/databento_integration.rs`.
+  Dropped the `databento` feature and its `dbn` + `time` dependencies
+  (`time` was databento-only). The domain-neutral `ingest::{Pacing,
+  PumpStats, DataSource, pump_source}` layer (issue #8) is unaffected — it
+  was already the generalisation and no longer name-drops the removed
+  adapter. Follow-up databento ideas (issues [#22] LiveClient, [#23]
+  synthetic DBN arb) are closed here as out-of-scope; that work belongs in
+  `biome`. **Breaking** for anyone building `--features databento`.
+- First step of a broader de-financialisation pass; forex (`market`,
+  `subsystems::{coordinator,sink,swarm}`, triangular arbitrage) removal is
+  planned separately (`.claude/plans/`).
+
 ## [0.9.0] — 2026-07-04
 
 ### Added (issue [#30] P7.2 topology projection + replay)

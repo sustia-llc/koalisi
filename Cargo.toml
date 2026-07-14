@@ -1,6 +1,6 @@
 [package]
 name = "koalisi"
-version = "0.9.0"
+version = "0.10.0"
 edition = "2024"
 rust-version = "1.88.0"
 description = "Reference implementation of agentic coalitions in Rust — tokio::sync task seams, temporal hypergraph topology, coalition algorithms, and optional Active Inference decision-making"
@@ -40,10 +40,6 @@ aif = { git = "ssh://git@github.com/sustia-llc/tira", tag = "aif-v0.5.0", option
 # is private and git here is SSH-only — same rationale as the `aif` dep above.
 catgraph-magnitude = { git = "ssh://git@github.com/sustia-llc/catgraph", tag = "v0.2.0", optional = true }
 
-# Optional: databento DBN-file adapter. Enabled via `--features databento`.
-dbn = { version = "0.58", features = ["async"], optional = true }
-time = { version = "0.3", optional = true, features = ["macros"] }
-
 # Optional: raw libp2p request-response transport for the remote alert gateway.
 # Enabled via `--features remote`. The gateway is a plain tokio task speaking a
 # hand-rolled CBOR request-response protocol (`/koalisi/alerts/1`) over
@@ -75,7 +71,6 @@ default = []
 decision = ["dep:aif"]
 # Categorical-magnitude coalition-decision strategy (pluggable, off by default).
 magnitude = ["dep:catgraph-magnitude"]
-databento = ["dep:dbn", "dep:time"]
 remote = ["dep:libp2p"]
 # Durable coalition decision-event bus on surrealdb-live-message (off by default).
 durable = ["dep:surrealdb-live-message", "dep:surrealdb-types"]
@@ -91,14 +86,6 @@ name = "strategy_comparison"
 required-features = ["decision", "magnitude"]
 
 [[example]]
-name = "databento_historical"
-required-features = ["databento"]
-
-[[example]]
-name = "databento_live_replay"
-required-features = ["databento"]
-
-[[example]]
 name = "distributed_alert_consumer"
 required-features = ["remote"]
 
@@ -109,10 +96,6 @@ required-features = ["durable"]
 [[test]]
 name = "magnitude_trajectory"
 required-features = ["magnitude"]
-
-[[test]]
-name = "databento_integration"
-required-features = ["databento"]
 
 [[test]]
 name = "remote_integration"
