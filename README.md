@@ -4,7 +4,7 @@ A reference implementation of **agentic coalitions** in Rust.
 
 koalisi provides a layered architecture for building agent coalition systems —
 from temporal hypergraph topology to coalition formation algorithms to
-actor-based runtime orchestration.
+`tokio::sync` task-based runtime orchestration.
 
 ## Architecture
 
@@ -13,8 +13,8 @@ actor-based runtime orchestration.
 │  Runtime Layer (tokio tasks)                     │
 │  broadcast buses, mpsc/oneshot handles,          │
 │  TaskTracker + CancellationToken three-step      │
-│  shutdown, task-restart supervision, libp2p      │
-│  remote gateway, optional durable decision log   │
+│  shutdown, task-restart supervision,             │
+│  CoalitionService seam, optional durable log     │
 ├─────────────────────────────────────────────────┤
 │  Algorithm Layer                                 │
 │  DCVC workload distribution, AIPA partition      │
@@ -40,8 +40,7 @@ actor-based runtime orchestration.
 | `ingest` | Domain-neutral ingestion (K5): `Sample`/`DataSource` traits, generic `SampleMonitor<S>`, `Pacing` + `pump_source`, synthetic NEST-shaped multi-resolution and tauhokohoko-shaped sensor-event fixture sources (seeded, no credentials) |
 | `decision` | `CoalitionDecisionPolicy` trait + always-available `ThresholdPolicy`; optional Active Inference strategy (`EfeValueCalculator`, `AifDecisionPolicy`) behind the `decision` feature; optional categorical-magnitude strategy (`MagnitudeValueCalculator`, `MagnitudePolicy`) behind the `magnitude` feature |
 | `persistence` | Append-only event store (feature `persistence`): hash-chained streams, CBOR frame log (`FileEventStore`), crash-tail recovery, writer task; topology events tap in and replay back into a fresh `EventLog` all queries run on unchanged (P7.1 + P7.2) — see `docs/phase7-persistence-design.md` |
-| `subsystems` | Forex-specific tokio task workers (monitor = `SampleMonitor<Tick>`, coordinator, sink, swarm), libp2p remote gateway (`remote`), durable decision log (`durable`) |
-| `market` | Forex value types (Pair, Tick, Quote, Triangle, ArbitrageOpportunity) |
+| `subsystems` | `CoalitionService` — the policy-gated coalition-membership seam (join/leave consult a `CoalitionDecisionPolicy` before mutating the hypergraph) — plus an optional durable decision log (`durable`) |
 
 ## Quick start
 
@@ -91,30 +90,27 @@ cargo run --example topology_coalition
 # Algorithm values — calculators, DCVC, AIPA
 cargo run --example algorithm_values
 
-# Forex arbitrage — triangular arb detection
-cargo run --example triangular_arbitrage
+# Flagship: synthetic ingestion → coalition formation (domain-neutral, no credentials)
+cargo run --example synthetic_ingestion
 
-# Full list
-cargo run --example historical_bootstrap
-cargo run --example live_pubsub
-cargo run --example supervised_swarm
+# Task-restart supervision (spawn_supervised over a synthetic monitor)
+cargo run --example supervised_monitor
 
 # Feature-gated
 cargo run --release --features decision,magnitude --example strategy_comparison   # divergence demo + AIF-vs-magnitude A/B report (#7)
-cargo run --features remote --example distributed_alert_consumer
+cargo run --features durable --example durable_decisions                          # durable decision log (needs Docker)
 ```
 
 ## Tests
 
 ```sh
-cargo test                                 # 87 tests (core + topology + algorithms + decision + ingestion + forex)
-cargo test --features decision             # 106 tests (+ Active Inference decision strategy)
-cargo test --features magnitude            # 109 tests (+ categorical-magnitude decision strategy + trajectory analytics)
-cargo test --features decision,magnitude   # 128 tests (both decision arms)
-cargo test --features persistence          # 107 tests (+ chained event store + topology replay)
-cargo test --features persistence,magnitude # 130 tests (incl. the live-vs-replayed parity gate)
+cargo test                                 # 76 tests (core + topology + algorithms + decision + ingestion)
+cargo test --features decision             # 95 tests (+ Active Inference decision strategy)
+cargo test --features magnitude            # 98 tests (+ categorical-magnitude decision strategy + trajectory analytics)
+cargo test --features decision,magnitude   # 117 tests (both decision arms)
+cargo test --features persistence          # 96 tests (+ chained event store + topology replay)
+cargo test --features persistence,magnitude # 119 tests (incl. the live-vs-replayed parity gate)
 cargo test --features durable              # + container-backed restart-durability test (needs Docker)
-cargo test --features remote               # + 1 remote integration test
 ```
 
 ## Dependencies
@@ -123,7 +119,6 @@ cargo test --features remote               # + 1 remote integration test
 - tokio + tokio-util — async runtime + lifecycle primitives
 - rayon + tokio-rayon — CPU-bound graph operations bridge
 - [surrealdb-live-message](https://github.com/sustia-llc/surrealdb-live-message) (tag `v0.2.0`, **optional**, feature `durable`) — two-tier restart-durable message bus for the coalition decision log
-- libp2p (**optional**, feature `remote`) — request-response alert gateway + mDNS discovery
 - [aif](https://github.com/sustia-llc/tira) (tag `aif-v0.5.0`, **optional**, feature `decision`) — active-inference engine for the AIF decision strategy; pulls `nalgebra` only when the feature is enabled
 - [catgraph-magnitude](https://github.com/sustia-llc/catgraph) (tag `v0.2.0`, **optional**, feature `magnitude`) — enriched-category coalition magnitude for the categorical decision strategy
 
@@ -133,9 +128,13 @@ koalisi consolidates four prior coalition projects into a single layered archite
 - **dynamo** — temporal hypergraph + event sourcing + CoalitionManager
 - **coalesce** — DCVC + AIPA + value calculators
 - **coalition_aif** — Active Inference + EFE (retired; its ideas re-expressed on the `aif` reference engine, available behind the optional `decision` feature)
-- **forex-arbitrage-swarm** — kameo actor runtime + PubSub + lifecycle
+- **forex-arbitrage-swarm** — the runtime layer (originally kameo actors + PubSub; since K3 pure `tokio::sync` task seams)
 
-The forex domain is preserved as a working adapter; the architecture is domain-agnostic.
+koalisi is domain-agnostic. It began as a forex triangular-arbitrage tool;
+that domain was removed in v0.11.0 (market/trading work now lives in the
+sibling [`biome`](https://github.com/sustia-llc/biome) project). The
+demonstrated runtime is a synthetic, non-financial coalition-formation
+pipeline (`examples/synthetic_ingestion.rs`).
 
 ## License
 

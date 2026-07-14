@@ -3,7 +3,7 @@
 //!
 //! Builds the two synthetic sources that mirror koalisi's real downstream
 //! drivers, pumps them through generic `SampleMonitor`s on a `broadcast` bus,
-//! and prints a short summary:
+//! then forms a coalition over the ingested data — all domain-neutral:
 //!
 //! - **NEST-shaped** `MultiResolutionSource`: two numeric series at very
 //!   different resolutions (hourly vs 6-hourly) merged into one time-ordered
@@ -11,6 +11,10 @@
 //! - **tauhokohoko-shaped** `SensorEventSource`: two ecological sensors at a
 //!   fixed cadence, one with a mid-stream mean changepoint that shows up as a
 //!   before/after mean difference.
+//! - **coalition formation** (the flagship demo): each ingested sensor becomes
+//!   an agent whose capability mask is a distinct bit, a `CoalitionManager`
+//!   forms a coalition over them, and a fresh candidate joins through the
+//!   policy-gated `CoalitionService` seam.
 //!
 //! Runs quickly and exits 0 (bounded counts, `Pacing::Asap`).
 
@@ -21,11 +25,22 @@ use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
+use koalisi::algorithms::{AdditiveCalculator, CapabilityAgent};
+use koalisi::decision::{DecisionContext, ThresholdPolicy};
 use koalisi::ingest::{
     MultiResolutionSource, NumericSample, Pacing, SampleUpdate, SensorEvent, SensorEventSource,
     SensorSpec, SeriesSpec, spawn_sample_monitor, spawn_source_pump,
 };
+use koalisi::subsystems::coalition_actor::CoalitionService;
+use koalisi::topology::CoalitionManager;
 
+/// A minimal coalition label (satisfies the topology `HyperedgeTrait` bound).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SensorCoalition(u32);
+
+// Demo `main`: three sequential sections read top-to-bottom; the mean-window
+// casts are on bounded fixture counts and lose no meaningful precision.
+#[allow(clippy::too_many_lines, clippy::cast_precision_loss)]
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt().with_target(false).try_init().ok();
@@ -163,6 +178,67 @@ async fn main() -> Result<()> {
         "  salinity changepoint: mean before={before:.3}, after={after:.3} (shift ≈ {:.3})",
         after - before
     );
+
+    // =====================================================================
+    // 3. Coalition formation on the synthetic data (the flagship demo).
+    //
+    // Each ingested sensor becomes an agent covering one distinct capability
+    // bit, so a coalition's value is coverage diversity — no domain types
+    // involved. We form a coalition over the sensor agents, then offer a fresh
+    // candidate (covering a not-yet-covered bit) through the policy-gated
+    // `CoalitionService` seam; the additive marginal value clears the threshold
+    // and the candidate joins.
+    // =====================================================================
+    let sensors = ["salinity", "turbidity"];
+
+    let manager: CoalitionManager<CapabilityAgent, SensorCoalition> = CoalitionManager::empty();
+
+    // One agent per ingested sensor.
+    let mut sensor_vertices = Vec::new();
+    for (id, _) in sensors.iter().enumerate() {
+        let agent = CapabilityAgent::new(id, 1u32 << id, 50);
+        sensor_vertices.push(manager.add_agent(agent).await?);
+    }
+    // One fresh candidate covering a new capability bit. It must be added before
+    // the manager moves into the service (the service seam mutates by index).
+    let candidate_agent = CapabilityAgent::new(sensors.len(), 1u32 << sensors.len(), 50);
+    let candidate = manager.add_agent(candidate_agent).await?;
+
+    let coalition = manager
+        .form_coalition(sensor_vertices.clone(), SensorCoalition(1))
+        .await?;
+
+    // Require every sensor bit plus the candidate's bit.
+    let required = (1u32 << (sensors.len() + 1)) - 1;
+    let service = CoalitionService::spawn(
+        manager,
+        Box::new(ThresholdPolicy::new(AdditiveCalculator, 0.0, 0.0)),
+        DecisionContext {
+            required_capabilities: required,
+        },
+    );
+
+    let before_members = service.members(coalition).await?;
+    println!(
+        "\ncoalition formed over {} synthetic sensor agents {sensors:?}",
+        before_members.len()
+    );
+
+    let decision = service.join(candidate, coalition).await?;
+    println!(
+        "  policy-gated candidate join: act={} score={:.3}",
+        decision.act, decision.score
+    );
+
+    let after_members = service.members(coalition).await?;
+    println!(
+        "  coalition size: {} → {}",
+        before_members.len(),
+        after_members.len()
+    );
+
+    // Release the service handle so its task exits on the closed command channel.
+    drop(service);
 
     // =====================================================================
     // Shutdown.

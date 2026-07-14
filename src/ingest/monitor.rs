@@ -2,10 +2,9 @@
 //! historical [`Sample`]s, tracks the latest [`view`](Sample::view), and
 //! publishes a [`SampleUpdate`] to a `broadcast` bus on every ingested sample.
 //!
-//! This is the domain-neutral generalisation of the forex `MarketMonitor`
-//! (issue #8): `MarketMonitor` is now `SampleMonitor<Tick>`. The runtime shape
+//! This is the domain-neutral core of ingestion (issue #8). The runtime shape
 //! and every semantic below are ported verbatim from the K3 monitor — only the
-//! concrete forex types became the `Sample` associated types.
+//! concrete stream types became the `Sample` associated types.
 //!
 //! ## Runtime shape (post-K3, issue #6)
 //!
@@ -106,8 +105,6 @@ impl<S: Sample> SampleMonitor<S> {
 
 /// What a [`SampleMonitor`] publishes to its broadcast bus on every fresh
 /// sample: the routing key plus the distilled latest view.
-///
-/// The forex `TickUpdate` is `SampleUpdate<Tick>`.
 pub struct SampleUpdate<S: Sample> {
     pub key: S::Key,
     pub view: S::View,
@@ -333,60 +330,60 @@ async fn monitor_loop<S: Sample>(
 // Tests
 // ---------------------------------------------------------------------------
 
-// These exercise the generic monitor through the forex `Tick` instantiation, so
-// they double as the `SampleMonitor<Tick>` (= `MarketMonitor`) guard. Their
-// assertions are ports of the old monitor tests: `ingest_ring_buffer_and_wrong_key`
-// checks the state core, and the `#[tokio::test]` drives the spawned task through
-// the same feed/flush checkpoints as the original.
+// These exercise the generic monitor through the domain-neutral `NumericSample`
+// instantiation. Their assertions are ports of the old monitor tests:
+// `ingest_ring_buffer_and_wrong_key` checks the state core, and the
+// `#[tokio::test]` drives the spawned task through the same feed/flush
+// checkpoints as the original.
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::market::{Pair, Tick};
+    use crate::ingest::NumericSample;
 
-    fn p(s: &str) -> Pair {
-        s.parse().unwrap()
+    fn s(key: &str, value: f64, ts: i64) -> NumericSample {
+        NumericSample {
+            series: key.into(),
+            value,
+            timestamp_ms: ts,
+        }
     }
 
     #[test]
     fn ingest_ring_buffer_and_wrong_key() {
-        let mut m = SampleMonitor::<Tick>::new(p("EUR/USD"), 2);
+        let mut m = SampleMonitor::<NumericSample>::new("load".into(), 2);
 
         // Wrong key → dropped, no update.
-        assert!(m.ingest(Tick::new(p("GBP/USD"), 1.0, 1.0002, 0)).is_none());
+        assert!(m.ingest(s("other", 1.0, 0)).is_none());
 
         // Correct keys fill + evict oldest.
-        let u0 = m.ingest(Tick::new(p("EUR/USD"), 1.10, 1.1002, 0)).unwrap();
-        assert_eq!(u0.key, p("EUR/USD"));
-        m.ingest(Tick::new(p("EUR/USD"), 1.11, 1.1102, 1)).unwrap();
-        m.ingest(Tick::new(p("EUR/USD"), 1.12, 1.1202, 2)).unwrap();
+        let u0 = m.ingest(s("load", 1.10, 0)).unwrap();
+        assert_eq!(u0.key, "load");
+        m.ingest(s("load", 1.11, 1)).unwrap();
+        m.ingest(s("load", 1.12, 2)).unwrap();
 
         let snap = m.snapshot();
         assert_eq!(snap.history.len(), 2, "capacity 2 evicts oldest");
-        let stamps: Vec<i64> = snap.history.iter().map(|t| t.timestamp_ms).collect();
+        let stamps: Vec<i64> = snap.history.iter().map(|s| s.timestamp_ms).collect();
         assert_eq!(stamps, vec![1, 2]);
-        // mid = (bid + ask) / 2 = (1.12 + 1.1202) / 2 = 1.1201
-        assert!((snap.latest.unwrap().mid - 1.1201).abs() < 1e-9);
+        assert!((snap.latest.unwrap().value - 1.12).abs() < 1e-9);
     }
 
     #[tokio::test]
     async fn handle_feed_publishes_and_snapshot_flushes() {
         let tracker = TaskTracker::new();
         let token = CancellationToken::new();
-        let (bus, mut rx) = broadcast::channel::<SampleUpdate<Tick>>(16);
+        let (bus, mut rx) = broadcast::channel::<SampleUpdate<NumericSample>>(16);
 
-        let h = spawn_sample_monitor::<Tick>(&tracker, token.child_token(), p("EUR/USD"), 8, bus);
+        let h =
+            spawn_sample_monitor::<NumericSample>(&tracker, token.child_token(), "load".into(), 8, bus);
 
         // feed acks only after the update is published, so recv must succeed.
-        h.feed(Tick::new(p("EUR/USD"), 1.10, 1.1002, 5))
-            .await
-            .unwrap();
+        h.feed(s("load", 1.10, 5)).await.unwrap();
         let update = rx.try_recv().expect("update published before feed ack");
-        assert_eq!(update.key, p("EUR/USD"));
+        assert_eq!(update.key, "load");
 
         // tell + ping flush: after ping the tell must have been ingested.
-        h.tell(Tick::new(p("EUR/USD"), 1.11, 1.1102, 6))
-            .await
-            .unwrap();
+        h.tell(s("load", 1.11, 6)).await.unwrap();
         h.ping().await.unwrap();
         let snap = h.snapshot().await.unwrap();
         assert_eq!(snap.history.len(), 2);

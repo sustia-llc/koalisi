@@ -19,7 +19,7 @@ use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
-use koalisi::algorithms::{AdditiveCalculator, AgentCapabilities};
+use koalisi::algorithms::{AdditiveCalculator, AgentCapabilities, CapabilityAgent};
 use koalisi::decision::{CoalitionDecisionPolicy, DecisionContext, ThresholdPolicy};
 use koalisi::ingest::{
     MultiResolutionSource, NumericSample, Pacing, SampleUpdate, SensorEvent, SensorEventSource,
@@ -219,29 +219,6 @@ async fn sensor_pump_windows_and_changepoint_visible() {
 // 2. Coalition layer runs on synthetic non-financial (sensor) data
 // ---------------------------------------------------------------------------
 
-/// A test-local agent standing in for a sensor stream. Its capability mask is
-/// derived from the sensor id, so coalition value comes from *coverage
-/// diversity* — no financial types involved. Derives `Copy + Eq + Debug` so it
-/// satisfies the topology `VertexTrait` blanket bound.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct SensorAgent {
-    id: usize,
-    caps: u32,
-    trust: u32,
-}
-
-impl AgentCapabilities for SensorAgent {
-    fn agent_id(&self) -> usize {
-        self.id
-    }
-    fn capabilities(&self) -> u32 {
-        self.caps
-    }
-    fn trust_level(&self) -> u32 {
-        self.trust
-    }
-}
-
 /// A minimal coalition label (satisfies the topology `HyperedgeTrait` bound).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct SensorCoalition(u32);
@@ -250,17 +227,14 @@ struct SensorCoalition(u32);
 async fn coalition_layer_runs_on_synthetic_sensor_agents() {
     timeout(Duration::from_secs(10), async {
         // Derive capability masks from sensor ids: each sensor covers a distinct
-        // capability bit, so a coalition of them is genuinely diverse.
-        let agents: Vec<SensorAgent> = (0..3)
-            .map(|id| SensorAgent {
-                id,
-                caps: 1u32 << id,
-                trust: 50,
-            })
+        // capability bit, so a coalition of them is genuinely diverse. The stock
+        // `CapabilityAgent` is the sensor stand-in — no financial types involved.
+        let agents: Vec<CapabilityAgent> = (0..3)
+            .map(|id| CapabilityAgent::new(id, 1u32 << id, 50))
             .collect();
 
         // ---- topology: form a coalition of the sensor agents ----
-        let manager: CoalitionManager<SensorAgent, SensorCoalition> = CoalitionManager::empty();
+        let manager: CoalitionManager<CapabilityAgent, SensorCoalition> = CoalitionManager::empty();
         let mut vertices = Vec::new();
         for a in &agents {
             vertices.push(manager.add_agent(*a).await.expect("add agent"));
@@ -282,11 +256,7 @@ async fn coalition_layer_runs_on_synthetic_sensor_agents() {
         let ctx = DecisionContext {
             required_capabilities: 0b1111,
         };
-        let candidate = SensorAgent {
-            id: 3,
-            caps: 1u32 << 3,
-            trust: 50,
-        };
+        let candidate = CapabilityAgent::new(3, 1u32 << 3, 50);
         let current: Vec<&dyn AgentCapabilities> =
             agents.iter().map(|a| a as &dyn AgentCapabilities).collect();
         let decision = policy.should_join_async(&candidate, &current, &ctx).await;

@@ -5,15 +5,14 @@
 //! independent of any domain:
 //!
 //! - a **routing key** ([`Sample::key`]) — which stream / monitor the sample
-//!   belongs to (the generic analogue of a forex `Pair`);
+//!   belongs to;
 //! - a **timestamp** ([`Sample::timestamp_ms`]) — Unix epoch milliseconds, so a
 //!   pump can pace or order a merged stream;
 //! - a distilled **view** ([`Sample::view`]) — the "latest" per-key state a
-//!   monitor tracks (the generic analogue of a forex `Quote`).
+//!   monitor tracks.
 //!
-//! The forex [`Tick`](crate::market::Tick) is one implementation
-//! (`Key = Pair`, `View = Quote`); the synthetic NEST- and tauhokohoko-shaped
-//! fixtures in [`synthetic`](super::synthetic) are others.
+//! The synthetic NEST- and tauhokohoko-shaped fixtures in
+//! [`synthetic`](super::synthetic) are the reference implementations.
 
 /// A time-ordered, keyed observation processed by the ingestion layer.
 ///
@@ -27,8 +26,7 @@ pub trait Sample: Clone + Send + Sync + 'static {
     /// logged; `Eq + Hash` so a pump can route by key through a `HashMap`.
     type Key: Clone + Eq + std::hash::Hash + std::fmt::Display + Send + Sync + 'static;
 
-    /// Distilled per-key state a monitor tracks as "latest" (the generic
-    /// analogue of the forex [`Quote`](crate::market::Quote)).
+    /// Distilled per-key state a monitor tracks as "latest".
     type View: Clone + Send + Sync + 'static;
 
     /// The routing key for this sample.

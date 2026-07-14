@@ -17,13 +17,16 @@ Four-layer architecture: Core (CoalitionRuntime, lifecycle), Topology
 yamafaktory hypergraph v4.2.0 — event sourcing, CoalitionManager,
 time-travel queries, analytics), Algorithms (DCVC workload distribution,
 AIPA partition search, pluggable value calculators), and Runtime (since K3:
-tokio tasks with mpsc/oneshot command handles + broadcast buses — kameo is
-gone — plus a thin task-restart layer, a raw-libp2p remote gateway, and an
-optional SurrealDB-backed durable decision log). The forex triangular
-arbitrage domain is preserved as a working adapter; the architecture is
-domain-agnostic.
+tokio tasks with mpsc/oneshot command handles — kameo is gone — the
+`CoalitionService` policy-gated membership seam, a thin task-restart layer,
+and an optional SurrealDB-backed durable decision log). koalisi began as a
+forex triangular-arbitrage tool; that domain was removed in v0.11.0 (#37) —
+the architecture is domain-agnostic and the demonstrated runtime is now a
+synthetic coalition-formation pipeline. Market/trading work lives in the
+sibling `biome` project.
 Evolved from four prior projects: dynamo (topology), coalesce (algorithms),
-coalition_aif (decision — planned), and forex-arbitrage-swarm (runtime).
+coalition_aif (decision — planned), and forex-arbitrage-swarm (runtime — the
+forex domain since removed).
 
 ## Available tooling for this project
 
@@ -49,6 +52,32 @@ coalition_aif (decision — planned), and forex-arbitrage-swarm (runtime).
 
 ### Done
 
+- **Forex domain REMOVED — v0.11.0 (2026-07-14, #37)**: the
+  de-financialisation pass completed. koalisi is now a purely domain-agnostic
+  coalition runtime. Deleted `src/market.rs` and the arbitrage swarm
+  (`subsystems/{coordinator,sink,swarm,monitor}.rs`) + the
+  `historical_bootstrap` / `live_pubsub` / `triangular_arbitrage` /
+  `hot_path_bench` examples + `tests/integration_test.rs`. **The `remote`
+  feature went too** (the libp2p alert gateway `subsystems/distributed.rs` +
+  `distributed_alert_consumer` + `remote_integration` + the `libp2p` dep): it
+  subscribed to the deleted swarm's `alert_bus` and published
+  `ArbitrageOpportunity`; reframing needs a coalition-event broadcast surface
+  that doesn't exist yet, so it was **deferred to #38** (domain-neutral remote
+  coalition-event gateway), not reworked. KEPT + unchanged: all of
+  core/topology/algorithms/decision/ingest/llm/persistence and
+  `subsystems::coalition_actor::CoalitionService` (the seam) + `durable`.
+  NEW/rewritten: `examples/synthetic_ingestion.rs` is the flagship demo
+  (synthetic sources → `SampleMonitor`s → coalition formation via
+  `CoalitionService`); `src/main.rs` is a domain-neutral `CoalitionRuntime`
+  daemon (seed coalition + bounded policy-gated join loop);
+  `examples/supervised_swarm.rs` → `examples/supervised_monitor.rs`
+  (`spawn_supervised` over a `SampleMonitor<SensorEvent>`). Gotchas 1/8/13 now
+  obsolete (swarm/remote-specific). **Suites: 76 default / 95 decision / 98
+  magnitude / 117 decision,magnitude / 96 persistence / 119
+  persistence,magnitude** (dropped the forex `integration_test` + `market`/
+  `monitor` unit tests; added 2 `CoalitionRuntime` shutdown tests from the
+  code-review pass). Verified: `cargo test` green, default clippy
+  `--all-targets` clean, all four features compile, both examples run.
 - **Databento (DBN) adapter REMOVED — v0.10.0 (2026-07-14)**: koalisi is a
   domain-agnostic coalition runtime; market-data decode now lives entirely in
   the sibling `biome` project (its own OHLCV `load_prices_dbn`, a different
@@ -60,10 +89,9 @@ coalition_aif (decision — planned), and forex-arbitrage-swarm (runtime).
   layer (#8) is untouched (it was already the generalisation; only lost the
   databento name-drops). koalisi issues #22 (LiveClient) / #23 (synthetic DBN
   arb) closed as out-of-scope → biome owns that. **First step of a broader
-  de-financialisation pass** — forex (`market`,
-  `subsystems::{coordinator,sink,swarm}`, triangular arb) removal is planned
-  separately (`.claude/plans/2026-07-14-forex-removal.md`). Gotchas 3/5 now
-  obsolete. Suites unchanged: 87 default (forex still present).
+  de-financialisation pass** — forex removal followed in v0.11.0 (see the top
+  entry). Gotchas 3/5 now obsolete. (At v0.10.0: 87 default, forex still
+  present.)
 - **P7.2 topology projection + replay (#30) — v0.9.0**: the event log now
   persists and replays. Always-compiled optional **event tap** on
   `TemporalHypergraph` (`with_event_tap`; try_send drop-with-warn; `Clone`
@@ -207,36 +235,41 @@ coalition_aif (decision — planned), and forex-arbitrage-swarm (runtime).
 - **Algorithm layer** (from coalesce): `AgentCapabilities` trait,
   `ValueCalculator` trait + 4 calculators (Additive, Synergistic,
   Multiplicative, Weighted), `DCVCDistributor`, AIPA partition search
-- **Forex adapter** (preserved from forex-arbitrage-swarm):
-
-- **Core swarm**: `MarketMonitor` × N + `ArbitrageCoordinator` +
-  `AlertSink` tasks + 2 `broadcast` buses wired by `Swarm::new`, all under a
-  single `TaskTracker` + `CancellationToken` (K3: was kameo actors + PubSubs).
-- **`SwarmFeeder`** — clone-able feed handle (owns only the per-pair
-  `MonitorHandle` map). Lets background tasks call `feed_tick` without
-  borrowing the `Swarm`.
-- **Examples (5 total)**:
-  - `historical_bootstrap` — single-pair history replay, ring-buffer inspection
-  - `live_pubsub` — scripted feed + user listener subscribed to the alert bus
-  - `triangular_arbitrage` — full triangle, fires +45.25 bps and −72.06 bps signals
-  - `supervised_swarm` — `core::supervision::spawn_supervised` restart demo (K3; panic → factory rebuild → liveness proof)
-  - `distributed_alert_consumer` *(feature `remote`)* — single binary with `ROLE=producer` / `ROLE=consumer`; libp2p + mDNS discovery; `AlertRequest::Poll` via `RemoteAlertClient` (K3: raw request-response, was kameo remote ask)
-- **Remote alert gateway** (`subsystems::distributed`, feature `remote`):
-  - `RemoteAlertGateway` actor: `#[derive(Actor, RemoteActor)]`, locally subscribed to `alert_bus`, exposes `#[remote_message]` asks `PollOpportunities`, `PeekOpportunityCount`, `ClearOpportunities`.
-  - `enable_remote_alerts(&swarm, RemoteConfig) -> Result<RemoteHandle>` builds libp2p swarm (`tcp` + `noise` + `yamux` + `mdns` + `kameo::remote::Behaviour`), calls `init_global()`, listens, spawns the event loop on `swarm.task_tracker()` with a child cancellation token, registers the gateway.
-  - `ArbitrageOpportunity`, `Triangle`, `Pair`, `Quote`, `Direction`, `Tick` all derive `Serialize + Deserialize` so the type doubles as the wire payload (POC trade-off — production would split this).
-  - Hot path (monitor → coordinator → sink) deliberately stays on local mpsc; libp2p is only at the publish-to-outside-world boundary. Architectural rationale in §"Worth flagging" entry 8.
+- **Runtime layer** (domain-neutral since v0.11.0 — the forex swarm was
+  removed, #37):
+  - **`CoalitionService`** (`subsystems::coalition_actor`) — the policy-gated
+    coalition-membership seam: a tokio task over mpsc/oneshot command handles
+    (`CoalitionServiceHandle` with `join`/`leave`/`members`) that consults a
+    `Box<dyn CoalitionDecisionPolicy>` + `DecisionContext` before mutating the
+    `CoalitionManager` hypergraph. Optional decision tap → `DecisionRecord`
+    (feeds the `durable` forwarder). This is the runtime demonstration now.
+  - **Task-restart layer** (`core::supervision::spawn_supervised`) — factory
+    rebuild on panic, sliding-window restart budget.
+  - **`durable`** (feature, off by default) — `DecisionRecord` tap →
+    `subsystems::durable` forwarder → restart-durable SurrealDB decision log.
+  - **Examples (domain-neutral)**:
+    - `synthetic_ingestion` — **flagship**: two synthetic sources
+      (NEST-shaped `MultiResolutionSource`, tauhokohoko-shaped
+      `SensorEventSource`) → generic `SampleMonitor`s → coalition formation
+      over the ingested sensor agents via `CoalitionService` (default features).
+    - `supervised_monitor` — `spawn_supervised` restart demo over a
+      `SampleMonitor<SensorEvent>` (panic → factory rebuild → liveness proof).
+    - `topology_coalition`, `algorithm_values` — layer demos.
+    - `strategy_comparison` *(decision,magnitude)*, `durable_decisions`
+      *(durable)*.
+  - `src/main.rs` — a domain-neutral reference daemon: `CoalitionRuntime` +
+    seed coalition + bounded policy-gated join loop through `CoalitionService`,
+    ctrl-c → three-step shutdown.
 - **Tests passing**:
   | Suite | Tests | Command |
   |---|---|---|
-  | Default | 87 | `cargo test` |
-  | `--features decision` | 106 | `cargo test --features decision` |
-  | `--features magnitude` | 109 | `cargo test --features magnitude` |
-  | `--features decision,magnitude` | 128 | `cargo test --features decision,magnitude` |
-  | `--features persistence` | 107 (+13 unit, +10 integration) | `cargo test --features persistence` |
-  | `--features persistence,magnitude` | 130 (incl. the #18/#30 replay parity gate) | `cargo test --features persistence,magnitude` |
-  | `--features durable` | 88 (+1 container-backed restart test; needs Docker) | `cargo test --features durable` |
-  | `--features remote` | + 1 remote integration | `cargo test --features remote` |
+  | Default | 76 | `cargo test` |
+  | `--features decision` | 95 | `cargo test --features decision` |
+  | `--features magnitude` | 98 | `cargo test --features magnitude` |
+  | `--features decision,magnitude` | 117 | `cargo test --features decision,magnitude` |
+  | `--features persistence` | 96 | `cargo test --features persistence` |
+  | `--features persistence,magnitude` | 119 (incl. the #18/#30 replay parity gate) | `cargo test --features persistence,magnitude` |
+  | `--features durable` | +1 container-backed restart test; needs Docker | `cargo test --features durable` |
   | All examples | exit 0 | see Reproducers below |
 
 ### File inventory
@@ -249,8 +282,7 @@ koalisi/
 ├── config/{default,development,test}.toml  coalition threshold, history capacity; [sdb]+[docker] for the durable feature's upstream SETTINGS (cwd-resolved)
 ├── src/
 │   ├── lib.rs                              module surface + re-exports
-│   ├── main.rs                             daemon binary with scripted live feed
-│   ├── market.rs                           Pair/Tick/Quote/Triangle/Opportunity + `impl Sample for Tick`; TickUpdate = SampleUpdate<Tick> alias (K5) + 6 unit tests
+│   ├── main.rs                             domain-neutral reference daemon: CoalitionRuntime + seed coalition + policy-gated join loop via CoalitionService (v0.11.0)
 │   ├── core/
 │   │   ├── mod.rs                          re-exports
 │   │   ├── config.rs                       Settings + CoalitionSettings + setup_logging
@@ -268,7 +300,7 @@ koalisi/
 │   │   ├── coalitions.rs                   CoalitionManager (form/join/leave/dissolve/merge)
 │   │   └── executor.rs                     HypergraphExecutor (rayon↔tokio bridge)
 │   ├── algorithms/
-│   │   ├── mod.rs                          AgentCapabilities trait + re-exports
+│   │   ├── mod.rs                          AgentCapabilities trait + CapabilityAgent (stock impl, also a VertexTrait; v0.11.0) + re-exports
 │   │   ├── value_calculation.rs            ValueCalculator + 4 calculators
 │   │   ├── dcvc.rs                         DCVCDistributor, WorkloadShare
 │   │   └── aipa.rs                         Integer partitions, bounds, best-partition + 10 unit tests
@@ -279,7 +311,7 @@ koalisi/
 │   ├── ingest/                             K5 (#8): domain-neutral ingestion layer (always compiled, no new deps)
 │   │   ├── mod.rs                          re-exports
 │   │   ├── sample.rs                       Sample trait (Key routing + timestamp_ms + View)
-│   │   ├── monitor.rs                      SampleMonitor<S> + SampleUpdate/Snapshot + handle + spawn (the generic MarketMonitor; K3 contracts verbatim)
+│   │   ├── monitor.rs                      SampleMonitor<S> + SampleUpdate/Snapshot + handle + spawn (generic ring-buffer monitor; K3 contracts verbatim)
 │   │   ├── source.rs                       DataSource trait + Pacing + PumpStats + pump_source/spawn_source_pump
 │   │   └── synthetic.rs                    MultiResolutionSource (NEST-shaped) + SensorEventSource (tauhokohoko-shaped, changepoint)
 │   ├── llm/
@@ -295,25 +327,15 @@ koalisi/
 │   │   ├── tee.rs                          spawn_topology_forwarder (tap → CBOR → store writer; shutdown disciplines) (#30)
 │   │   └── replay.rs                       replay_into_event_log (batched read → fresh EventLog; quiescence precondition) (#30)
 │   └── subsystems/
-│       ├── monitor.rs                      forex aliases: MarketMonitor = SampleMonitor<Tick> etc. + spawn_monitor (K5)
-│       ├── coordinator.rs                  ArbitrageCoordinator task + CoordinatorHandle (broadcast tick_bus in, alert_bus out)
-│       ├── sink.rs                         AlertSink task + SinkHandle (get/drain alerts, ping)
-│       ├── swarm.rs                        Swarm (wraps CoalitionRuntime) + SwarmConfig + SwarmFeeder (mpsc senders)
-│       ├── coalition_actor.rs              CoalitionService + handle (policy-gated membership seam, #1) + DecisionRecord tap (K3)
-│       ├── durable.rs                      DecisionEvent + DurableDecisionBus + forwarder (feature `durable`, K3)
-│       └── distributed.rs                  raw-libp2p request-response alert gateway + RemoteAlertClient (feature `remote`)
+│       ├── coalition_actor.rs              CoalitionService + handle (policy-gated membership seam, #1) + DecisionRecord tap (K3) — THE runtime seam
+│       └── durable.rs                      DecisionEvent + DurableDecisionBus + forwarder (feature `durable`, K3)
 ├── examples/
 │   ├── topology_coalition.rs               coalition lifecycle + time-travel queries
 │   ├── algorithm_values.rs                 value calculators + DCVC + AIPA
-│   ├── historical_bootstrap.rs             single-pair history replay
-│   ├── live_pubsub.rs                      scripted feed + broadcast listener
-│   ├── triangular_arbitrage.rs             full triangle, fires arb signals
-│   ├── supervised_swarm.rs                 spawn_supervised restart demo (K3)
-│   ├── synthetic_ingestion.rs              K5 demo: NEST + sensor fixtures through generic monitors (default features)
-│   ├── hot_path_bench.rs                   K3 latency bench (run --release)
+│   ├── synthetic_ingestion.rs              FLAGSHIP (v0.11.0): NEST + sensor fixtures → generic monitors → coalition formation via CoalitionService (default features)
+│   ├── supervised_monitor.rs               spawn_supervised restart demo over SampleMonitor<SensorEvent> (v0.11.0; was supervised_swarm)
 │   ├── strategy_comparison.rs              divergence demo + K4 A/B battery (features decision,magnitude)
-│   ├── durable_decisions.rs                durable decision log end-to-end (feature `durable`)
-│   └── distributed_alert_consumer.rs       ROLE=producer/consumer over libp2p rr (feature `remote`)
+│   └── durable_decisions.rs                durable decision log end-to-end (feature `durable`)
 ├── docs/
 │   ├── ab-report-K4-{yamafaktory,catgraph}.md   K4 A/B + backend-parity reports
 │   ├── ab-report-K4-catgraph-evaluator.md  K6 post-optimization re-run + parity + latency profile (#33 evidence)
@@ -322,25 +344,20 @@ koalisi/
 └── tests/
     ├── topology_test.rs                    12 tests
     ├── algorithms_test.rs                  15 tests
-    ├── integration_test.rs                 5 tests (forex)
     ├── decision_integration.rs             4–6 tests (feature-dependent)
     ├── durable_integration.rs              1 container-backed restart test (feature `durable`)
     ├── ingestion_integration.rs            3 tests (K5: synthetic sources → monitors → coalition formation; default features)
     ├── magnitude_trajectory.rs             6 tests (#18: hand-computed trajectory semantics; feature `magnitude`)
     ├── persistence_integration.rs          7 tests (#29: roundtrip, rotation+reopen, tamper, torn tail, sealed opaque, writer drain, bounds; feature `persistence`)
     ├── topology_replay.rs                  3 tests (#30: 13-variant round-trip, reconstruction equality, schema/Sealed rejection; feature `persistence`)
-    ├── replay_parity.rs                    1 test (#30: magnitude_history live == replayed — THE parity gate; features `persistence,magnitude`)
-    └── remote_integration.rs               1 test (feature `remote`)
+    └── replay_parity.rs                    1 test (#30: magnitude_history live == replayed — THE parity gate; features `persistence,magnitude`)
 ```
 
 ## Worth flagging (gotchas)
 
 These cost time during the build; future-me should not relearn them.
 
-1. **~~kameo supervised actors keep the same `ActorId` across restart.~~ OBSOLETE since K3 (#6)** — kameo is gone; restarts are `core::supervision::spawn_supervised` factory rebuilds (no id identity at all). Kept for history:
-   - In `examples/supervised_swarm.rs` the original monitor (id=#2) panics, gets restarted, and the NEW actor is also id=#2.
-   - `monitor.wait_for_shutdown()` therefore HANGS on a supervised actor — from the ref's perspective the actor only blips down and back up; "shutdown" never finalises.
-   - Workaround: after `tell(ForcePanic)`, do a brief sleep + `supervisor.ask(Ping)` to confirm the supervisor is alive. The original `monitor` ref still works against the restarted instance because the id is preserved.
+1. **~~kameo supervised actors keep the same `ActorId` across restart.~~ OBSOLETE since K3 (#6)** — kameo is gone; restarts are `core::supervision::spawn_supervised` factory rebuilds (no id identity at all). The demo moved from `supervised_swarm` to `examples/supervised_monitor.rs` (v0.11.0, over a `SampleMonitor<SensorEvent>`).
 
 2. **~~`anyhow::Context` shadows `kameo::Context`.~~ OBSOLETE since K3 (#6)** — kameo is gone. Kept for history:
    - kameo's prelude exports `Context<Self, Reply>` (the actor handler parameter type).
@@ -357,20 +374,14 @@ These cost time during the build; future-me should not relearn them.
 
 5. **~~DBN file discovery for examples.~~ OBSOLETE since v0.10.0** — the databento adapter and its `$DBN_TEST_PATH`/`databento-rs` fixture probing were removed (moved to `biome`).
 
-6. **~~PubSub `Subscribe` requires the subscriber to be alive.~~ OBSOLETE since K3 (#6)** — buses are `tokio::sync::broadcast`; `subscribe()` is synchronous and order-free. Kept for history:
-   - `swarm.alert_bus().ask(Subscribe(listener))` panics/errors if `listener` hasn't been spawned yet.
-   - All current examples spawn the listener first, then subscribe — keep that order.
+6. **~~PubSub `Subscribe` requires the subscriber to be alive.~~ OBSOLETE since K3 (#6)** — buses were `tokio::sync::broadcast` (`subscribe()` synchronous, order-free); the whole forex swarm carrying those buses was removed in v0.11.0 (#37).
 
 7. **Cargo target dir + timeout convention (project-wide).**
-   - We use `--manifest-path Cargo.toml --target-dir /tmp/forex-arbitrage-swarm-target` to avoid contention with Zed's own `cargo check`. Run from inside the `forex-arbitrage-swarm` worktree.
+   - We use `--manifest-path Cargo.toml --target-dir /tmp/koalisi-target` to avoid contention with the IDE's own `cargo check`. Run from inside the `koalisi` worktree.
    - Wrap with `timeout 30s` (or 60s, 120s as appropriate) so a hang in a freshly-built binary is killed cleanly, not just the shell wrapper.
    - Pattern: `timeout 30s cargo run --manifest-path Cargo.toml --target-dir /tmp/… --example foo 2>/dev/null ; echo "exit=$?"`. Exit 124 = unix `timeout` fired.
 
-8. **libp2p remote RPC: hybrid, NOT hot-path** *(updated K3 — the gateway is now raw libp2p `request-response`, protocol `/koalisi/alerts/1`, CBOR; the rationale below still holds with "kameo remote ask" replaced by "libp2p rr round-trip").*
-   - The `remote` feature is intentionally a *publish-to-outside-world* boundary, NOT a replacement for the local mpsc hot path.
-   - Rationale: local `ask` is sub-μs (see `kameo/benches/overhead.rs`); `remote::ask` adds rmp-serde encode/decode + libp2p `request-response` over yamux + noise + network I/O — ≅10μs loopback, ≅10µs–1ms real network. Default `remote::messaging::Config::request_timeout` is **10 seconds**, sized for the network, not for actor-internal calls.
-   - Trait-bound asymmetry: local needs `Send + 'static`. Remote needs `Send + 'static + Serialize + DeserializeOwned` on messages, `Serialize` on `Reply::Ok` and `Reply::Error`, `#[derive(RemoteActor)]` on the actor, `#[remote_message]` on each exposed handler. Strictly more, not less.
-   - The hybrid we settled on (K3 wording): monitors → `tick_bus` → coordinator → `alert_bus` → sink is all local tokio channels. A separate gateway TASK subscribes to `alert_bus` and answers libp2p `request-response` asks (`AlertRequest::Poll` etc. via `RemoteAlertClient`). Off-process consumers get alerts without ever touching the hot path.
+8. **~~libp2p remote RPC: hybrid, NOT hot-path.~~ OBSOLETE since v0.11.0 (#37)** — the `remote` feature (raw libp2p `request-response` gateway on `subsystems/distributed.rs`) was deleted with the forex swarm it subscribed to. Re-introduction as a domain-neutral coalition-event gateway is tracked in [#38](https://github.com/sustia-llc/koalisi/issues/38); the "publish-to-outside-world boundary, never the hot path" design rationale is recoverable from the git history at `v0.10.0` and #38.
 
 9. **~~`kameo::remote::Behaviour::init_global()` is process-wide.~~ OBSOLETE since K3 (#6)** — no global init; producer + client coexist in one process (the remote test does exactly that). Kept for history:
    - Called once inside `enable_remote_alerts`. Calling it twice in the same process (e.g., from two integration tests in a single binary) will conflict.
@@ -381,8 +392,7 @@ These cost time during the build; future-me should not relearn them.
     - Without `remote`: sync, just returns `Result<(), RegistryError>` (no `.await`).
     - With `remote`: returns a future that resolves once libp2p propagates the registration.
 
-11. **libp2p `#[derive(NetworkBehaviour)]` requires the `macros` feature** *(still true post-K3; koalisi now owns the full libp2p feature list: `macros, noise, mdns, tcp, tokio, yamux, request-response, cbor`).*
-    - Generated event-enum naming: `#[derive(NetworkBehaviour)] struct GatewayBehaviour {...}` produces `GatewayBehaviourEvent` (K3 names). Match on `SwarmEvent::Behaviour(GatewayBehaviourEvent::Mdns(…))`.
+11. **~~libp2p `#[derive(NetworkBehaviour)]` requires the `macros` feature.~~ OBSOLETE since v0.11.0 (#37)** — the `libp2p` dep left with the `remote` gateway. Relevant again only when #38 re-adds a gateway.
 
 12. **catgraph backend contracts (K1, #4) — rely on these, don't re-derive.**
     - **Stable, never-reused indices**: `VertexIndex`/`HyperedgeIndex` come from
@@ -399,21 +409,19 @@ These cost time during the build; future-me should not relearn them.
     - Full contract: module docs of `catgraph-applied/src/hypergraph.rs` at the
       pinned tag.
 
-13. **K3 runtime contracts (tokio::sync seams).**
-    - **Broadcast buses**: `tick_bus`/`alert_bus` are `broadcast::Sender` (cap
-      1024); a subscriber > capacity behind gets `RecvError::Lagged` and skips
-      the overflow. `Swarm::{tick_bus,alert_bus}` return `&Sender` — call
-      `.subscribe()`.
-    - **Flush barriers**: `Ping`/`GetQuotes`/`GetAlerts` handlers DRAIN the
-      buffered broadcast before replying, and `flush()` pings monitors →
-      coordinator → sink in order — that reconstruction of kameo's FIFO-mailbox
-      guarantee is what keeps the integration tests deterministic. Don't
-      "optimize" the drain away.
-    - **`MonitorHandle::feed` is acknowledged** (the old ask barrier);
-      `::tell` is fire-and-forget. `SwarmFeeder::feed_tick` uses `feed`.
+13. **K3 runtime contracts (tokio::sync seams).** *(The forex swarm bullets —
+    `tick_bus`/`alert_bus` broadcast buses, the `flush()` monitor→coordinator→
+    sink drain barrier, `SwarmFeeder` — were removed with the swarm in v0.11.0
+    (#37). What survives:)*
+    - **`SampleMonitorHandle::feed` is acknowledged** (an oneshot ack barrier);
+      `::tell` is fire-and-forget. The generic `ingest` monitor keeps this
+      distinction; `Ping`/snapshot handlers drain the buffered `broadcast`
+      before replying, which is what keeps the ingestion tests deterministic —
+      don't "optimize" the drain away.
     - **Restart layer**: `spawn_supervised` rebuilds from the factory on PANIC
       only (token cancellation is not a failure); sliding-window
       `restart_limit`; exceeding gives up + cancels the child token.
+      Demonstrated by `examples/supervised_monitor.rs`.
 
 14. **`durable` feature gotchas (surrealdb-live-message v0.2.0).**
     - **Upstream `SETTINGS` resolves from the CONSUMER's cwd**: `config/default`
@@ -530,37 +538,26 @@ These cost time during the build; future-me should not relearn them.
 All assume `cwd = koalisi/`.
 
 ```sh
-# === default features (87 tests) ===
+# === default features (76 tests) ===
 timeout 60s  cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target
 timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example topology_coalition
 timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example algorithm_values
-timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example triangular_arbitrage
-timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example historical_bootstrap
-timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example live_pubsub
-timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example supervised_swarm
-timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example synthetic_ingestion
+timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example synthetic_ingestion   # FLAGSHIP
+timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example supervised_monitor
 
-# === decision-layer feature combos (106 / 109 / 128 tests) ===
+# === decision-layer feature combos (95 / 98 / 117 tests) ===
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features magnitude
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision,magnitude
 timeout 120s cargo run --release --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision,magnitude --example strategy_comparison
 
-# === K3 hot-path bench (release; see docs/k3-hot-path-bench.md) ===
-timeout 120s cargo run --release --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example hot_path_bench
-
-# === with persistence feature (P7.1 store + P7.2 replay, 107 tests) ===
+# === with persistence feature (P7.1 store + P7.2 replay, 96 tests) ===
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features persistence
-timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features persistence,magnitude   # 130, incl. the replay parity gate
+timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features persistence,magnitude   # 119, incl. the replay parity gate
 
 # === with durable feature (needs Docker; container-backed restart test) ===
 timeout 300s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features durable
 timeout 120s cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features durable --example durable_decisions
-
-# === with remote feature ===
-timeout 60s  cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features remote
-ROLE=producer timeout 60s cargo run --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features remote --example distributed_alert_consumer
-ROLE=consumer timeout 60s cargo run --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features remote --example distributed_alert_consumer
 ```
 
 ## Next steps
@@ -630,7 +627,8 @@ Five concrete integration ideas, ported verbatim from the summary's
 
 5. **Cross-model transferability as a koalisi value-prop.** SwarmAgentic
    shows discovered systems transfer across LLMs. If the runtime layer
-   (kameo + PubSub + libp2p gateway) stays provider-agnostic, a
+   (the `tokio::sync` task seams + `CoalitionService`) stays
+   provider-agnostic, a
    SwarmAgentic-discovered coalition spec can be re-instantiated under
    different LLM backends without re-running the search. The `LlmProvider`
    trait in `src/llm/mod.rs` is the abstraction boundary that makes this
@@ -939,56 +937,24 @@ and the synthetic-DBN arb-signal demo
 decode (biome #5/#6/#7). koalisi issues #22 and #23 were closed as
 out-of-scope; do not re-file databento work here.
 
-### C. Remote gateway hardening  *(unblocked, low priority — rewritten post-K3 for the raw-libp2p gateway; tracked: [#24](https://github.com/sustia-llc/koalisi/issues/24))*
-- see /home/oryx/Documents/category/deep_causality/examples/avionics_examples/flight_envelope_monitor/README.md for a template for trade_envelope_monitor
-The K3 gateway (raw libp2p `request-response`, `/koalisi/alerts/1`) works
-(round-trip integration test green) but is minimal. To make it
-production-shaped:
+### Removed: forex-coupled backlog — moot since v0.11.0 (#37)
 
-1. **Bounded buffer + size cap.** Replace the gateway task's
-   `Vec<ArbitrageOpportunity>` with a `VecDeque` capped at e.g. `1024`;
-   oldest evicted on push. Consumers that lag forever should not OOM the
-   producer.
-2. **Sequence numbers + cursor-based polling.** Add a monotonic `seq: u64`
-   to each buffered alert; add `AlertRequest::PollSince { last_seq }` →
-   `Vec<(u64, ArbitrageOpportunity)>`. Consumers fetch deltas only.
-3. **Stable wire schema.** `ArbitrageOpportunity` is currently the wire
-   type; define a `RemoteArbitrageOpportunityV1` in `distributed.rs` and
-   convert at the boundary.
-4. **Multiple protocols on one swarm.** With `init_global()` gone (K3),
-   this is now easy: add more `request_response` behaviours (e.g. a tick
-   protocol) to `GatewayBehaviour` — no process-wide constraint remains.
-5. **QUIC transport in addition to TCP.** `.with_quic()` as an additional
-   transport. Useful for higher-RTT links. Cheap to add.
-6. **mDNS-expired disconnects.** The K3 rewrite no longer calls
-   `disconnect_peer_id` on mDNS expiry (deliberate: an active polling
-   client keeps its connection; idle ones close via the 300s idle
-   timeout). Revisit if stale-peer connection buildup ever matters.
+The forex swarm removal retired several tracked-but-forex-specific items.
+Their GitHub issues are candidates to close:
 
-### D. Smaller nice-to-haves (optional; tracked: [#25](https://github.com/sustia-llc/koalisi/issues/25) metrics, [#26](https://github.com/sustia-llc/koalisi/issues/26) multi-triangle stress, [#27](https://github.com/sustia-llc/koalisi/issues/27) bid/ask execution)
-
-- **Metrics example** — subscribe a `metrics::Counter`-driven task to
-  both broadcast buses, scrape via `metrics-exporter-prometheus` (post-K3:
-  plain `metrics` crate; no runtime-framework feature needed).
-- **Multi-triangle stress test** — verify `coordinator.triangles: Vec<Triangle>`
-  scales: 10 triangles, 30 unique pairs, all sharing some legs. Adversarial
-  pricing that flips multiple triangles at once.
-- **Bid/ask-aware execution model** — replace mid-price arithmetic with
-  realistic execution costs (you cross the spread on each leg). Triangle
-  `edge_bps` becomes signed by direction and net of spread.
-- ~~Switch off path deps when kameo 0.20.0 is on crates.io~~ — moot since
-  K3 (#6): kameo was removed entirely, not version-bumped.
+- **[#24] Remote gateway hardening** — the gateway itself was deleted (#37);
+  its hardening ideas (bounded/cursor buffer, stable wire schema `V1`, QUIC,
+  multi-protocol) fold into **[#38]** (re-introduce a domain-neutral remote
+  coalition-event gateway). Close #24 → #38.
+- **[#26] Multi-triangle stress** and **[#27] bid/ask execution model** — pure
+  forex (`coordinator.triangles`, `Triangle` spread math); no coordinator
+  exists any more. Moot.
+- **[#25] Metrics example** — still valid, but reframe: instrument the
+  `CoalitionService` decision path / topology events, not the deleted
+  `tick_bus`/`alert_bus`.
 
 ## Open questions (jot anything here as it comes up)
 
-> The hysteresis semantics are folded into
-> [#26](https://github.com/sustia-llc/koalisi/issues/26) (multi-triangle
-> stress). Kept below for context. (The former databento-feature-split
-> question is moot — the databento adapter was removed in v0.10.0; dbn work
-> lives in `biome`.)
-
-- Whether the coordinator's hysteresis state should be per-direction
-  (so a +45 bps fire doesn't suppress a −45 bps fire on the same
-  triangle without an intervening realignment). Currently it's a single
-  bool per triangle — the `triangular_arbitrage` example exercises the
-  "realign + flip" path and works, but the semantic is debatable.
+> The former forex open questions (coordinator hysteresis per-direction; the
+> databento feature split) are moot — the forex swarm (v0.11.0, #37) and the
+> databento adapter (v0.10.0) are both gone. Nothing open here right now.
