@@ -25,7 +25,7 @@ use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
-use koalisi::algorithms::{AdditiveCalculator, AgentCapabilities};
+use koalisi::algorithms::{AdditiveCalculator, CapabilityAgent};
 use koalisi::decision::{DecisionContext, ThresholdPolicy};
 use koalisi::ingest::{
     MultiResolutionSource, NumericSample, Pacing, SampleUpdate, SensorEvent, SensorEventSource,
@@ -33,28 +33,6 @@ use koalisi::ingest::{
 };
 use koalisi::subsystems::coalition_actor::CoalitionService;
 use koalisi::topology::CoalitionManager;
-
-/// A domain-neutral agent standing in for one ingested sensor stream. Its
-/// capability mask is a single distinct bit, so coalition value is coverage
-/// diversity. `Copy + Eq + Debug` satisfies the topology `VertexTrait` bound.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct SensorAgent {
-    id: usize,
-    caps: u32,
-    trust: u32,
-}
-
-impl AgentCapabilities for SensorAgent {
-    fn agent_id(&self) -> usize {
-        self.id
-    }
-    fn capabilities(&self) -> u32 {
-        self.caps
-    }
-    fn trust_level(&self) -> u32 {
-        self.trust
-    }
-}
 
 /// A minimal coalition label (satisfies the topology `HyperedgeTrait` bound).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -213,25 +191,17 @@ async fn main() -> Result<()> {
     // =====================================================================
     let sensors = ["salinity", "turbidity"];
 
-    let manager: CoalitionManager<SensorAgent, SensorCoalition> = CoalitionManager::empty();
+    let manager: CoalitionManager<CapabilityAgent, SensorCoalition> = CoalitionManager::empty();
 
     // One agent per ingested sensor.
     let mut sensor_vertices = Vec::new();
     for (id, _) in sensors.iter().enumerate() {
-        let agent = SensorAgent {
-            id,
-            caps: 1u32 << id,
-            trust: 50,
-        };
+        let agent = CapabilityAgent::new(id, 1u32 << id, 50);
         sensor_vertices.push(manager.add_agent(agent).await?);
     }
     // One fresh candidate covering a new capability bit. It must be added before
     // the manager moves into the service (the service seam mutates by index).
-    let candidate_agent = SensorAgent {
-        id: sensors.len(),
-        caps: 1u32 << sensors.len(),
-        trust: 50,
-    };
+    let candidate_agent = CapabilityAgent::new(sensors.len(), 1u32 << sensors.len(), 50);
     let candidate = manager.add_agent(candidate_agent).await?;
 
     let coalition = manager

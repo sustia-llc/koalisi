@@ -14,34 +14,12 @@ use anyhow::Result;
 use tokio::time::interval;
 use tokio_util::sync::CancellationToken;
 
-use koalisi::algorithms::{AdditiveCalculator, AgentCapabilities};
+use koalisi::algorithms::{AdditiveCalculator, CapabilityAgent};
 use koalisi::core::CoalitionRuntime;
 use koalisi::core::config::setup_logging;
 use koalisi::decision::{DecisionContext, ThresholdPolicy};
 use koalisi::subsystems::coalition_actor::{CoalitionService, CoalitionServiceHandle};
 use koalisi::topology::{CoalitionManager, HyperedgeIndex, VertexIndex};
-
-/// A minimal domain-neutral agent: its capability mask is a single distinct bit,
-/// so a coalition's value comes from coverage diversity. `Copy + Eq + Debug`
-/// satisfies the topology `VertexTrait` blanket bound.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Agent {
-    id: usize,
-    caps: u32,
-    trust: u32,
-}
-
-impl AgentCapabilities for Agent {
-    fn agent_id(&self) -> usize {
-        self.id
-    }
-    fn capabilities(&self) -> u32 {
-        self.caps
-    }
-    fn trust_level(&self) -> u32 {
-        self.trust
-    }
-}
 
 /// A minimal coalition label (satisfies the topology `HyperedgeTrait` bound).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,18 +35,14 @@ async fn main() -> Result<()> {
     let runtime = CoalitionRuntime::new();
 
     // A set of agents, each covering a distinct capability bit.
-    let agents: Vec<Agent> = (0..AGENT_COUNT)
-        .map(|id| Agent {
-            id,
-            caps: 1u32 << id,
-            trust: 50,
-        })
+    let agents: Vec<CapabilityAgent> = (0..AGENT_COUNT)
+        .map(|id| CapabilityAgent::new(id, 1u32 << id, 50))
         .collect();
 
     // Add every agent to the manager (the candidate vertices must exist before
     // the manager is moved into the service), then form a seed coalition over
     // the first `SEED_MEMBERS`.
-    let manager: CoalitionManager<Agent, Team> = CoalitionManager::empty();
+    let manager: CoalitionManager<CapabilityAgent, Team> = CoalitionManager::empty();
     let mut vertices = Vec::with_capacity(agents.len());
     for a in &agents {
         vertices.push(manager.add_agent(*a).await?);
