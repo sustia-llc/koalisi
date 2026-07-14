@@ -300,7 +300,7 @@ koalisi/
 │   │   ├── coalitions.rs                   CoalitionManager (form/join/leave/dissolve/merge)
 │   │   └── executor.rs                     HypergraphExecutor (rayon↔tokio bridge)
 │   ├── algorithms/
-│   │   ├── mod.rs                          AgentCapabilities trait + re-exports
+│   │   ├── mod.rs                          AgentCapabilities trait + CapabilityAgent (stock impl, also a VertexTrait; v0.11.0) + re-exports
 │   │   ├── value_calculation.rs            ValueCalculator + 4 calculators
 │   │   ├── dcvc.rs                         DCVCDistributor, WorkloadShare
 │   │   └── aipa.rs                         Integer partitions, bounds, best-partition + 10 unit tests
