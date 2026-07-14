@@ -17,8 +17,8 @@
 //!   A/B mirror scoring coalitions by enriched-category magnitude.
 //! - [`llm`] — Phase 5/6 LLM provider stub (real backends land later).
 //! - [`subsystems`] — forex-specific worker tasks (monitor, coordinator,
-//!   sink, swarm) on `tokio::sync` seams, plus optional adapters (databento,
-//!   libp2p remote).
+//!   sink, swarm) on `tokio::sync` seams, plus an optional libp2p remote
+//!   alert gateway.
 //! - [`market`] — forex value types: `Pair`, `Tick`, `Quote`, `Triangle`,
 //!   `TickUpdate`, `ArbitrageOpportunity`.
 //!
@@ -39,8 +39,6 @@ pub mod topology;
 pub mod subsystems {
     pub mod coalition_actor;
     pub mod coordinator;
-    #[cfg(feature = "databento")]
-    pub mod databento;
     #[cfg(feature = "remote")]
     pub mod distributed;
     #[cfg(feature = "durable")]

@@ -220,9 +220,9 @@ impl Swarm {
     }
 
     /// A clone-able, owned feed handle that captures the monitor handles and
-    /// nothing else. Pass it into background tasks (e.g., the databento
-    /// adapter's pump) so they can call `feed_tick` without holding a borrow on
-    /// the `Swarm` itself.
+    /// nothing else. Pass it into background tasks (e.g., a source pump) so
+    /// they can call `feed_tick` without holding a borrow on the `Swarm`
+    /// itself.
     pub fn feeder(&self) -> SwarmFeeder {
         SwarmFeeder {
             monitors: self.monitors.clone(),

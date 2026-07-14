@@ -5,7 +5,7 @@
 //! koalisi's `CoalitionService` decision tap + `spawn_decision_forwarder`:
 //!
 //! 1. Boot SurrealDB (upstream container harness). Skip-with-diagnostic if
-//!    Docker is unavailable (mirrors the databento-fixture pattern).
+//!    Docker is unavailable (print + pass, so CI without Docker stays green).
 //! 2. Round 1: stand up the durable bus (`recorder` + `decision_log`) so
 //!    `decision_log` snapshots a "from-now" cursor against the empty log, then
 //!    shut it down — `decision_log` is now OFFLINE, cursor persisted.

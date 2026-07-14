@@ -10,10 +10,7 @@
 //!   `SampleMonitor<Tick>`.
 //! - [`DataSource`] + [`pump_source`] — a producer of time-ordered samples and
 //!   the generic pump that routes them into monitors by key. [`Pacing`] and its
-//!   replay semantics live here; the databento adapter shares this `Pacing` enum
-//!   (re-exported under its old path for continuity) but keeps its own DBN
-//!   decode/pump loop — it does not (yet) implement [`DataSource`] or go through
-//!   [`pump_source`].
+//!   replay semantics live here (domain-neutral).
 //! - [`synthetic`] — seeded, credential-free fixtures matching the two real
 //!   downstream driver shapes: NEST-style multi-resolution numeric series
 //!   ([`MultiResolutionSource`]) and tauhokohoko-style ecological sensor streams

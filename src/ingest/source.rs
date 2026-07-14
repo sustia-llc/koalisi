@@ -2,11 +2,9 @@
 //! and the generic pump that routes a source's samples into per-key
 //! [`SampleMonitor`](super::monitor::SampleMonitor)s.
 //!
-//! This is the ingestion-layer generalisation of the databento pump (issue #8).
-//! [`Pacing`] lives here (domain-neutral); the `databento` module shares this
-//! enum (re-exported under its old path for continuity) but keeps its own
-//! nanosecond-paced DBN pump loop — it does not (yet) implement [`DataSource`]
-//! or route through [`pump_source`].
+//! This is the domain-neutral ingestion layer (issue #8): [`Pacing`] and the
+//! generic [`pump_source`] loop route any [`DataSource`]'s samples into
+//! monitors by key.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -27,8 +25,7 @@ use super::sample::Sample;
 
 /// Replay pacing strategy for a [`pump_source`] run.
 ///
-/// Domain-neutral (was `subsystems::databento::Pacing`, moved here for issue #8;
-/// the databento module re-exports it under its old path).
+/// Domain-neutral replay pacing (introduced with the ingestion layer, issue #8).
 #[derive(Debug, Clone, Copy, Default)]
 pub enum Pacing {
     /// Pump every sample as fast as the source can produce it.
@@ -44,10 +41,7 @@ pub enum Pacing {
 // Stats
 // ---------------------------------------------------------------------------
 
-/// Outcome counters returned by [`pump_source`].
-///
-/// Mirrors the shape of the databento `PumpStats` (which keeps its own richer,
-/// decode-oriented counters); here the concerns are only routing outcomes.
+/// Outcome counters returned by [`pump_source`]: routing outcomes only.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct PumpStats {
     /// Samples successfully forwarded into a monitor via acknowledged `feed`.
@@ -161,7 +155,7 @@ pub async fn pump_source<D: DataSource, H: BuildHasher>(
 }
 
 // ---------------------------------------------------------------------------
-// Spawn helper — mirrors databento's spawn_dbn_pump (tracker + child token)
+// Spawn helper — runs the pump on a TaskTracker under a child token
 // ---------------------------------------------------------------------------
 
 /// Spawn [`pump_source`] on `tracker` under `token` (pass a child token so the

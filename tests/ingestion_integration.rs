@@ -1,7 +1,6 @@
 //! Integration test for the domain-neutral ingestion layer (issue #8, K5).
 //!
-//! Proves two things end-to-end with **no databento dependency and no financial
-//! data**:
+//! Proves two things end-to-end with **no financial data**:
 //!
 //! 1. Both synthetic sources (NEST-shaped `MultiResolutionSource` and
 //!    tauhokohoko-shaped `SensorEventSource`) pump through generic
