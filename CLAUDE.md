@@ -578,12 +578,19 @@ timeout 120s cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-tar
 > portable format + EffectLog-compatible traces + FAIR provenance).
 > **Status: the Phase 7 RE-PLAN (#21) is DONE and CLOSED — design doc
 > shipped v0.7.0 (2026-07-04, `docs/phase7-persistence-design.md`), signed
-> off, implementation filed as #29–#33 (P7.1–P7.5). Phase 5 implementation
-> stays HELD until NEST's 2026-07-09 working session assigns Year-1
-> ownership** (plan/scaffolding only until then; the LLM stub in
-> `src/llm/mod.rs` remains the only code anchor).
+> off, implementation filed as #29–#33 (P7.1–P7.5). Phase 5 DE-GATED
+> 2026-07-15 (owner decision: NEST is slow — first session was
+> administrative — so Phase 5 no longer blocks on the Year-1 ownership
+> assignment). LLM-free slices promoted to standalone issues:
+> [#41](https://github.com/sustia-llc/koalisi/issues/41) (idea 3,
+> feedback-weight ValueCalculator) and
+> [#42](https://github.com/sustia-llc/koalisi/issues/42) (idea 4, AIPA
+> population search). #20 keeps the LLM-dependent remainder
+> (configurator + velocity-rewrite loop + transferability); the only
+> still-NEST-dependent piece is the input-#2 NEST-H4 calibration-copilot
+> deployment framing, which activates whenever ownership lands.**
 
-### Phase 5: SwarmAgentic-style optimisation  *(planned — input #2 recorded, implementation HELD until post-2026-07-09; tracked: [#20](https://github.com/sustia-llc/koalisi/issues/20))*
+### Phase 5: SwarmAgentic-style optimisation  *(DE-GATED 2026-07-15 — LLM-free slices actionable now: [#41](https://github.com/sustia-llc/koalisi/issues/41) idea 3, [#42](https://github.com/sustia-llc/koalisi/issues/42) idea 4; LLM meta-layer remainder tracked: [#20](https://github.com/sustia-llc/koalisi/issues/20))*
 
 Lift the SwarmAgentic framework (Zhang et al., 2025 — see
 `docs/SwarmAgentic-summary.md` for full paper digest) into koalisi as a
@@ -607,7 +614,8 @@ Five concrete integration ideas, ported verbatim from the summary's
    slow between-iteration structural changes. The trait surface in
    `src/llm/mod.rs` is where both phases meet.
 
-3. **`ValueCalculator` extension with feedback weights.** SwarmAgentic's
+3. **`ValueCalculator` extension with feedback weights** (promoted →
+   [#41](https://github.com/sustia-llc/koalisi/issues/41))**.** SwarmAgentic's
    three coefficients (`c_f` failure / `c_p` personal-best / `c_g`
    global-best) are direct analogues of `WeightedCalculator`'s
    `size`/`capability`/`trust`/`synergy` weights. Add `history_weight`
@@ -616,7 +624,8 @@ Five concrete integration ideas, ported verbatim from the summary's
    value-calculation feedback loop closes inside Rust without LLM
    round-trips for every score.
 
-4. **Population-based search atop AIPA.** AIPA enumerates integer
+4. **Population-based search atop AIPA** (promoted →
+   [#42](https://github.com/sustia-llc/koalisi/issues/42))**.** AIPA enumerates integer
    partitions deterministically; SwarmAgentic maintains a *population*
    of full system designs. Hybrid: AIPA generates candidate partitions,
    a SwarmAgentic-style swarm evolves agent assignments + collaboration
