@@ -697,12 +697,28 @@ engine from the `tira` repo and bridges to it.
   observation model, the agent routes around conflict and `G ≈ 0` for everyone — the
   decision degenerates. So the bridge maps **capability coverage** of
   `required_capabilities` → observation-model **precision** of a 2-state POMDP, built
-  via `POMDPAgent::new` directly (NOT via `aif::CoalitionEvaluator`, whose
-  `observation_probs` can't see members). Higher coverage ⇒ sharper `A` ⇒ lower `G`
-  (verified monotone: `G(0)=0.511 > G(0.5)=0.121 > G(1)=0.017`). Non-degeneracy is
+  via `POMDPAgent::new` directly (NOT via the since-removed `aif::CoalitionEvaluator`,
+  whose `observation_probs` couldn't see members). Higher coverage ⇒ sharper `A` ⇒ lower
+  `G` (verified monotone: `G(0)=1.204 > G(0.5)=0.710 > G(1)=0.215` — the engine's
+  default-parameter anchors, pinned in aif's `test_competence_efe_regression_anchors`
+  since 0.6.0; the `0.511/0.121/0.017` figures previously recorded here were stale
+  v0.4.0-era measurements of the pre-bridge `efe_for_coverage`). Non-degeneracy is
   unit-tested: an agent covering a new required bit lowers `G` (joins); a redundant
   clone does not. `BridgeParams` (`max_precision` 0.95, `success_preference` 0.9,
   `alpha` 8.0) tunes the mapping.
+- **aif 0.6.0 is released** (tag `aif-v0.6.0`; koalisi still pins `v0.5.0` — bump tracked
+  in [#43](https://github.com/sustia-llc/koalisi/issues/43)). Migration when bumping:
+  `ObsPrecisionParams` gained a `transition_noise` field (add `transition_noise: 0.0` or
+  use `..Default::default()`; default preserves current values byte-for-byte);
+  `CoalitionEvaluator`/`CapabilityProvider` are gone (koalisi never used them). Two
+  design facts from the 0.6.0 work that shape the K4 v3 rematch: (1) `transition_noise`
+  makes the info-gain term live but **raises** net `G` across most of the competence
+  range (pragmatic blurring dominates) — it is a modeling choice, not an exploration
+  bonus, and competence monotonicity is preserved; (2) noise alone cannot make the AIF
+  arm diversity-sensitive (competence stays a scalar) — the diversity-aware arm 0.6.0
+  enables is a **multi-modality bridge**: one observation modality per required
+  capability bit via `GenerativeModel`/`from_model`, per-bit coverage driving that
+  modality's precision, so member-overlap structure enters `G` directly.
 - **Execution (sync engine, async edge).** The `aif` engine stays sync. EFE is
   CPU-bound, so `AifDecisionPolicy`'s `should_join_async`/`should_leave_async` snapshot
   capability masks to owned `u32` (the `&dyn` borrows aren't `'static`) and offload to
