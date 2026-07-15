@@ -2,7 +2,13 @@
 
 **Authors:** Yao Zhang, Chenyang Lin, Shijie Tang, Haokun Chen, Shijie Zhou, Yunpu Ma, Volker Tresp (LMU Munich / TU Munich / MCML)
 **Code:** github.com/SwarmAgentic
-**PDF on disk:** `docs/SwarmAgentic-2506.15672v1.pdf`
+**Full text on disk:** [`docs/2506.15672v1.md`](2506.15672v1.md) (markdown conversion;
+figures in `docs/2506.15672v1_images/`, PDF at `docs/2506.15672v1.pdf`)
+
+> *Updated 2026-07-15: file pointers refreshed to the new full-text conversion; ablation
+> numbers corrected against the paper's Table 5. The live, maintained copy of the
+> integration ideas below is CLAUDE.md's Phase 5 section (SwarmAgentic became Phase 5
+> when the phases were reordered; the ideas were originally ported from this digest).*
 
 ## TL;DR
 
@@ -97,14 +103,16 @@ Claude-3.5-sonnet-0620, DeepSeek-V3, Gemini-1.5-Pro.
 | Creative Writing | Multi-paragraph generation | 7.6 (SPP) | **8.5** |
 | MGSM | Math reasoning | 87.3 (Direct) | **88.4** |
 
-**Cross-model transfer:** systems discovered with GPT-4o-mini transfer
-well to Claude-3.5-sonnet, DeepSeek-V3, Gemini-1.5; re-optimising
-directly on the target executor adds a further bump.
+**Cross-model transfer** (Table 4 — Creative Writing only): the system
+discovered with GPT-4o-mini transfers to GPT-4o (8.5), Claude-3.5-sonnet
+(8.3), DeepSeek-V3 (9.0), Gemini-1.5 (7.5), beating all baselines on
+each; re-optimising directly on the target executor adds a further bump
+(Gemini-1.5\* 7.8 vs ADAS 6.6).
 
-**Ablation (Creative Writing, +Δ vs. Direct baseline 6.2):**
-- Remove Failure-Driven Adjustments → 6.7 (+8.1%) *— biggest loss*
+**Ablation (Table 5; Creative Writing, 20 instances, +Δ vs. Direct baseline 6.2):**
+- Remove Collaborative-Structures Reconfiguration → 6.7 (+8.1%) *— biggest loss*
 - Remove Agent-Level Adaptation → 7.3 (+17.7%)
-- Remove Collaborative-Structure Reconfiguration → 8.4 (+35.5%)
+- Remove Failure-Driven Adjustments → 8.4 (+35.5%)
 - Full SwarmAgentic → 8.8 (+41.9%)
 
 Iterations and particle count both monotonically help (5 particles ×

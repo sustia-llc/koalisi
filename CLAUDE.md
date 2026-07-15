@@ -663,7 +663,8 @@ learning, ad-hoc RNG). Instead koalisi depends on the code-reviewed `aif` refere
 engine from the `tira` repo and bridges to it.
 
 - **Dependency:** `aif = { git = "ssh://git@github.com/sustia-llc/tira", tag =
-  "aif-v0.4.0", optional = true }`, behind `[features] decision = ["dep:aif"]`. SSH
+  "aif-v0.5.0", optional = true }` (shipped at `aif-v0.4.0`; bumped by follow-up #2),
+  behind `[features] decision = ["dep:aif"]`. SSH
   URL (not HTTPS) because `tira` is private and git here is SSH-only — cargo's libgit2
   HTTPS fetch can't authenticate. Feature-off builds compile **no `aif` and no
   `nalgebra`**. (`aif` uses `nalgebra` internally — NOT `ndarray`; the old "adds
