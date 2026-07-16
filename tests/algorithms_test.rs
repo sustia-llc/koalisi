@@ -4,8 +4,9 @@ mod common;
 
 use common::algorithms::{Agent, as_caps, test_agents};
 use koalisi::algorithms::{
-    AdditiveCalculator, DCVCDistributor, MultiplicativeCalculator, SynergisticCalculator,
-    ValueCalculator, WeightedCalculator, compute_all_partition_bounds, find_best_partition,
+    AdditiveCalculator, AgentCapabilities, CapabilityAgent, DCVCDistributor, FeedbackCalculator,
+    FeedbackStore, MultiplicativeCalculator, SynergisticCalculator, ValueCalculator,
+    WeightedCalculator, compute_all_partition_bounds, find_best_partition,
     generate_integer_partitions, partition_count, verify_partition,
 };
 use std::collections::HashMap;
@@ -73,6 +74,127 @@ fn synergistic_beats_additive_for_diverse() {
     let synergistic = SynergisticCalculator;
 
     assert!(synergistic.calculate_value(&refs) > additive.calculate_value(&refs));
+}
+
+// =========================================================================
+// Feedback-weighted calculator tests (issue #41)
+// =========================================================================
+
+/// End-to-end feedback loop through `ThresholdPolicy`: a candidate with a heavy
+/// failure record is declined where an otherwise-identical clean candidate joins.
+#[test]
+fn feedback_failures_close_the_decision_loop() {
+    use koalisi::decision::{CoalitionDecisionPolicy, DecisionContext, ThresholdPolicy};
+
+    let a1 = CapabilityAgent::new(1, 0b0011, 60);
+    let coalition = [&a1 as &dyn AgentCapabilities];
+    let ctx = DecisionContext::default();
+
+    // Five failing outcomes for the candidate id 9 (value 0.0 < threshold 100).
+    let store = FeedbackStore::new(100.0);
+    for _ in 0..5 {
+        store.record_outcome(&[9], 0.0);
+    }
+    assert_eq!(store.history(9), 5);
+    assert_eq!(store.failures(9), 5);
+
+    // hw=0, fw=1: the candidate's additive marginal (110) is dragged to
+    // 110 − 25·5 = −15, below the join_threshold of 0.0.
+    let policy = ThresholdPolicy::new(
+        FeedbackCalculator::new(AdditiveCalculator, 0.0, 1.0, store),
+        0.0,
+        0.0,
+    );
+
+    let failing = CapabilityAgent::new(9, 0b1000, 50);
+    let decision = policy.should_join(&failing, &coalition, &ctx);
+    assert!(!decision.act, "heavy failure record blocks the join");
+    assert_eq!(decision.score, -15.0);
+
+    // A clean candidate with identical caps/trust but no failure record joins.
+    let clean = CapabilityAgent::new(10, 0b1000, 50);
+    let clean_decision = policy.should_join(&clean, &coalition, &ctx);
+    assert!(clean_decision.act, "clean candidate joins on positive marginal");
+    assert_eq!(clean_decision.score, 110.0);
+}
+
+/// The join marginal decomposes exactly as
+/// `base_marginal + hw·HISTORY_UNIT·history(x) − fw·FAILURE_UNIT·failures(x)`;
+/// the existing members' counters cancel in the with/without difference.
+#[test]
+fn feedback_marginal_decomposition() {
+    use koalisi::decision::{CoalitionDecisionPolicy, DecisionContext, ThresholdPolicy};
+
+    let a1 = CapabilityAgent::new(1, 0b0011, 60);
+    let x = CapabilityAgent::new(9, 0b1000, 50);
+    let coalition = [&a1 as &dyn AgentCapabilities];
+    let ctx = DecisionContext::default();
+
+    // Record outcomes touching BOTH the existing member and the candidate so the
+    // cancellation of the member's counters is actually exercised.
+    let store = FeedbackStore::new(100.0);
+    store.record_outcome(&[1, 9], 150.0); // success for 1 and 9
+    store.record_outcome(&[1, 9], 50.0); // failure for 1 and 9
+    store.record_outcome(&[9], 50.0); // extra failure for 9
+    // history(1)=2 failures(1)=1 ; history(9)=3 failures(9)=2.
+
+    let (hw, fw) = (1.0_f64, 1.0_f64);
+
+    // Base (feedback-free) additive marginal for x joining [a1].
+    let base_without = AdditiveCalculator.calculate_value(&coalition);
+    let mut with = coalition.to_vec();
+    with.push(&x);
+    let base_with = AdditiveCalculator.calculate_value(&with);
+    let base_marginal = base_with - base_without;
+
+    let expected = base_marginal
+        + hw * koalisi::algorithms::HISTORY_UNIT * store.history(9) as f64
+        - fw * koalisi::algorithms::FAILURE_UNIT * store.failures(9) as f64;
+
+    let policy = ThresholdPolicy::new(
+        FeedbackCalculator::new(AdditiveCalculator, hw, fw, store),
+        0.0,
+        0.0,
+    );
+    let decision = policy.should_join(&x, &coalition, &ctx);
+    assert_eq!(decision.score, expected);
+    assert_eq!(decision.score, 135.0);
+}
+
+/// `seed_feedback_history` folds the event-sourced membership episode count into
+/// the store: an agent that joined two coalitions (one dissolved, one ongoing)
+/// seeds a history of 2 and no failures.
+#[tokio::test]
+async fn feedback_seeding_from_event_log() {
+    use koalisi::topology::CoalitionManager;
+
+    let manager = CoalitionManager::<CapabilityAgent, &'static str>::empty();
+    let agent = manager
+        .add_agent(CapabilityAgent::new(7, 0b0001, 50))
+        .await
+        .expect("add agent");
+
+    // Episode 1: form a coalition with the agent, then dissolve it (closed range).
+    let c1 = manager
+        .form_coalition(vec![agent], "alpha")
+        .await
+        .expect("form c1");
+    manager.dissolve_coalition(c1).await.expect("dissolve c1");
+
+    // Episode 2: form another coalition, left open (ongoing membership).
+    let _c2 = manager
+        .form_coalition(vec![agent], "beta")
+        .await
+        .expect("form c2");
+
+    let store = FeedbackStore::new(100.0);
+    manager
+        .seed_feedback_history(&[agent], &store)
+        .await
+        .expect("seed history");
+
+    assert_eq!(store.history(7), 2, "two membership episodes seeded");
+    assert_eq!(store.failures(7), 0, "log seeds no failures");
 }
 
 // =========================================================================
