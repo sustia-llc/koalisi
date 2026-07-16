@@ -146,3 +146,16 @@ Scope-B `success_rate` per arm (expected `fb > thr ≈ mag` if H-main holds).
   a correct calculator whose payoff needs richer structure than this battery supplies. #41
   is not refuted (Scope A is the expected null; the calculator math is unit-proven).
 - Thresholds (1.25×, 60%, seeds/T/universe) are inherited, not chosen post hoc.
+
+## Result — FALSIFIED (feedback), 2026-07-16
+
+Run committed as `docs/ab-report-feedback-arm-k4.md`. Scope B medians: `mag 0.2818 · thr
+0.0140 · fb 0.0140`; H1 FAIL, H2 FAIL (fb strictly superior to thr on **0/30** seeds).
+Scope A held the registered null (`fb ≈ thr`, 0/30 — no red flag). The registered
+`hw = fw = 0.5` weighting **cancels** in the full-join `ThresholdPolicy`-at-0 regime
+(`history ≈ failures` per member ⇒ balanced marginal ≈ 0); the E1 sweep confirms the
+mechanism is live (failure-dominant cells move the metric, best `0.0730`) but no cell
+reaches magnitude. Magnitude's edge is selectivity (churn 8, small high-`cov_eff`
+coalitions) that the full-join base does not induce. `#41` not refuted. Follow-ups (each a
+**new** registration): a failure-weighted point (`hw=0, fw=1`) and/or a selective base
+(positive `join_threshold`). Nothing tuned to flip the verdict.
