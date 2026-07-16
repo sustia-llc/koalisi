@@ -86,7 +86,9 @@ use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
 use catgraph_magnitude::CatgraphError;
-use koalisi::algorithms::{AgentCapabilities, SynergisticCalculator};
+use koalisi::algorithms::{
+    AgentCapabilities, FeedbackCalculator, FeedbackStore, SynergisticCalculator,
+};
 use koalisi::decision::{
     AifDecisionPolicy, AifMmDecisionPolicy, CoalitionDecisionPolicy, CouplingModel, Decision,
     DecisionContext, MagnitudePolicy, ThresholdPolicy,
@@ -96,6 +98,9 @@ use koalisi::decision::{
 /// manually per committed run (2026-07-02 = K4 initial + K1 backend parity;
 /// 2026-07-03 = K6 post-optimization re-run, koalisi #14).
 const REPORT_DATE: &str = "2026-07-03";
+/// Report date for the Part 3 feedback-arm battery (koalisi #46), separate from
+/// the frozen Part 2 date above so a re-run stamps its own committed run.
+const FEEDBACK_REPORT_DATE: &str = "2026-07-16";
 /// Number of seeded instances (seeds `0..SEEDS`).
 const SEEDS: u64 = 30;
 /// Tasks per instance.
@@ -105,6 +110,31 @@ const UNIVERSE_BITS: u64 = 8;
 /// Instances with `n <= ORACLE_MAX_N` are oracle-eligible (brute force ≤ 255
 /// non-empty subsets).
 const ORACLE_MAX_N: usize = 8;
+
+// --- Part 3 (feedback arm, koalisi #46) reliability-structure constants ------
+/// Scope B: probability an agent is *reliable* (bimodal hidden reliability).
+const RELIABLE_PROB: f64 = 0.7;
+/// Scope B: per-task failure probability of a *reliable* agent.
+const RHO_RELIABLE: f64 = 0.05;
+/// Scope B: per-task failure probability of a *flaky* agent.
+const RHO_FLAKY: f64 = 0.40;
+/// Part 3 confirmatory: `fb` must beat `thr` on at least this many of `SEEDS`
+/// seeds for H2 (≥ 18/30, the 60% consistency bar inherited from K4-v2/v3).
+const FB_SUPERIOR_MIN: usize = 18;
+
+/// Which battery an instance run belongs to.
+///
+/// - [`Scope::A`] — the i.i.d. null control: fitness = `completed` (0/1); the
+///   PRIMARY is `completion_rate × mean_cov_eff`, exactly the committed Part 2
+///   metric (the regression gate reproduces `mag` seed-for-seed here).
+/// - [`Scope::B`] — the reliability-structured contest: a task succeeds iff it
+///   is `completed` **and** every final member performed (per-`(task, agent)`
+///   `perf` matrix); `PRIMARY_B` = `success_rate × mean_cov_eff`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Scope {
+    A,
+    B,
+}
 
 /// Concrete agent for the demo.
 #[derive(Debug, Clone, Copy)]
@@ -132,6 +162,10 @@ fn main() {
     println!("{}", "=".repeat(72));
     println!();
     part2_ab_harness();
+    println!();
+    println!("{}", "=".repeat(72));
+    println!();
+    part3_feedback_arm();
 }
 
 // ===========================================================================
@@ -278,16 +312,17 @@ struct Task {
     order: Vec<usize>,
 }
 
-/// Generate one seeded instance: the agent pool and the task stream. Called by
-/// BOTH the arm runners and the oracle, guaranteeing byte-identical instances.
-fn generate_instance(seed: u64) -> (Vec<Worker>, Vec<Task>) {
-    let mut rng = SplitMix64::new(seed);
-
+/// Draw the shared instance *prefix* — the agent pool then the task stream —
+/// off `rng`. This is the exact draw sequence both scopes share; Scope B
+/// continues drawing its reliability structure off the SAME `rng` afterwards, so
+/// the prefix stays byte-identical to Scope A (and to the committed Part 2
+/// battery). Do not reorder draws here.
+fn draw_prefix(rng: &mut SplitMix64) -> (Vec<Worker>, Vec<Task>) {
     let n = (4 + rng.next_u64() % 13) as usize;
     let agents: Vec<Worker> = (0..n)
         .map(|id| {
             let k = 1 + rng.next_u64() % 4;
-            let caps = draw_distinct_bits(&mut rng, k);
+            let caps = draw_distinct_bits(rng, k);
             let trust = (20 + rng.next_u64() % 80) as u32;
             Worker { id, caps, trust }
         })
@@ -296,8 +331,8 @@ fn generate_instance(seed: u64) -> (Vec<Worker>, Vec<Task>) {
     let tasks: Vec<Task> = (0..TASKS)
         .map(|_| {
             let r = 1 + rng.next_u64() % 5;
-            let required = draw_distinct_bits(&mut rng, r);
-            let order = fisher_yates(&mut rng, n);
+            let required = draw_distinct_bits(rng, r);
+            let order = fisher_yates(rng, n);
             Task { required, order }
         })
         .collect();
@@ -305,14 +340,68 @@ fn generate_instance(seed: u64) -> (Vec<Worker>, Vec<Task>) {
     (agents, tasks)
 }
 
+/// Generate one seeded instance: the agent pool and the task stream. Called by
+/// BOTH the arm runners and the oracle, guaranteeing byte-identical instances.
+fn generate_instance(seed: u64) -> (Vec<Worker>, Vec<Task>) {
+    let mut rng = SplitMix64::new(seed);
+    draw_prefix(&mut rng)
+}
+
+/// Uniform `f64` in `[0, 1)` from the top 53 bits of one `next_u64` draw (the
+/// standard IEEE-754 double construction). Part 3 uses this for the reliability
+/// draws; the integer `% N` draws in `draw_prefix` are untouched.
+fn next_unit(rng: &mut SplitMix64) -> f64 {
+    (rng.next_u64() >> 11) as f64 / (1u64 << 53) as f64
+}
+
+/// Generate one Scope-B instance: the byte-identical Scope-A prefix, then the
+/// reliability structure drawn off the SAME stream (so the prefix is unchanged).
+///
+/// Draw order after the prefix (fixed, arm-independent):
+/// 1. per-agent hidden reliability `ρ_i` — one `next_unit` per agent: reliable
+///    (`RHO_RELIABLE`) with prob `RELIABLE_PROB`, else flaky (`RHO_FLAKY`);
+/// 2. the `perf[t][i]` matrix — `t` outer, `i` inner — one `next_unit` each:
+///    `perf[t][i] = (next_unit < 1 − ρ_i)` (the agent "performs" on that task).
+///
+/// `perf` is pre-drawn once per instance and identical for every arm — the
+/// prereg's core invariant that arms only differ in their value model.
+fn generate_instance_b(seed: u64) -> (Vec<Worker>, Vec<Task>, Vec<f64>, Vec<Vec<bool>>) {
+    let mut rng = SplitMix64::new(seed);
+    let (agents, tasks) = draw_prefix(&mut rng);
+    let n = agents.len();
+
+    let rho: Vec<f64> = (0..n)
+        .map(|_| {
+            if next_unit(&mut rng) < RELIABLE_PROB {
+                RHO_RELIABLE
+            } else {
+                RHO_FLAKY
+            }
+        })
+        .collect();
+
+    let perf: Vec<Vec<bool>> = (0..TASKS)
+        .map(|_| (0..n).map(|i| next_unit(&mut rng) < 1.0 - rho[i]).collect())
+        .collect();
+
+    (agents, tasks, rho, perf)
+}
+
 /// Per-seed result for one arm.
 struct InstanceMetrics {
     seed: u64,
     n: usize,
-    /// `completion_rate × mean_cov_eff` (stream-level product; see below).
+    /// PRIMARY: `success_rate × mean_cov_eff` (stream-level product). Under
+    /// [`Scope::A`], `success ≡ completed`, so this is exactly the committed
+    /// Part 2 metric; under [`Scope::B`], `success` additionally requires every
+    /// final member to have performed.
     primary: f64,
     /// Total leave-sweep removals over the stream.
     churn: usize,
+    /// Fraction of tasks that succeeded (Scope A: completed; Scope B: completed
+    /// AND all final members performed). Record-only; for Scope A it equals the
+    /// completion rate.
+    success_rate: f64,
 }
 
 fn seconds_to_us(d: Duration) -> f64 {
@@ -334,20 +423,42 @@ fn coalition_view<'a>(agents: &'a [Worker], members: &[usize]) -> Vec<&'a dyn Ag
 /// - `completed(task)` = union of members' caps covers `required` fully.
 /// - `coverage_eff(task)` = (covered required bits / required bits) / member
 ///   count, `0.0` if empty.
-/// - PRIMARY = `completion_rate × mean_cov_eff` (stream-level product).
+/// - `success(task)` = `completed` (Scope A) or `completed AND ∀ i∈members:
+///   perf[t][i]` (Scope B, the reliability contest).
+/// - PRIMARY = `success_rate × mean_cov_eff` (stream-level product).
+///
+/// `store` (the feedback arm's counter table) is written **once per task, after
+/// the leave sweep**, with the final coalition's `success` (0/1) as the fitness —
+/// so every within-task join/leave decision saw a *constant* store. Member
+/// indices are their `agent_id`s (`Worker.id == index`), so they are recorded
+/// directly. Passing `None` (the `mag`/`thr`/Part-2 arms) records nothing and
+/// reproduces the committed behaviour exactly.
 fn run_instance(
     policy: &dyn CoalitionDecisionPolicy,
     seed: u64,
+    scope: Scope,
+    store: Option<&FeedbackStore>,
     latencies: &mut Vec<f64>,
 ) -> InstanceMetrics {
-    let (agents, tasks) = generate_instance(seed);
+    // Scope A draws only the shared prefix; Scope B additionally draws the
+    // arm-independent `perf` matrix. Both share a byte-identical prefix.
+    let (agents, tasks, perf) = match scope {
+        Scope::A => {
+            let (agents, tasks) = generate_instance(seed);
+            (agents, tasks, Vec::new())
+        }
+        Scope::B => {
+            let (agents, tasks, _rho, perf) = generate_instance_b(seed);
+            (agents, tasks, perf)
+        }
+    };
     let n = agents.len();
 
-    let mut completed_count = 0usize;
+    let mut success_count = 0usize;
     let mut cov_eff_sum = 0.0f64;
     let mut churn = 0usize;
 
-    for task in &tasks {
+    for (t, task) in tasks.iter().enumerate() {
         let ctx = DecisionContext {
             required_capabilities: task.required,
         };
@@ -383,27 +494,46 @@ fn run_instance(
             }
         }
 
-        // Task metrics on the formed coalition.
+        // Task metrics on the formed (final) coalition.
         let union = members.iter().fold(0u32, |acc, &i| acc | agents[i].caps);
         let covered = (union & task.required).count_ones();
-        if covered == task.required.count_ones() {
-            completed_count += 1;
+        let completed = covered == task.required.count_ones();
+
+        // Scope B: a covered task still fails unless every final member performed
+        // on this task (the reliability signal `mag`/EFE are blind to). Scope A:
+        // success ≡ completed.
+        let success = match scope {
+            Scope::A => completed,
+            Scope::B => completed && members.iter().all(|&i| perf[t][i]),
+        };
+        if success {
+            success_count += 1;
         }
+
         let cov_eff = if members.is_empty() {
             0.0
         } else {
             (f64::from(covered) / f64::from(task.required.count_ones())) / members.len() as f64
         };
         cov_eff_sum += cov_eff;
+
+        // Feedback write-back: once per task, AFTER the leave sweep, so all of
+        // this task's decisions saw a constant store. `FeedbackStore::new(1.0)`
+        // ⇒ any non-success (fitness < 1.0) is a failure.
+        if let Some(store) = store {
+            let fitness = if success { 1.0 } else { 0.0 };
+            store.record_outcome(&members, fitness);
+        }
     }
 
-    let completion_rate = completed_count as f64 / tasks.len() as f64;
+    let success_rate = success_count as f64 / tasks.len() as f64;
     let mean_cov_eff = cov_eff_sum / tasks.len() as f64;
     InstanceMetrics {
         seed,
         n,
-        primary: completion_rate * mean_cov_eff,
+        primary: success_rate * mean_cov_eff,
         churn,
+        success_rate,
     }
 }
 
@@ -413,11 +543,11 @@ fn run_instance(
 fn run_battery(policy: &dyn CoalitionDecisionPolicy) -> (Vec<InstanceMetrics>, Vec<f64>) {
     // Warm-up: full seed-0 instance, latencies discarded.
     let mut warm = Vec::new();
-    let _ = run_instance(policy, 0, &mut warm);
+    let _ = run_instance(policy, 0, Scope::A, None, &mut warm);
 
     let mut latencies = Vec::new();
     let per_seed: Vec<InstanceMetrics> = (0..SEEDS)
-        .map(|s| run_instance(policy, s, &mut latencies))
+        .map(|s| run_instance(policy, s, Scope::A, None, &mut latencies))
         .collect();
     (per_seed, latencies)
 }
@@ -687,7 +817,7 @@ fn part2_ab_harness() {
             };
             let mut scratch = Vec::new();
             let primaries: Vec<f64> = (0..SEEDS)
-                .map(|s| run_instance(&policy, s, &mut scratch).primary)
+                .map(|s| run_instance(&policy, s, Scope::A, None, &mut scratch).primary)
                 .collect();
             (t, median(primaries))
         })
@@ -983,4 +1113,308 @@ fn print_report(
 
 fn pass(b: bool) -> &'static str {
     if b { "PASS" } else { "FAIL" }
+}
+
+// ===========================================================================
+// Part 3 — feedback-weighted arm vs magnitude (koalisi #46; #41 follow-up).
+//
+// Confirmatory battery over TWO scopes (prereg `docs/prereg-feedback-arm-k4.md`):
+//   Scope A (i.i.d.)      — the null control: feedback ≈ its feedback-off base.
+//   Scope B (reliability) — the contest: agents have a hidden bimodal
+//                           reliability `ρ`; a covered task still fails unless
+//                           every final member performed. `mag` (diversity) and
+//                           EFE (coverage) are blind to `ρ`; feedback can learn
+//                           it, so H-main predicts fb > mag on realized quality.
+//
+// Arms (base = SynergisticCalculator; ThresholdPolicy thresholds = 0.0):
+//   mag — MagnitudePolicy::default()                        (frozen incumbent)
+//   thr — ThresholdPolicy(Synergistic)                      (feedback-OFF control)
+//   fb  — ThresholdPolicy(FeedbackCalculator(Synergistic, hw=0.5, fw=0.5, store))
+//         with a FRESH FeedbackStore::new(1.0) per seed; outcomes written back
+//         once per task after the leave sweep (see `run_instance`).
+//
+// The instance prefix (pool + tasks) is byte-identical across arms and scopes;
+// only the value model + feedback differ. The `mag` arm reproduces the committed
+// Part 2 `mag` column on Scope A seed-for-seed (the regression gate).
+// ===========================================================================
+
+/// Per-arm battery result: the 30 measured seeds and every per-decision latency.
+struct ArmRun {
+    seeds: Vec<InstanceMetrics>,
+    lat: Vec<f64>,
+}
+
+/// The three arms of one scope's battery.
+struct ScopeRun {
+    mag: ArmRun,
+    thr: ArmRun,
+    fb: ArmRun,
+}
+
+/// Build the `fb` arm's policy + its write-back store handle (a FRESH store per
+/// call, per the prereg — the two clones share one `Arc`, so the store the
+/// calculator reads is the store `run_instance` records into).
+fn make_fb(hw: f64, fw: f64) -> (Box<dyn CoalitionDecisionPolicy>, Option<FeedbackStore>) {
+    let store = FeedbackStore::new(1.0);
+    let calc = FeedbackCalculator::new(SynergisticCalculator, hw, fw, store.clone());
+    (
+        Box::new(ThresholdPolicy::new(calc, 0.0, 0.0)) as Box<dyn CoalitionDecisionPolicy>,
+        Some(store),
+    )
+}
+
+/// Run one arm's full 30-seed battery (discarded seed-0 warm-up first), building
+/// a fresh arm — and thus a fresh feedback store — per seed via `make`. A fresh
+/// store per seed keeps the 30 instances independent even though `fb` decisions
+/// are path-dependent on within-seed task order by design.
+fn run_fb_arm<F>(scope: Scope, make: F) -> ArmRun
+where
+    F: Fn(u64) -> (Box<dyn CoalitionDecisionPolicy>, Option<FeedbackStore>),
+{
+    let (warm_policy, warm_store) = make(0);
+    let mut warm = Vec::new();
+    let _ = run_instance(&*warm_policy, 0, scope, warm_store.as_ref(), &mut warm);
+
+    let mut lat = Vec::new();
+    let seeds: Vec<InstanceMetrics> = (0..SEEDS)
+        .map(|s| {
+            let (policy, store) = make(s);
+            run_instance(&*policy, s, scope, store.as_ref(), &mut lat)
+        })
+        .collect();
+    ArmRun { seeds, lat }
+}
+
+/// Run all three arms for one scope. `mag` is constructed once and cloned per
+/// seed (`MagnitudePolicy::clone` SHARES its evaluator cache — gotcha 15 — so the
+/// cache behaves exactly as the committed single-instance battery); `thr`/`fb`
+/// build fresh per seed.
+fn run_feedback_scope(scope: Scope) -> ScopeRun {
+    let mag = MagnitudePolicy::default();
+    let mag_run = run_fb_arm(scope, |_| {
+        (
+            Box::new(mag.clone()) as Box<dyn CoalitionDecisionPolicy>,
+            None,
+        )
+    });
+    let thr_run = run_fb_arm(scope, |_| {
+        (
+            Box::new(ThresholdPolicy::new(SynergisticCalculator, 0.0, 0.0))
+                as Box<dyn CoalitionDecisionPolicy>,
+            None,
+        )
+    });
+    let fb_run = run_fb_arm(scope, |_| make_fb(0.5, 0.5));
+    ScopeRun {
+        mag: mag_run,
+        thr: thr_run,
+        fb: fb_run,
+    }
+}
+
+fn primaries(run: &ArmRun) -> Vec<f64> {
+    run.seeds.iter().map(|m| m.primary).collect()
+}
+
+fn churns(run: &ArmRun) -> Vec<f64> {
+    run.seeds.iter().map(|m| m.churn as f64).collect()
+}
+
+fn success_rates(run: &ArmRun) -> Vec<f64> {
+    run.seeds.iter().map(|m| m.success_rate).collect()
+}
+
+/// Number of seeds on which `a` strictly beats `b` on PRIMARY.
+fn superior_count(a: &ArmRun, b: &ArmRun) -> usize {
+    (0..a.seeds.len())
+        .filter(|&i| a.seeds[i].primary > b.seeds[i].primary)
+        .count()
+}
+
+/// Print a scope's per-seed table: `mag`/`thr`/`fb` primary + churn per seed.
+fn print_scope_table(run: &ScopeRun) {
+    println!(
+        "| seed | n | mag_primary | thr_primary | fb_primary | mag_churn | thr_churn | fb_churn |"
+    );
+    println!(
+        "|-----:|--:|------------:|------------:|-----------:|----------:|----------:|---------:|"
+    );
+    for i in 0..run.mag.seeds.len() {
+        let m = &run.mag.seeds[i];
+        let t = &run.thr.seeds[i];
+        let f = &run.fb.seeds[i];
+        println!(
+            "| {} | {} | {:.4} | {:.4} | {:.4} | {} | {} | {} |",
+            m.seed, m.n, m.primary, t.primary, f.primary, m.churn, t.churn, f.churn
+        );
+    }
+}
+
+fn part3_feedback_arm() {
+    let scope_a = run_feedback_scope(Scope::A);
+    let scope_b = run_feedback_scope(Scope::B);
+    print_feedback_report(&scope_a, &scope_b);
+    print_weight_sweep();
+}
+
+#[allow(clippy::too_many_lines)]
+fn print_feedback_report(scope_a: &ScopeRun, scope_b: &ScopeRun) {
+    // Medians (Scope A = null control; Scope B = contest).
+    let a_mag_med = median(primaries(&scope_a.mag));
+    let a_thr_med = median(primaries(&scope_a.thr));
+    let a_fb_med = median(primaries(&scope_a.fb));
+    let b_mag_med = median(primaries(&scope_b.mag));
+    let b_thr_med = median(primaries(&scope_b.thr));
+    let b_fb_med = median(primaries(&scope_b.fb));
+
+    // Confirmatory verdict — evaluated on Scope B.
+    let h1 = b_mag_med < 1.25 * b_fb_med;
+    let fb_sup_thr_b = superior_count(&scope_b.fb, &scope_b.thr);
+    let h2a = b_fb_med >= 1.25 * b_thr_med;
+    let h2b = fb_sup_thr_b >= FB_SUPERIOR_MIN;
+    let h2 = h2a && h2b;
+    let verdict = match (h1, h2) {
+        (true, true) => "VALIDATED (feedback arm)",
+        (false, true) => "PARTIAL (mechanism only)",
+        (_, false) => "FALSIFIED (feedback)",
+    };
+
+    // Scope A red-flag: the registered prediction is fb ≈ thr and fb does NOT
+    // clear H1. A Scope-A fb win points at a metric/leakage bug, not a success.
+    let a_h1 = a_mag_med < 1.25 * a_fb_med;
+    let fb_sup_thr_a = superior_count(&scope_a.fb, &scope_a.thr);
+    let a_redflag = a_h1 || fb_sup_thr_a >= FB_SUPERIOR_MIN;
+
+    println!("# koalisi #46 — feedback-weighted arm vs magnitude (K4 battery)");
+    println!();
+    println!(
+        "_{FEEDBACK_REPORT_DATE} · catgraph backend · release build · base calculator `SynergisticCalculator` · `ThresholdPolicy` thresholds 0.0_"
+    );
+    println!();
+    println!(
+        "Confirmatory battery (prereg `docs/prereg-feedback-arm-k4.md`). Three arms — `mag` (`MagnitudePolicy`, frozen incumbent), `thr` (feedback-OFF `ThresholdPolicy<Synergistic>`), `fb` (`ThresholdPolicy<FeedbackCalculator<Synergistic>>`, `hw = fw = 0.5`, fresh store per seed) — over two scopes."
+    );
+    println!();
+    println!("## Protocol");
+    println!();
+    println!(
+        "- **Shared grammar:** {SEEDS} seeds `0..{SEEDS}`, inline SplitMix64; pool `n ∈ [4,16]`, caps `k ∈ [1,4]` bits of an 8-bit universe, trust `20–99`; `T = {TASKS}` tasks, required `r ∈ [1,5]` bits; seeded Fisher–Yates arrival; bootstrap-first-arrival; one leave sweep; seed-0 warm-up discarded."
+    );
+    println!(
+        "- **Scope A (null control):** i.i.d.; success ≡ `completed` (union of member caps covers `required`); PRIMARY = completion_rate × mean_cov_eff (the committed Part 2 metric)."
+    );
+    println!(
+        "- **Scope B (contest):** per-agent hidden reliability `ρ_i` (bimodal: reliable `ρ={RHO_RELIABLE}` w.p. {RELIABLE_PROB}, else flaky `ρ={RHO_FLAKY}`) + a pre-drawn arm-independent `perf[t][i]` matrix (`perform` w.p. `1−ρ_i`); success ≡ `completed AND all final members performed`; PRIMARY_B = success_rate × mean_cov_eff."
+    );
+    println!(
+        "- **Feedback write-back:** `fb` records `success` (0/1) for the final coalition once per task, AFTER the leave sweep; `FeedbackStore::new(1.0)` ⇒ any non-success is a failure. `mag`/`thr` record nothing."
+    );
+    println!();
+
+    // Scope A section.
+    println!("## Scope A — i.i.d. null control");
+    println!();
+    print_scope_table(scope_a);
+    println!();
+    println!(
+        "**Scope A medians:** mag {a_mag_med:.4} · thr {a_thr_med:.4} · fb {a_fb_med:.4}. fb strictly beats thr in {fb_sup_thr_a}/{SEEDS} seeds."
+    );
+    println!(
+        "_Registered prediction: fb ≈ thr and fb does NOT clear H1 (mag {a_mag_med:.4} < 1.25 × fb {a_fb_med:.4} is {}). A Scope-A fb win is a RED FLAG to investigate (metric/leakage bug), not a success._",
+        pass(a_h1)
+    );
+    if a_redflag {
+        println!();
+        println!(
+            "> **⚠ RED FLAG:** Scope A shows a feedback advantage the null control did not predict — investigate before trusting the Scope-B contest."
+        );
+    }
+    println!();
+
+    // Scope B section.
+    println!("## Scope B — reliability-structured contest");
+    println!();
+    print_scope_table(scope_b);
+    println!();
+    println!(
+        "**Scope B medians:** mag {b_mag_med:.4} · thr {b_thr_med:.4} · fb {b_fb_med:.4}."
+    );
+    println!();
+
+    // Record-only secondaries.
+    let b_mag_succ = median(success_rates(&scope_b.mag));
+    let b_thr_succ = median(success_rates(&scope_b.thr));
+    let b_fb_succ = median(success_rates(&scope_b.fb));
+    let b_mag_churn = median(churns(&scope_b.mag));
+    let b_thr_churn = median(churns(&scope_b.thr));
+    let b_fb_churn = median(churns(&scope_b.fb));
+    let b_mag_lat = median(scope_b.mag.lat.clone());
+    let b_thr_lat = median(scope_b.thr.lat.clone());
+    let b_fb_lat = median(scope_b.fb.lat.clone());
+    println!("### Scope B secondaries (record-only, non-gating)");
+    println!();
+    println!("| metric (median) | mag | thr | fb |");
+    println!("|-----------------|----:|----:|---:|");
+    println!("| success_rate | {b_mag_succ:.4} | {b_thr_succ:.4} | {b_fb_succ:.4} |");
+    println!("| churn | {b_mag_churn:.2} | {b_thr_churn:.2} | {b_fb_churn:.2} |");
+    println!("| latency µs | {b_mag_lat:.3} | {b_thr_lat:.3} | {b_fb_lat:.3} |");
+    println!();
+    println!(
+        "_Expected if H-main holds: fb success_rate > thr ≈ mag (feedback learns to avoid flaky members)._"
+    );
+    println!();
+
+    // Confirmatory verdict.
+    println!("## Confirmatory verdict (Scope B)");
+    println!();
+    println!(
+        "- **H1 (beats magnitude):** mag median {b_mag_med:.4} < 1.25 × fb median {b_fb_med:.4} → {}",
+        pass(h1)
+    );
+    println!(
+        "- **H2 (mechanism):** fb median {b_fb_med:.4} ≥ 1.25 × thr median {b_thr_med:.4} ({}) AND fb strictly superior to thr in {fb_sup_thr_b}/{SEEDS} seeds ≥ {FB_SUPERIOR_MIN} ({}) → {}",
+        pass(h2a),
+        pass(h2b),
+        pass(h2)
+    );
+    println!();
+    println!("**VERDICT (feedback arm, #46): {verdict}**");
+    println!();
+    println!(
+        "_VALIDATED = H1 ∧ H2 · PARTIAL (mechanism only) = H2 ∧ ¬H1 · FALSIFIED = ¬H2. Thresholds (1.25×, {FB_SUPERIOR_MIN}/{SEEDS}) inherited from the K4-v2/v3 amendments; falsification is a legitimate result and nothing is tuned to flip it (koalisi #46)._"
+    );
+    println!();
+}
+
+/// E1 — weight sweep (exploratory, non-gating): `fb` `PRIMARY_B` median on Scope
+/// B over `(hw, fw) ∈ {0, 0.5, 1, 2}²`. `(0, 0)` is the feedback-off control
+/// (≡ `thr`); `(0.5, 0.5)` reproduces the confirmatory `fb` cell.
+fn print_weight_sweep() {
+    let weights = [0.0_f64, 0.5, 1.0, 2.0];
+    println!("## E1 — weight sweep (exploratory, non-gating, Scope B)");
+    println!();
+    println!(
+        "`fb` `PRIMARY_B` median over {SEEDS} seeds by (history_weight `hw`, failure_weight `fw`). `(0, 0)` ≡ the feedback-off `thr` control; `(0.5, 0.5)` = the confirmatory arm."
+    );
+    println!();
+    print!("| hw \\ fw ");
+    for fw in weights {
+        print!("| fw={fw:.1} ");
+    }
+    println!("|");
+    print!("|--------:");
+    for _ in weights {
+        print!("|-------:");
+    }
+    println!("|");
+    for hw in weights {
+        print!("| hw={hw:.1} ");
+        for fw in weights {
+            let run = run_fb_arm(Scope::B, |_| make_fb(hw, fw));
+            let med = median(primaries(&run));
+            print!("| {med:.4} ");
+        }
+        println!("|");
+    }
+    println!();
 }

@@ -15,6 +15,12 @@ Planned work — issue-tracked (details in [`CLAUDE.md`](./CLAUDE.md)
   population search (the remaining LLM-free slice), [#20] the LLM
   meta-layer remainder (configurator, velocity-rewrite loop,
   transferability).
+  - ~~[#46] feedback-weighted arm in the K4 battery~~ — **FALSIFIED
+    (feedback), 2026-07-16** (example + report only, no version bump):
+    `examples/strategy_comparison.rs` Part 3 + `docs/prereg-feedback-arm-k4.md`
+    + `docs/ab-report-feedback-arm-k4.md`. The balanced `hw=fw` weighting
+    cancels in the full-join base; a selective base / failure-weighted point
+    would each need a fresh registration.
 - **Phase 7 — Persistence implementation** ([#29]–[#33] from the [#21]
   design doc): ~~[#29] core chained log~~ (DONE 0.8.0), ~~[#30] topology
   projection + replay~~ (DONE 0.9.0 — #18 parity gate held), [#31]

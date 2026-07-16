@@ -74,7 +74,12 @@ forex domain since removed).
   report — see §Phase 6). **Suites: 88 default / 119 decision / 110 magnitude
   / 141 decision,magnitude / 108 persistence / 131 persistence,magnitude**
   (+12 everywhere vs the post-#43 baselines: 9 unit + 3 integration).
-  Payoff: a feedback-aware third baseline arm for any future K4 rematch.
+  Payoff: a feedback-aware arm for a K4 rematch — REALISED as
+  [#46](https://github.com/sustia-llc/koalisi/issues/46), **FALSIFIED (feedback)
+  2026-07-16** (see Phase 5 idea 3 + gotcha 20). `ThresholdPolicy<FeedbackCalculator<C>>`
+  drops into the battery via a per-seed `Arm { policy, store }` factory; the loop
+  is closed with `record_outcome` per task after the leave sweep, store reset per
+  seed (feedback is decision-CHANGING, unlike the magnitude evaluator cache).
 - **Forex domain REMOVED — v0.11.0 (2026-07-14, #37)**: the
   de-financialisation pass completed. koalisi is now a purely domain-agnostic
   coalition runtime. Deleted `src/market.rs` and the arbitrage swarm
@@ -366,7 +371,9 @@ koalisi/
 │   ├── ab-report-K4-{yamafaktory,catgraph}.md   K4 A/B + backend-parity reports
 │   ├── ab-report-K4-catgraph-evaluator.md  K6 post-optimization re-run + parity + latency profile (#33 evidence)
 │   ├── phase7-persistence-design.md        Phase 7 EventStore design (#21 deliverable; P7.1–P7.5 phasing)
-│   └── k3-hot-path-bench.md                K3 kameo-vs-tokio bench evidence
+│   ├── k3-hot-path-bench.md                K3 kameo-vs-tokio bench evidence
+│   ├── prereg-feedback-arm-k4.md           #46 pre-registration (feedback-arm K4 rematch; result appended)
+│   └── ab-report-feedback-arm-k4.md        #46 run — FALSIFIED (feedback); Scope A null + Scope B reliability contest + E1 sweep
 └── tests/
     ├── topology_test.rs                    12 tests
     ├── algorithms_test.rs                  18 tests (incl. 3 feedback-loop/seeding tests, #41)
@@ -576,6 +583,27 @@ These cost time during the build; future-me should not relearn them.
       store can't be NaN-poisoned); non-finite *weights* propagate to the score
       where `ThresholdPolicy`'s non-finite guard declines the action.
 
+20. **Feedback-arm K4 battery (#46) — why it FALSIFIED, rely on this.**
+    - **Balanced weights cancel in the full-join regime.** With
+      `ThresholdPolicy<Synergistic>` at threshold 0 every marginal is positive, so
+      every agent joins and none leaves (churn 0). Each member then accrues history
+      and failures together (`history ≈ failures`), and `hw=fw` makes the feedback
+      term `hw·25·history − fw·25·failures ≈ 0` — `fb` never diverges from `thr`
+      (0/30 seeds). Feedback can only bite by declining an agent, which needs the
+      *failure* term to dominate (`fw > hw`): the E1 sweep's failure-heavy cells
+      move `PRIMARY_B` (best 0.0730) but none reach magnitude (0.2818). Magnitude
+      wins by *selectivity* (small high-`cov_eff` coalitions), which a full-join base
+      can't produce. Lesson for any rematch: use a **selective base** (positive
+      `join_threshold`, #48) and/or a **failure-weighted** point (#49) — and
+      register it fresh.
+    - **Harness contract** (`examples/strategy_comparison.rs` Part 3): `run_instance`
+      takes `Scope` + `Option<&FeedbackStore>`; write-back is `record_outcome` ONCE
+      per task AFTER the leave sweep (within-task decisions see a constant store);
+      the store is FRESH PER SEED (via the `Arm { policy, store }` factory) so the 30
+      instances stay independent. Scope A shares a byte-identical prefix with the
+      frozen Part 2 (regression gate: Scope-A `mag` == committed baseline); Scope B
+      appends reliability + `perf[t][i]` draws off the SAME stream, after the prefix.
+
 ## Reproducers
 
 All assume `cwd = koalisi/`.
@@ -660,7 +688,19 @@ Five concrete integration ideas, ported verbatim from the summary's
 3. **`ValueCalculator` extension with feedback weights** (promoted →
    [#41](https://github.com/sustia-llc/koalisi/issues/41), **DONE v0.12.0
    2026-07-16** — shipped as the `FeedbackCalculator<C>` wrapper +
-   shared `FeedbackStore`, see §Current state and gotcha 19)**.** SwarmAgentic's
+   shared `FeedbackStore`, see §Current state and gotcha 19)**.**
+   **K4 rematch as an arm: [#46](https://github.com/sustia-llc/koalisi/issues/46)
+   — FALSIFIED (feedback), 2026-07-16.** The feedback arm was wired into the
+   battery (`examples/strategy_comparison.rs` Part 3, Scope A i.i.d. null + Scope
+   B reliability-structured contest; pre-reg `docs/prereg-feedback-arm-k4.md`,
+   report `docs/ab-report-feedback-arm-k4.md`). Registered `hw=fw=0.5` cancels in
+   the full-join `ThresholdPolicy`-at-0 regime (`history≈failures`); the E1 sweep
+   shows failure-dominant cells bite but never reach magnitude (mag 0.2818 vs best
+   fb 0.0730). Example-only, no library/version change. Follow-ups filed (new
+   registrations): selective base (positive `join_threshold`) →
+   [#48](https://github.com/sustia-llc/koalisi/issues/48); failure-weighted point
+   (`hw=0,fw=1`) → [#49](https://github.com/sustia-llc/koalisi/issues/49) (likely
+   folds into #48). SwarmAgentic's
    three coefficients (`c_f` failure / `c_p` personal-best / `c_g`
    global-best) are direct analogues of `WeightedCalculator`'s
    `size`/`capability`/`trust`/`synergy` weights. Add `history_weight`
