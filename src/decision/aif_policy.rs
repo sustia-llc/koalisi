@@ -106,6 +106,9 @@ impl CapabilityModel {
                 max_precision: params.max_precision,
                 success_preference: params.success_preference,
                 alpha: params.alpha,
+                // Deterministic-B bridge: no stochastic-transition info-gain term
+                // (0.6.0's opt-in; noise RAISES net G — see tira CHANGELOG 0.6.0).
+                transition_noise: 0.0,
             },
         )
     }

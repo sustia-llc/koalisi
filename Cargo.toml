@@ -33,7 +33,7 @@ tokio-rayon = "2.1"
 # Engine crate from the `tira` repo. When the `decision` feature is off, none
 # of this (and none of its nalgebra dependency) is compiled — the non-AIF
 # ThresholdPolicy / ValueCalculator path is always available without it.
-aif = { git = "ssh://git@github.com/sustia-llc/tira", tag = "aif-v0.5.0", optional = true }
+aif = { git = "ssh://git@github.com/sustia-llc/tira", tag = "aif-v0.9.0", optional = true }
 
 # Optional: categorical magnitude decision strategy (coalition diversity via
 # catgraph's enriched-category magnitude). SSH URL (not HTTPS) because catgraph

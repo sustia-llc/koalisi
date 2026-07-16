@@ -672,7 +672,8 @@ learning, ad-hoc RNG). Instead koalisi depends on the code-reviewed `aif` refere
 engine from the `tira` repo and bridges to it.
 
 - **Dependency:** `aif = { git = "ssh://git@github.com/sustia-llc/tira", tag =
-  "aif-v0.5.0", optional = true }` (shipped at `aif-v0.4.0`; bumped by follow-up #2),
+  "aif-v0.9.0", optional = true }` (shipped at `aif-v0.4.0`; → `v0.5.0` by follow-up #2;
+  → `v0.9.0` by #43 Part 1, 2026-07-16 — decision suite passed unchanged),
   behind `[features] decision = ["dep:aif"]`. SSH
   URL (not HTTPS) because `tira` is private and git here is SSH-only — cargo's libgit2
   HTTPS fetch can't authenticate. Feature-off builds compile **no `aif` and no
@@ -706,8 +707,9 @@ engine from the `tira` repo and bridges to it.
   unit-tested: an agent covering a new required bit lowers `G` (joins); a redundant
   clone does not. `BridgeParams` (`max_precision` 0.95, `success_preference` 0.9,
   `alpha` 8.0) tunes the mapping.
-- **aif 0.9.0 is released** (tag `aif-v0.9.0`, 2026-07-16; koalisi still pins `v0.5.0` —
-  bump tracked in [#43](https://github.com/sustia-llc/koalisi/issues/43)). **tira's
+- **aif 0.9.0 is released and pinned** (tag `aif-v0.9.0`, 2026-07-16; bump landed via
+  [#43](https://github.com/sustia-llc/koalisi/issues/43) Part 1 — Part 2, the K4 v3
+  rematch pre-registration, remains open). **tira's
   canonical-AIF parity roadmap (#12–#16) is complete**: 0.6.0 generalized generative
   model (multi-factor/multi-modality/injectable B), 0.7.0 marginal message passing +
   surfaced F, 0.8.0 full Dirichlet learning (pA/pB/pD/pE, η/ω, novelty EFE term,
