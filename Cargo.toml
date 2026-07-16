@@ -34,6 +34,11 @@ tokio-rayon = "2.1"
 # of this (and none of its nalgebra dependency) is compiled — the non-AIF
 # ThresholdPolicy / ValueCalculator path is always available without it.
 aif = { git = "ssh://git@github.com/sustia-llc/tira", tag = "aif-v0.9.0", optional = true }
+# The multi-modality AIF bridge (`aif-mm`, prereg K4-v3) constructs a
+# `GenerativeModel` directly, which is expressed over `nalgebra::DMatrix`. Version
+# unifies with the one `aif` already pulls transitively (0.35), so no new build.
+# Only compiled under `decision`.
+nalgebra = { version = "0.35", optional = true }
 
 # Optional: categorical magnitude decision strategy (coalition diversity via
 # catgraph's enriched-category magnitude). SSH URL (not HTTPS) because catgraph
@@ -62,7 +67,7 @@ sha2 = { version = "0.10", optional = true }
 [features]
 default = []
 # Active Inference coalition-decision strategy (pluggable, off by default).
-decision = ["dep:aif"]
+decision = ["dep:aif", "dep:nalgebra"]
 # Categorical-magnitude coalition-decision strategy (pluggable, off by default).
 magnitude = ["dep:catgraph-magnitude"]
 # Durable coalition decision-event bus on surrealdb-live-message (off by default).

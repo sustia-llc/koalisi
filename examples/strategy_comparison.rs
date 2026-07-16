@@ -88,8 +88,8 @@ use std::time::{Duration, Instant};
 use catgraph_magnitude::CatgraphError;
 use koalisi::algorithms::{AgentCapabilities, SynergisticCalculator};
 use koalisi::decision::{
-    AifDecisionPolicy, CoalitionDecisionPolicy, CouplingModel, Decision, DecisionContext,
-    MagnitudePolicy, ThresholdPolicy,
+    AifDecisionPolicy, AifMmDecisionPolicy, CoalitionDecisionPolicy, CouplingModel, Decision,
+    DecisionContext, MagnitudePolicy, ThresholdPolicy,
 };
 
 /// Hardcoded report date — deterministic, never read from the clock. Bumped
@@ -656,11 +656,17 @@ fn median(mut values: Vec<f64>) -> f64 {
 // ---------------------------------------------------------------------------
 
 fn part2_ab_harness() {
-    // Two measured arms.
+    // Three measured arms (prereg K4-v3): the incumbent quality winner `mag`, the
+    // shipped scalar AIF bridge `aif-scalar`, and the new multi-modality bridge
+    // `aif-mm`. Instances are byte-identical across arms; only the value model
+    // differs. `aif` / `mag` run first and in their original order so their
+    // per-seed rows reproduce the committed baseline (the regression gate).
     let aif = AifDecisionPolicy::default();
     let mag = MagnitudePolicy::default();
+    let mm = AifMmDecisionPolicy::default();
     let (aif_seeds, aif_lat) = run_battery(&aif);
     let (mag_seeds, mag_lat) = run_battery(&mag);
+    let (mm_seeds, mm_lat) = run_battery(&mm);
 
     // Oracle (n <= 8 seeds only).
     let oracle: Vec<Option<f64>> = (0..SEEDS)
@@ -687,7 +693,9 @@ fn part2_ab_harness() {
         })
         .collect();
 
-    print_report(&aif_seeds, &aif_lat, &mag_seeds, &mag_lat, &oracle, &sweep);
+    print_report(
+        &aif_seeds, &aif_lat, &mag_seeds, &mag_lat, &mm_seeds, &mm_lat, &oracle, &sweep,
+    );
 }
 
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
@@ -696,20 +704,29 @@ fn print_report(
     aif_lat: &[f64],
     mag_seeds: &[InstanceMetrics],
     mag_lat: &[f64],
+    mm_seeds: &[InstanceMetrics],
+    mm_lat: &[f64],
     oracle: &[Option<f64>],
     sweep: &[(f64, f64)],
 ) {
     // Aggregates.
     let aif_primaries: Vec<f64> = aif_seeds.iter().map(|m| m.primary).collect();
     let mag_primaries: Vec<f64> = mag_seeds.iter().map(|m| m.primary).collect();
+    let mm_primaries: Vec<f64> = mm_seeds.iter().map(|m| m.primary).collect();
     let aif_primary_med = median(aif_primaries.clone());
     let mag_primary_med = median(mag_primaries.clone());
+    let mm_primary_med = median(mm_primaries.clone());
     let (aif_p_med, aif_p_iqr) = median_iqr(aif_primaries);
     let (mag_p_med, mag_p_iqr) = median_iqr(mag_primaries);
+    let (mm_p_med, mm_p_iqr) = median_iqr(mm_primaries);
     let (aif_c_med, aif_c_iqr) = median_iqr(aif_seeds.iter().map(|m| m.churn as f64).collect());
     let (mag_c_med, mag_c_iqr) = median_iqr(mag_seeds.iter().map(|m| m.churn as f64).collect());
+    let mm_churn_med = median(mm_seeds.iter().map(|m| m.churn as f64).collect());
+    let scalar_churn_med = median(aif_seeds.iter().map(|m| m.churn as f64).collect());
+    let (mm_c_med, mm_c_iqr) = median_iqr(mm_seeds.iter().map(|m| m.churn as f64).collect());
     let (aif_l_med, aif_l_iqr) = median_iqr(aif_lat.to_vec());
     let (mag_l_med, mag_l_iqr) = median_iqr(mag_lat.to_vec());
+    let (mm_l_med, mm_l_iqr) = median_iqr(mm_lat.to_vec());
 
     // Verdict criteria (pre-committed).
     let non_inferior_median = mag_primary_med >= 0.95 * aif_primary_med;
@@ -743,6 +760,31 @@ fn print_report(
         (false, true) => "VALIDATED (B)",
         (false, false) => "FALSIFIED",
     };
+
+    // K4-v3 confirmatory criteria (prereg `docs/prereg-K4v3-multimodal-aif.md`).
+    // `aif` is the scalar arm; `mag` the incumbent; `mm` the new multi-modality arm.
+    // H1 — gap closed: magnitude is no longer clearly superior to mm.
+    let h1 = mag_primary_med < 1.25 * mm_primary_med;
+    // H2 — mechanism: mm clearly beats the scalar bridge (median + per-seed).
+    let mm_superior_count = (0..mm_seeds.len())
+        .filter(|&i| mm_seeds[i].primary > aif_seeds[i].primary)
+        .count();
+    let h2a = mm_primary_med >= 1.25 * aif_primary_med;
+    let h2b = mm_superior_count as f64 >= 0.60 * SEEDS as f64;
+    let h2 = h2a && h2b;
+    // S1 — churn (secondary, reported alongside the verdict, non-gating).
+    let s1 = mm_churn_med <= 0.5 * scalar_churn_med;
+    let k4v3_verdict = match (h1, h2) {
+        (true, true) => "VALIDATED (gap closed)",
+        (_, true) => "PARTIAL (mechanism only)",
+        (_, false) => "FALSIFIED (multimodality)",
+    };
+    // Regression gate: mm ≡ scalar per-seed indicates the registered bridge is
+    // decision-equivalent to the scalar arm (both monotone in covered-bit count).
+    let mm_equals_scalar = (0..mm_seeds.len()).all(|i| {
+        (mm_seeds[i].primary - aif_seeds[i].primary).abs() < 1e-12
+            && mm_seeds[i].churn == aif_seeds[i].churn
+    });
 
     // Oracle regret over eligible seeds.
     let aif_regrets: Vec<f64> = (0..aif_seeds.len())
@@ -789,18 +831,23 @@ fn print_report(
     // Per-seed table.
     println!("## Per-seed results");
     println!();
-    println!("| seed | n | aif_primary | mag_primary | aif_churn | mag_churn | oracle_primary |");
-    println!("|-----:|--:|------------:|------------:|----------:|----------:|---------------:|");
+    println!(
+        "| seed | n | mag_primary | scalar_primary | mm_primary | mag_churn | scalar_churn | mm_churn | oracle_primary |"
+    );
+    println!(
+        "|-----:|--:|------------:|---------------:|-----------:|----------:|-------------:|---------:|---------------:|"
+    );
     for i in 0..aif_seeds.len() {
         let a = &aif_seeds[i];
         let m = &mag_seeds[i];
+        let mm = &mm_seeds[i];
         let oracle_cell = match oracle[i] {
             Some(o) => format!("{o:.4}"),
             None => "—".to_string(),
         };
         println!(
-            "| {} | {} | {:.4} | {:.4} | {} | {} | {} |",
-            a.seed, a.n, a.primary, m.primary, a.churn, m.churn, oracle_cell
+            "| {} | {} | {:.4} | {:.4} | {:.4} | {} | {} | {} | {} |",
+            a.seed, a.n, m.primary, a.primary, mm.primary, m.churn, a.churn, mm.churn, oracle_cell
         );
     }
     println!();
@@ -808,11 +855,17 @@ fn print_report(
     // Aggregate table.
     println!("## Aggregates (median · IQR)");
     println!();
-    println!("| metric | AIF | Magnitude |");
-    println!("|--------|----:|----------:|");
-    println!("| primary | {aif_p_med:.4} · {aif_p_iqr:.4} | {mag_p_med:.4} · {mag_p_iqr:.4} |");
-    println!("| churn | {aif_c_med:.2} · {aif_c_iqr:.2} | {mag_c_med:.2} · {mag_c_iqr:.2} |");
-    println!("| latency µs | {aif_l_med:.3} · {aif_l_iqr:.3} | {mag_l_med:.3} · {mag_l_iqr:.3} |");
+    println!("| metric | Magnitude | AIF-scalar | AIF-mm |");
+    println!("|--------|----------:|-----------:|-------:|");
+    println!(
+        "| primary | {mag_p_med:.4} · {mag_p_iqr:.4} | {aif_p_med:.4} · {aif_p_iqr:.4} | {mm_p_med:.4} · {mm_p_iqr:.4} |"
+    );
+    println!(
+        "| churn | {mag_c_med:.2} · {mag_c_iqr:.2} | {aif_c_med:.2} · {aif_c_iqr:.2} | {mm_c_med:.2} · {mm_c_iqr:.2} |"
+    );
+    println!(
+        "| latency µs | {mag_l_med:.3} · {mag_l_iqr:.3} | {aif_l_med:.3} · {aif_l_iqr:.3} | {mm_l_med:.3} · {mm_l_iqr:.3} |"
+    );
     println!();
     println!(
         "_Latency: same hardware, both arms warm, sync path — the only machine-varying numbers in this report._"
@@ -865,6 +918,37 @@ fn print_report(
     println!();
     println!("_Falsification is a legitimate result; nothing was tuned to flip it (koalisi #7)._");
     println!();
+
+    // K4-v3 confirmatory verdict (multi-modality AIF arm; koalisi #43 Part 2).
+    let lat_ratio = if aif_l_med > 0.0 { mm_l_med / aif_l_med } else { f64::NAN };
+    println!("### K4-v3 confirmatory criteria (multi-modality AIF arm, #43 Part 2)");
+    println!();
+    println!(
+        "- **H1 (gap closed):** mag median {mag_primary_med:.4} < 1.25 × mm median {mm_primary_med:.4} → {}",
+        pass(h1)
+    );
+    println!(
+        "- **H2 (mechanism):** mm median {mm_primary_med:.4} ≥ 1.25 × scalar median {aif_primary_med:.4} ({}) AND mm strictly superior in {mm_superior_count}/{SEEDS} seeds ≥ 60% ({}) → {}",
+        pass(h2a),
+        pass(h2b),
+        pass(h2)
+    );
+    println!(
+        "- **S1 (churn, secondary/non-gating):** mm churn median {mm_churn_med:.2} ≤ 0.5 × scalar churn median {scalar_churn_med:.2} → {}",
+        pass(s1)
+    );
+    println!(
+        "- **Latency (record-only):** mm median {mm_l_med:.3} µs, scalar median {aif_l_med:.3} µs, mm/scalar ratio {lat_ratio:.2}×."
+    );
+    println!();
+    println!("**VERDICT (K4-v3): {k4v3_verdict}**");
+    println!();
+    if mm_equals_scalar {
+        println!(
+            "_Note: the registered `aif-mm` arm is **decision-equivalent** to `aif-scalar` — per-seed primary and churn match seed-for-seed. With binary union coverage and symmetric per-modality preferences the multi-modality `G` is a strictly monotone function of the covered-bit COUNT, the same information the scalar coverage fraction carries; both decision rules depend only on the sign of ΔG, so they make identical join/leave acts. The structure enters the *value* (`G` magnitudes differ) but not the *decision*. This is the mechanism the H2 test probes; it is reported, not tuned._"
+        );
+        println!();
+    }
 
     // t-sweep.
     println!("## t-sweep (exploratory, non-gating)");

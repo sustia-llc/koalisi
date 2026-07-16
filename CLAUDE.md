@@ -678,8 +678,11 @@ engine from the `tira` repo and bridges to it.
   URL (not HTTPS) because `tira` is private and git here is SSH-only — cargo's libgit2
   HTTPS fetch can't authenticate. Feature-off builds compile **no `aif` and no
   `nalgebra`**. (`aif` uses `nalgebra` internally — NOT `ndarray`; the old "adds
-  ndarray dependency" note was wrong. koalisi itself adds no matrix lib: the bridge
-  boundary is plain `u32`/`f64`.)
+  ndarray dependency" note was wrong. Since the K4-v3 `aif-mm` arm, koalisi carries a
+  **direct optional `nalgebra` dep under `decision`** — the multimodal bridge
+  constructs `GenerativeModel` matrices itself; version unified with aif's transitive
+  0.35, so no extra compile unit. The *scalar* bridge boundary remains plain
+  `u32`/`f64` via `competence_efe`.)
 - **`src/decision/` module** (`mod.rs` always compiled; `aif_policy.rs` feature-gated):
   - `CoalitionDecisionPolicy` trait — `should_join`/`should_leave` (and dyn-compatible
     `*_async` variants returning boxed futures) over `&dyn AgentCapabilities` +
@@ -707,9 +710,20 @@ engine from the `tira` repo and bridges to it.
   unit-tested: an agent covering a new required bit lowers `G` (joins); a redundant
   clone does not. `BridgeParams` (`max_precision` 0.95, `success_preference` 0.9,
   `alpha` 8.0) tunes the mapping.
+- **K4-v3 rematch: `FALSIFIED (multimodality)`** (2026-07-16,
+  `docs/ab-report-K4v3-multimodal-aif.md`; pre-registered in
+  `docs/prereg-K4v3-multimodal-aif.md` before implementation). The registered
+  multimodal arm (`AifMmDecisionPolicy`, one modality per required bit, binary union
+  coverage) is **decision-equivalent to the scalar arm** — G is affine in the
+  covered-bit count and margin-0 decisions see only sign(ΔG), so all 30 seeds match
+  scalar seed-for-seed (theorem characterized by the committed
+  `mm_and_scalar_agree_on_acts` test). The v2 magnitude-quality verdict stands.
+  E3 resolved analytically (same theorem); E1/E2 (learning / stochastic-B +
+  PrecisionDynamics) deferred — they need a *persistent-agent* design (fresh-POMDP-per-
+  decision makes learning/β-persistence meaningless) and their own registration. E2 is
+  the identified lever: a live info-gain term is non-monotone in per-bit structure.
 - **aif 0.9.0 is released and pinned** (tag `aif-v0.9.0`, 2026-07-16; bump landed via
-  [#43](https://github.com/sustia-llc/koalisi/issues/43) Part 1 — Part 2, the K4 v3
-  rematch pre-registration, remains open). **tira's
+  [#43](https://github.com/sustia-llc/koalisi/issues/43) Part 1). **tira's
   canonical-AIF parity roadmap (#12–#16) is complete**: 0.6.0 generalized generative
   model (multi-factor/multi-modality/injectable B), 0.7.0 marginal message passing +
   surfaced F, 0.8.0 full Dirichlet learning (pA/pB/pD/pE, η/ω, novelty EFE term,

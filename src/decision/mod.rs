@@ -237,6 +237,11 @@ pub use aif_policy::{
     EfeValueCalculator, TrustBeliefs,
 };
 
+#[cfg(feature = "decision")]
+mod aif_mm_policy;
+#[cfg(feature = "decision")]
+pub use aif_mm_policy::{AifMmDecisionPolicy, MmEfeValueCalculator, MultiModalModel};
+
 #[cfg(feature = "magnitude")]
 mod magnitude_policy;
 #[cfg(feature = "magnitude")]
