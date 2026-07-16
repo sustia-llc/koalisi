@@ -74,7 +74,15 @@ forex domain since removed).
   report — see §Phase 6). **Suites: 88 default / 119 decision / 110 magnitude
   / 141 decision,magnitude / 108 persistence / 131 persistence,magnitude**
   (+12 everywhere vs the post-#43 baselines: 9 unit + 3 integration).
-  Payoff: a feedback-aware third baseline arm for any future K4 rematch.
+  Payoff: a feedback-aware arm for any future K4 rematch —
+  `ThresholdPolicy<FeedbackCalculator<C>>` drops straight into
+  `run_battery(&dyn CoalitionDecisionPolicy)` (strategy_comparison.rs) alongside
+  aif/mag/mm, BUT only *bites* if the battery closes the loop (`record_outcome`
+  per task or `seed_feedback_history`; an empty store ≡ plain
+  `ThresholdPolicy<C>`, and reset per seed since feedback is decision-CHANGING
+  unlike the magnitude evaluator cache) AND needs its own pre-registration —
+  the feedback signal is orthogonal to magnitude/EFE, a new hypothesis, not a
+  reparameterization.
 - **Forex domain REMOVED — v0.11.0 (2026-07-14, #37)**: the
   de-financialisation pass completed. koalisi is now a purely domain-agnostic
   coalition runtime. Deleted `src/market.rs` and the arbitrage swarm
