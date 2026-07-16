@@ -104,12 +104,12 @@ cargo run --features durable --example durable_decisions                        
 ## Tests
 
 ```sh
-cargo test                                 # 76 tests (core + topology + algorithms + decision + ingestion)
-cargo test --features decision             # 95 tests (+ Active Inference decision strategy)
-cargo test --features magnitude            # 98 tests (+ categorical-magnitude decision strategy + trajectory analytics)
-cargo test --features decision,magnitude   # 117 tests (both decision arms)
-cargo test --features persistence          # 96 tests (+ chained event store + topology replay)
-cargo test --features persistence,magnitude # 119 tests (incl. the live-vs-replayed parity gate)
+cargo test                                 # 88 tests (core + topology + algorithms + decision + ingestion)
+cargo test --features decision             # 119 tests (+ Active Inference decision strategies, scalar + multimodal)
+cargo test --features magnitude            # 110 tests (+ categorical-magnitude decision strategy + trajectory analytics)
+cargo test --features decision,magnitude   # 141 tests (both decision arms)
+cargo test --features persistence          # 108 tests (+ chained event store + topology replay)
+cargo test --features persistence,magnitude # 131 tests (incl. the live-vs-replayed parity gate)
 cargo test --features durable              # + container-backed restart-durability test (needs Docker)
 ```
 
@@ -118,8 +118,8 @@ cargo test --features durable              # + container-backed restart-durabili
 - [catgraph-applied](https://github.com/sustia-llc/catgraph) (tag `v0.2.0`, kept in lockstep with catgraph-magnitude — one repo, one checkout) — CRUD hypergraph container backing the topology layer (the K1 re-back; replaced yamafaktory `hypergraph` v4.2.0)
 - tokio + tokio-util — async runtime + lifecycle primitives
 - rayon + tokio-rayon — CPU-bound graph operations bridge
-- [surrealdb-live-message](https://github.com/sustia-llc/surrealdb-live-message) (tag `v0.2.0`, **optional**, feature `durable`) — two-tier restart-durable message bus for the coalition decision log
-- [aif](https://github.com/sustia-llc/tira) (tag `aif-v0.5.0`, **optional**, feature `decision`) — active-inference engine for the AIF decision strategy; pulls `nalgebra` only when the feature is enabled
+- [surrealdb-live-message](https://github.com/sustia-llc/surrealdb-live-message) (tag `v0.2.1`, **optional**, feature `durable`) — two-tier restart-durable message bus for the coalition decision log
+- [aif](https://github.com/sustia-llc/tira) (tag `aif-v0.9.0`, **optional**, feature `decision`) — active-inference engine for the AIF decision strategies (scalar + multimodal); `nalgebra` is only compiled when the feature is enabled
 - [catgraph-magnitude](https://github.com/sustia-llc/catgraph) (tag `v0.2.0`, **optional**, feature `magnitude`) — enriched-category coalition magnitude for the categorical decision strategy
 
 ## Origin
