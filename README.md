@@ -104,6 +104,18 @@ cargo run --release --features decision,magnitude --example strategy_comparison 
 cargo run --features durable --example durable_decisions                          # durable decision log (needs Docker)
 ```
 
+> **Value models for structure search (population_search).** `search` maximises
+> `Σ over blocks of ValueCalculator(block)`. The built-in calculators are
+> *degenerate* for this: `AdditiveCalculator` is **constant** across every
+> set-partition (its size / capability / trust terms sum to the same total for any
+> grouping), and `SynergisticCalculator` / `MultiplicativeCalculator` favour
+> all-singletons — so with those the answer is trivial and the improvement lineage
+> is one epoch. The `population_search` example therefore uses a `TaskCoverage`
+> value model (reward full coverage of a required capability set, penalise redundant
+> members) whose optimum is a genuine non-trivial partition. Real structure search
+> needs an interior-optimum value model — coverage-style, or the `magnitude` / EFE /
+> `FeedbackCalculator` arms.
+
 ## Tests
 
 ```sh
