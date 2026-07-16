@@ -5,16 +5,22 @@
 //!   coefficients closed inside Rust; issue #41)
 //! - [`dcvc`] — Distributed Coalitional Value Calculation (fair workload distribution)
 //! - [`aipa`] — Anytime Integer Partition Algorithm (partition-based coalition search)
+//! - [`population`] — population-based coalition-structure search atop AIPA
+//!   (SwarmAgentic-style deterministic PSO; issue #42)
 
 pub mod aipa;
 pub mod dcvc;
 pub mod feedback;
+pub mod population;
 pub mod value_calculation;
 
 pub use aipa::{
     IntegerPartition, PartitionBounds, compute_all_partition_bounds, compute_partition_avg_bound,
     compute_partition_min_bound, compute_partition_upper_bound, find_best_partition,
     generate_integer_partitions, partition_count, verify_partition,
+};
+pub use population::{
+    CoalitionStructure, PopulationConfig, SearchOutcome, record_trajectory, search,
 };
 pub use dcvc::{DCVCDistributor, DistributionStats, WorkloadShare};
 pub use feedback::{FAILURE_UNIT, FeedbackCalculator, FeedbackStore, HISTORY_UNIT};
