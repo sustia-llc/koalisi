@@ -8,7 +8,7 @@ use super::events::TemporalEvent;
 use super::queries::TemporalQueries;
 use super::temporal::TemporalHypergraph;
 use super::timestamp::{TimeRange, Timestamp};
-use crate::algorithms::AgentCapabilities;
+use crate::algorithms::{AgentCapabilities, FeedbackStore};
 use crate::decision::{CoalitionDecisionPolicy, Decision, DecisionContext};
 use super::{HyperedgeTrait, VertexTrait};
 use catgraph_applied::{HyperedgeIndex, VertexIndex};
@@ -225,8 +225,12 @@ where
     ///
     /// Returns a list of (coalition_index, time_range) pairs showing when
     /// the agent was a member of each coalition.
-    #[allow(dead_code)]
-    pub(crate) async fn agent_coalition_history(
+    ///
+    /// The episode count (list length) feeds [`FeedbackStore`] seeding via
+    /// [`seed_feedback_history`](Self::seed_feedback_history).
+    ///
+    /// [`FeedbackStore`]: crate::algorithms::FeedbackStore
+    pub async fn agent_coalition_history(
         &self,
         agent: VertexIndex,
     ) -> Vec<(HyperedgeIndex, TimeRange)> {
@@ -420,6 +424,35 @@ where
     V: VertexTrait + Clone + AgentCapabilities + 'static,
     HE: HyperedgeTrait + Clone + 'static,
 {
+    /// Seed the feedback store's personal-best history signal from the
+    /// event-sourced membership log.
+    ///
+    /// For each agent index, its membership-episode count (from
+    /// [`agent_coalition_history`](Self::agent_coalition_history) — ongoing
+    /// memberships count as one episode) is added to `store` via
+    /// [`FeedbackStore::add_history`]. Failures cannot be seeded from the log
+    /// (it records memberships, not outcomes); those accrue only through
+    /// [`FeedbackStore::record_outcome`] as coalitions produce values.
+    ///
+    /// **Seed a given store at most once, before outcome recording begins.**
+    /// Seeding is not idempotent: the full episode count is recomputed from the
+    /// event log and *added* on every call, so re-seeding the same store from
+    /// the same log doubles every agent's history. If a mid-slice agent lookup
+    /// fails, the error short-circuits and agents earlier in the slice remain
+    /// seeded — reseeding into a fresh store is the recovery path.
+    pub async fn seed_feedback_history(
+        &self,
+        agents: &[VertexIndex],
+        store: &FeedbackStore,
+    ) -> TemporalResult<()> {
+        for &idx in agents {
+            let id = self.get_agent(idx).await?.agent_id();
+            let episodes = self.agent_coalition_history(idx).await.len() as u64;
+            store.add_history(id, episodes);
+        }
+        Ok(())
+    }
+
     /// Fetch the (Copy/Clone) weights of `members`, preserving order.
     async fn agent_weights(&self, members: &[VertexIndex]) -> TemporalResult<Vec<V>> {
         let mut weights = Vec::with_capacity(members.len());

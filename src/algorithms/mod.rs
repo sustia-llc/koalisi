@@ -1,11 +1,14 @@
 //! Coalition formation algorithms.
 //!
 //! - [`value_calculation`] — pluggable value calculators for coalitions
+//! - [`feedback`] — feedback-weighted value calculator (SwarmAgentic velocity
+//!   coefficients closed inside Rust; issue #41)
 //! - [`dcvc`] — Distributed Coalitional Value Calculation (fair workload distribution)
 //! - [`aipa`] — Anytime Integer Partition Algorithm (partition-based coalition search)
 
 pub mod aipa;
 pub mod dcvc;
+pub mod feedback;
 pub mod value_calculation;
 
 pub use aipa::{
@@ -14,6 +17,7 @@ pub use aipa::{
     generate_integer_partitions, partition_count, verify_partition,
 };
 pub use dcvc::{DCVCDistributor, DistributionStats, WorkloadShare};
+pub use feedback::{FAILURE_UNIT, FeedbackCalculator, FeedbackStore, HISTORY_UNIT};
 pub use value_calculation::{
     AdditiveCalculator, MultiplicativeCalculator, SynergisticCalculator, ValueCalculator,
     WeightedCalculator,

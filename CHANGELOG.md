@@ -7,43 +7,83 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Both gated design inputs are now recorded (gate RESOLVED 2026-07-03).
-Input #1 (2026-05-27): SwarmAgentic-style optimisation becomes the new
-Phase 5 (see `docs/SwarmAgentic-summary.md`); Persistence moved to
-Phase 7 (last) so the particle traces and belief states inform the
-persistence schema before committing to a wire format. Input #2
-(2026-07-03): driver-derived design goals from the tauhokohoko + NEST
-requirement surveys — Phase 7 gets the IDSov persistence constraint set
-(append-only + crypto-deletion + bilateral federation + portable
-format + EffectLog-compatible traces + FAIR provenance; recorded on
-[#21]), Phase 5 is reframed as NEST's slow-loop AI-for-AI calibration
-copilot (recorded on [#20]). The Phase 7 re-plan is unblocked; Phase 5
-implementation is held until NEST's 2026-07-09 working session assigns
-Year-1 ownership.
+Planned work — issue-tracked (details in [`CLAUDE.md`](./CLAUDE.md)
+§"Next steps"):
 
-Planned work — all issue-tracked as of 2026-07-03 (details in
-[`CLAUDE.md`](./CLAUDE.md) §"Next steps"):
+- **Phase 5 — SwarmAgentic-style optimisation** (de-gated 2026-07-15):
+  ~~[#41] ValueCalculator feedback weights~~ (DONE 0.12.0), [#42] AIPA
+  population search (the remaining LLM-free slice), [#20] the LLM
+  meta-layer remainder (configurator, velocity-rewrite loop,
+  transferability).
+- **Phase 7 — Persistence implementation** ([#29]–[#33] from the [#21]
+  design doc): ~~[#29] core chained log~~ (DONE 0.8.0), ~~[#30] topology
+  projection + replay~~ (DONE 0.9.0 — #18 parity gate held), [#31]
+  sealing + revocation registry (*blocked on the tauhokohoko
+  KEK-granularity answer*), [#32] decision/belief streams, [#33]
+  federation manifests + FAIR provenance.
+- **[#38]** domain-neutral remote coalition-event gateway (successor to
+  the removed `remote` feature; folds in the [#24] hardening ideas).
+- **[#44]** persistent-agent AIF design (E1/E2 learning + precision
+  dynamics deferred from the K4-v3 rematch; unscheduled).
+- **[#25]** metrics example, reframed onto the `CoalitionService`
+  decision path / topology events.
 
-- **Phase 5 — SwarmAgentic-style optimisation** ([#20], **gated** on the
-  user's design input #2): language-driven PSO meta-layer that evolves
-  coalition designs. Five integration ideas (configurator, failure-aware
-  velocity ↔ EFE bridge, ValueCalculator feedback weights, AIPA +
-  population hybrid, cross-model transferability). `LlmProvider` stub in
-  place.
-- **Phase 7 — Persistence implementation** (filed 2026-07-04 as [#29]–[#33]
-  after sign-off of the [#21] design doc shipped in 0.7.0 — see
-  `docs/phase7-persistence-design.md` §16): ~~[#29] core chained log~~
-  (DONE 0.8.0), ~~[#30] topology projection + replay~~ (DONE 0.9.0 —
-  #18 parity gate held), [#31] sealing + revocation registry, [#32]
-  decision/belief streams, [#33] federation manifests + FAIR provenance.
-- **Databento `LiveClient` integration** ([#22], *blocked on
-  `DATABENTO_API_KEY`*).
-- **Synthetic DBN file** for the end-to-end arb signal demo ([#23]).
-- **Remote gateway hardening** ([#24]) — bounded buffer, cursor-based
-  polling, stable wire schema, QUIC transport alongside TCP.
-- **Nice-to-haves**: metrics/prometheus example ([#25]), multi-triangle
-  stress test + hysteresis semantics ([#26]), bid/ask-aware execution
-  model ([#27]).
+## [0.12.0] — 2026-07-16
+
+Phase 5 idea 3 ships as an LLM-free slice ([#41]), plus the previously
+uncut [#43] decision-layer work (aif 0.9.0 + the K4-v3 multimodal
+rematch) that landed on `main` after 0.11.0.
+
+### Added
+
+- **Feedback-weighted value calculation** ([#41]): new
+  `algorithms::feedback` module (always compiled, zero new deps).
+  `FeedbackCalculator<C: ValueCalculator>` wraps any base calculator and
+  adds two SwarmAgentic velocity-coefficient analogues, closing the
+  feedback loop inside Rust with no LLM round-trips:
+  `history_weight` (≈ `c_p`, personal-best guidance — rewards recorded
+  coalition-membership episodes) and `failure_weight` (≈ `c_f`,
+  failure-driven repulsion — penalises outcomes strictly below a
+  threshold), each scaled by `HISTORY_UNIT`/`FAILURE_UNIT` (= 25.0).
+  Signals accumulate in a shared `FeedbackStore` (`Clone` shares;
+  `record_outcome` ignores + warns on non-finite values so the counters
+  can't be NaN-poisoned; duplicate member ids count per occurrence —
+  dedup first for at-most-once semantics). Zero weights reproduce the
+  base calculator exactly. Under `ThresholdPolicy` the join marginal
+  decomposes as `base_marginal + hw·25·history(x) − fw·25·failures(x)`
+  (existing members' counters cancel), so the feedback acts directly on
+  the candidate's margin — and doubles as a third baseline arm for any
+  future K4 rematch.
+- **Event-log history seeding** ([#41]):
+  `CoalitionManager::agent_coalition_history` promoted to `pub` (the
+  Phase 5 anchor activating) and new
+  `CoalitionManager::seed_feedback_history` folds per-agent
+  membership-episode counts from the event-sourced log into a
+  `FeedbackStore`. Seed a given store at most once, before recording
+  begins — seeding accumulates and is not idempotent (CLAUDE.md
+  gotcha 19). Failures are not seedable (the log has no outcomes).
+- **Multimodal AIF arm** ([#43] Part 2, landed 2026-07-16 pre-cut):
+  `AifMmDecisionPolicy`/`MmEfeValueCalculator` (feature `decision`) —
+  one observation modality per required capability bit via
+  `GenerativeModel`; direct optional `nalgebra` dep under `decision`.
+  K4-v3 registered run: **FALSIFIED (multimodality)** — decision-
+  equivalent to the scalar arm on all 30 seeds
+  (`docs/ab-report-K4v3-multimodal-aif.md`); the v2 magnitude-quality
+  verdict stands.
+
+### Changed
+
+- **aif pin bumped `v0.5.0` → `v0.9.0`** ([#43] Part 1): tira's
+  canonical-AIF parity roadmap complete upstream; decision suite passed
+  unchanged (anchors bit-identical across four upstream minors).
+
+### Tests
+
+- Suites: 88 default / 119 `decision` / 110 `magnitude` /
+  141 `decision,magnitude` / 108 `persistence` /
+  131 `persistence,magnitude` (+12 everywhere from [#41]: 9 unit +
+  3 integration, incl. a `ThresholdPolicy` loop-closure test and an
+  event-log seeding test).
 
 [#18]: https://github.com/sustia-llc/koalisi/issues/18
 [#20]: https://github.com/sustia-llc/koalisi/issues/20
@@ -61,6 +101,10 @@ Planned work — all issue-tracked as of 2026-07-03 (details in
 [#33]: https://github.com/sustia-llc/koalisi/issues/33
 [#37]: https://github.com/sustia-llc/koalisi/issues/37
 [#38]: https://github.com/sustia-llc/koalisi/issues/38
+[#41]: https://github.com/sustia-llc/koalisi/issues/41
+[#42]: https://github.com/sustia-llc/koalisi/issues/42
+[#43]: https://github.com/sustia-llc/koalisi/issues/43
+[#44]: https://github.com/sustia-llc/koalisi/issues/44
 
 ## [0.11.0] — 2026-07-14
 
