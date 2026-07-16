@@ -706,19 +706,30 @@ engine from the `tira` repo and bridges to it.
   unit-tested: an agent covering a new required bit lowers `G` (joins); a redundant
   clone does not. `BridgeParams` (`max_precision` 0.95, `success_preference` 0.9,
   `alpha` 8.0) tunes the mapping.
-- **aif 0.6.0 is released** (tag `aif-v0.6.0`; koalisi still pins `v0.5.0` — bump tracked
-  in [#43](https://github.com/sustia-llc/koalisi/issues/43)). Migration when bumping:
-  `ObsPrecisionParams` gained a `transition_noise` field (add `transition_noise: 0.0` or
-  use `..Default::default()`; default preserves current values byte-for-byte);
-  `CoalitionEvaluator`/`CapabilityProvider` are gone (koalisi never used them). Two
-  design facts from the 0.6.0 work that shape the K4 v3 rematch: (1) `transition_noise`
-  makes the info-gain term live but **raises** net `G` across most of the competence
-  range (pragmatic blurring dominates) — it is a modeling choice, not an exploration
-  bonus, and competence monotonicity is preserved; (2) noise alone cannot make the AIF
-  arm diversity-sensitive (competence stays a scalar) — the diversity-aware arm 0.6.0
-  enables is a **multi-modality bridge**: one observation modality per required
-  capability bit via `GenerativeModel`/`from_model`, per-bit coverage driving that
-  modality's precision, so member-overlap structure enters `G` directly.
+- **aif 0.9.0 is released** (tag `aif-v0.9.0`, 2026-07-16; koalisi still pins `v0.5.0` —
+  bump tracked in [#43](https://github.com/sustia-llc/koalisi/issues/43)). **tira's
+  canonical-AIF parity roadmap (#12–#16) is complete**: 0.6.0 generalized generative
+  model (multi-factor/multi-modality/injectable B), 0.7.0 marginal message passing +
+  surfaced F, 0.8.0 full Dirichlet learning (pA/pB/pD/pE, η/ω, novelty EFE term,
+  Fa/Fb/Fd/Fe), 0.9.0 opt-in γ/β precision dynamics (Smith Table 2). Migration when
+  bumping straight to 0.9.0: `ObsPrecisionParams` gained a `transition_noise` field (add
+  `transition_noise: 0.0` or use `..Default::default()`; default preserves current
+  values byte-for-byte); `CoalitionEvaluator`/`CapabilityProvider` are gone (koalisi
+  never used them); the `competence_efe` anchors above are unchanged through 0.9.0
+  (bit-identical defaults every release); `AgentParams` grew ten fields across
+  0.7.0–0.9.0 — only relevant to the multimodal arm, use `..Default::default()`.
+  Design facts shaping the K4 v3 rematch: (1) `transition_noise` makes the info-gain
+  term live but **raises** net `G` across most of the competence range (pragmatic
+  blurring dominates) — it is a modeling choice, not an exploration bonus, and
+  competence monotonicity is preserved; (2) noise alone cannot make the AIF arm
+  diversity-sensitive (competence stays a scalar) — the diversity-aware arm is a
+  **multi-modality bridge**: one observation modality per required capability bit via
+  `GenerativeModel`/`from_model`, per-bit coverage driving that modality's precision,
+  so member-overlap structure enters `G` directly; (3) since 0.8.0/0.9.0 the multimodal
+  arm can additionally learn its observation model online (`learn_a` + novelty term
+  drives information-seeking toward uncertain members) and run dynamic policy precision
+  (`PrecisionDynamics`, requires MMP + stochastic B) — both opt-in, both optional
+  extensions to the v3 arm design, not prerequisites.
 - **Execution (sync engine, async edge).** The `aif` engine stays sync. EFE is
   CPU-bound, so `AifDecisionPolicy`'s `should_join_async`/`should_leave_async` snapshot
   capability masks to owned `u32` (the `&dyn` borrows aren't `'static`) and offload to
