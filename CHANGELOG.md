@@ -11,10 +11,9 @@ Planned work — issue-tracked (details in [`CLAUDE.md`](./CLAUDE.md)
 §"Next steps"):
 
 - **Phase 5 — SwarmAgentic-style optimisation** (de-gated 2026-07-15):
-  ~~[#41] ValueCalculator feedback weights~~ (DONE 0.12.0), [#42] AIPA
-  population search (the remaining LLM-free slice), [#20] the LLM
-  meta-layer remainder (configurator, velocity-rewrite loop,
-  transferability).
+  ~~[#41] ValueCalculator feedback weights~~ (DONE 0.12.0), ~~[#42] AIPA
+  population search~~ (DONE 0.13.0), [#20] the LLM meta-layer remainder
+  (configurator, velocity-rewrite loop, transferability).
   - ~~[#46] feedback-weighted arm in the K4 battery~~ — **FALSIFIED
     (feedback), 2026-07-16** (example + report only, no version bump):
     `examples/strategy_comparison.rs` Part 3 + `docs/prereg-feedback-arm-k4.md`
@@ -33,6 +32,35 @@ Planned work — issue-tracked (details in [`CLAUDE.md`](./CLAUDE.md)
   dynamics deferred from the K4-v3 rematch; unscheduled).
 - **[#25]** metrics example, reframed onto the `CoalitionService`
   decision path / topology events.
+
+## [0.13.0] — 2026-07-16
+
+Phase 5 idea 4 ships as the second LLM-free slice ([#42]): population-based
+coalition-structure search atop AIPA.
+
+### Added
+
+- **Population search** ([#42]): new `algorithms::population` module (always
+  compiled, zero new deps). `search(agents, calc, cfg) -> SearchOutcome` runs a
+  deterministic (SplitMix64-seeded, `rand`-free) SwarmAgentic-style particle
+  swarm over coalition structures (set-partitions), maximising `Σ over blocks of
+  ValueCalculator(block)`. AIPA integer-partition shapes seed a diverse
+  population; per-agent global-best / personal-best pulls plus random mutation
+  evolve it; the strictly-improving global-best `lineage` is returned. `search`
+  is pure and synchronous; the separate async `record_trajectory(manager, agents,
+  lineage)` writes the lineage into a `CoalitionManager` as form/dissolve epochs,
+  replayable through `TemporalQueries` (the `tests/population_test.rs` parity
+  gate). New `examples/population_search.rs` (a `TaskCoverage` value model with a
+  non-trivial interior optimum, since the built-in calculators are degenerate for
+  structure search — see CLAUDE.md gotcha 21). `CoalitionStructure`,
+  `PopulationConfig`, `SearchOutcome`, `search`, `record_trajectory` re-exported
+  from `algorithms`.
+
+### Notes
+
+- Tests: 98 default / 129 decision / 120 magnitude / 151 decision,magnitude /
+  118 persistence / 141 persistence,magnitude (+10 each vs 0.12.0: 5 lib unit +
+  4 integration + 1 doctest; population is default-compiled and un-gated).
 
 ## [0.12.0] — 2026-07-16
 

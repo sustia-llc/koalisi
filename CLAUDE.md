@@ -52,6 +52,29 @@ forex domain since removed).
 
 ### Done
 
+- **Population search atop AIPA — v0.13.0 (2026-07-16, #42)**: Phase 5 idea 4
+  shipped as the second LLM-free slice. New `src/algorithms/population.rs`
+  (always compiled, ZERO new deps): a deterministic `SwarmAgentic`-style search
+  over **coalition structures** (set-partitions) maximising `Σ over blocks of
+  ValueCalculator(block)`. AIPA integer-partition shapes seed a diverse
+  population; a single-`SplitMix64` PSO (per-agent global-best/personal-best
+  pulls + random mutation, seeded ⇒ pure function of the seed) evolves it.
+  `search()` is **pure + sync** (returns `SearchOutcome { best, lineage,
+  iterations_run }`, `lineage` = the strictly-improving global-best chain);
+  `record_trajectory()` is a **separate async** step that writes the gbest
+  lineage into a `CoalitionManager` as successive form/dissolve epochs, replayable
+  via `TemporalQueries` — the #42 acceptance gate (`tests/population_test.rs`
+  reconstructs the final structure and asserts set-equality). Decisions A/A/A:
+  shape-anchored seeding, gbest-lineage recording, pure/async split.
+  **Gotcha 21**: the built-in calculators are degenerate for *structure* search
+  (Additive is CONSTANT across partitions; Synergistic/Multiplicative favour
+  all-singletons) — the search only does real work with an interior-optimum value
+  model (coverage-style, or the magnitude/EFE/feedback arms); the example uses a
+  `TaskCoverage` calculator to show it. **Suites: 98 default / 129 decision / 120
+  magnitude / 151 decision,magnitude / 118 persistence / 141 persistence,magnitude**
+  (+10 everywhere: 5 lib unit + 4 integration + 1 module doctest). Independent
+  review 0 findings ≥80; two sub-bar hardenings applied (empty-block filter in
+  `blocks()`; `record_trajectory` length precondition).
 - **Feedback-weighted ValueCalculator — v0.12.0 (2026-07-16, #41)**: Phase 5
   idea 3 shipped as an LLM-free slice (promoted by the 2026-07-15 de-gate).
   New `src/algorithms/feedback.rs` (always compiled, zero new deps):
@@ -293,12 +316,12 @@ forex domain since removed).
 - **Tests passing**:
   | Suite | Tests | Command |
   |---|---|---|
-  | Default | 88 | `cargo test` |
-  | `--features decision` | 119 | `cargo test --features decision` |
-  | `--features magnitude` | 110 | `cargo test --features magnitude` |
-  | `--features decision,magnitude` | 141 | `cargo test --features decision,magnitude` |
-  | `--features persistence` | 108 | `cargo test --features persistence` |
-  | `--features persistence,magnitude` | 131 (incl. the #18/#30 replay parity gate) | `cargo test --features persistence,magnitude` |
+  | Default | 98 | `cargo test` |
+  | `--features decision` | 129 | `cargo test --features decision` |
+  | `--features magnitude` | 120 | `cargo test --features magnitude` |
+  | `--features decision,magnitude` | 151 | `cargo test --features decision,magnitude` |
+  | `--features persistence` | 118 | `cargo test --features persistence` |
+  | `--features persistence,magnitude` | 141 (incl. the #18/#30 replay parity gate) | `cargo test --features persistence,magnitude` |
   | `--features durable` | +1 container-backed restart test; needs Docker | `cargo test --features durable` |
   | All examples | exit 0 | see Reproducers below |
 
@@ -334,7 +357,8 @@ koalisi/
 │   │   ├── value_calculation.rs            ValueCalculator + 4 base calculators
 │   │   ├── feedback.rs                     FeedbackCalculator<C> wrapper + shared FeedbackStore (history/failure weights, #41)
 │   │   ├── dcvc.rs                         DCVCDistributor, WorkloadShare
-│   │   └── aipa.rs                         Integer partitions, bounds, best-partition + 10 unit tests
+│   │   ├── aipa.rs                         Integer partitions, bounds, best-partition + 10 unit tests
+│   │   └── population.rs                   P5.2 (#42): population coalition-structure search atop AIPA (SplitMix64 PSO, gbest lineage) + record_trajectory (always compiled, no deps)
 │   ├── decision/
 │   │   ├── mod.rs                          CoalitionDecisionPolicy + ThresholdPolicy (always compiled)
 │   │   ├── aif_policy.rs                   AifDecisionPolicy + EfeValueCalculator (feature `decision`)
@@ -604,19 +628,42 @@ These cost time during the build; future-me should not relearn them.
       frozen Part 2 (regression gate: Scope-A `mag` == committed baseline); Scope B
       appends reliability + `perf[t][i]` draws off the SAME stream, after the prefix.
 
+21. **Population search (#42) — rely on these.**
+    - **Built-in calculators are degenerate for STRUCTURE search.** `search`
+      maximises `Σ over blocks of ValueCalculator(block)`, but summed over a
+      set-partition the `AdditiveCalculator` total is CONSTANT (its size /
+      capability / trust terms sum to the same value for every partition), and
+      `Synergistic`/`Multiplicative` are split-favouring (all-singletons optimal).
+      So with those the answer is degenerate and the lineage is one epoch — NOT a
+      bug. The search only does real work for a value model with an interior
+      optimum: coverage-style (see `examples/population_search.rs`'s `TaskCoverage`)
+      or the magnitude / EFE / #41-feedback arms. Documented in the module docs;
+      don't "fix" it by changing the built-ins.
+    - **Determinism**: one `SplitMix64` seeded from `PopulationConfig::seed`;
+      `canonicalize` assigns block ids by first-occurrence traversal (NOT HashMap
+      iteration), so `search` is a pure function of the seed. `blocks()` filters
+      empties, so it returns a true set-partition even for a hand-built
+      non-canonical `assignment` (the field is `pub`).
+    - **`record_trajectory` is fresh-manager-only** and adds `agents`
+      unconditionally; every `lineage` structure must be over the same `agents`
+      (`assignment.len() == agents.len()`) or `vmap[i]` indexes out of bounds. It
+      records the gbest lineage as form/dissolve epochs; the final epoch is live
+      and replays via `TemporalQueries::coalition_members_at` (the #42 parity gate).
+
 ## Reproducers
 
 All assume `cwd = koalisi/`.
 
 ```sh
-# === default features (88 tests) ===
+# === default features (98 tests) ===
 timeout 60s  cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target
 timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example topology_coalition
 timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example algorithm_values
 timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example synthetic_ingestion   # FLAGSHIP
 timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example supervised_monitor
+timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example population_search   # P5.2 (#42)
 
-# === decision-layer feature combos (119 / 110 / 141 tests) ===
+# === decision-layer feature combos (129 / 120 / 151 tests) ===
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features magnitude
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision,magnitude
@@ -661,7 +708,7 @@ timeout 120s cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-tar
 > still-NEST-dependent piece is the input-#2 NEST-H4 calibration-copilot
 > deployment framing, which activates whenever ownership lands.**
 
-### Phase 5: SwarmAgentic-style optimisation  *(DE-GATED 2026-07-15 — LLM-free slices: [#41](https://github.com/sustia-llc/koalisi/issues/41) idea 3 **DONE v0.12.0**, [#42](https://github.com/sustia-llc/koalisi/issues/42) idea 4 next; LLM meta-layer remainder tracked: [#20](https://github.com/sustia-llc/koalisi/issues/20))*
+### Phase 5: SwarmAgentic-style optimisation  *(DE-GATED 2026-07-15 — LLM-free slices: [#41](https://github.com/sustia-llc/koalisi/issues/41) idea 3 **DONE v0.12.0**, [#42](https://github.com/sustia-llc/koalisi/issues/42) idea 4 **DONE v0.13.0**; LLM meta-layer remainder tracked: [#20](https://github.com/sustia-llc/koalisi/issues/20))*
 
 Lift the SwarmAgentic framework (Zhang et al., 2025 — see
 `docs/SwarmAgentic-summary.md` for full paper digest) into koalisi as a
@@ -710,14 +757,16 @@ Five concrete integration ideas, ported verbatim from the summary's
    round-trips for every score.
 
 4. **Population-based search atop AIPA** (promoted →
-   [#42](https://github.com/sustia-llc/koalisi/issues/42))**.** AIPA enumerates integer
-   partitions deterministically; SwarmAgentic maintains a *population*
-   of full system designs. Hybrid: AIPA generates candidate partitions,
-   a SwarmAgentic-style swarm evolves agent assignments + collaboration
-   policies per partition, and `TemporalHypergraph` records every
-   particle's trajectory so good lineages can be replayed via
-   `TemporalQueries`. The fitness function is the existing
-   `ValueCalculator` trait.
+   [#42](https://github.com/sustia-llc/koalisi/issues/42), **DONE v0.13.0
+   2026-07-16** — `src/algorithms/population.rs`, see §Current state + gotcha 21)**.**
+   AIPA enumerates integer partitions deterministically; SwarmAgentic maintains a
+   *population* of full system designs. Shipped: AIPA integer-partition shapes seed
+   a diverse population, a deterministic (LLM-free) `SplitMix64` PSO swarm evolves
+   the assignments, and the improving global-best lineage is recorded into a
+   `TemporalHypergraph` (`record_trajectory`) so good lineages replay via
+   `TemporalQueries`. Fitness = the existing `ValueCalculator` trait (any arm). The
+   LLM-driven *language* velocity rewrites (per-particle trajectory recording,
+   collaboration-policy evolution) remain #20's meta-layer.
 
 5. **Cross-model transferability as a koalisi value-prop.** SwarmAgentic
    shows discovered systems transfer across LLMs. If the runtime layer
