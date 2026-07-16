@@ -594,7 +594,8 @@ These cost time during the build; future-me should not relearn them.
       move `PRIMARY_B` (best 0.0730) but none reach magnitude (0.2818). Magnitude
       wins by *selectivity* (small high-`cov_eff` coalitions), which a full-join base
       can't produce. Lesson for any rematch: use a **selective base** (positive
-      `join_threshold`) and/or a **failure-weighted** point — and register it fresh.
+      `join_threshold`, #48) and/or a **failure-weighted** point (#49) — and
+      register it fresh.
     - **Harness contract** (`examples/strategy_comparison.rs` Part 3): `run_instance`
       takes `Scope` + `Option<&FeedbackStore>`; write-back is `record_outcome` ONCE
       per task AFTER the leave sweep (within-task decisions see a constant store);
@@ -695,9 +696,11 @@ Five concrete integration ideas, ported verbatim from the summary's
    report `docs/ab-report-feedback-arm-k4.md`). Registered `hw=fw=0.5` cancels in
    the full-join `ThresholdPolicy`-at-0 regime (`history≈failures`); the E1 sweep
    shows failure-dominant cells bite but never reach magnitude (mag 0.2818 vs best
-   fb 0.0730). Example-only, no library/version change. Follow-ups (new
-   registrations): failure-weighted point (`hw=0,fw=1`) and/or a selective base
-   (positive `join_threshold`). SwarmAgentic's
+   fb 0.0730). Example-only, no library/version change. Follow-ups filed (new
+   registrations): selective base (positive `join_threshold`) →
+   [#48](https://github.com/sustia-llc/koalisi/issues/48); failure-weighted point
+   (`hw=0,fw=1`) → [#49](https://github.com/sustia-llc/koalisi/issues/49) (likely
+   folds into #48). SwarmAgentic's
    three coefficients (`c_f` failure / `c_p` personal-best / `c_g`
    global-best) are direct analogues of `WeightedCalculator`'s
    `size`/`capability`/`trust`/`synergy` weights. Add `history_weight`

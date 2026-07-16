@@ -156,6 +156,7 @@ Scope A held the registered null (`fb ≈ thr`, 0/30 — no red flag). The regis
 (`history ≈ failures` per member ⇒ balanced marginal ≈ 0); the E1 sweep confirms the
 mechanism is live (failure-dominant cells move the metric, best `0.0730`) but no cell
 reaches magnitude. Magnitude's edge is selectivity (churn 8, small high-`cov_eff`
-coalitions) that the full-join base does not induce. `#41` not refuted. Follow-ups (each a
-**new** registration): a failure-weighted point (`hw=0, fw=1`) and/or a selective base
-(positive `join_threshold`). Nothing tuned to flip the verdict.
+coalitions) that the full-join base does not induce. `#41` not refuted. Follow-ups filed (each a
+**new** registration): a selective base (positive `join_threshold`) — #48; a
+failure-weighted point (`hw=0, fw=1`) — #49 (likely folds into #48). Nothing tuned to
+flip the verdict.

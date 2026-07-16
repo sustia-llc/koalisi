@@ -142,10 +142,11 @@ Two things kill the registered arm:
 
 The reliability signal is real and orthogonal to diversity/coverage — `fb`'s Scope-B
 `success_rate` should exceed `thr`'s once the weighting doesn't cancel — but on this
-`ThresholdPolicy`-at-0 base it does not translate into `PRIMARY_B` dominance. A future
-registration could test a **failure-weighted** point (e.g. `hw = 0, fw = 1`) and/or a
-**selective base** (a positive `join_threshold`, so feedback can gate membership rather
-than only reorder a full pool) — both are new hypotheses requiring their own pre-registration.
+`ThresholdPolicy`-at-0 base it does not translate into `PRIMARY_B` dominance. Filed as
+follow-ups (each a new hypothesis, own pre-registration): a **selective base** (a positive
+`join_threshold`, so feedback can gate membership rather than only reorder a full pool) —
+[#48](https://github.com/sustia-llc/koalisi/issues/48); a **failure-weighted** point
+(`hw = 0, fw = 1`) — [#49](https://github.com/sustia-llc/koalisi/issues/49).
 `#41`'s calculator is not refuted: Scope A is the expected null (`fb ≈ thr`, 0/30) and the
 `(0, 0)` sweep cell equals the `thr` control, confirming the feedback-off identity.
 
