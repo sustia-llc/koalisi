@@ -58,6 +58,14 @@ coalition-structure search atop AIPA.
 
 ### Notes
 
+- **Value models for structure search**: `search` maximises `Σ over blocks of
+  ValueCalculator(block)`, but the built-in calculators are *degenerate* for
+  *structure* search — `AdditiveCalculator` is **constant** across every
+  set-partition, and `SynergisticCalculator` / `MultiplicativeCalculator` favour
+  all-singletons (trivial optimum, one-epoch lineage). The `population_search`
+  example therefore ships a `TaskCoverage` value model with a genuine interior
+  optimum; real work needs an interior-optimum calculator (coverage-style, or the
+  `magnitude` / EFE / `FeedbackCalculator` arms). See CLAUDE.md gotcha 21.
 - Tests: 98 default / 129 decision / 120 magnitude / 151 decision,magnitude /
   118 persistence / 141 persistence,magnitude (+10 each vs 0.12.0: 5 lib unit +
   4 integration + 1 doctest; population is default-compiled and un-gated).
