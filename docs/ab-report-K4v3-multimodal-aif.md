@@ -19,10 +19,14 @@ is decision-equivalent to `aif-scalar`: per-seed primary **and** churn match
 seed-for-seed on all 30 seeds. With binary union coverage and symmetric per-modality
 preferences over a deterministic-B bridge, each required bit contributes either
 `G_cov = competence_efe(1)` or `G_unc = competence_efe(0)` (unit-anchored at
-0.215 / 1.204), so the multimodal `G = k·G_cov + (r−k)·G_unc` is **affine in the
-covered-bit count k** — exactly the information the scalar coverage fraction `k/r`
-carries. Both arms' join/leave rules depend only on `sign(ΔG)` at `join_margin = 0`,
-so every act is identical. Structure enters the *value* (G magnitudes, latency) but
+0.215 / 1.204), so the multimodal `G ≈ k·G_cov + (r−k)·G_unc` is affine in the
+covered-bit count k up to a strictly **sub-additive** γ-softmax coupling of ~1e-13 at
+the registered γ = 16 (pinned by test: additive to 1e-12, residual sign negative) —
+five orders of magnitude below the smallest decision gap `G_unc − G_cov ≈ 0.99`, and
+exactly zero for any candidate that leaves the coverage vector unchanged (identical
+POMDP ⇒ identical G). So G carries exactly the information of the scalar coverage
+fraction `k/r`, both arms' join/leave rules depend only on `sign(ΔG)` at
+`join_margin = 0`, and every act is identical. Structure enters the *value* (G magnitudes, latency) but
 not the *decision*. Characterized by a committed test
 (`aif_mm_policy::tests::mm_and_scalar_agree_on_acts`); reported, not tuned.
 
@@ -124,7 +128,9 @@ observation modality per bit at `p_b = 0.5 + (max_precision − 0.5)·cov_b`
 2-control B, uniform D, `AgentParams::default()` + α — via aif 0.9.0
 `GenerativeModel`/`from_model`; value = `−expected_free_energy()`; join/leave rule
 identical to the scalar arm at `join_margin = 0`. Unit-anchored to
-`competence_efe(0)`/`competence_efe(1)` per modality and exact-additivity-tested.
+`competence_efe(0)`/`competence_efe(1)` per modality (1e-12); additivity pinned at
+1e-12 with the true sub-additive residual sign (`g_2cov ≤ 2·g_1cov`) — G is not
+exactly modality-additive in principle (γ-softmax coupling), only to ~1e-13 at γ = 16.
 
 ## Reproduce
 
