@@ -36,7 +36,7 @@ from temporal hypergraph topology to coalition formation algorithms to
 |--------|-------------|
 | `core` | `CoalitionRuntime` (lifecycle), settings, logging |
 | `topology` | Temporal hypergraph with event sourcing, `CoalitionManager`, time-travel queries, analytics (incl. `magnitude_history` coalition-diversity trajectories behind the `magnitude` feature) |
-| `algorithms` | `ValueCalculator` trait + 4 calculators, `DCVCDistributor`, AIPA partition search |
+| `algorithms` | `ValueCalculator` trait + 4 base calculators + a feedback-weighting `FeedbackCalculator` wrapper (history/failure signals from a shared `FeedbackStore`), `DCVCDistributor`, AIPA partition search |
 | `ingest` | Domain-neutral ingestion (K5): `Sample`/`DataSource` traits, generic `SampleMonitor<S>`, `Pacing` + `pump_source`, synthetic NEST-shaped multi-resolution and tauhokohoko-shaped sensor-event fixture sources (seeded, no credentials) |
 | `decision` | `CoalitionDecisionPolicy` trait + always-available `ThresholdPolicy`; optional Active Inference strategy (`EfeValueCalculator`, `AifDecisionPolicy`) behind the `decision` feature; optional categorical-magnitude strategy (`MagnitudeValueCalculator`, `MagnitudePolicy`) behind the `magnitude` feature |
 | `persistence` | Append-only event store (feature `persistence`): hash-chained streams, CBOR frame log (`FileEventStore`), crash-tail recovery, writer task; topology events tap in and replay back into a fresh `EventLog` all queries run on unchanged (P7.1 + P7.2) — see `docs/phase7-persistence-design.md` |

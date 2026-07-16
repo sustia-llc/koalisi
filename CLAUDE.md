@@ -48,10 +48,33 @@ forex domain since removed).
   `surrealdb:surrealql-language` — for K3 (#6) surrealdb-live-message work,
   per the user CLAUDE.md routing rules.
 
-## Current state — 2026-07-14
+## Current state — 2026-07-16
 
 ### Done
 
+- **Feedback-weighted ValueCalculator — v0.12.0 (2026-07-16, #41)**: Phase 5
+  idea 3 shipped as an LLM-free slice (promoted by the 2026-07-15 de-gate).
+  New `src/algorithms/feedback.rs` (always compiled, zero new deps):
+  `FeedbackCalculator<C: ValueCalculator>` wraps ANY base calculator with two
+  SwarmAgentic velocity-coefficient analogues — `history_weight` (≈ c_p,
+  personal-best; rewards recorded membership episodes) and `failure_weight`
+  (≈ c_f, repulsion; penalises outcomes strictly `<` a threshold), each scaled
+  by `HISTORY_UNIT`/`FAILURE_UNIT` = 25.0. Signals live in a shared
+  `FeedbackStore` (`Arc<RwLock<counters>>`; `Clone` SHARES — K6 cache
+  precedent); `record_outcome` closes the loop with no LLM round-trips and
+  ignores+warns non-finite values. Plumbing: `agent_coalition_history`
+  promoted `pub` (the Phase 5 anchor activating) +
+  `CoalitionManager::seed_feedback_history` seeds history from the event log
+  (seed-once contract; failures aren't seedable — the log has no outcomes).
+  Under `ThresholdPolicy` the join marginal decomposes exactly as
+  `base_marginal + hw·25·history(x) − fw·25·failures(x)` (members' counters
+  cancel). See gotcha 19. 5-panel review applied (2 important findings →
+  documented contracts). 0.12.0 also carries the earlier-uncut #43 Part 1/2
+  work (aif pin `v0.9.0`, `AifMmDecisionPolicy` mm arm + K4-v3 FALSIFIED
+  report — see §Phase 6). **Suites: 88 default / 119 decision / 110 magnitude
+  / 141 decision,magnitude / 108 persistence / 131 persistence,magnitude**
+  (+12 everywhere vs the post-#43 baselines: 9 unit + 3 integration).
+  Payoff: a feedback-aware third baseline arm for any future K4 rematch.
 - **Forex domain REMOVED — v0.11.0 (2026-07-14, #37)**: the
   de-financialisation pass completed. koalisi is now a purely domain-agnostic
   coalition runtime. Deleted `src/market.rs` and the arbitrage swarm
@@ -233,8 +256,10 @@ forex domain since removed).
   `TemporalAnalytics` (delta/time-series/activity), `HypergraphExecutor`
   (rayon↔tokio bridge), `Timestamp`/`TimeRange`/`Clock`
 - **Algorithm layer** (from coalesce): `AgentCapabilities` trait,
-  `ValueCalculator` trait + 4 calculators (Additive, Synergistic,
-  Multiplicative, Weighted), `DCVCDistributor`, AIPA partition search
+  `ValueCalculator` trait + 4 base calculators (Additive, Synergistic,
+  Multiplicative, Weighted) + the `FeedbackCalculator<C>` feedback-weighting
+  wrapper over a shared `FeedbackStore` (#41), `DCVCDistributor`, AIPA
+  partition search
 - **Runtime layer** (domain-neutral since v0.11.0 — the forex swarm was
   removed, #37):
   - **`CoalitionService`** (`subsystems::coalition_actor`) — the policy-gated
@@ -263,12 +288,12 @@ forex domain since removed).
 - **Tests passing**:
   | Suite | Tests | Command |
   |---|---|---|
-  | Default | 76 | `cargo test` |
-  | `--features decision` | 95 | `cargo test --features decision` |
-  | `--features magnitude` | 98 | `cargo test --features magnitude` |
-  | `--features decision,magnitude` | 117 | `cargo test --features decision,magnitude` |
-  | `--features persistence` | 96 | `cargo test --features persistence` |
-  | `--features persistence,magnitude` | 119 (incl. the #18/#30 replay parity gate) | `cargo test --features persistence,magnitude` |
+  | Default | 88 | `cargo test` |
+  | `--features decision` | 119 | `cargo test --features decision` |
+  | `--features magnitude` | 110 | `cargo test --features magnitude` |
+  | `--features decision,magnitude` | 141 | `cargo test --features decision,magnitude` |
+  | `--features persistence` | 108 | `cargo test --features persistence` |
+  | `--features persistence,magnitude` | 131 (incl. the #18/#30 replay parity gate) | `cargo test --features persistence,magnitude` |
   | `--features durable` | +1 container-backed restart test; needs Docker | `cargo test --features durable` |
   | All examples | exit 0 | see Reproducers below |
 
@@ -297,11 +322,12 @@ koalisi/
 │   │   ├── temporal.rs                     TemporalHypergraph<V, HE>, SharedGraph, Snapshot
 │   │   ├── queries.rs                      TemporalQueries (point-in-time state)
 │   │   ├── analytics.rs                    TemporalAnalytics, GraphDelta + magnitude_history/MagnitudePoint (#18, feature `magnitude`)
-│   │   ├── coalitions.rs                   CoalitionManager (form/join/leave/dissolve/merge)
+│   │   ├── coalitions.rs                   CoalitionManager (form/join/leave/dissolve/merge; agent_coalition_history pub + seed_feedback_history since #41)
 │   │   └── executor.rs                     HypergraphExecutor (rayon↔tokio bridge)
 │   ├── algorithms/
 │   │   ├── mod.rs                          AgentCapabilities trait + CapabilityAgent (stock impl, also a VertexTrait; v0.11.0) + re-exports
-│   │   ├── value_calculation.rs            ValueCalculator + 4 calculators
+│   │   ├── value_calculation.rs            ValueCalculator + 4 base calculators
+│   │   ├── feedback.rs                     FeedbackCalculator<C> wrapper + shared FeedbackStore (history/failure weights, #41)
 │   │   ├── dcvc.rs                         DCVCDistributor, WorkloadShare
 │   │   └── aipa.rs                         Integer partitions, bounds, best-partition + 10 unit tests
 │   ├── decision/
@@ -343,7 +369,7 @@ koalisi/
 │   └── k3-hot-path-bench.md                K3 kameo-vs-tokio bench evidence
 └── tests/
     ├── topology_test.rs                    12 tests
-    ├── algorithms_test.rs                  15 tests
+    ├── algorithms_test.rs                  18 tests (incl. 3 feedback-loop/seeding tests, #41)
     ├── decision_integration.rs             4–6 tests (feature-dependent)
     ├── durable_integration.rs              1 container-backed restart test (feature `durable`)
     ├── ingestion_integration.rs            3 tests (K5: synthetic sources → monitors → coalition formation; default features)
@@ -533,27 +559,44 @@ These cost time during the build; future-me should not relearn them.
       WIRE_TOPOLOGY_SCHEMA_VERSION` and `Sealed` payloads on the Topology
       stream are replay errors.
 
+19. **Feedback-calculator contracts (#41) — rely on these.**
+    - **Seed a given `FeedbackStore` at most once, before recording begins.**
+      `seed_feedback_history` recomputes the FULL episode count from the event
+      log and *adds* it (`add_history` accumulates, never replaces), so
+      re-seeding the same store from the same log doubles every agent's
+      history. On a mid-slice `get_agent` error, earlier agents remain seeded —
+      reseed into a fresh store.
+    - **Ids count per occurrence.** `record_outcome` bumps a duplicated member
+      id twice; hyperedge member lists are ordered `Vec`s with duplicates
+      allowed (gotcha 12), so dedup before recording if you want
+      at-most-once-per-agent semantics. (Consistent with the base calculators,
+      which also count duplicate agents per occurrence.)
+    - `Clone` SHARES the store (Arc) — a `FeedbackCalculator` clone does not
+      fork its feedback history. Non-finite outcomes are ignored + warned (the
+      store can't be NaN-poisoned); non-finite *weights* propagate to the score
+      where `ThresholdPolicy`'s non-finite guard declines the action.
+
 ## Reproducers
 
 All assume `cwd = koalisi/`.
 
 ```sh
-# === default features (76 tests) ===
+# === default features (88 tests) ===
 timeout 60s  cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target
 timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example topology_coalition
 timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example algorithm_values
 timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example synthetic_ingestion   # FLAGSHIP
 timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example supervised_monitor
 
-# === decision-layer feature combos (95 / 98 / 117 tests) ===
+# === decision-layer feature combos (119 / 110 / 141 tests) ===
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features magnitude
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision,magnitude
 timeout 120s cargo run --release --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision,magnitude --example strategy_comparison
 
-# === with persistence feature (P7.1 store + P7.2 replay, 96 tests) ===
+# === with persistence feature (P7.1 store + P7.2 replay, 108 tests) ===
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features persistence
-timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features persistence,magnitude   # 119, incl. the replay parity gate
+timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features persistence,magnitude   # 131, incl. the replay parity gate
 
 # === with durable feature (needs Docker; container-backed restart test) ===
 timeout 300s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features durable
@@ -590,7 +633,7 @@ timeout 120s cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-tar
 > still-NEST-dependent piece is the input-#2 NEST-H4 calibration-copilot
 > deployment framing, which activates whenever ownership lands.**
 
-### Phase 5: SwarmAgentic-style optimisation  *(DE-GATED 2026-07-15 — LLM-free slices actionable now: [#41](https://github.com/sustia-llc/koalisi/issues/41) idea 3, [#42](https://github.com/sustia-llc/koalisi/issues/42) idea 4; LLM meta-layer remainder tracked: [#20](https://github.com/sustia-llc/koalisi/issues/20))*
+### Phase 5: SwarmAgentic-style optimisation  *(DE-GATED 2026-07-15 — LLM-free slices: [#41](https://github.com/sustia-llc/koalisi/issues/41) idea 3 **DONE v0.12.0**, [#42](https://github.com/sustia-llc/koalisi/issues/42) idea 4 next; LLM meta-layer remainder tracked: [#20](https://github.com/sustia-llc/koalisi/issues/20))*
 
 Lift the SwarmAgentic framework (Zhang et al., 2025 — see
 `docs/SwarmAgentic-summary.md` for full paper digest) into koalisi as a
@@ -615,7 +658,9 @@ Five concrete integration ideas, ported verbatim from the summary's
    `src/llm/mod.rs` is where both phases meet.
 
 3. **`ValueCalculator` extension with feedback weights** (promoted →
-   [#41](https://github.com/sustia-llc/koalisi/issues/41))**.** SwarmAgentic's
+   [#41](https://github.com/sustia-llc/koalisi/issues/41), **DONE v0.12.0
+   2026-07-16** — shipped as the `FeedbackCalculator<C>` wrapper +
+   shared `FeedbackStore`, see §Current state and gotcha 19)**.** SwarmAgentic's
    three coefficients (`c_f` failure / `c_p` personal-best / `c_g`
    global-best) are direct analogues of `WeightedCalculator`'s
    `size`/`capability`/`trust`/`synergy` weights. Add `history_weight`
