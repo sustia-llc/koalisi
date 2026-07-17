@@ -184,6 +184,10 @@ fn main() {
     println!("{}", "=".repeat(72));
     println!();
     part4_selective_feedback();
+    println!();
+    println!("{}", "=".repeat(72));
+    println!();
+    part3b_scalar_aif_scope_b_baseline();
 }
 
 // ===========================================================================
@@ -1648,5 +1652,53 @@ fn print_selective_threshold_sweep() {
             "| {join:.1} | {thr_primary:.4} | {fb_primary:.4} | {thr_churn:.2} | {fb_churn:.2} |"
         );
     }
+    println!();
+}
+
+// ===========================================================================
+// Part 3b — scalar-AIF Scope-B baseline (koalisi #44, K4-v4 prereg).
+//
+// Purely additive, non-gating: runs the shipped scalar bridge
+// `AifDecisionPolicy::default()` through the Scope-B reliability battery so its
+// per-seed PRIMARY_B + churn rows can be frozen as the K4-v4 baseline. The
+// scalar policy is stateless per call (store = None), so it runs all 30 seeds
+// directly, exactly as the `mag` arm does. Scope-B instances are byte-identical
+// to every other Scope-B arm — they come from `generate_instance_b(seed)`, not
+// shared state. Alters no existing section, ordering, or printed value.
+// ===========================================================================
+
+fn part3b_scalar_aif_scope_b_baseline() {
+    // Warm-up: full seed-0 Scope-B instance, latencies discarded (matches the
+    // other batteries' warm-cache convention). Rows are seed-derived, so the
+    // warm-up cannot perturb any printed value.
+    let aif = AifDecisionPolicy::default();
+    let mut warm = Vec::new();
+    let _ = run_instance(&aif, 0, Scope::B, None, &mut warm);
+
+    let mut lat = Vec::new();
+    let seeds: Vec<InstanceMetrics> = (0..SEEDS)
+        .map(|s| run_instance(&aif, s, Scope::B, None, &mut lat))
+        .collect();
+
+    let primary_med = median(seeds.iter().map(|m| m.primary).collect());
+    let churn_med = median(seeds.iter().map(|m| m.churn as f64).collect());
+
+    println!("# koalisi #44 — scalar-AIF Scope-B baseline (K4-v4 prereg)");
+    println!();
+    println!(
+        "_scalar bridge `AifDecisionPolicy::default()` · Scope B (reliability contest) · store = None · additive baseline, non-gating_"
+    );
+    println!();
+    println!(
+        "Per-seed `PRIMARY_B` + churn for the shipped scalar AIF arm over {SEEDS} seeds `0..{SEEDS}`, byte-identical Scope-B instances (`generate_instance_b(seed)`), seed-0 warm-up discarded. Frozen as the K4-v4 baseline (koalisi #44)."
+    );
+    println!();
+    println!("| seed | n | primary_B | churn |");
+    println!("|-----:|--:|----------:|------:|");
+    for m in &seeds {
+        println!("| {} | {} | {:.4} | {} |", m.seed, m.n, m.primary, m.churn);
+    }
+    println!();
+    println!("**Medians:** primary_B {primary_med:.4} · churn {churn_med:.2}.");
     println!();
 }
