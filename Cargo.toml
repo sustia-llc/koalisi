@@ -33,7 +33,7 @@ tokio-rayon = "2.1"
 # Engine crate from the `tira` repo. When the `decision` feature is off, none
 # of this (and none of its nalgebra dependency) is compiled — the non-AIF
 # ThresholdPolicy / ValueCalculator path is always available without it.
-aif = { git = "ssh://git@github.com/sustia-llc/tira", tag = "aif-v0.10.0", optional = true }
+aif = { git = "ssh://git@github.com/sustia-llc/tira", tag = "aif-v0.10.1", optional = true }
 # The multi-modality AIF bridge (`aif-mm`, prereg K4-v3) constructs a
 # `GenerativeModel` directly, which is expressed over `nalgebra::DMatrix`. Version
 # unifies with the one `aif` already pulls transitively (0.35), so no new build.
