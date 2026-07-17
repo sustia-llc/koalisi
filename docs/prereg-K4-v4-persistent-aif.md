@@ -125,6 +125,75 @@ Single toggles on the registered arm, t-sweep style tables, no verdicts:
   isolates the novelty terms' decision contribution.
 - **E8 — `initial_precision_b` sensitivity**: 1.0 / 4.0 / 16.0.
 
+## Amendment 1 (2026-07-17 — pre-implementation, pre-run; posted to #44)
+
+Owner-approved same date. Replaces the query-POMDP construction in Arms §3 and closes
+the remaining specification gaps found during implementation prep. All D1–D5 decisions
+and all confirmatory criteria/thresholds are unchanged.
+
+**A1.1 — Query POMDP: membership-factor construction** (replaces "r factors + 2-control
+bridge-lift B"). The registered bridge-lift had two defects: per-factor 2-control B
+makes the joint action space 2^r (≈1024 depth-2 policies at r = 5 — impractical), while
+1-control factors leave a single policy — making `PrecisionDynamics` provably inert in
+the query (the engine's single-policy inertness argument). Joining a coalition does not
+*control* bit reliability; the decision belongs in the policy space, not in fake
+transition agency. Amended construction — **one query agent per decision**:
+
+- **Factors**: r bit-drift factors (2-state, **one control**, B = the persistent
+  agent's learned per-bit sticky B, stochastic ⇒ state info-gain live) + **one
+  membership factor** (2-state `{config0, config1}`, **two controls**, deterministic B:
+  control u drives membership to state u). `n_actions = 2`; joint states ≤ 2^5·2 = 64;
+  `policy_depth = 2` ⇒ 4 policies — dynamics genuinely live (per-policy F).
+  For a join decision `config0` = current (alone), `config1` = coalition ∪ {agent};
+  for a leave decision `config0` = coalition with the member, `config1` = without.
+- **Modalities**: r, 3-outcome `{success, failure, no-obs}`; A_m conditions on
+  (bit-m factor, membership factor): under membership state s, if config(s) covers bit
+  m → the learned success/failure block scaled by (1−u) with no-obs row u; if uncovered
+  → the uninformative block `[0.5(1−u), 0.5(1−u), u]` (both states identical). u = 0.5.
+- **C** per modality = `normalize([0.9, 0.1, 0.3])` — no-obs at the ln-midpoint of
+  success/failure (pragmatically neutral).
+- **D**: bit factors = the persistent agent's current smoothed per-bit beliefs
+  (`bma_state_belief`); membership = delta on `config0`.
+- **Decision rule (deterministic posterior read — no sampling)**: feed the replay
+  window (A1.4), then read the marginal action posterior via `action_probabilities`
+  (the deterministic learning-aware replay path). Join iff `p(control 1) > 0.5`;
+  leave iff `p(control 1) ≥ 0.5` (ties leave, matching the scalar arm's "leave when
+  staying does not lower G"). This is the full Smith Eq. 22 posterior — F and the
+  dynamic γ now genuinely enter the decision, which sign(ΔG) on a static G never let
+  them do. It subsumes the sign(ΔG) rule (equal-F, fixed-γ ⇒ identical decisions).
+
+**A1.2 — Persistent-agent initial A anchors** (previously unpinned — a degree of
+freedom): per bit modality, no-obs row uniform at u = 0.5 across states;
+reliable-state column `[0.45, 0.05, 0.50]` (q_r = 0.9), unreliable
+`[0.30, 0.20, 0.50]` (q_u = 0.6 — mirroring Scope B's ρ ∈ {0.05, 0.40} member
+success rates 0.95/0.60). Asymmetric initialization breaks the state-label symmetry a
+flat A cannot (a symmetric A never learns to discriminate).
+
+**A1.3 — Count injection into queries (approximations, pinned)**: query A blocks =
+column-normalized persistent pA counts (exact structure). Engine constraint:
+`initial_precision` is one per-joint-column vector replicated across modalities, so
+exact per-modality concentration injection is impossible — registered approximation:
+`initial_precision[j]` = the arithmetic mean over required-bit modalities of that
+column's persistent count total (novelty magnitudes approximate, structure exact).
+`initial_precision_b` is a scalar — set to the mean concentration of the persistent
+pB (structure via the learned B itself; the membership factor's deterministic B has
+structural zeros, so the 0.10.0 `pb > 0` mask makes its B-novelty exactly 0
+automatically). Uncovered-bit A blocks are structurally flat, not uncertain — their
+novelty contribution is inherently near-zero under the mask/normalization; no special
+handling registered.
+
+**A1.4 — Replay semantics**: before the posterior read, the query agent observes the
+persistent agent's last `min(2, tasks observed so far)` task outcomes, restricted to
+this task's required bits (no-obs padding for bits not required in those past tasks),
+recording control 0 (stay in `config0`) per replayed step. First decision of a seed:
+no replay (fresh priors) — the posterior read still runs one belief step on the
+current-task null observation? No: with zero observations the precision loop has not
+run and the posterior is the fixed-γ form — acceptable and pinned (the arm warms up as
+outcomes accrue; this is the persistence bet, not a defect).
+
+**A1.5 — Consequential simplification**: the "learned B lifted to the 2-control bridge
+shape" clause is void — bit factors use the learned single-control B directly.
+
 ## Interpretation commitments
 
 - `VALIDATED`: the K4 quality gap is attributed to the frozen arms' outcome-blindness;
