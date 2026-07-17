@@ -194,6 +194,36 @@ outcomes accrue; this is the persistence bet, not a defect).
 **A1.5 — Consequential simplification**: the "learned B lifted to the 2-control bridge
 shape" clause is void — bit factors use the learned single-control B directly.
 
+## Amendment 2 (2026-07-17 — pre-implementation-completion, pre-run; posted to #44)
+
+Owner-approved same date. Engine basis moves to **`aif-v0.11.0`** (79da34f; pins bumped
+koalisi cbbf62a). Criteria, thresholds, arms, and all D1–D5/A1 decisions unchanged.
+
+**A2.1 — Why.** During implementation the registered query construction proved
+**decision-dead on aif ≤ 0.10.1** (implementation STOPPED before any run, per
+discipline): `initial_precision` seeds pA row-uniform per joint column, and under
+`learn_a` the first update's `A = normalize(pA)` write-back erases the
+coverage-structured A — measured: the registered config produced `p ≈ [0.49, 0.51]`
+regardless of coverage. aif-v0.11.0 adds `AgentParams::initial_pa` / `initial_pb`
+(direct Dirichlet-count injection, `A/B ≡ column-normalize(counts)` from step 0),
+making the registered structure + learning + novelty stack expressible.
+
+**A2.2 — Exact count injection (supersedes A1.3's approximations).** The query now
+injects the persistent agent's counts directly: query `initial_pa` = the coverage-
+masked persistent pA blocks (covered bit → the persistent modality's counts; uncovered
+→ the flat block at unit concentration), query `initial_pb` = the persistent per-bit pB
+verbatim (bit factors) and unit-scaled deterministic counts (membership factor —
+structural zeros; B-novelty exactly 0 under the 0.10.0 mask). A1.3's
+mean-concentration approximations for `initial_precision`/`initial_precision_b` are
+**void** — novelty magnitudes are now exact, not approximate. A1.3's fallback clause
+("observation_model() blocks — equivalent post-write-back") is likewise void: counts
+are the single source of truth.
+
+**A2.3 — Sub-floor guard.** aif-v0.11.0 validates injected columns against the shared
+1e-10 concentration floor. The registered arm's ω = 1.0 (no forgetting) cannot decay
+counts toward the floor; if an exploratory condition ever hits the validation error,
+that run is reported as inexpressible rather than worked around.
+
 ## Interpretation commitments
 
 - `VALIDATED`: the K4 quality gap is attributed to the frozen arms' outcome-blindness;
