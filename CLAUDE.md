@@ -48,10 +48,26 @@ forex domain since removed).
   `surrealdb:surrealql-language` — for K3 (#6) surrealdb-live-message work,
   per the user CLAUDE.md routing rules.
 
-## Current state — 2026-07-16
+## Current state — 2026-07-17
 
 ### Done
 
+- **Selective-base feedback arm — #48 (2026-07-17, example-only, no bump)**: the
+  #46 rematch on a *selective* base. `examples/strategy_comparison.rs` gains
+  **Part 4** (the frozen Part 3 #46 battery is the byte-identical regression gate):
+  arms `mag` (frozen) / `thr-selective` = `ThresholdPolicy(Synergistic,
+  join_threshold=100, leave=0)` / `fb-selective` = same over
+  `FeedbackCalculator(Synergistic, hw=0, fw=1)` — decomposing magnitude's edge into
+  **selectivity** (thr-selective) + **reliability-gating** (the fb-selective
+  increment). **Verdict: `PARTIAL (mechanism only)`** — Scope B medians `mag 0.2818 ·
+  thr-selective 0.0301 · fb-selective 0.0512`; H1 FAIL (mag ~5.5× ahead, unbeaten),
+  H2 PASS (`fb ≥ 1.25×thr` AND fb superior to thr 21/30). So magnitude's dominance is
+  **not** pure selectivity — feedback adds a real reliability signal on a selective
+  base — but it doesn't close the gap. #49 **absorbed** (registered `hw=0,fw=1`).
+  See **gotcha 22**; prereg `docs/prereg-feedback-arm-k4-v2.md`, report
+  `docs/ab-report-feedback-arm-k4-v2.md`. Independent review: 0 blocking/important, 1
+  minor efficiency applied (single-battery sweep). Suites unchanged (98/129/120/151/
+  118/141 — example-only).
 - **Population search atop AIPA — v0.13.0 (2026-07-16, #42)**: Phase 5 idea 4
   shipped as the second LLM-free slice. New `src/algorithms/population.rs`
   (always compiled, ZERO new deps): a deterministic `SwarmAgentic`-style search
@@ -397,7 +413,9 @@ koalisi/
 │   ├── phase7-persistence-design.md        Phase 7 EventStore design (#21 deliverable; P7.1–P7.5 phasing)
 │   ├── k3-hot-path-bench.md                K3 kameo-vs-tokio bench evidence
 │   ├── prereg-feedback-arm-k4.md           #46 pre-registration (feedback-arm K4 rematch; result appended)
-│   └── ab-report-feedback-arm-k4.md        #46 run — FALSIFIED (feedback); Scope A null + Scope B reliability contest + E1 sweep
+│   ├── ab-report-feedback-arm-k4.md        #46 run — FALSIFIED (feedback); Scope A null + Scope B reliability contest + E1 sweep
+│   ├── prereg-feedback-arm-k4-v2.md        #48 pre-registration (selective-base rematch, join=100, hw=0/fw=1; result appended)
+│   └── ab-report-feedback-arm-k4-v2.md     #48 run — PARTIAL (mechanism only); selectivity vs reliability-gating decomposition + E1 threshold sweep
 └── tests/
     ├── topology_test.rs                    12 tests
     ├── algorithms_test.rs                  18 tests (incl. 3 feedback-loop/seeding tests, #41)
@@ -619,7 +637,8 @@ These cost time during the build; future-me should not relearn them.
       wins by *selectivity* (small high-`cov_eff` coalitions), which a full-join base
       can't produce. Lesson for any rematch: use a **selective base** (positive
       `join_threshold`, #48) and/or a **failure-weighted** point (#49) — and
-      register it fresh.
+      register it fresh. (#48 did exactly this — `PARTIAL (mechanism only)`: the
+      selective base makes feedback bite, but magnitude still wins; see gotcha 22.)
     - **Harness contract** (`examples/strategy_comparison.rs` Part 3): `run_instance`
       takes `Scope` + `Option<&FeedbackStore>`; write-back is `record_outcome` ONCE
       per task AFTER the leave sweep (within-task decisions see a constant store);
@@ -649,6 +668,26 @@ These cost time during the build; future-me should not relearn them.
       (`assignment.len() == agents.len()`) or `vmap[i]` indexes out of bounds. It
       records the gbest lineage as form/dissolve epochs; the final epoch is live
       and replays via `TemporalQueries::coalition_members_at` (the #42 parity gate).
+
+22. **Selective-base feedback arm (#48) — rely on these.** Extends gotcha 20.
+    - **A positive `join_threshold` makes feedback bite, but doesn't beat magnitude.**
+      On Scope B with base `ThresholdPolicy(Synergistic, join=100, 0)` and
+      `FeedbackCalculator(hw=0, fw=1)`, `fb-selective` (0.0512) beats `thr-selective`
+      (0.0301) on 21/30 seeds (H2 PASS) — so magnitude's edge is **NOT** pure
+      selectivity; failure-weighting adds a genuine reliability signal. But mag
+      (0.2818) is ~5.5× ahead (H1 FAIL) ⇒ `PARTIAL (mechanism only)`. Don't read the
+      H2 pass as "feedback wins".
+    - **The feedback increment is NON-MONOTONE in `join_threshold`.** E1 sweep: fb > thr
+      at `join ∈ {50,75,100}` but pure selectivity **overtakes** at `{125,150}`
+      (thr 0.0906/0.0937 vs fb 0.0451/0.0413). A tight base already forms small
+      coalitions, and the 0/1 `fw=1` penalty then evicts merely-*unlucky* good agents (a
+      reliable agent that missed a covered task still accrues a failure). So a *tighter*
+      base is not *better* for feedback — it helps in a middle band. The registered
+      `join=100` was fixed before the sweep (not threshold-shopped).
+    - **Part 4 is additive; Part 3 (#46) is the byte-identical regression gate.**
+      `make_fb`/`run_feedback_scope` gained a leading `join_threshold` param; Part 3
+      passes its original `(0.0, 0.5, 0.5)` so its output — and the committed
+      `docs/ab-report-feedback-arm-k4.md` — is unchanged.
 
 ## Reproducers
 
@@ -743,11 +782,14 @@ Five concrete integration ideas, ported verbatim from the summary's
    report `docs/ab-report-feedback-arm-k4.md`). Registered `hw=fw=0.5` cancels in
    the full-join `ThresholdPolicy`-at-0 regime (`history≈failures`); the E1 sweep
    shows failure-dominant cells bite but never reach magnitude (mag 0.2818 vs best
-   fb 0.0730). Example-only, no library/version change. Follow-ups filed (new
-   registrations): selective base (positive `join_threshold`) →
-   [#48](https://github.com/sustia-llc/koalisi/issues/48); failure-weighted point
-   (`hw=0,fw=1`) → [#49](https://github.com/sustia-llc/koalisi/issues/49) (likely
-   folds into #48). SwarmAgentic's
+   fb 0.0730). Example-only, no library/version change. **Rematch on a selective
+   base: [#48](https://github.com/sustia-llc/koalisi/issues/48) — `PARTIAL
+   (mechanism only)`, 2026-07-17** (`join_threshold=100`, `hw=0/fw=1`;
+   `fb-selective` beats `thr-selective` 21/30 ⇒ feedback adds a real reliability
+   signal, but neither closes the ~5.5× gap to magnitude; the increment is
+   non-monotone in the threshold — see gotcha 22). #49 **absorbed** as the
+   registered weighting; prereg/report `docs/{prereg,ab-report}-feedback-arm-k4-v2.md`.
+   SwarmAgentic's
    three coefficients (`c_f` failure / `c_p` personal-best / `c_g`
    global-best) are direct analogues of `WeightedCalculator`'s
    `size`/`capability`/`trust`/`synergy` weights. Add `history_weight`
