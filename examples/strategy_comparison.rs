@@ -122,6 +122,20 @@ const RHO_FLAKY: f64 = 0.40;
 /// seeds for H2 (≥ 18/30, the 60% consistency bar inherited from K4-v2/v3).
 const FB_SUPERIOR_MIN: usize = 18;
 
+// --- Part 4 (selective-base feedback arm, koalisi #48) constants -------------
+/// Part 4 confirmatory `join_threshold` — a *selective* base (positive threshold
+/// keeps the coalition small, unlike the falsified #46 `join = 0` full-join base).
+const JOIN_THRESHOLD_SELECTIVE: f64 = 100.0;
+/// Part 4 exploratory E1 `join_threshold` grid (Scope B, non-gating).
+const SELECTIVE_THRESHOLD_GRID: [f64; 5] = [50.0, 75.0, 100.0, 125.0, 150.0];
+/// Part 4 selective-base feedback weights: failure-only (`hw = 0, fw = 1`);
+/// absorbs the #49 failure-weighted point.
+const HW_SELECTIVE: f64 = 0.0;
+const FW_SELECTIVE: f64 = 1.0;
+/// Report date for the Part 4 selective-base battery (koalisi #48), separate from
+/// the frozen Part 2/3 dates so a re-run stamps its own committed run.
+const SELECTIVE_REPORT_DATE: &str = "2026-07-17";
+
 /// Which battery an instance run belongs to.
 ///
 /// - [`Scope::A`] — the i.i.d. null control: fitness = `completed` (0/1); the
@@ -166,6 +180,10 @@ fn main() {
     println!("{}", "=".repeat(72));
     println!();
     part3_feedback_arm();
+    println!();
+    println!("{}", "=".repeat(72));
+    println!();
+    part4_selective_feedback();
 }
 
 // ===========================================================================
@@ -1154,11 +1172,15 @@ struct ScopeRun {
 /// Build the `fb` arm's policy + its write-back store handle (a FRESH store per
 /// call, per the prereg — the two clones share one `Arc`, so the store the
 /// calculator reads is the store `run_instance` records into).
-fn make_fb(hw: f64, fw: f64) -> (Box<dyn CoalitionDecisionPolicy>, Option<FeedbackStore>) {
+fn make_fb(
+    join_threshold: f64,
+    hw: f64,
+    fw: f64,
+) -> (Box<dyn CoalitionDecisionPolicy>, Option<FeedbackStore>) {
     let store = FeedbackStore::new(1.0);
     let calc = FeedbackCalculator::new(SynergisticCalculator, hw, fw, store.clone());
     (
-        Box::new(ThresholdPolicy::new(calc, 0.0, 0.0)) as Box<dyn CoalitionDecisionPolicy>,
+        Box::new(ThresholdPolicy::new(calc, join_threshold, 0.0)) as Box<dyn CoalitionDecisionPolicy>,
         Some(store),
     )
 }
@@ -1189,7 +1211,7 @@ where
 /// seed (`MagnitudePolicy::clone` SHARES its evaluator cache — gotcha 15 — so the
 /// cache behaves exactly as the committed single-instance battery); `thr`/`fb`
 /// build fresh per seed.
-fn run_feedback_scope(scope: Scope) -> ScopeRun {
+fn run_feedback_scope(scope: Scope, join_threshold: f64, hw: f64, fw: f64) -> ScopeRun {
     let mag = MagnitudePolicy::default();
     let mag_run = run_fb_arm(scope, |_| {
         (
@@ -1199,12 +1221,12 @@ fn run_feedback_scope(scope: Scope) -> ScopeRun {
     });
     let thr_run = run_fb_arm(scope, |_| {
         (
-            Box::new(ThresholdPolicy::new(SynergisticCalculator, 0.0, 0.0))
+            Box::new(ThresholdPolicy::new(SynergisticCalculator, join_threshold, 0.0))
                 as Box<dyn CoalitionDecisionPolicy>,
             None,
         )
     });
-    let fb_run = run_fb_arm(scope, |_| make_fb(0.5, 0.5));
+    let fb_run = run_fb_arm(scope, |_| make_fb(join_threshold, hw, fw));
     ScopeRun {
         mag: mag_run,
         thr: thr_run,
@@ -1251,8 +1273,8 @@ fn print_scope_table(run: &ScopeRun) {
 }
 
 fn part3_feedback_arm() {
-    let scope_a = run_feedback_scope(Scope::A);
-    let scope_b = run_feedback_scope(Scope::B);
+    let scope_a = run_feedback_scope(Scope::A, 0.0, 0.5, 0.5);
+    let scope_b = run_feedback_scope(Scope::B, 0.0, 0.5, 0.5);
     print_feedback_report(&scope_a, &scope_b);
     print_weight_sweep();
 }
@@ -1410,11 +1432,221 @@ fn print_weight_sweep() {
     for hw in weights {
         print!("| hw={hw:.1} ");
         for fw in weights {
-            let run = run_fb_arm(Scope::B, |_| make_fb(hw, fw));
+            let run = run_fb_arm(Scope::B, |_| make_fb(0.0, hw, fw));
             let med = median(primaries(&run));
             print!("| {med:.4} ");
         }
         println!("|");
+    }
+    println!();
+}
+
+// ===========================================================================
+// Part 4 — selective-base feedback arm vs magnitude (koalisi #48; absorbs #49).
+//
+// #46 falsified the feedback arm on a full-join base (`join_threshold = 0`):
+// `ThresholdPolicy<Synergistic>` joins the whole pool, never leaves (churn 0),
+// and the balanced `hw=fw=0.5` cancelled (`history ≈ failures` per member). This
+// part re-runs the contest on a *selective* base (`join_threshold = 100.0`) with
+// a *failure-only* signal (`hw = 0, fw = 1`), decomposing magnitude's edge into:
+//   * selectivity        — isolated by `thr-selective` (positive threshold, no feedback);
+//   * reliability-gating  — the increment `fb-selective` adds via failure-weighting.
+//
+// Arms (base = SynergisticCalculator; leave_threshold = 0.0):
+//   mag           — MagnitudePolicy::default()                     (frozen incumbent)
+//   thr-selective — ThresholdPolicy(Synergistic, 100.0, 0.0)       (feedback-OFF control)
+//   fb-selective  — ThresholdPolicy(FeedbackCalculator(Synergistic, hw=0, fw=1, store),
+//                                    100.0, 0.0), fresh store per seed.
+//
+// The `mag` arm reproduces the frozen #46 rows seed-for-seed (regression gate);
+// verdict is 4-way (H1 × H2), distinct from Part 3's 3-way verdict.
+// ===========================================================================
+
+fn part4_selective_feedback() {
+    let scope_a = run_feedback_scope(Scope::A, JOIN_THRESHOLD_SELECTIVE, HW_SELECTIVE, FW_SELECTIVE);
+    let scope_b = run_feedback_scope(Scope::B, JOIN_THRESHOLD_SELECTIVE, HW_SELECTIVE, FW_SELECTIVE);
+    print_selective_report(&scope_a, &scope_b);
+    print_selective_threshold_sweep();
+}
+
+#[allow(clippy::too_many_lines)]
+fn print_selective_report(scope_a: &ScopeRun, scope_b: &ScopeRun) {
+    // Medians (Scope A = null control; Scope B = contest).
+    let a_mag_med = median(primaries(&scope_a.mag));
+    let a_thr_med = median(primaries(&scope_a.thr));
+    let a_fb_med = median(primaries(&scope_a.fb));
+    let b_mag_med = median(primaries(&scope_b.mag));
+    let b_thr_med = median(primaries(&scope_b.thr));
+    let b_fb_med = median(primaries(&scope_b.fb));
+
+    // 4-way confirmatory verdict — evaluated on Scope B.
+    let h1 = b_mag_med < 1.25 * b_fb_med;
+    let fb_sup_thr_b = superior_count(&scope_b.fb, &scope_b.thr);
+    let h2a = b_fb_med >= 1.25 * b_thr_med;
+    let h2b = fb_sup_thr_b >= FB_SUPERIOR_MIN;
+    let h2 = h2a && h2b;
+    let verdict = match (h1, h2) {
+        (true, true) => "VALIDATED (selective-feedback arm)",
+        (true, false) => "PARTIAL (selectivity only)",
+        (false, true) => "PARTIAL (mechanism only)",
+        (false, false) => "FALSIFIED (selective feedback)",
+    };
+
+    // Scope A red-flag: the registered prediction is thr-selective ≈ fb-selective
+    // and neither clears H1. A Scope-A fb win points at a metric/leakage bug.
+    let a_h1 = a_mag_med < 1.25 * a_fb_med;
+    let fb_sup_thr_a = superior_count(&scope_a.fb, &scope_a.thr);
+    let a_redflag = a_h1 || fb_sup_thr_a >= FB_SUPERIOR_MIN;
+
+    println!("# koalisi #48 — selective-base feedback arm vs magnitude (K4 battery v2)");
+    println!();
+    println!(
+        "_{SELECTIVE_REPORT_DATE} · catgraph backend · release build · base calculator `SynergisticCalculator` · `join_threshold = 100.0` · `leave_threshold = 0.0` · weights `hw = 0, fw = 1` · prereg `docs/prereg-feedback-arm-k4-v2.md`_"
+    );
+    println!();
+    println!(
+        "Confirmatory battery decomposing magnitude's edge into **selectivity** (`thr-selective`) and **reliability-gating** (the `fb-selective` increment). Three arms — `mag` (`MagnitudePolicy`, frozen incumbent), `thr-selective` (feedback-OFF `ThresholdPolicy<Synergistic>` at `join_threshold = 100.0`, isolating selectivity), `fb-selective` (`ThresholdPolicy<FeedbackCalculator<Synergistic>>` at `join_threshold = 100.0`, `hw = 0`, `fw = 1`, fresh store per seed) — over two scopes. In the tables below the `thr`/`fb` columns are the `thr-selective`/`fb-selective` arms."
+    );
+    println!();
+    println!("## Protocol");
+    println!();
+    println!(
+        "- **Shared grammar:** {SEEDS} seeds `0..{SEEDS}`, inline SplitMix64; pool `n ∈ [4,16]`, caps `k ∈ [1,4]` bits of an 8-bit universe, trust `20–99`; `T = {TASKS}` tasks, required `r ∈ [1,5]` bits; seeded Fisher–Yates arrival; bootstrap-first-arrival; one leave sweep; seed-0 warm-up discarded."
+    );
+    println!(
+        "- **Scope A (null control):** i.i.d.; success ≡ `completed` (union of member caps covers `required`); PRIMARY = completion_rate × mean_cov_eff."
+    );
+    println!(
+        "- **Scope B (contest):** per-agent hidden reliability `ρ_i` (bimodal: reliable `ρ={RHO_RELIABLE}` w.p. {RELIABLE_PROB}, else flaky `ρ={RHO_FLAKY}`) + a pre-drawn arm-independent `perf[t][i]` matrix (`perform` w.p. `1−ρ_i`); success ≡ `completed AND all final members performed`; PRIMARY_B = success_rate × mean_cov_eff."
+    );
+    println!(
+        "- **Feedback write-back:** `fb-selective` records `success` (0/1) for the final coalition once per task, AFTER the leave sweep; `FeedbackStore::new(1.0)` ⇒ any non-success is a failure. `mag`/`thr-selective` record nothing."
+    );
+    println!();
+
+    // Regression gate (run validity, not hypothesis).
+    let gate_a_ok = (a_mag_med - 0.4469).abs() < 5e-4;
+    let gate_b_ok = (b_mag_med - 0.2818).abs() < 5e-4;
+    println!("## Regression gate (run validity)");
+    println!();
+    println!(
+        "- **`mag` Scope-A median** {a_mag_med:.4} must equal 0.4469 (`docs/ab-report-feedback-arm-k4.md`) → {}",
+        pass(gate_a_ok)
+    );
+    println!(
+        "- **`mag` Scope-B median** {b_mag_med:.4} must equal 0.2818 (`docs/ab-report-feedback-arm-k4.md`) → {}",
+        pass(gate_b_ok)
+    );
+    if !(gate_a_ok && gate_b_ok) {
+        println!();
+        println!(
+            "> **⚠ INVALID RUN:** the `mag` regression gate did not reproduce the frozen #46 medians — fix the harness, never the criteria (prereg)."
+        );
+    }
+    println!();
+
+    // Scope A section.
+    println!("## Scope A — i.i.d. null control");
+    println!();
+    print_scope_table(scope_a);
+    println!();
+    println!(
+        "**Scope A medians:** mag {a_mag_med:.4} · thr-selective {a_thr_med:.4} · fb-selective {a_fb_med:.4}. fb-selective strictly beats thr-selective in {fb_sup_thr_a}/{SEEDS} seeds."
+    );
+    println!(
+        "_Registered prediction: thr-selective ≈ fb-selective and neither clears H1 (mag {a_mag_med:.4} < 1.25 × fb {a_fb_med:.4} is {}). A Scope-A fb win is a RED FLAG (metric/leakage bug), not a success._",
+        pass(a_h1)
+    );
+    if a_redflag {
+        println!();
+        println!(
+            "> **⚠ RED FLAG:** Scope A shows a feedback advantage the null control did not predict — investigate before trusting the Scope-B contest."
+        );
+    }
+    println!();
+
+    // Scope B section.
+    println!("## Scope B — reliability-structured contest");
+    println!();
+    print_scope_table(scope_b);
+    println!();
+    println!("**Scope B medians:** mag {b_mag_med:.4} · thr-selective {b_thr_med:.4} · fb-selective {b_fb_med:.4}.");
+    println!();
+
+    // Record-only secondaries.
+    let b_mag_succ = median(success_rates(&scope_b.mag));
+    let b_thr_succ = median(success_rates(&scope_b.thr));
+    let b_fb_succ = median(success_rates(&scope_b.fb));
+    let b_mag_churn = median(churns(&scope_b.mag));
+    let b_thr_churn = median(churns(&scope_b.thr));
+    let b_fb_churn = median(churns(&scope_b.fb));
+    let b_mag_lat = median(scope_b.mag.lat.clone());
+    let b_thr_lat = median(scope_b.thr.lat.clone());
+    let b_fb_lat = median(scope_b.fb.lat.clone());
+    println!("### Scope B secondaries (record-only, non-gating)");
+    println!();
+    println!("| metric (median) | mag | thr-selective | fb-selective |");
+    println!("|-----------------|----:|--------------:|-------------:|");
+    println!("| success_rate | {b_mag_succ:.4} | {b_thr_succ:.4} | {b_fb_succ:.4} |");
+    println!("| churn | {b_mag_churn:.2} | {b_thr_churn:.2} | {b_fb_churn:.2} |");
+    println!("| latency µs | {b_mag_lat:.3} | {b_thr_lat:.3} | {b_fb_lat:.3} |");
+    println!();
+    println!(
+        "_Expected: fb-selective churn ↑ vs the falsified `join = 0` arms; fb-selective success_rate > thr-selective if H2 holds._"
+    );
+    println!();
+
+    // Confirmatory verdict.
+    println!("## Confirmatory verdict (Scope B)");
+    println!();
+    println!(
+        "- **H1 (beats magnitude):** mag median {b_mag_med:.4} < 1.25 × fb-selective median {b_fb_med:.4} → {}",
+        pass(h1)
+    );
+    println!(
+        "- **H2 (mechanism beyond selectivity):** fb-selective median {b_fb_med:.4} ≥ 1.25 × thr-selective median {b_thr_med:.4} ({}) AND fb-selective strictly superior to thr-selective in {fb_sup_thr_b}/{SEEDS} seeds ≥ {FB_SUPERIOR_MIN} ({}) → {}",
+        pass(h2a),
+        pass(h2b),
+        pass(h2)
+    );
+    println!();
+    println!("**VERDICT (selective-feedback arm, #48): {verdict}**");
+    println!();
+    println!(
+        "_VALIDATED = H1 ∧ H2 · PARTIAL (selectivity only) = H1 ∧ ¬H2 · PARTIAL (mechanism only) = H2 ∧ ¬H1 · FALSIFIED = ¬H1 ∧ ¬H2. Thresholds (1.25×, {FB_SUPERIOR_MIN}/{SEEDS}) inherited from the K4-v2/v3/#46 amendments; falsification is a legitimate result and nothing is tuned to flip it (koalisi #48)._"
+    );
+    println!();
+}
+
+/// E1 — selectivity threshold sweep (exploratory, non-gating): `thr-selective`
+/// and `fb-selective` `PRIMARY_B` + churn medians on Scope B over
+/// `join_threshold ∈ SELECTIVE_THRESHOLD_GRID`. The `join = 100.0` row must match
+/// the confirmatory medians (sanity).
+fn print_selective_threshold_sweep() {
+    println!("## E1 — selectivity threshold sweep (exploratory, non-gating, Scope B)");
+    println!();
+    println!(
+        "`thr-selective` (feedback-off, `hw = fw = 0`) and `fb-selective` (`hw = 0, fw = 1`) `PRIMARY_B` + churn medians over {SEEDS} seeds by `join_threshold`. The `join = 100.0` row matches the confirmatory arms (sanity)."
+    );
+    println!();
+    println!(
+        "| join_threshold | thr-selective PRIMARY_B | fb-selective PRIMARY_B | thr churn (med) | fb churn (med) |"
+    );
+    println!(
+        "|---------------:|------------------------:|-----------------------:|----------------:|---------------:|"
+    );
+    for join in SELECTIVE_THRESHOLD_GRID {
+        // One battery yields both arms: the `thr` arm is a bare
+        // `ThresholdPolicy` that never reads `hw`/`fw`, so its result is
+        // independent of the `(0.0, 1.0)` weights the `fb` arm uses.
+        let scope = run_feedback_scope(Scope::B, join, 0.0, 1.0);
+        let thr_primary = median(primaries(&scope.thr));
+        let fb_primary = median(primaries(&scope.fb));
+        let thr_churn = median(churns(&scope.thr));
+        let fb_churn = median(churns(&scope.fb));
+        println!(
+            "| {join:.1} | {thr_primary:.4} | {fb_primary:.4} | {thr_churn:.2} | {fb_churn:.2} |"
+        );
     }
     println!();
 }
