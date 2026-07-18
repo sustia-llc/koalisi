@@ -85,7 +85,12 @@ forex domain since removed).
   `docs/k4-arm-choice-memo.md`** — full lineage v1→v5 + Steps 1–3 ledger;
   options A (adopt e1) / B (keep mag + event seam + state-based v6) / C
   (hybrid) / D (slow-loop fitness); recommendation **B + event seam + D**;
-  **owner decision PENDING** (§6 checkboxes).
+  **owner decision PENDING** (§6 checkboxes). **Post-memo probe (owner-approved,
+  Part 4g, f0c13eb): C's cheap form RULED OUT** — mag + #41-FeedbackStore veto
+  is WORSE than bare mag in every cell (absorbing-exclusion mechanism; see the
+  new gotcha-23 bullet); catgraph scan found no mag-quality lever pending
+  (catgraph#33 = latency polish only, #46 = role research, wrong axis).
+  Recommendation B+D strengthened; memo §4-C updated in place.
 - **Selective-base feedback arm — #48 (2026-07-17, example-only, no bump)**: the
   #46 rematch on a *selective* base. `examples/strategy_comparison.rs` gains
   **Part 4** (the frozen Part 3 #46 battery is the byte-identical regression gate):
@@ -744,6 +749,16 @@ These cost time during the build; future-me should not relearn them.
       nonzero. e1 churn correlates weakly POSITIVELY with its quality (+0.22)
       and its margin over mag (+0.17): e1 wins *with* thrash, not despite it —
       churn mitigation (Step 3) is plausible but not free.
+    - **Cheap reliability-gating on mag is WORSE than bare mag (Part 4g).**
+      `RelFilteredMag` (mag structure + #41 `FeedbackStore` veto on the
+      whole-task L2 signal): every grid cell < 0.2720 (best 0.2582; eviction
+      cells collapse to 0.03–0.12). The veto is an ABSORBING exclusion — smeared
+      failure zeroes a good agent's r̂ and a vetoed agent never re-earns
+      evidence. Reliability is only usable via a learned model with an
+      epistemic term (e1's Dirichlet+novelty; cf. v5 X1). Also rejected on
+      theory: reliability-weighted couplings RAISE an unreliable agent's Möbius
+      weight (magnitude = diversity, not dependability) — don't retry either
+      form. `run_seed_b`'s hook is 4-arg since Part 4g (adds final `members`).
     - **Score-space margins/hysteresis on the e1 arm are INERT (Part 4f).** The
       fixed-γ=16 query posteriors saturate at ±0.5 (all join/leave score
       quantiles from p25 up are exactly 0.5000), so `p > 0.5 + δ` thresholds

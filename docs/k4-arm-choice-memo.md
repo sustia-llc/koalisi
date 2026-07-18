@@ -111,8 +111,25 @@ Commits to: a new arm design (e.g. mag decides, e1's per-bit reliability
 beliefs veto/penalize unreliable providers) and its own registration. Note the
 #46/#48 precedent: reliability-gating on a non-learning base never closed the
 gap; the hybrid bet is that mag's structural selectivity + e1's *learned*
-reliability compose. Untested; highest design risk, plausibly best ceiling
-(the two arms' blind spots are orthogonal).
+reliability compose. Highest design risk, plausibly best ceiling (the two
+arms' blind spots are orthogonal).
+
+> **Probe result (2026-07-18, Part 4g — C's cheap form is RULED OUT).** The
+> owner-approved probe composed mag with the shipped #41 `FeedbackStore` as a
+> reliability veto (`r̂ = 1 − failures/history`, optimistic cold start,
+> optional eviction), fed the runtime-feasible whole-task success signal.
+> **Every cell of the pre-fixed τ × n_min × eviction grid landed BELOW bare
+> mag** (best 0.2582 vs 0.2720; eviction cells down to 0.0289), identity gate
+> held. Mechanism: the veto is an *absorbing exclusion* — the L2 signal smears
+> failure over all final members, one bad coalition zeroes a good agent's
+> estimate, and a vetoed agent can never generate evidence to recover.
+> Corroborates v5's X1 from the other side: the reliability signal is only
+> usable through a learned model with an epistemic (novelty) term. A viable C
+> must therefore carry e1-grade beliefs — i.e. run the e1 world model anyway —
+> which restores e1's cost profile and demotes C behind the v6 path. A
+> catgraph-side lever was also examined and rejected on theory grounds:
+> reliability-weighted couplings *raise* an unreliable agent's Möbius weight
+> (magnitude measures diversity, not dependability).
 
 **D — Slow-loop seam (orthogonal; combinable with A/B/C).**
 The SwarmAgentic population search (#42/#20) consumes a `ValueCalculator`, not
@@ -125,7 +142,10 @@ parked (B), this is its natural second life.
 
 ## 5. Recommendation
 
-**B + the event seam + D-as-follow-up.** Reasoning: (1) the decisive
+**B + the event seam + D-as-follow-up** — *strengthened by the Part 4g probe:
+the cheap hybrid is empirically out, so B's v6 path and C's full-belief hybrid
+are the only quality-preserving routes, and v6 is strictly cheaper to test.*
+Original reasoning: (1) the decisive
 runtime-blocker measured in this cycle is churn, and Step 3 proved it is not
 tunable on the registered arm — adopting now (A) means adopting the thrash;
 (2) the task-completion event is the no-regret move — small, arm-agnostic,
@@ -155,9 +175,9 @@ That is a legitimate owner call; the evidence does not force B.
   (v1/v2 + parity), `docs/ab-report-K4v3-multimodal-aif.md`,
   `docs/ab-report-K4-v4-persistent-aif.md`,
   `docs/ab-report-K4-v5-e1-persistent-aif.md` (+ preregs alongside).
-- #54 exploratory (unregistered, labelled): Parts 4e/4f of
-  `examples/strategy_comparison.rs` (commits e69eb62, 66ea144; runs of
-  2026-07-18 — prefix byte-identity + identity/X2 gates all held in-code),
+- #54 exploratory (unregistered, labelled): Parts 4e/4f/4g of
+  `examples/strategy_comparison.rs` (commits e69eb62, 66ea144, f0c13eb; runs
+  of 2026-07-18 — prefix byte-identity + identity/X2 gates all held in-code),
   `docs/per-bit-outcome-plumbing-design.md`, Step-1b correlation (posted to
   #54, 2026-07-18).
 - Context: #46/#48 feedback-arm reports; CLAUDE.md gotchas 20–23.
