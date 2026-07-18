@@ -201,6 +201,10 @@ fn main() {
     println!("{}", "=".repeat(72));
     println!();
     part4e_arm_choice_addendum();
+    println!();
+    println!("{}", "=".repeat(72));
+    println!();
+    part4f_churn_frontier();
 }
 
 // ===========================================================================
@@ -2335,6 +2339,302 @@ fn part4e_arm_choice_addendum() {
     println!();
 }
 
+// ===========================================================================
+// Part 4f — churn-mitigation frontier (koalisi #54 Step 3). UNREGISTERED,
+// EXPLORATORY. Additive to the frozen Parts 1–4e; no verdict is derived here.
+//
+// Sweeps a join-margin threshold (δ) × a leave-hysteresis threshold (h) over the
+// registered `aif-e1` arm, entirely example-side (no `src/` change). The wrapper
+// is EXACT at (0, 0): `PersistentAifArm::decide` returns `score = p1 - 0.5` and
+// decides join on `score > 0`, leave on `score >= 0` (its `required == 0` /
+// engine-error paths return `act = false`). So `act && score > δ` / `act && score
+// >= h` is the bare arm at (0, 0) and monotone-tightens for positive δ/h — an
+// identity gate asserts the (0, 0) reproduction, mirroring the X2 determinism gate.
+// ===========================================================================
+
+/// Decision-score tap: the raw `p1 − 0.5` margins the wrapped arm produced, split
+/// by join vs leave. Filled only for the (0, 0) identity cell (Part 4f score
+/// distribution); every other cell passes `tap: None`.
+#[derive(Default)]
+struct ScoreTap {
+    join_scores: Vec<f64>,
+    leave_scores: Vec<f64>,
+}
+
+/// Margin / hysteresis wrapper over a [`PersistentAifArm`] (koalisi #54 Step 3,
+/// example-only). Tightens the arm's own decision rule: join iff `act && score >
+/// join_delta`, leave iff `act && score >= leave_delta`. At `(0, 0)` this is the
+/// bare arm bit-for-bit — the arm's finite path already decides join on `score >
+/// 0` and leave on `score >= 0`, and its `required == 0` / engine-error paths
+/// return `act = false` (which stays false under the AND). See `decide()` in
+/// `src/decision/aif_persistent_policy.rs`.
+struct MarginE1<'a> {
+    arm: &'a PersistentAifArm,
+    join_delta: f64,
+    leave_delta: f64,
+    tap: Option<&'a std::sync::Mutex<ScoreTap>>,
+}
+
+impl CoalitionDecisionPolicy for MarginE1<'_> {
+    fn should_join(
+        &self,
+        agent: &dyn AgentCapabilities,
+        coalition: &[&dyn AgentCapabilities],
+        ctx: &DecisionContext,
+    ) -> Decision {
+        let d = self.arm.should_join(agent, coalition, ctx);
+        if let Some(tap) = self.tap {
+            tap.lock().expect("score tap poisoned").join_scores.push(d.score);
+        }
+        Decision {
+            act: d.act && d.score > self.join_delta,
+            score: d.score,
+        }
+    }
+
+    fn should_leave(
+        &self,
+        agent: &dyn AgentCapabilities,
+        coalition: &[&dyn AgentCapabilities],
+        ctx: &DecisionContext,
+    ) -> Decision {
+        let d = self.arm.should_leave(agent, coalition, ctx);
+        if let Some(tap) = self.tap {
+            tap.lock().expect("score tap poisoned").leave_scores.push(d.score);
+        }
+        Decision {
+            act: d.act && d.score >= self.leave_delta,
+            score: d.score,
+        }
+    }
+}
+
+/// Run the margin/hysteresis-wrapped `aif-e1` arm over the Scope-B seed range
+/// `start..end`: fresh `PersistentAifArm` per seed, wrapped by a per-seed
+/// [`MarginE1`] at `(jd, ld)`. `degraded` selects the outcome signal fed back to
+/// the arm (oracle per-bit vs whole-coalition success smeared across the required
+/// bits — see [`persistent_battery_range_degraded`]). Same warm-up discipline as
+/// the other persistent batteries; the warm-up wrapper always gets `tap: None`, so
+/// a supplied `tap` collects scores only from the scored seeds.
+fn margin_battery_range(
+    config: PersistentAifConfig,
+    jd: f64,
+    ld: f64,
+    degraded: bool,
+    start: u64,
+    end: u64,
+    tap: Option<&std::sync::Mutex<ScoreTap>>,
+) -> (Vec<SeedResultB>, Vec<f64>) {
+    {
+        let arm = PersistentAifArm::new(start, config).expect("persistent arm construction");
+        let wrapper = MarginE1 {
+            arm: &arm,
+            join_delta: jd,
+            leave_delta: ld,
+            tap: None,
+        };
+        let mut warm = Vec::new();
+        if degraded {
+            let _ = run_seed_b(&wrapper, start, &mut warm, |req, _bits, success| {
+                arm.observe_outcome(req, &[success; 8]);
+            });
+        } else {
+            let _ = run_seed_b(&wrapper, start, &mut warm, |req, bits, _| {
+                arm.observe_outcome(req, bits);
+            });
+        }
+    }
+    let mut lat = Vec::new();
+    let results = (start..end)
+        .map(|s| {
+            let arm = PersistentAifArm::new(s, config).expect("persistent arm construction");
+            let wrapper = MarginE1 {
+                arm: &arm,
+                join_delta: jd,
+                leave_delta: ld,
+                tap,
+            };
+            if degraded {
+                run_seed_b(&wrapper, s, &mut lat, |req, _bits, success| {
+                    arm.observe_outcome(req, &[success; 8]);
+                })
+            } else {
+                run_seed_b(&wrapper, s, &mut lat, |req, bits, _| {
+                    arm.observe_outcome(req, bits);
+                })
+            }
+        })
+        .collect();
+    (results, lat)
+}
+
+#[allow(clippy::too_many_lines)]
+fn part4f_churn_frontier() {
+    println!("# koalisi #54 — Part 4f: churn-mitigation frontier (unregistered, exploratory)");
+    println!();
+    println!(
+        "_join margin `p > 0.5 + δ` (wrapper `score > δ`) × leave hysteresis (`score ≥ h` to evict), swept over seeds 30..60 under BOTH the oracle and degraded outcome signals. Unregistered and exploratory: a promising point here is a v6 registration CANDIDATE only — a fresh prereg on seeds 60..90 must precede any quality claim._"
+    );
+    println!();
+
+    // --- Identity gate (run-invalidating, like X2) -------------------------
+    let tap = std::sync::Mutex::new(ScoreTap::default());
+    let (base, _base_lat) = margin_battery_range(e1_config(), 0.0, 0.0, false, 30, 60, Some(&tap));
+    let (ref_e1, _ref_lat) = persistent_battery_range(e1_config(), 30, 60);
+    assert_eq!(
+        base.len(),
+        ref_e1.len(),
+        "Part 4f identity gate: MarginE1(0,0) must reproduce the bare arm"
+    );
+    for i in 0..base.len() {
+        assert!(
+            base[i].primary.to_bits() == ref_e1[i].primary.to_bits()
+                && base[i].churn == ref_e1[i].churn,
+            "Part 4f identity gate: MarginE1(0,0) must reproduce the bare arm"
+        );
+    }
+    println!(
+        "**Identity gate:** `MarginE1(δ=0, h=0)` reproduces the bare `aif-e1` arm on all {} seeds (primary + churn bit-identical; asserted in-code).",
+        base.len()
+    );
+    println!();
+
+    // --- Decision-score distribution (identity cell, oracle) ---------------
+    let (mut js, mut ls) = {
+        let g = tap.lock().expect("score tap poisoned");
+        (g.join_scores.clone(), g.leave_scores.clone())
+    };
+    js.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    ls.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let qtl = |s: &[f64], p: f64| -> f64 {
+        if s.is_empty() {
+            return f64::NAN;
+        }
+        let idx = (p * (s.len() as f64 - 1.0)).round() as usize;
+        s[idx.min(s.len() - 1)]
+    };
+    println!("## decision-score distribution (identity cell, oracle)");
+    println!();
+    println!("| stream | n | min | p25 | p50 | p75 | max |");
+    println!("|--------|--:|----:|----:|----:|----:|----:|");
+    println!(
+        "| join | {} | {:.4} | {:.4} | {:.4} | {:.4} | {:.4} |",
+        js.len(),
+        qtl(&js, 0.0),
+        qtl(&js, 0.25),
+        qtl(&js, 0.5),
+        qtl(&js, 0.75),
+        qtl(&js, 1.0)
+    );
+    println!(
+        "| leave | {} | {:.4} | {:.4} | {:.4} | {:.4} | {:.4} |",
+        ls.len(),
+        qtl(&ls, 0.0),
+        qtl(&ls, 0.25),
+        qtl(&ls, 0.5),
+        qtl(&ls, 0.75),
+        qtl(&ls, 1.0)
+    );
+    println!();
+    println!(
+        "_quantiles by nearest-rank on the sorted scores (`score = p(control 1) − 0.5`). Shows where posterior mass sits: with fixed γ = 16 the query posteriors may saturate near ±0.5, which would bound how much a margin/hysteresis threshold can move._"
+    );
+    println!();
+
+    // --- Frontier grids ----------------------------------------------------
+    let jd_grid = [0.0, 0.05, 0.15, 0.30, 0.45];
+    let ld_grid = [0.0, 0.05, 0.15, 0.30];
+
+    // Oracle: reuse the identity-cell `base` for (0, 0); run every other cell.
+    let mut oracle_cells: Vec<(f64, f64, f64, f64)> = Vec::new();
+    for (ji, &jd) in jd_grid.iter().enumerate() {
+        for (li, &ld) in ld_grid.iter().enumerate() {
+            let (prim, churn) = if ji == 0 && li == 0 {
+                (median(primaries_b(&base)), median(churns_b(&base)))
+            } else {
+                let (rs, _) = margin_battery_range(e1_config(), jd, ld, false, 30, 60, None);
+                (median(primaries_b(&rs)), median(churns_b(&rs)))
+            };
+            oracle_cells.push((jd, ld, prim, churn));
+        }
+    }
+
+    // Degraded: every cell runs (including its own (0, 0)).
+    let mut deg_cells: Vec<(f64, f64, f64, f64)> = Vec::new();
+    for &jd in &jd_grid {
+        for &ld in &ld_grid {
+            let (rs, _) = margin_battery_range(e1_config(), jd, ld, true, 30, 60, None);
+            deg_cells.push((jd, ld, median(primaries_b(&rs)), median(churns_b(&rs))));
+        }
+    }
+
+    let print_grid = |title: &str, cells: &[(f64, f64, f64, f64)]| {
+        println!("{title}");
+        println!();
+        print!("| δ\\h |");
+        for &ld in &ld_grid {
+            print!(" h={ld:.2} |");
+        }
+        println!();
+        print!("|---|");
+        for _ in &ld_grid {
+            print!("---|");
+        }
+        println!();
+        for (ji, &jd) in jd_grid.iter().enumerate() {
+            print!("| δ={jd:.2} |");
+            for li in 0..ld_grid.len() {
+                let cell = &cells[ji * ld_grid.len() + li];
+                print!(" {:.4}/{:.0} |", cell.2, cell.3);
+            }
+            println!();
+        }
+        println!();
+        println!("_cell = median PRIMARY_B / median churn over seeds 30..60._");
+        println!();
+    };
+
+    print_grid("## frontier — oracle signal (seeds 30..60)", &oracle_cells);
+    print_grid("## frontier — degraded signal (seeds 30..60)", &deg_cells);
+
+    // --- Pareto summary ----------------------------------------------------
+    println!("## Pareto summary");
+    println!();
+    println!(
+        "_Reference (this run's Part 4d/4e values, stable under the identity gate; not recomputed here): mag 0.2720 / churn 8 · e1 baseline 0.4406 / churn 136._"
+    );
+    println!();
+    let print_pareto = |signal: &str, cells: &[(f64, f64, f64, f64)]| {
+        let mut qualifying: Vec<&(f64, f64, f64, f64)> =
+            cells.iter().filter(|c| c.2 >= 0.40).collect();
+        qualifying.sort_by(|a, b| a.3.partial_cmp(&b.3).unwrap_or(std::cmp::Ordering::Equal));
+        println!("**{signal}** — cells with median PRIMARY_B ≥ 0.40, by churn ascending:");
+        println!();
+        if qualifying.is_empty() {
+            println!("- none.");
+        } else {
+            for (rank, c) in qualifying.iter().enumerate() {
+                if rank == 0 {
+                    println!(
+                        "- **(δ={:.2}, h={:.2}) {:.4}/{:.0} — v6 candidate ({signal})**",
+                        c.0, c.1, c.2, c.3
+                    );
+                } else {
+                    println!("- (δ={:.2}, h={:.2}) {:.4}/{:.0}", c.0, c.1, c.2, c.3);
+                }
+            }
+        }
+        println!();
+    };
+    print_pareto("oracle", &oracle_cells);
+    print_pareto("degraded", &deg_cells);
+
+    println!(
+        "_Unregistered exploratory sweep — nothing here is a verdict. Any v6 arm must be pre-registered on fresh seeds 60..90 before a quality claim; the (δ, h) grid was fixed before this run, not tuned on its results._"
+    );
+    println!();
+}
+
 #[cfg(test)]
 mod part4c_tests {
     use super::*;
@@ -2407,5 +2707,28 @@ mod part4c_tests {
             assert!(!r.acts.is_empty(), "some join/leave decisions must have run");
         }
         assert!(!lat.is_empty(), "latencies recorded");
+    }
+
+    /// 2-seed smoke for Part 4f: (a) `MarginE1(0, 0)` reproduces the bare arm
+    /// (the identity property at 2-seed scale), and (b) a tightened degraded cell
+    /// runs end-to-end with finite in-range metrics.
+    #[test]
+    fn part4f_two_seed_smoke() {
+        let (m, _) = margin_battery_range(e1_config(), 0.0, 0.0, false, 30, 32, None);
+        let (r, _) = persistent_battery_range(e1_config(), 30, 32);
+        assert_eq!(m.len(), 2);
+        assert_eq!(r.len(), 2);
+        for i in 0..m.len() {
+            assert!(
+                m[i].primary.to_bits() == r[i].primary.to_bits() && m[i].churn == r[i].churn,
+                "MarginE1(0,0) must reproduce the bare arm"
+            );
+        }
+
+        let (deg, _) = margin_battery_range(e1_config(), 0.15, 0.05, true, 30, 32, None);
+        assert_eq!(deg.len(), 2);
+        for x in &deg {
+            assert!(x.primary.is_finite() && (0.0..=1.0).contains(&x.primary));
+        }
     }
 }
