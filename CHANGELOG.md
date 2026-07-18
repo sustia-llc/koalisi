@@ -10,8 +10,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned work — issue-tracked (details in [`CLAUDE.md`](./CLAUDE.md)
 §"Next steps"):
 
-- **[#56]** K4-v6 never-evict E1 arm — registered, seeds 60..90 (decided by
-  the #54 memo, option B; prereg precedes code).
 - **[#57]** e1-derived `ValueCalculator` for the population-search fitness
   (#42/#20 slow-loop seam; depends on #55).
 - **Phase 5 — SwarmAgentic meta-layer remainder** ([#20]): configurator,
@@ -25,6 +23,31 @@ Planned work — issue-tracked (details in [`CLAUDE.md`](./CLAUDE.md)
   removed `remote` feature; folds in the [#24] hardening ideas).
 - **[#25]** metrics example, reframed onto the `CoalitionService` decision
   path / topology events.
+
+## [0.15.0] — 2026-07-18
+
+### Added
+
+- **K4-v6 state levers on the persistent AIF arm**
+  ([#56](https://github.com/sustia-llc/koalisi/issues/56)):
+  `PersistentAifConfig` gains `eviction_cap: Option<u32>` (per-task leave-act
+  cap; `Some(0)` = never-evict, skip-query leave semantics) and
+  `rejoin_lockout_tasks: u64` (bar a just-evicted agent from rejoining for k
+  tasks) — both **identity-default** (`None` / `0` reproduce the #53
+  registered arm bit-for-bit, gated by the X-A/X2 asserts).
+  `examples/strategy_comparison.rs` gains Part 4h, the registered K4-v6
+  battery (fresh seeds 60..90, dual-signal).
+
+### Registered result
+
+- **`FALSIFIED (never-evict)`** (`docs/ab-report-K4-v6-never-evict.md`,
+  prereg `docs/prereg-K4-v6-never-evict.md`): the never-evict point collapses
+  to 0.0143/0.0141 vs the 1.25×-mag bar 0.3551 under both signals. The
+  exploratory cap series is monotone (quality rises with allowed evictions) —
+  **eviction churn is the arm's mechanism, not overhead**. Memo option B's
+  parked state is final: magnitude stays the demonstrated default; e1 stays
+  parked as capability evidence (its quality edge replicated on a third seed
+  range: e1-k0 0.3840 vs mag 0.2841 on 60..90).
 
 ## [0.14.0] — 2026-07-18
 

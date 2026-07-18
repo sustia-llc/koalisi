@@ -209,6 +209,10 @@ fn main() {
     println!("{}", "=".repeat(72));
     println!();
     part4g_reliability_filtered_mag();
+    println!();
+    println!("{}", "=".repeat(72));
+    println!();
+    part4h_v6_never_evict();
 }
 
 // ===========================================================================
@@ -2885,6 +2889,201 @@ fn part4g_reliability_filtered_mag() {
     println!();
 }
 
+// ===========================================================================
+// Part 4h — K4-v6 never-evict E1 arm, dual-signal, out-of-sample (koalisi #56).
+// THE REGISTERED RUN. Governed by `docs/prereg-K4-v6-never-evict.md` (committed +
+// posted to #56 before implementation); seeds 60..90; both signals gating;
+// thresholds from THIS run's own 60..90 medians. Additive; every existing printed
+// line byte-identical.
+// ===========================================================================
+
+#[allow(clippy::too_many_lines)]
+fn part4h_v6_never_evict() {
+    // The registered lever: never-evict (eviction cap 0) atop the #53 E6 config.
+    let ne_cfg = PersistentAifConfig {
+        eviction_cap: Some(0),
+        ..e1_config()
+    };
+
+    println!(
+        "# koalisi #56 — K4-v6: never-evict E1 arm, dual-signal, out-of-sample (REGISTERED)"
+    );
+    println!();
+    println!(
+        "_governed by `docs/prereg-K4-v6-never-evict.md` (committed + posted pre-implementation); registered lever = `eviction_cap: Some(0)` (churn 0 by construction) atop the #53 E6 `aif-e1` config; Scope B · seeds **60..90** (out-of-sample, never used by v1–v5 or #54 Parts 4d–4g); BOTH signals gating; all thresholds are THIS run's own 60..90 medians._"
+    );
+    println!();
+
+    // --- X-A run-validity gate (run-invalidating, like X2) -----------------
+    // e1-k0 (cap None, oracle) on 30..60 must reproduce the #53 registered numbers.
+    let (xa, _) = persistent_battery_range(e1_config(), 30, 60);
+    let xa_med = median(primaries_b(&xa));
+    let xa_churn = median(churns_b(&xa));
+    assert_eq!(
+        format!("{xa_med:.4}"),
+        "0.4406",
+        "X-A gate: e1-k0 (cap None, oracle) on 30..60 must reproduce the #53 median 0.4406"
+    );
+    assert_eq!(
+        format!("{xa_churn:.2}"),
+        "136.00",
+        "X-A gate: e1-k0 (cap None, oracle) on 30..60 must reproduce the #53 churn 136.00"
+    );
+    println!(
+        "**X-A gate:** `e1-k0` (cap `None`, oracle) on seeds 30..60 reproduces the #53 registered numbers 0.4406 / 136.00 exactly (asserted in-code)."
+    );
+    println!();
+
+    // --- Confirmatory batteries — Scope B, seeds 60..90 --------------------
+    let (ne_oracle, ne_o_lat) = persistent_battery_range(ne_cfg, 60, 90);
+    let (ne_deg, _ne_d_lat) = persistent_battery_range_degraded(ne_cfg, 60, 90);
+    let (e1k0, _e1k0_lat) = persistent_battery_range(e1_config(), 60, 90);
+    let (scalar, _scalar_lat) = stateless_battery_range(
+        || Box::new(AifDecisionPolicy::default()) as Box<dyn CoalitionDecisionPolicy>,
+        60,
+        90,
+    );
+    let mag_policy = MagnitudePolicy::default();
+    let (mag, _mag_lat) = stateless_battery_range(
+        || Box::new(mag_policy.clone()) as Box<dyn CoalitionDecisionPolicy>,
+        60,
+        90,
+    );
+
+    let ne_o_med = median(primaries_b(&ne_oracle));
+    let ne_d_med = median(primaries_b(&ne_deg));
+    let e1k0_med = median(primaries_b(&e1k0));
+    let scalar_med = median(primaries_b(&scalar));
+    let mag_med = median(primaries_b(&mag));
+    let ne_o_churn = median(churns_b(&ne_oracle));
+    let ne_d_churn = median(churns_b(&ne_deg));
+    let e1k0_churn = median(churns_b(&e1k0));
+    let ne_o_lat_med = median(ne_o_lat.clone());
+
+    println!("## Per-seed PRIMARY_B + churn (seeds 60..90)");
+    println!();
+    println!(
+        "| seed | ne_oracle | ne_degraded | e1k0_oracle | scalar | mag | ne_o_churn | ne_d_churn |"
+    );
+    println!(
+        "|-----:|----------:|------------:|------------:|-------:|----:|-----------:|-----------:|"
+    );
+    for i in 0..ne_oracle.len() {
+        let seed = 60 + i as u64;
+        println!(
+            "| {} | {:.4} | {:.4} | {:.4} | {:.4} | {:.4} | {} | {} |",
+            seed,
+            ne_oracle[i].primary,
+            ne_deg[i].primary,
+            e1k0[i].primary,
+            scalar[i].primary,
+            mag[i].primary,
+            ne_oracle[i].churn,
+            ne_deg[i].churn
+        );
+    }
+    println!();
+    println!(
+        "**Medians (60..90):** ne-oracle {ne_o_med:.4} · ne-degraded {ne_d_med:.4} · e1-k0 {e1k0_med:.4} · scalar {scalar_med:.4} · mag {mag_med:.4}. Churn: ne-oracle {ne_o_churn:.2} · ne-degraded {ne_d_churn:.2} · e1-k0 {e1k0_churn:.2}. Latency ne-oracle {ne_o_lat_med:.3} µs (record-only)."
+    );
+    println!();
+
+    // --- Confirmatory verdict (prereg rule, from THIS run's 60..90 medians) -
+    let sup_o = superior_count_b(&ne_oracle, &scalar);
+    let sup_d = superior_count_b(&ne_deg, &scalar);
+    let h1_o = ne_o_med >= 1.25 * mag_med;
+    let h1_d = ne_d_med >= 1.25 * mag_med;
+    let h3_o = sup_o >= 18;
+    let h3_d = sup_d >= 18;
+    let h2_o = ne_o_churn <= 68.0;
+    let h2_d = ne_d_churn <= 68.0;
+    let h2 = h2_o && h2_d;
+    let oracle_pass = h1_o && h3_o;
+    let degraded_pass = h1_d && h3_d;
+    // Never-evict must give churn 0 (H2 by construction); a >68 median would be a
+    // run-invalidating implementation bug, so it blocks VALIDATED.
+    let verdict = if h2 {
+        match (oracle_pass, degraded_pass) {
+            (true, true) => "VALIDATED (v6)",
+            (true, false) => "PARTIAL (signal-limited: oracle only)",
+            (false, true) => "PARTIAL (signal-limited: degraded only)",
+            (false, false) => "FALSIFIED (never-evict)",
+        }
+    } else {
+        "FALSIFIED (never-evict)"
+    };
+
+    println!("## Confirmatory verdict (Scope B, seeds 60..90)");
+    println!();
+    println!(
+        "- **H1(oracle) — quality vs mag:** ne-oracle {ne_o_med:.4} ≥ 1.25 × mag {mag_med:.4} (= {:.4}) → {}",
+        1.25 * mag_med,
+        pass(h1_o)
+    );
+    println!(
+        "- **H1(degraded) — quality vs mag:** ne-degraded {ne_d_med:.4} ≥ 1.25 × mag {mag_med:.4} (= {:.4}) → {}",
+        1.25 * mag_med,
+        pass(h1_d)
+    );
+    println!(
+        "- **H3(oracle) — mechanism vs scalar:** ne-oracle strictly superior to scalar in {sup_o}/30 ≥ 18 → {}",
+        pass(h3_o)
+    );
+    println!(
+        "- **H3(degraded) — mechanism vs scalar:** ne-degraded strictly superior to scalar in {sup_d}/30 ≥ 18 → {}",
+        pass(h3_d)
+    );
+    println!(
+        "- **H2 — churn ceiling ≤ 68 (absolute; by construction at c = 0):** ne-oracle {ne_o_churn:.2} ({}) · ne-degraded {ne_d_churn:.2} ({})",
+        pass(h2_o),
+        pass(h2_d)
+    );
+    println!();
+    println!("**VERDICT (K4-v6, #56): {verdict}**");
+    println!();
+    println!(
+        "_VALIDATED (v6) = H1 ∧ H3 under BOTH signals (∧ H2); PARTIAL (signal-limited) = H1 ∧ H3 under exactly one signal; FALSIFIED (never-evict) = anything less. Thresholds (1.25×, 18/30) inherit the v2→v5 family; churn ceiling 68 is absolute; nothing is tuned — lever, signal set, and bar were locked before implementation (prereg `docs/prereg-K4-v6-never-evict.md`)._"
+    );
+    println!();
+
+    // --- Exploratory (non-gating) ------------------------------------------
+    println!(
+        "## Exploratory (non-gating): eviction-cap interpolation + rejoin lockout (degraded, 60..90)"
+    );
+    println!();
+    println!("| condition | median PRIMARY_B | churn median |");
+    println!("|-----------|----------------:|-------------:|");
+    for c in [1u32, 2, 4] {
+        let cfg = PersistentAifConfig {
+            eviction_cap: Some(c),
+            ..e1_config()
+        };
+        let (rs, _) = persistent_battery_range_degraded(cfg, 60, 90);
+        println!(
+            "| cap c={c} | {:.4} | {:.2} |",
+            median(primaries_b(&rs)),
+            median(churns_b(&rs))
+        );
+    }
+    for k in [1u64, 2] {
+        let cfg = PersistentAifConfig {
+            rejoin_lockout_tasks: k,
+            ..e1_config()
+        };
+        let (rs, _) = persistent_battery_range_degraded(cfg, 60, 90);
+        println!(
+            "| lockout k={k} | {:.4} | {:.2} |",
+            median(primaries_b(&rs)),
+            median(churns_b(&rs))
+        );
+    }
+    println!();
+    println!(
+        "_non-gating; caps interpolate between never-evict (c = 0) and the k0 arm (unlimited), lockouts are the across-task state alternative (unlimited evictions). Informs whether any interior point merits a future registration — none is implied by this run._"
+    );
+    println!();
+}
+
 #[cfg(test)]
 mod part4c_tests {
     use super::*;
@@ -3008,6 +3207,28 @@ mod part4c_tests {
         assert_eq!(active.len(), 2);
         for x in &active {
             assert!(x.primary.is_finite() && (0.0..=1.0).contains(&x.primary));
+        }
+    }
+
+    /// 2-seed smoke for Part 4h (#56): the never-evict arm (`eviction_cap: Some(0)`)
+    /// runs end-to-end on the registered seeds 60..62 with finite metrics AND zero
+    /// churn (the never-evict structural guarantee); one lockout config also runs.
+    #[test]
+    fn part4h_two_seed_smoke() {
+        let ne_cfg = PersistentAifConfig { eviction_cap: Some(0), ..e1_config() };
+        let (ne, lat) = persistent_battery_range(ne_cfg, 60, 62);
+        assert_eq!(ne.len(), 2);
+        for r in &ne {
+            assert!(r.primary.is_finite() && (0.0..=1.0).contains(&r.primary));
+            assert_eq!(r.churn, 0, "never-evict ⇒ zero churn by construction");
+        }
+        assert!(!lat.is_empty(), "latencies recorded");
+
+        let lk_cfg = PersistentAifConfig { rejoin_lockout_tasks: 1, ..e1_config() };
+        let (lk, _) = persistent_battery_range_degraded(lk_cfg, 60, 62);
+        assert_eq!(lk.len(), 2);
+        for r in &lk {
+            assert!(r.primary.is_finite() && (0.0..=1.0).contains(&r.primary));
         }
     }
 }
