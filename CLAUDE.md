@@ -48,10 +48,31 @@ forex domain since removed).
   `surrealdb:surrealql-language` — for K3 (#6) surrealdb-live-message work,
   per the user CLAUDE.md routing rules.
 
-## Current state — 2026-07-17
+## Current state — 2026-07-18
 
 ### Done
 
+- **#54 Steps 1–2: arm-choice evidence — 2026-07-18 (example+docs only, no
+  bump)**: the cheap-evidence + load-bearing-feasibility steps from the #54
+  sequencing comment. `examples/strategy_comparison.rs` gains **Part 4e**
+  (unregistered, exploratory; Parts 1–4d frozen and reproduced byte-identical,
+  X2 gate 0.4042/210.00 held): (a) **mag churn on 30..60 finally measured —
+  median 8.00** vs e1 136 (17×; the churn gap is now a number, not folklore);
+  (b) **degraded-outcome e1** — `run_seed_b`'s hook gained a third
+  `success: bool` arg and `persistent_battery_range_degraded` feeds
+  `observe_outcome(req, &[success; 8])` (whole-coalition success smeared across
+  required bits — the runtime-feasible L2 signal). **Result: degraded ≈ oracle**
+  (0.4381 vs 0.4406 median, bit-identical 17/30 seeds, scalar 0.1267) ⇒ the
+  per-bit oracle signal is NOT load-bearing; the runtime needs only ONE new
+  domain-emitted task-completion event `(required, members, success)` — the
+  #41-seam information contract. Step 1b correlation (offline): e1 churn vs
+  quality Spearman **+0.22**, vs e1−mag margin **+0.17** — e1 wins *with*
+  thrash, not despite it; Step-3 mitigation is plausible but not free. Design
+  note: `docs/per-bit-outcome-plumbing-design.md` (fidelity ladder L0/L1/L2 +
+  runtime-seam inventory + event sketch: NOT a `TemporalEvent`; durable home =
+  P7.4 #32). See **gotcha 23**. Step 3 (churn frontier) awaits owner go.
+  Suites: decision,magnitude **161** (v4/v5 cycle added 10 over the table
+  below; re-measured green 2026-07-18).
 - **Selective-base feedback arm — #48 (2026-07-17, example-only, no bump)**: the
   #46 rematch on a *selective* base. `examples/strategy_comparison.rs` gains
   **Part 4** (the frozen Part 3 #46 battery is the byte-identical regression gate):
@@ -415,7 +436,8 @@ koalisi/
 │   ├── prereg-feedback-arm-k4.md           #46 pre-registration (feedback-arm K4 rematch; result appended)
 │   ├── ab-report-feedback-arm-k4.md        #46 run — FALSIFIED (feedback); Scope A null + Scope B reliability contest + E1 sweep
 │   ├── prereg-feedback-arm-k4-v2.md        #48 pre-registration (selective-base rematch, join=100, hw=0/fw=1; result appended)
-│   └── ab-report-feedback-arm-k4-v2.md     #48 run — PARTIAL (mechanism only); selectivity vs reliability-gating decomposition + E1 threshold sweep
+│   ├── ab-report-feedback-arm-k4-v2.md     #48 run — PARTIAL (mechanism only); selectivity vs reliability-gating decomposition + E1 threshold sweep
+│   └── per-bit-outcome-plumbing-design.md  #54 Step 2 design note — outcome-signal fidelity ladder; degraded ≈ oracle result (gotcha 23)
 └── tests/
     ├── topology_test.rs                    12 tests
     ├── algorithms_test.rs                  18 tests (incl. 3 feedback-loop/seeding tests, #41)
@@ -688,6 +710,26 @@ These cost time during the build; future-me should not relearn them.
       `make_fb`/`run_feedback_scope` gained a leading `join_threshold` param; Part 3
       passes its original `(0.0, 0.5, 0.5)` so its output — and the committed
       `docs/ab-report-feedback-arm-k4.md` — is unchanged.
+
+23. **E1 outcome-signal fidelity (#54 Part 4e, unregistered) — rely on these.**
+    - **The per-bit oracle signal is NOT load-bearing.** Feeding the registered
+      `aif-e1` arm the DEGRADED signal — whole-coalition `success` smeared across
+      required bits, `observe_outcome(req, &[success; 8])` — retains the effect on
+      30..60: degraded 0.4381 vs oracle 0.4406 median (bit-identical 17/30 seeds),
+      scalar 0.1267, churn 143 vs 136. A runtime therefore needs only ONE
+      domain-emitted task-completion event `(required, members, success)` — the
+      same information contract as #41's `record_outcome`. Full analysis:
+      `docs/per-bit-outcome-plumbing-design.md` (fidelity ladder; the event is NOT
+      a `TemporalEvent` — durable home is the P7.4 #32 streams).
+    - **`run_seed_b`'s hook is 3-arg since Part 4e**
+      (`FnMut(u32, &[bool; 8], bool)` — third = whole-coalition `success`,
+      which is NOT derivable from `per_bit` alone). Behavior of all frozen
+      parts unchanged (byte-identity reproduced 2026-07-18).
+    - **mag churn on 30..60 is 8.00 median** (Part 4e table) — "historically
+      near-zero" was 0..30 folklore; the real out-of-sample number is small but
+      nonzero. e1 churn correlates weakly POSITIVELY with its quality (+0.22)
+      and its margin over mag (+0.17): e1 wins *with* thrash, not despite it —
+      churn mitigation (Step 3) is plausible but not free.
 
 ## Reproducers
 
