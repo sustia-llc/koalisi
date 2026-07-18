@@ -163,11 +163,19 @@ That is a legitimate owner call; the evidence does not force B.
 
 ## 6. Decision (owner)
 
+**DECIDED 2026-07-18 (owner, #54): B + D — per the recommendation.**
+
 - [ ] A — adopt e1 now
-- [ ] B — keep mag; event seam now; v6 (state-based low-churn e1) next
-- [ ] C — hybrid design cycle
-- [ ] D — slow-loop e1 fitness derivation (with A/B/C: ____)
+- [x] B — keep mag; event seam now; v6 (state-based low-churn e1) next
+- [ ] C — hybrid design cycle *(cheap form ruled out by the Part 4g probe;
+  full-belief form parked behind the v6 answer)*
+- [x] D — slow-loop e1 fitness derivation (with B)
 - [ ] other / amendments: ____
+
+Execution filed as follow-up issues (see #54 closing comment): the
+arm-agnostic task-completion event seam, the K4-v6 state-based low-churn E1
+registration, and the e1-derived `ValueCalculator` for the population-search
+fitness seam.
 
 ## 7. Provenance
 

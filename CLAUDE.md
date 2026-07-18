@@ -91,6 +91,13 @@ forex domain since removed).
   new gotcha-23 bullet); catgraph scan found no mag-quality lever pending
   (catgraph#33 = latency polish only, #46 = role research, wrong axis).
   Recommendation B+D strengthened; memo §4-C updated in place.
+  **DECIDED (owner, 2026-07-18): B + D — #54 CLOSED.** Follow-ups filed:
+  **#55** (arm-agnostic task-completion event seam — build FIRST, no-regret),
+  **#56** (K4-v6 state-based low-churn E1 arm, dwell/cooldown; prereg on seeds
+  60..90, bar ≥ ~0.40 at materially lower churn; design decisions to lock with
+  owner BEFORE prereg — lever choice, k grid, oracle-vs-degraded signal),
+  **#57** (e1-derived `ValueCalculator` for the #42/#20 population-search
+  fitness; depends on #55). Magnitude stays the demonstrated default arm.
 - **Selective-base feedback arm — #48 (2026-07-17, example-only, no bump)**: the
   #46 rematch on a *selective* base. `examples/strategy_comparison.rs` gains
   **Part 4** (the frozen Part 3 #46 battery is the byte-identical regression gate):
