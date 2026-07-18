@@ -70,9 +70,18 @@ forex domain since removed).
   thrash, not despite it; Step-3 mitigation is plausible but not free. Design
   note: `docs/per-bit-outcome-plumbing-design.md` (fidelity ladder L0/L1/L2 +
   runtime-seam inventory + event sketch: NOT a `TemporalEvent`; durable home =
-  P7.4 #32). See **gotcha 23**. Step 3 (churn frontier) awaits owner go.
-  Suites: decision,magnitude **161** (v4/v5 cycle added 10 over the table
-  below; re-measured green 2026-07-18).
+  P7.4 #32). See **gotcha 23**. Suites: decision,magnitude **161** (v4/v5 cycle
+  added 10 over the table below; re-measured green 2026-07-18).
+  **Step 3 ran same day (owner GO; Part 4f, 66ea144): NULL — the frontier is
+  FLAT.** `MarginE1` wrapper (identity at (0,0) asserted per-seed) swept
+  δ∈{0..0.45}×h∈{0..0.30} under both signals: every cell 0.4406/136 (oracle) /
+  0.4381/143–142 (degraded). Mechanism: the fixed-γ=16 posteriors **saturate at
+  ±0.5** (p25–max of all join/leave scores = 0.5000) — decisions are binary, no
+  sub-0.5 threshold separates them; e1 churn is confident flip-flopping from
+  between-task belief updates, not marginal indecision. Score-space
+  margins/hysteresis are a dead lever; churn mitigation needs a STATE-based
+  design (dwell-time/cooldown — new arm, own registration). No v6 candidate
+  from this lever. Step 4 (decision memo) is next; owner decides.
 - **Selective-base feedback arm — #48 (2026-07-17, example-only, no bump)**: the
   #46 rematch on a *selective* base. `examples/strategy_comparison.rs` gains
   **Part 4** (the frozen Part 3 #46 battery is the byte-identical regression gate):
@@ -730,6 +739,13 @@ These cost time during the build; future-me should not relearn them.
       nonzero. e1 churn correlates weakly POSITIVELY with its quality (+0.22)
       and its margin over mag (+0.17): e1 wins *with* thrash, not despite it —
       churn mitigation (Step 3) is plausible but not free.
+    - **Score-space margins/hysteresis on the e1 arm are INERT (Part 4f).** The
+      fixed-γ=16 query posteriors saturate at ±0.5 (all join/leave score
+      quantiles from p25 up are exactly 0.5000), so `p > 0.5 + δ` thresholds
+      and leave hysteresis in score units change NOTHING for any δ, h < 0.5
+      (frontier flat at 0.4406/136 oracle, 0.4381/143–142 degraded). Don't
+      re-try this lever; churn work must target membership STATE (dwell-time /
+      cooldown / rejoin-lockout), which is a new arm design + registration.
 
 ## Reproducers
 
