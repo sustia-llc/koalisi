@@ -898,6 +898,24 @@ engine from the `tira` repo and bridges to it.
   PrecisionDynamics) deferred — they need a *persistent-agent* design (fresh-POMDP-per-
   decision makes learning/β-persistence meaningless) and their own registration. E2 is
   the identified lever: a live info-gain term is non-monotone in per-bit structure.
+- **K4-v4 persistent arm: `FALSIFIED (persistence)`** (2026-07-17,
+  `docs/ab-report-K4-v4-persistent-aif.md`; pre-registered in
+  `docs/prereg-K4-v4-persistent-aif.md` + Amendments 1–2, all posted to #44 before
+  implementation/run; engine `aif-v0.11.0` — three tira releases cut for this arm:
+  0.10.0 seed+B-novelty, 0.10.1 read accessors, 0.11.0 `initial_pa`/`initial_pb`
+  count injection after the row-uniform-pA/learn_a write-back gap made structured
+  query A's decision-dead). `PersistentAifArm` (`aif_persistent_policy.rs`): per-seed
+  persistent 8-bit reliability world model + membership-factor query POMDPs (exact
+  coverage-masked count injection, `PrecisionDynamics`, deterministic posterior
+  decisions). Registered medians: pers 0.0326 vs scalar 0.1035 vs mag 0.2818 — ¬H2,
+  though S1 act-divergence 30/30 proves the arm **genuinely escapes the v3
+  equivalence theorem** (first arm to do so; the falsification is performance, not
+  collapse). Ablations: E5 learning-off reproduces scalar exactly (theorem-recovery
+  sanity); **E6 dynamics-off (learned precisions + fixed-γ MeanField queries) posts
+  0.4042 > mag's 0.2818** (churn 210) — exploratory only, no verdict; an E1-only v5
+  would need a fresh registration. The γ₀ = 1 dynamics flattening + novelty join-bias
+  are the leading (uninstrumented) explanations for the registered arm's collapse.
+  Magnitude's v2 quality verdict now stands against four successive challengers.
 - **aif 0.9.0 is released and pinned** (tag `aif-v0.9.0`, 2026-07-16; bump landed via
   [#43](https://github.com/sustia-llc/koalisi/issues/43) Part 1). **tira's
   canonical-AIF parity roadmap (#12–#16) is complete**: 0.6.0 generalized generative
