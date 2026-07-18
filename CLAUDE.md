@@ -81,7 +81,11 @@ forex domain since removed).
   between-task belief updates, not marginal indecision. Score-space
   margins/hysteresis are a dead lever; churn mitigation needs a STATE-based
   design (dwell-time/cooldown — new arm, own registration). No v6 candidate
-  from this lever. Step 4 (decision memo) is next; owner decides.
+  from this lever. **Step 4 memo COMMITTED same day:
+  `docs/k4-arm-choice-memo.md`** — full lineage v1→v5 + Steps 1–3 ledger;
+  options A (adopt e1) / B (keep mag + event seam + state-based v6) / C
+  (hybrid) / D (slow-loop fitness); recommendation **B + event seam + D**;
+  **owner decision PENDING** (§6 checkboxes).
 - **Selective-base feedback arm — #48 (2026-07-17, example-only, no bump)**: the
   #46 rematch on a *selective* base. `examples/strategy_comparison.rs` gains
   **Part 4** (the frozen Part 3 #46 battery is the byte-identical regression gate):
@@ -446,7 +450,8 @@ koalisi/
 │   ├── ab-report-feedback-arm-k4.md        #46 run — FALSIFIED (feedback); Scope A null + Scope B reliability contest + E1 sweep
 │   ├── prereg-feedback-arm-k4-v2.md        #48 pre-registration (selective-base rematch, join=100, hw=0/fw=1; result appended)
 │   ├── ab-report-feedback-arm-k4-v2.md     #48 run — PARTIAL (mechanism only); selectivity vs reliability-gating decomposition + E1 threshold sweep
-│   └── per-bit-outcome-plumbing-design.md  #54 Step 2 design note — outcome-signal fidelity ladder; degraded ≈ oracle result (gotcha 23)
+│   ├── per-bit-outcome-plumbing-design.md  #54 Step 2 design note — outcome-signal fidelity ladder; degraded ≈ oracle result (gotcha 23)
+│   └── k4-arm-choice-memo.md               #54 Step 4 decision memo — full K4 ledger, options A–D, recommendation B; owner decision pending
 └── tests/
     ├── topology_test.rs                    12 tests
     ├── algorithms_test.rs                  18 tests (incl. 3 feedback-loop/seeding tests, #41)
