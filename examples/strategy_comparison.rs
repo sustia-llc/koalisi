@@ -91,7 +91,8 @@ use koalisi::algorithms::{
 };
 use koalisi::decision::{
     AifDecisionPolicy, AifMmDecisionPolicy, CoalitionDecisionPolicy, CouplingModel, Decision,
-    DecisionContext, MagnitudePolicy, ThresholdPolicy,
+    DecisionContext, MagnitudePolicy, PersistentAifArm, PersistentAifConfig, ThresholdPolicy,
+    TrialBoundary,
 };
 
 /// Hardcoded report date — deterministic, never read from the clock. Bumped
@@ -188,6 +189,10 @@ fn main() {
     println!("{}", "=".repeat(72));
     println!();
     part3b_scalar_aif_scope_b_baseline();
+    println!();
+    println!("{}", "=".repeat(72));
+    println!();
+    part4c_persistent_aif();
 }
 
 // ===========================================================================
@@ -1701,4 +1706,360 @@ fn part3b_scalar_aif_scope_b_baseline() {
     println!();
     println!("**Medians:** primary_B {primary_med:.4} · churn {churn_med:.2}.");
     println!();
+}
+
+// ===========================================================================
+// Part 4c — persistent-agent AIF arm vs magnitude/scalar (koalisi #44, K4-v4
+// prereg + Amendment 2). ADDITIVE ONLY — all existing Parts print unchanged.
+//
+// Confirmatory: `aif-pers` (registered PersistentAifConfig) over Scope B, 30
+// seeds, per-seed factory (fresh persistent arm per seed). After each task's
+// leave sweep the harness computes per-bit outcome success (bit b succeeds iff
+// any FINAL member providing b performed) and calls the arm's outcome hook — the
+// arm learns per-bit reliability across the stream. `scalar`/`mag` Scope-B rows
+// are reused for the strict-superiority (H2) and act-divergence (S1) tests and as
+// regression gates (mag 0.2818 / scalar 0.1035). Then exploratory E4–E8 tables.
+// ===========================================================================
+
+/// Per-seed Scope-B result for an instrumented arm: PRIMARY_B, churn, and the
+/// ordered join/leave act stream (for S1 act divergence).
+struct SeedResultB {
+    primary: f64,
+    churn: usize,
+    acts: Vec<bool>,
+}
+
+/// Run one arm over one Scope-B seed, mirroring [`run_instance`]'s Scope::B metric
+/// path byte-for-byte (so `scalar`/`mag` reproduce their frozen medians), while
+/// additionally capturing the act stream and invoking `on_task_outcome` once per
+/// task after the leave sweep with `(required, per_bit_success)`.
+fn run_seed_b(
+    policy: &dyn CoalitionDecisionPolicy,
+    seed: u64,
+    lat: &mut Vec<f64>,
+    mut on_task_outcome: impl FnMut(u32, &[bool; 8]),
+) -> SeedResultB {
+    let (agents, tasks, _rho, perf) = generate_instance_b(seed);
+
+    let mut success_count = 0usize;
+    let mut cov_eff_sum = 0.0f64;
+    let mut churn = 0usize;
+    let mut acts = Vec::new();
+
+    for (t, task) in tasks.iter().enumerate() {
+        let ctx = DecisionContext {
+            required_capabilities: task.required,
+        };
+        let mut members: Vec<usize> = vec![task.order[0]];
+
+        for &idx in &task.order[1..] {
+            let candidate: &dyn AgentCapabilities = &agents[idx];
+            let coalition = coalition_view(&agents, &members);
+            let t0 = Instant::now();
+            let d = policy.should_join(candidate, &coalition, &ctx);
+            lat.push(seconds_to_us(t0.elapsed()));
+            acts.push(d.act);
+            if d.act {
+                members.push(idx);
+            }
+        }
+
+        for &idx in &task.order {
+            let Some(pos) = members.iter().position(|&m| m == idx) else {
+                continue;
+            };
+            let coalition = coalition_view(&agents, &members);
+            let agent: &dyn AgentCapabilities = &agents[idx];
+            let t0 = Instant::now();
+            let d = policy.should_leave(agent, &coalition, &ctx);
+            lat.push(seconds_to_us(t0.elapsed()));
+            acts.push(d.act);
+            if d.act {
+                members.remove(pos);
+                churn += 1;
+            }
+        }
+
+        let union = members.iter().fold(0u32, |acc, &i| acc | agents[i].caps);
+        let covered = (union & task.required).count_ones();
+        let completed = covered == task.required.count_ones();
+        let success = completed && members.iter().all(|&i| perf[t][i]);
+        if success {
+            success_count += 1;
+        }
+        let cov_eff = if members.is_empty() {
+            0.0
+        } else {
+            (f64::from(covered) / f64::from(task.required.count_ones())) / members.len() as f64
+        };
+        cov_eff_sum += cov_eff;
+
+        // Per-bit outcome success (harness-computed; the arm stays decoupled from
+        // `perf`): bit b succeeds iff any final member providing b performed.
+        let mut per_bit = [false; 8];
+        for (b, slot) in per_bit.iter_mut().enumerate() {
+            *slot = members
+                .iter()
+                .any(|&i| (agents[i].caps >> b) & 1 == 1 && perf[t][i]);
+        }
+        on_task_outcome(task.required, &per_bit);
+    }
+
+    let success_rate = success_count as f64 / tasks.len() as f64;
+    let mean_cov_eff = cov_eff_sum / tasks.len() as f64;
+    SeedResultB {
+        primary: success_rate * mean_cov_eff,
+        churn,
+        acts,
+    }
+}
+
+/// Run the `aif-pers` battery over `seeds` Scope-B seeds: a FRESH persistent arm
+/// per seed (the `run_fb_arm` factory pattern), with the per-task outcome hook
+/// wired into the arm. Discards a seed-0 warm-up first (warm caches). Returns the
+/// per-seed results and every measured latency (µs).
+fn persistent_battery(config: PersistentAifConfig, seeds: u64) -> (Vec<SeedResultB>, Vec<f64>) {
+    // Warm-up (seed 0), latencies discarded.
+    {
+        let arm = PersistentAifArm::new(0, config).expect("persistent arm construction");
+        let mut warm = Vec::new();
+        let _ = run_seed_b(&arm, 0, &mut warm, |req, succ| arm.observe_outcome(req, succ));
+    }
+    let mut lat = Vec::new();
+    let results = (0..seeds)
+        .map(|s| {
+            let arm = PersistentAifArm::new(s, config).expect("persistent arm construction");
+            run_seed_b(&arm, s, &mut lat, |req, succ| arm.observe_outcome(req, succ))
+        })
+        .collect();
+    (results, lat)
+}
+
+/// Run a stateless arm (scalar / magnitude) over `seeds` Scope-B seeds with no
+/// outcome hook, capturing act streams. Seed-0 warm-up discarded.
+fn stateless_battery_b(
+    make: impl Fn() -> Box<dyn CoalitionDecisionPolicy>,
+    seeds: u64,
+) -> (Vec<SeedResultB>, Vec<f64>) {
+    {
+        let p = make();
+        let mut warm = Vec::new();
+        let _ = run_seed_b(&*p, 0, &mut warm, |_, _| {});
+    }
+    let mut lat = Vec::new();
+    let p = make();
+    let results = (0..seeds)
+        .map(|s| run_seed_b(&*p, s, &mut lat, |_, _| {}))
+        .collect();
+    (results, lat)
+}
+
+fn primaries_b(rs: &[SeedResultB]) -> Vec<f64> {
+    rs.iter().map(|r| r.primary).collect()
+}
+fn churns_b(rs: &[SeedResultB]) -> Vec<f64> {
+    rs.iter().map(|r| r.churn as f64).collect()
+}
+/// Seeds on which `a` strictly beats `b` on PRIMARY_B.
+fn superior_count_b(a: &[SeedResultB], b: &[SeedResultB]) -> usize {
+    (0..a.len()).filter(|&i| a[i].primary > b[i].primary).count()
+}
+/// Seeds on which the act streams differ (S1 divergence vs the scalar theorem).
+fn act_divergence(a: &[SeedResultB], b: &[SeedResultB]) -> usize {
+    (0..a.len()).filter(|&i| a[i].acts != b[i].acts).count()
+}
+
+#[allow(clippy::too_many_lines)]
+fn part4c_persistent_aif() {
+    // Confirmatory batteries — Scope B, 30 seeds.
+    let (pers, pers_lat) = persistent_battery(PersistentAifConfig::default(), SEEDS);
+    let (scalar, _scalar_lat) = stateless_battery_b(
+        || Box::new(AifDecisionPolicy::default()) as Box<dyn CoalitionDecisionPolicy>,
+        SEEDS,
+    );
+    let mag_policy = MagnitudePolicy::default();
+    let (mag, _mag_lat) = stateless_battery_b(
+        || Box::new(mag_policy.clone()) as Box<dyn CoalitionDecisionPolicy>,
+        SEEDS,
+    );
+
+    let pers_med = median(primaries_b(&pers));
+    let scalar_med = median(primaries_b(&scalar));
+    let mag_med = median(primaries_b(&mag));
+    let pers_churn_med = median(churns_b(&pers));
+    let scalar_churn_med = median(churns_b(&scalar));
+    let pers_lat_med = median(pers_lat.clone());
+
+    // Regression gates (run validity, not hypothesis): frozen Scope-B medians.
+    assert_eq!(
+        format!("{scalar_med:.4}"),
+        "0.1035",
+        "regression gate: scalar Scope-B median must reproduce 0.1035 (baseline-aif-scalar-scope-b.md)"
+    );
+    assert_eq!(
+        format!("{mag_med:.4}"),
+        "0.2818",
+        "regression gate: mag Scope-B median must reproduce 0.2818 (ab-report-feedback-arm-k4-v2.md)"
+    );
+
+    // Confirmatory criteria (prereg §Confirmatory criteria v4).
+    let h1 = mag_med < 1.25 * pers_med;
+    let h2a = pers_med >= 1.25 * scalar_med;
+    let pers_sup_scalar = superior_count_b(&pers, &scalar);
+    let h2b = pers_sup_scalar >= 18;
+    let h2 = h2a && h2b;
+    let s1 = act_divergence(&pers, &scalar);
+    let verdict = match (h1, h2) {
+        (true, true) => "VALIDATED (gap closed)",
+        (false, true) => "PARTIAL (mechanism only)",
+        (_, false) => "FALSIFIED (persistence)",
+    };
+
+    println!("# koalisi #44 — persistent-agent AIF arm (K4-v4, Amendment 2)");
+    println!();
+    println!(
+        "_persistent multimodal AIF (`PersistentAifConfig::default()`, aif-v0.11.0 count injection) · Scope B (reliability contest) · 30 seeds `0..{SEEDS}` · per-seed factory + per-bit outcome hook · confirmatory_"
+    );
+    println!();
+    println!(
+        "Three arms — `aif-pers` (registered persistent arm), `aif-scalar` (`AifDecisionPolicy::default()`, frozen), `mag` (`MagnitudePolicy`, frozen) — over Scope B. Regression gate: `scalar` median {scalar_med:.4} ≡ 0.1035, `mag` median {mag_med:.4} ≡ 0.2818."
+    );
+    println!();
+    println!("## Per-seed PRIMARY_B + churn");
+    println!();
+    println!("| seed | pers_primary | scalar_primary | mag_primary | pers_churn | scalar_churn | acts_differ |");
+    println!("|-----:|-------------:|---------------:|------------:|-----------:|-------------:|:-----------:|");
+    for i in 0..pers.len() {
+        let differ = if pers[i].acts != scalar[i].acts { "yes" } else { "no" };
+        println!(
+            "| {} | {:.4} | {:.4} | {:.4} | {} | {} | {} |",
+            i, pers[i].primary, scalar[i].primary, mag[i].primary, pers[i].churn, scalar[i].churn, differ
+        );
+    }
+    println!();
+    println!(
+        "**Medians:** pers {pers_med:.4} · scalar {scalar_med:.4} · mag {mag_med:.4}. Churn: pers {pers_churn_med:.2} · scalar {scalar_churn_med:.2}. Latency pers {pers_lat_med:.3} µs (record-only)."
+    );
+    println!();
+
+    // Confirmatory verdict.
+    println!("## Confirmatory verdict (Scope B)");
+    println!();
+    println!(
+        "- **H1 (gap closed):** mag median {mag_med:.4} < 1.25 × pers median {pers_med:.4} ({:.4}) → {}",
+        1.25 * pers_med,
+        pass(h1)
+    );
+    println!(
+        "- **H2 (mechanism):** pers median {pers_med:.4} ≥ 1.25 × scalar median {scalar_med:.4} (= {:.6}) ({}) AND pers strictly superior to scalar in {pers_sup_scalar}/{SEEDS} seeds ≥ 18 ({}) → {}",
+        1.25 * scalar_med,
+        pass(h2a),
+        pass(h2b),
+        pass(h2)
+    );
+    println!(
+        "- **S1 (act divergence, non-gating):** pers act stream differs from scalar on {s1}/{SEEDS} seeds. {}",
+        if s1 == 0 {
+            "divergence = 0 ⇒ the arm collapsed back to the K4-v3 theorem."
+        } else {
+            "divergence > 0 ⇒ the arm genuinely escapes the theorem."
+        }
+    );
+    println!(
+        "- **S2 (churn, non-gating):** pers churn median {pers_churn_med:.2} vs scalar 113.00."
+    );
+    println!();
+    println!("**VERDICT (persistent arm, #44): {verdict}**");
+    println!();
+    println!(
+        "_VALIDATED (gap closed) = H1 ∧ H2 · PARTIAL (mechanism only) = H2 ∧ ¬H1 · FALSIFIED (persistence) = ¬H2. Thresholds (1.25×, 18/{SEEDS}) inherited from v2/v3; falsification is a legitimate result and nothing is tuned to flip it (koalisi #44)._"
+    );
+    println!();
+
+    // Exploratory E4–E8 (non-gating, single-toggle tables).
+    print_persistent_exploratory();
+}
+
+/// E4–E8 exploratory conditions (non-gating): one 30-seed Scope-B battery each
+/// under a single toggle off the registered arm, reported as PRIMARY_B + churn
+/// medians. No verdicts (prereg §Exploratory conditions).
+fn print_persistent_exploratory() {
+    let base = PersistentAifConfig::default();
+    let rows: Vec<(String, PersistentAifConfig)> = vec![
+        (
+            "E4 PerTask (reset each task)".to_owned(),
+            PersistentAifConfig { trial_boundary: TrialBoundary::PerTask, ..base },
+        ),
+        (
+            "E5 learning off".to_owned(),
+            PersistentAifConfig { persistent_learning: false, ..base },
+        ),
+        (
+            "E6 dynamics off (MeanField query)".to_owned(),
+            PersistentAifConfig { query_dynamics: false, ..base },
+        ),
+        (
+            "E7 novelty off".to_owned(),
+            PersistentAifConfig { query_novelty: false, ..base },
+        ),
+        (
+            "E8 initial_precision_b = 1.0".to_owned(),
+            PersistentAifConfig { initial_precision_b: 1.0, ..base },
+        ),
+        (
+            "E8 initial_precision_b = 4.0 (registered)".to_owned(),
+            base,
+        ),
+        (
+            "E8 initial_precision_b = 16.0".to_owned(),
+            PersistentAifConfig { initial_precision_b: 16.0, ..base },
+        ),
+    ];
+
+    println!("## Exploratory E4–E8 (non-gating, Scope B, {SEEDS} seeds)");
+    println!();
+    println!("| condition | median PRIMARY_B | churn median |");
+    println!("|-----------|----------------:|-------------:|");
+    for (label, cfg) in rows {
+        let (rs, _lat) = persistent_battery(cfg, SEEDS);
+        let med = median(primaries_b(&rs));
+        let churn = median(churns_b(&rs));
+        println!("| {label} | {med:.4} | {churn:.2} |");
+    }
+    println!();
+    println!("_Single-toggle ablations off the registered arm; no verdicts (prereg §Exploratory conditions)._");
+    println!();
+}
+
+#[cfg(test)]
+mod part4c_tests {
+    use super::*;
+
+    /// 2-seed smoke: the persistent arm pipeline (fresh arm per seed + per-bit
+    /// outcome hook + join/leave decisions) executes end-to-end and produces finite
+    /// metrics, and the scalar comparison arm runs alongside. Does NOT run the full
+    /// 30-seed registered battery.
+    #[test]
+    fn part4c_two_seed_smoke() {
+        let (pers, lat) = persistent_battery(PersistentAifConfig::default(), 2);
+        assert_eq!(pers.len(), 2);
+        for r in &pers {
+            assert!(r.primary.is_finite() && (0.0..=1.0).contains(&r.primary));
+            assert!(!r.acts.is_empty(), "some join/leave decisions must have run");
+        }
+        assert!(!lat.is_empty(), "latencies recorded");
+
+        let (scalar, _) = stateless_battery_b(
+            || Box::new(AifDecisionPolicy::default()) as Box<dyn CoalitionDecisionPolicy>,
+            2,
+        );
+        assert_eq!(scalar.len(), 2);
+
+        // An exploratory toggle also runs end-to-end on 2 seeds.
+        let (e5, _) = persistent_battery(
+            PersistentAifConfig { persistent_learning: false, ..PersistentAifConfig::default() },
+            2,
+        );
+        assert_eq!(e5.len(), 2);
+    }
 }

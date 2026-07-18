@@ -242,6 +242,13 @@ mod aif_mm_policy;
 #[cfg(feature = "decision")]
 pub use aif_mm_policy::{AifMmDecisionPolicy, MmEfeValueCalculator, MultiModalModel};
 
+#[cfg(feature = "decision")]
+mod aif_persistent_policy;
+#[cfg(feature = "decision")]
+pub use aif_persistent_policy::{
+    PersistentAifArm, PersistentAifConfig, PersistentAifState, TrialBoundary,
+};
+
 #[cfg(feature = "magnitude")]
 mod magnitude_policy;
 #[cfg(feature = "magnitude")]
