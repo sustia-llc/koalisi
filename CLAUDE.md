@@ -916,6 +916,22 @@ engine from the `tira` repo and bridges to it.
   would need a fresh registration. The γ₀ = 1 dynamics flattening + novelty join-bias
   are the leading (uninstrumented) explanations for the registered arm's collapse.
   Magnitude's v2 quality verdict now stands against four successive challengers.
+- **K4-v5 E1-only arm: `VALIDATED (gap closed)`** (2026-07-17,
+  `docs/ab-report-K4-v5-e1-persistent-aif.md`; pre-registered in
+  `docs/prereg-K4-v5-e1-persistent-aif.md` posted to #53 before the run). **The
+  first arm in the K4 lineage (v1→v5) to beat magnitude on quality**, on
+  **out-of-sample seeds 30..60**: `aif-e1` (the #44 `PersistentAifArm` at 943d139,
+  zero code changes, in the v4 E6 configuration — learned per-bit precisions +
+  fixed-γ = 16 MeanField queries, no `PrecisionDynamics`) posts median 0.4406 vs
+  mag 0.2720 (1.62×) and scalar 0.1267; strictly superior to scalar 30/30; H1∧H2.
+  X2 determinism gate reproduced the 0..30 E6 numbers exactly (0.4042/210.00,
+  asserted). **X1: novelty-off collapses to 0.1308 ≈ scalar** — the winning
+  mechanism is learned precisions + novelty-driven epistemic joining, neither
+  suffices alone (ablation inference). Costs: churn 136 vs scalar 79.5 (mag's is
+  historically near-zero — the tradeoff to address), latency ~63 µs/decision vs
+  µs-scale stateless arms. The v2 magnitude verdict is not overturned (scoped to
+  the arms then registered); arm choice is now a cost-quality tradeoff — tracked as
+  a follow-up issue per the prereg's pre-committed interpretation.
 - **aif 0.9.0 is released and pinned** (tag `aif-v0.9.0`, 2026-07-16; bump landed via
   [#43](https://github.com/sustia-llc/koalisi/issues/43) Part 1). **tira's
   canonical-AIF parity roadmap (#12–#16) is complete**: 0.6.0 generalized generative
