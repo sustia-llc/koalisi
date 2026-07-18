@@ -37,6 +37,7 @@ pub mod subsystems {
     pub mod coalition_actor;
     #[cfg(feature = "durable")]
     pub mod durable;
+    pub mod outcome;
 }
 
 pub use decision::{CoalitionDecisionPolicy, Decision, DecisionContext, ThresholdPolicy};

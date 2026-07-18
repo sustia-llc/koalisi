@@ -19,19 +19,22 @@
 //! Runs quickly and exits 0 (bounded counts, `Pacing::Asap`).
 
 use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::Result;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
-use koalisi::algorithms::{AdditiveCalculator, CapabilityAgent};
+use koalisi::algorithms::{AdditiveCalculator, CapabilityAgent, FeedbackStore};
 use koalisi::decision::{DecisionContext, ThresholdPolicy};
 use koalisi::ingest::{
     MultiResolutionSource, NumericSample, Pacing, SampleUpdate, SensorEvent, SensorEventSource,
     SensorSpec, SeriesSpec, spawn_sample_monitor, spawn_source_pump,
 };
 use koalisi::subsystems::coalition_actor::CoalitionService;
+use koalisi::subsystems::outcome::{OutcomeSink, TaskOutcome, emit_outcome, spawn_outcome_forwarder};
 use koalisi::topology::CoalitionManager;
 
 /// A minimal coalition label (satisfies the topology `HyperedgeTrait` bound).
@@ -239,6 +242,63 @@ async fn main() -> Result<()> {
 
     // Release the service handle so its task exits on the closed command channel.
     drop(service);
+
+    // =====================================================================
+    // 4. Task outcomes (issue #55): arm-agnostic completion events.
+    //
+    // The domain (this example) emits one `TaskOutcome` per completed task over
+    // the coalition's final members. A forwarder fans each record out to two
+    // learned consumers: a `FeedbackStore` (#41, scalarized) and a counting
+    // closure sink. The success/failure pattern is deterministic — no
+    // randomness — and the seam never gates a decision (Part 4g caveat).
+    // =====================================================================
+    let member_ids: Vec<usize> = after_members.iter().map(|v| usize::from(*v)).collect();
+
+    let store = FeedbackStore::new(0.5);
+    let outcome_count = Arc::new(AtomicUsize::new(0));
+
+    let store_sink: Box<dyn OutcomeSink> = Box::new(store.clone());
+    let counter = Arc::clone(&outcome_count);
+    let closure_sink: Box<dyn OutcomeSink> = Box::new(move |_o: &TaskOutcome| {
+        counter.fetch_add(1, Ordering::SeqCst);
+    });
+
+    let (outcome_tx, outcome_rx) = mpsc::channel::<TaskOutcome>(64);
+    let forwarder = spawn_outcome_forwarder(
+        outcome_rx,
+        vec![store_sink, closure_sink],
+        &tracker,
+        root.child_token(),
+    );
+
+    // Five deterministic outcomes over the coalition members: succeed unless
+    // `t % 3 == 2` (⇒ four successes, one failure).
+    for t in 0..5 {
+        emit_outcome(
+            Some(&outcome_tx),
+            TaskOutcome {
+                required,
+                members: member_ids.clone(),
+                success: t % 3 != 2,
+            },
+        );
+    }
+
+    // Drop the sender ⇒ the forwarder drains every buffered outcome, then exits.
+    drop(outcome_tx);
+    forwarder.await?;
+
+    println!(
+        "\ntask outcomes: {} fanned out over members {member_ids:?}",
+        outcome_count.load(Ordering::SeqCst)
+    );
+    for &id in member_ids.iter().take(2) {
+        println!(
+            "  agent {id}: history={} failures={}",
+            store.history(id),
+            store.failures(id)
+        );
+    }
 
     // =====================================================================
     // Shutdown.
