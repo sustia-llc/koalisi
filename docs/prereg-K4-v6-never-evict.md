@@ -1,5 +1,11 @@
 # Pre-registration: K4-v6 — never-evict E1-persistent AIF arm, dual-signal, out-of-sample (koalisi #56)
 
+> **RESULT (2026-07-18): `FALSIFIED (never-evict)`** — ne 0.0143/0.0141 vs the
+> 0.3551 bar, superior to scalar 3/30 (both signals); churn 0 by construction.
+> X-A held (0.4406/136.00 reproduced). See
+> `docs/ab-report-K4-v6-never-evict.md`. The exploratory cap series shows
+> quality monotone in allowed evictions — churn IS the mechanism.
+
 _Registered 2026-07-18, BEFORE any v6 implementation or run (posted to #56).
 Owner-locked design decisions (2026-07-18, in-session): lever = **never-evict
 (eviction cap c = 0)**; outcome signal = **BOTH oracle and degraded, gating**;

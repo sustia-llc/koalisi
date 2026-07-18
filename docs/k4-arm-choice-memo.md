@@ -177,6 +177,14 @@ arm-agnostic task-completion event seam, the K4-v6 state-based low-churn E1
 registration, and the e1-derived `ValueCalculator` for the population-search
 fitness seam.
 
+> **Postscript (2026-07-18, same day):** #55 shipped (v0.14.0). **#56 ran and
+> FALSIFIED** (`docs/ab-report-K4-v6-never-evict.md`): never-evict collapses
+> the arm (0.014 vs bar 0.355 under both signals); the exploratory cap series
+> is monotone — eviction churn IS the e1 mechanism. **Option B's parked state
+> is final**: magnitude = demonstrated default, e1 = capability evidence; the
+> E1 lineage has both damping directions measured (score-space inert, Part
+> 4f; state-space destructive, Part 4h). #57 proceeds.
+
 ## 7. Provenance
 
 - Registered: `docs/ab-report-K4-{yamafaktory,catgraph,catgraph-evaluator}.md`

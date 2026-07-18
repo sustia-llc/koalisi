@@ -51,7 +51,7 @@
 //!   (structural zeros ⇒ B-novelty exactly 0 under the 0.10.0 mask). A1.3's
 //!   mean-concentration approximations are void; novelty magnitudes are now exact.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use nalgebra::{DMatrix, DVector};
@@ -136,6 +136,22 @@ pub struct PersistentAifConfig {
     /// Persistent pB Dirichlet concentration scale (registered: `4.0`; E8 sweeps
     /// `1.0 / 4.0 / 16.0`).
     pub initial_precision_b: f64,
+    /// Per-task eviction cap (koalisi #56, K4-v6). **Identity default `None`** —
+    /// unlimited leaves, the #53 arm bit-for-bit. `Some(c)`: at most `c` leave-acts
+    /// per task; once the cap is exhausted (including `c = 0` from the first leave
+    /// consult) the leave path returns `Decision { act: false, score: 0.0 }`
+    /// WITHOUT constructing a query (no engine call, no `decision_counter`
+    /// increment). `Some(0)` = **never-evict** (churn `0` by construction — the
+    /// registered v6 point). The arm still learns normally via `observe_outcome`.
+    pub eviction_cap: Option<u32>,
+    /// Rejoin lockout in tasks (koalisi #56, exploratory). **Identity default `0`**
+    /// (off). When `k > 0`, an agent whose leave decision returned `act == true`
+    /// during task `t` (i.e. `tasks_observed == t` at that moment) is barred from
+    /// JOINING while `tasks_observed > t && tasks_observed <= t + k`: `should_join`
+    /// returns `Decision { act: false, score: 0.0 }` without a query (no counter
+    /// increment). Within-task rejoin can't occur anyway (the join pass precedes
+    /// the leave sweep), so the bar effectively covers the next `k` tasks.
+    pub rejoin_lockout_tasks: u64,
 }
 
 impl Default for PersistentAifConfig {
@@ -147,6 +163,8 @@ impl Default for PersistentAifConfig {
             query_dynamics: true,
             query_novelty: true,
             initial_precision_b: 4.0,
+            eviction_cap: None,
+            rejoin_lockout_tasks: 0,
         }
     }
 }
@@ -190,6 +208,12 @@ struct Inner {
     decision_counter: u64,
     /// The seed this arm was built for (the query seed base).
     battery_seed: u64,
+    /// Leave-acts emitted so far in the current task; reset to 0 each
+    /// `observe_outcome` (the task boundary). Gates the eviction cap (#56).
+    evictions_this_task: usize,
+    /// `agent_id` → `tasks_observed` at its last eviction (overwritten on
+    /// re-eviction). Never reset within a seed. Gates the rejoin lockout (#56).
+    evicted_at: HashMap<usize, usize>,
 }
 
 /// Persistent-agent multimodal Active Inference join/leave policy (`aif-pers`,
@@ -221,6 +245,8 @@ impl PersistentAifArm {
                 tasks_observed: 0,
                 decision_counter: 0,
                 battery_seed,
+                evictions_this_task: 0,
+                evicted_at: HashMap::new(),
             })),
             config,
         })
@@ -268,6 +294,9 @@ impl PersistentAifArm {
         }
         inner.replay.push_back(obs);
         inner.tasks_observed += 1;
+        // Task boundary: reset the per-task eviction counter (#56). `evicted_at`
+        // persists across tasks (it drives the cross-task rejoin lockout).
+        inner.evictions_this_task = 0;
     }
 
     /// Snapshot the persistent world model (design note §5 serialization seam).
@@ -335,6 +364,18 @@ impl CoalitionDecisionPolicy for PersistentAifArm {
         ctx: &DecisionContext,
     ) -> Decision {
         let alone = agent.capabilities();
+        // Rejoin lockout (#56, exploratory): bar an agent evicted during task `t`
+        // from rejoining while `t < tasks_observed <= t + k` — skip the query, no
+        // decision-counter increment. Off (identity) when `rejoin_lockout_tasks == 0`.
+        if self.config.rejoin_lockout_tasks > 0 {
+            let inner = self.inner.lock().expect("persistent arm mutex poisoned");
+            if let Some(&t) = inner.evicted_at.get(&agent.agent_id()) {
+                let now = inner.tasks_observed;
+                if now > t && (now as u64) <= t as u64 + self.config.rejoin_lockout_tasks {
+                    return Decision { act: false, score: 0.0 };
+                }
+            }
+        }
         let cfg1 = union_caps(coalition) | alone;
         self.decide(ctx.required_capabilities, alone, cfg1, false)
     }
@@ -353,7 +394,31 @@ impl CoalitionDecisionPolicy for PersistentAifArm {
             .iter()
             .filter(|a| a.agent_id() != agent_id)
             .fold(0u32, |acc, a| acc | a.capabilities());
-        self.decide(ctx.required_capabilities, cfg0, cfg1, true)
+
+        // Eviction cap (#56): once the per-task cap is exhausted (incl. `c = 0` from
+        // the first consult), decline the leave WITHOUT building a query — no engine
+        // call, no `decision_counter` increment. Skipped entirely (identity) when
+        // `eviction_cap` is `None`.
+        if let Some(cap) = self.config.eviction_cap {
+            let inner = self.inner.lock().expect("persistent arm mutex poisoned");
+            if inner.evictions_this_task >= cap as usize {
+                return Decision { act: false, score: 0.0 };
+            }
+        }
+
+        let d = self.decide(ctx.required_capabilities, cfg0, cfg1, true);
+
+        // Count an actual eviction and record its task for the rejoin lockout. This
+        // assumes callers honor `act` (true for the battery sweep and the
+        // `CoalitionService` seam). Both counters are inert at the identity default
+        // (`eviction_cap: None`, `rejoin_lockout_tasks: 0`) — nothing reads them.
+        if d.act {
+            let mut inner = self.inner.lock().expect("persistent arm mutex poisoned");
+            inner.evictions_this_task += 1;
+            let t = inner.tasks_observed;
+            inner.evicted_at.insert(agent_id, t);
+        }
+        d
     }
 }
 
@@ -904,6 +969,111 @@ mod tests {
             let full: [&dyn AgentCapabilities; 2] = [&a0, &a1];
             let _ = arm.should_leave(&a0, &full, &ctx);
         }
+    }
+
+    /// #56: `eviction_cap: Some(0)` never evicts — in a scenario where the default
+    /// arm removes a redundant clone (coverage unchanged ⇒ `p(control 1) = 0.5`,
+    /// leave tie removes), the capped arm declines with score `0.0` (no query built).
+    #[test]
+    fn eviction_cap_zero_never_evicts() {
+        let ctx = DecisionContext { required_capabilities: 0b0011 };
+        let a0 = TestAgent { id: 0, caps: 0b0001, trust: 50 };
+        let a1 = TestAgent { id: 1, caps: 0b0010, trust: 50 };
+        let clone = TestAgent { id: 2, caps: 0b0001, trust: 50 }; // redundant with a0
+        let full: [&dyn AgentCapabilities; 3] = [&a0, &a1, &clone];
+
+        let def = PersistentAifArm::new(0, PersistentAifConfig::default()).unwrap();
+        assert!(
+            def.should_leave(&clone, &full, &ctx).act,
+            "control: the default arm must evict the redundant clone"
+        );
+
+        let ne = PersistentAifArm::new(
+            0,
+            PersistentAifConfig { eviction_cap: Some(0), ..Default::default() },
+        )
+        .unwrap();
+        let d = ne.should_leave(&clone, &full, &ctx);
+        assert!(!d.act && d.score == 0.0, "eviction_cap Some(0) must decline with score 0.0");
+    }
+
+    /// #56: the rejoin lockout bars an evicted agent from rejoining for the next `k`
+    /// tasks, then consults it normally again. The barred agent is otherwise a
+    /// coverage-improving (would-fire) join, so barred = declined, unbarred = fires.
+    #[test]
+    fn rejoin_lockout_bars_then_reallows() {
+        let cfg = PersistentAifConfig { rejoin_lockout_tasks: 2, ..Default::default() };
+        let arm = PersistentAifArm::new(0, cfg).unwrap();
+        let ctx = DecisionContext { required_capabilities: 0b0011 };
+        let a0 = TestAgent { id: 0, caps: 0b0001, trust: 50 };
+        let a1 = TestAgent { id: 1, caps: 0b0010, trust: 50 };
+        let x = TestAgent { id: 2, caps: 0b0001, trust: 50 };
+        let full: [&dyn AgentCapabilities; 3] = [&a0, &a1, &x]; // x redundant here
+        let solo: [&dyn AgentCapabilities; 1] = [&a1]; // x is coverage-improving vs a1
+        let succ = [true, true, false, false, false, false, false, false];
+
+        // Task 0 (tasks_observed == 0): evict the redundant x → recorded at t = 0.
+        assert!(arm.should_leave(&x, &full, &ctx).act, "x evicted in task 0");
+        arm.observe_outcome(0b0011, &succ); // tasks_observed → 1
+
+        // Tasks 1 and 2 (0 < now <= 0 + 2): x's coverage-improving join is barred.
+        let d1 = arm.should_join(&x, &solo, &ctx);
+        assert!(!d1.act && d1.score == 0.0, "barred at task 1");
+        arm.observe_outcome(0b0011, &succ); // → 2
+        let d2 = arm.should_join(&x, &solo, &ctx);
+        assert!(!d2.act && d2.score == 0.0, "barred at task 2");
+        arm.observe_outcome(0b0011, &succ); // → 3
+
+        // Task 3 (now = 3 > 0 + 2): consulted normally again. The query runs on the
+        // asymmetric coverage (cfg0 = x alone covers 1/2, cfg1 = x ∪ a1 covers 2/2),
+        // so `p(control 1) != 0.5` ⇒ a non-zero score — the observable signature that
+        // the lockout no longer forces the score-0.0 decline (learning drift makes
+        // the raw `act` value across tasks engine-dependent, so we gate on the query
+        // having run, not on its sign).
+        let d3 = arm.should_join(&x, &solo, &ctx);
+        assert!(
+            d3.score != 0.0,
+            "lockout lifted: the join is consulted (query ran, non-zero score), got {}",
+            d3.score
+        );
+    }
+
+    /// #56 X-B: the new levers at their defaults are identity — a config with
+    /// explicit `eviction_cap: None, rejoin_lockout_tasks: 0` decides identically to
+    /// `..Default::default()` over a fixed join/leave/observe stream.
+    #[test]
+    fn defaults_are_identity() {
+        let ctx = DecisionContext { required_capabilities: 0b0111 };
+        let a0 = TestAgent { id: 0, caps: 0b0001, trust: 50 };
+        let a1 = TestAgent { id: 1, caps: 0b0010, trust: 50 };
+        let a2 = TestAgent { id: 2, caps: 0b0100, trust: 50 };
+        let coalition: [&dyn AgentCapabilities; 2] = [&a1, &a2];
+        let full: [&dyn AgentCapabilities; 3] = [&a0, &a1, &a2];
+
+        let run = |cfg| {
+            let arm = PersistentAifArm::new(42, cfg).unwrap();
+            let mut out = Vec::new();
+            for _ in 0..3 {
+                let j = arm.should_join(&a0, &coalition, &ctx);
+                out.push((j.act, j.score.to_bits()));
+                let l = arm.should_leave(&a0, &full, &ctx);
+                out.push((l.act, l.score.to_bits()));
+                let succ = [false, true, true, false, false, false, false, false];
+                arm.observe_outcome(0b0111, &succ);
+            }
+            out
+        };
+
+        let explicit = PersistentAifConfig {
+            eviction_cap: None,
+            rejoin_lockout_tasks: 0,
+            ..Default::default()
+        };
+        assert_eq!(
+            run(explicit),
+            run(PersistentAifConfig::default()),
+            "explicit None/0 must decide identically to the defaults"
+        );
     }
 
     /// Object-safety: the arm is usable behind the decision trait object.

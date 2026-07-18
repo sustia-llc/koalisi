@@ -52,6 +52,27 @@ forex domain since removed).
 
 ### Done
 
+- **#56 K4-v6 never-evict arm — v0.15.0 (2026-07-18): `FALSIFIED
+  (never-evict)`**. The #54 option-B registered adoption path, run and closed
+  same day (prereg 68ba8fc posted PRE-implementation; owner-locked lever =
+  `eviction_cap: Some(0)`, BOTH signals gating, hybrid bar).
+  `PersistentAifConfig` gained `eviction_cap: Option<u32>` +
+  `rejoin_lockout_tasks: u64` (identity defaults — X-A reproduced
+  0.4406/136.00, all frozen gates held); Part 4h = the registered battery
+  (seeds 60..90). **Result: ne 0.0143/0.0141 vs bar 0.3551, superior to
+  scalar 3/30 — H1+H3 FAIL both signals.** Mechanistic headline (exploratory
+  cap series, monotone 0→0.014 / 1→0.020 / 2→0.025 / 4→0.047 / ∞→0.384):
+  **eviction churn IS the e1 mechanism** — the leave sweep converts
+  reliability beliefs into small high-cov_eff coalitions; hardens #54 Step 1b
+  to a causal reading. Lockout axis gentler (k=1: 0.3222 at churn 104.5 =
+  1.13× mag) but under the family bar — if any interior point is ever tried,
+  it's lockout on seeds 90..120 (none implied). Context: e1-k0 replicates on
+  a third range (0.3840 vs mag 0.2841, 1.35×; churn 186.5). **The E1 lineage
+  now has both damping directions measured: score-space inert (4f),
+  state-space destructive (4h). Memo option B park is FINAL: mag = default,
+  e1 = capability evidence; #57 (slow loop) unaffected.** Report
+  `docs/ab-report-K4-v6-never-evict.md`. Suites: 103 default / **169**
+  decision,magnitude (+3 lever tests).
 - **#55 task-completion event seam — v0.14.0 (2026-07-18)**: the #54 option-B
   no-regret build. New always-compiled `src/subsystems/outcome.rs` (zero new
   deps): `TaskOutcome { required, members, success }` (the L2 contract —
@@ -480,7 +501,9 @@ koalisi/
 │   ├── prereg-feedback-arm-k4-v2.md        #48 pre-registration (selective-base rematch, join=100, hw=0/fw=1; result appended)
 │   ├── ab-report-feedback-arm-k4-v2.md     #48 run — PARTIAL (mechanism only); selectivity vs reliability-gating decomposition + E1 threshold sweep
 │   ├── per-bit-outcome-plumbing-design.md  #54 Step 2 design note — outcome-signal fidelity ladder; degraded ≈ oracle result (gotcha 23)
-│   └── k4-arm-choice-memo.md               #54 Step 4 decision memo — full K4 ledger, options A–D, recommendation B; owner decision pending
+│   ├── k4-arm-choice-memo.md               #54 Step 4 decision memo — DECIDED B+D 2026-07-18; postscript: #56 FALSIFIED ⇒ B's park final
+│   ├── prereg-K4-v6-never-evict.md         #56 pre-registration (never-evict, dual-signal, 60..90; result appended)
+│   └── ab-report-K4-v6-never-evict.md      #56 run — FALSIFIED (never-evict); cap-series monotonicity = churn is the mechanism
 └── tests/
     ├── topology_test.rs                    12 tests
     ├── algorithms_test.rs                  18 tests (incl. 3 feedback-loop/seeding tests, #41)
