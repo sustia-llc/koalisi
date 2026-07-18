@@ -130,6 +130,11 @@ where
 /// apply backpressure to the task/decision path. Mirrors
 /// [`emit_decision`](crate::subsystems::coalition_actor) — the tap is
 /// best-effort and the producing path is unaffected by tap health.
+///
+/// Size the channel for the producer's PEAK burst rate: drops correlate in
+/// time, so under autocorrelated outcome bursts (e.g. an agent failing
+/// repeatedly) a too-small tap can skew a ratio-reading learned consumer's
+/// history/failure counts, not just thin them uniformly.
 pub fn emit_outcome(tap: Option<&mpsc::Sender<TaskOutcome>>, outcome: TaskOutcome) {
     let Some(tx) = tap else { return };
     match tx.try_send(outcome) {
@@ -174,8 +179,22 @@ pub fn spawn_outcome_forwarder(
                 _ = token.cancelled() => break,
                 maybe = rx.recv() => match maybe {
                     Some(outcome) => {
-                        for sink in &sinks {
-                            sink.on_outcome(&outcome);
+                        for (i, sink) in sinks.iter().enumerate() {
+                            // A sink is arbitrary caller code (the closure impl
+                            // carries decision-arm hooks); isolate a panicking
+                            // sink so it cannot end delivery to the others.
+                            // FeedbackStore is unwind-safe here (poison-recovery
+                            // locks, counters consistent at every point).
+                            if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                sink.on_outcome(&outcome);
+                            }))
+                            .is_err()
+                            {
+                                tracing::warn!(
+                                    sink = i,
+                                    "outcome sink panicked; skipping (other sinks unaffected)"
+                                );
+                            }
                         }
                     }
                     None => break, // all taps dropped; nothing more to forward
@@ -275,6 +294,38 @@ mod tests {
         handle.await.expect("forwarder joins on cancel");
 
         drop(tx);
+        tracker.close();
+        tracker.wait().await;
+    }
+
+    /// A panicking sink is isolated: delivery to the other sinks (and to later
+    /// records) continues.
+    #[tokio::test]
+    async fn forwarder_isolates_panicking_sink() {
+        let count = Arc::new(AtomicUsize::new(0));
+
+        let panicking: Box<dyn OutcomeSink> = Box::new(|_o: &TaskOutcome| {
+            panic!("sink invariant violated (test)");
+        });
+        let counter = Arc::clone(&count);
+        let counting: Box<dyn OutcomeSink> = Box::new(move |_o: &TaskOutcome| {
+            counter.fetch_add(1, Ordering::SeqCst);
+        });
+
+        let tracker = TaskTracker::new();
+        let token = CancellationToken::new();
+        let (tx, rx) = mpsc::channel(16);
+        // Panicking sink FIRST: the counting sink only sees records if the
+        // panic is contained per-sink.
+        let handle = spawn_outcome_forwarder(rx, vec![panicking, counting], &tracker, token);
+
+        emit_outcome(Some(&tx), outcome(vec![1], true));
+        emit_outcome(Some(&tx), outcome(vec![2], false));
+        drop(tx);
+        handle.await.expect("forwarder survives panicking sink");
+
+        assert_eq!(count.load(Ordering::SeqCst), 2);
+
         tracker.close();
         tracker.wait().await;
     }

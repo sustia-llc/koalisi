@@ -10,6 +10,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned work — issue-tracked (details in [`CLAUDE.md`](./CLAUDE.md)
 §"Next steps"):
 
+- **[#56]** K4-v6 never-evict E1 arm — registered, seeds 60..90 (decided by
+  the #54 memo, option B; prereg precedes code).
+- **[#57]** e1-derived `ValueCalculator` for the population-search fitness
+  (#42/#20 slow-loop seam; depends on #55).
+- **Phase 5 — SwarmAgentic meta-layer remainder** ([#20]): configurator,
+  velocity-rewrite loop, transferability (needs an LLM backend behind
+  `src/llm/mod.rs`).
+- **Phase 7 — Persistence implementation**: [#31] sealing + revocation
+  registry (*blocked on the tauhokohoko KEK-granularity answer*), [#32]
+  decision/belief streams (the `TaskOutcome` durable home), [#33] federation
+  manifests + FAIR provenance.
+- **[#38]** domain-neutral remote coalition-event gateway (successor to the
+  removed `remote` feature; folds in the [#24] hardening ideas).
+- **[#25]** metrics example, reframed onto the `CoalitionService` decision
+  path / topology events.
+
+## [0.14.0] — 2026-07-18
+
+### Added
+
+- **Arm-agnostic task-completion event seam**
+  ([#55](https://github.com/sustia-llc/koalisi/issues/55), decided by the #54
+  arm-choice memo, option B): new always-compiled `src/subsystems/outcome.rs`
+  (zero new deps) — `TaskOutcome { required, members, success }` (the L2
+  contract: whole-task success is sufficient, per the #54 Step 2 measurement
+  0.4381 ≈ oracle 0.4406), `OutcomeSink` fan-out trait with `FeedbackStore`
+  (scalarized #41 consumer) and closure (arm side-channel) impls,
+  `emit_outcome` (non-blocking `try_send`, drop-with-warn — the decision-tap
+  contract), and `spawn_outcome_forwarder` (biased cancel vs drain-to-`None`,
+  mirroring the `durable` forwarder's shutdown disciplines). Emission is the
+  embedding domain's responsibility; koalisi never synthesizes outcomes. NOT a
+  `TemporalEvent` — the durable home is the P7.4 (#32) streams.
+- `examples/synthetic_ingestion.rs`: deterministic "task outcomes" section
+  demonstrating the seam (forwarder fan-out to a `FeedbackStore` + counter
+  sink, drain-then-print).
+
+### Notes
+
+- The module docs carry the Part 4g caveat: this seam feeds **learned**
+  consumers; raw ratio-gating on the signal measured strictly worse than no
+  gating (absorbing exclusion).
+
+## [Unreleased]
+
+Planned work — issue-tracked (details in [`CLAUDE.md`](./CLAUDE.md)
+§"Next steps"):
+
 - **Phase 5 — SwarmAgentic-style optimisation** (de-gated 2026-07-15):
   ~~[#41] ValueCalculator feedback weights~~ (DONE 0.12.0), ~~[#42] AIPA
   population search~~ (DONE 0.13.0), [#20] the LLM meta-layer remainder

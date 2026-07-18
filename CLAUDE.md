@@ -52,6 +52,22 @@ forex domain since removed).
 
 ### Done
 
+- **#55 task-completion event seam — v0.14.0 (2026-07-18)**: the #54 option-B
+  no-regret build. New always-compiled `src/subsystems/outcome.rs` (zero new
+  deps): `TaskOutcome { required, members, success }` (the L2 contract —
+  whole-task success suffices per #54 Step 2), `OutcomeSink` fan-out trait
+  (`FeedbackStore` scalarized impl + closure impl = the arm side-channel; the
+  `Fn` blanket is THE arm-attachment route — a future trait-bound blanket
+  would collide with it, conscious decision), `emit_outcome` (try_send
+  drop-with-warn, the tap contract), `spawn_outcome_forwarder` (biased cancel
+  vs drain-to-None — pick one discipline, don't mix; **panicking sinks are
+  isolated** via per-sink catch_unwind, review-caught). Emission is the
+  DOMAIN's job — koalisi never synthesizes outcomes; NOT a `TemporalEvent`
+  (durable home = P7.4 #32). Demo: `synthetic_ingestion` §4 (deterministic
+  outcomes, lossless-only token). 5 module tests. **Suites: 103 default /
+  166 decision,magnitude.** 8-angle review: 2 confirmed applied (panic guard;
+  example discipline-mixing), 3 conventions applied (version/CHANGELOG/this
+  entry), rest refuted-as-designed or example-trivia — see PR #58.
 - **#54 Steps 1–2: arm-choice evidence — 2026-07-18 (example+docs only, no
   bump)**: the cheap-evidence + load-bearing-feasibility steps from the #54
   sequencing comment. `examples/strategy_comparison.rs` gains **Part 4e**
@@ -445,6 +461,7 @@ koalisi/
 │   │   └── replay.rs                       replay_into_event_log (batched read → fresh EventLog; quiescence precondition) (#30)
 │   └── subsystems/
 │       ├── coalition_actor.rs              CoalitionService + handle (policy-gated membership seam, #1) + DecisionRecord tap (K3) — THE runtime seam
+│       ├── outcome.rs                      #55 (v0.14.0): TaskOutcome + OutcomeSink fan-out + emit_outcome tap + spawn_outcome_forwarder (always compiled; the L2 outcome seam)
 │       └── durable.rs                      DecisionEvent + DurableDecisionBus + forwarder (feature `durable`, K3)
 ├── examples/
 │   ├── topology_coalition.rs               coalition lifecycle + time-travel queries

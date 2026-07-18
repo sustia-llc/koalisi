@@ -196,16 +196,23 @@ async fn main() -> Result<()> {
 
     let manager: CoalitionManager<CapabilityAgent, SensorCoalition> = CoalitionManager::empty();
 
-    // One agent per ingested sensor.
+    // One agent per ingested sensor. Topology `VertexIndex` and domain
+    // `agent_id` are DISTINCT id spaces (they coincide here only because the
+    // manager is fresh and agents are added in id order) — keep the mapping so
+    // downstream consumers keyed by agent_id are wired honestly.
     let mut sensor_vertices = Vec::new();
+    let mut vertex_to_agent = HashMap::new();
     for (id, _) in sensors.iter().enumerate() {
         let agent = CapabilityAgent::new(id, 1u32 << id, 50);
-        sensor_vertices.push(manager.add_agent(agent).await?);
+        let vertex = manager.add_agent(agent).await?;
+        sensor_vertices.push(vertex);
+        vertex_to_agent.insert(vertex, id);
     }
     // One fresh candidate covering a new capability bit. It must be added before
     // the manager moves into the service (the service seam mutates by index).
     let candidate_agent = CapabilityAgent::new(sensors.len(), 1u32 << sensors.len(), 50);
     let candidate = manager.add_agent(candidate_agent).await?;
+    vertex_to_agent.insert(candidate, sensors.len());
 
     let coalition = manager
         .form_coalition(sensor_vertices.clone(), SensorCoalition(1))
@@ -252,7 +259,18 @@ async fn main() -> Result<()> {
     // closure sink. The success/failure pattern is deterministic — no
     // randomness — and the seam never gates a decision (Part 4g caveat).
     // =====================================================================
-    let member_ids: Vec<usize> = after_members.iter().map(|v| usize::from(*v)).collect();
+    // Resolve topology vertices to DOMAIN agent ids — `TaskOutcome.members` and
+    // `FeedbackStore` are keyed by `agent_id`, not by `VertexIndex` (the raw
+    // index only coincides with the id in a fresh, in-order, no-removal graph).
+    let member_ids: Vec<usize> = after_members
+        .iter()
+        .map(|v| {
+            vertex_to_agent
+                .get(v)
+                .copied()
+                .expect("invariant: every coalition member vertex was added by this example")
+        })
+        .collect();
 
     let store = FeedbackStore::new(0.5);
     let outcome_count = Arc::new(AtomicUsize::new(0));
@@ -264,11 +282,16 @@ async fn main() -> Result<()> {
     });
 
     let (outcome_tx, outcome_rx) = mpsc::channel::<TaskOutcome>(64);
+    // Lossless shutdown discipline ("pick one; don't mix" — module docs): the
+    // forwarder gets a dedicated, never-cancelled token, so ONLY the
+    // drop-sender → drain path can end it; every buffered outcome reaches the
+    // sinks. It is still on `tracker`, so the final drain covers it too.
+    let outcome_shutdown = CancellationToken::new();
     let forwarder = spawn_outcome_forwarder(
         outcome_rx,
         vec![store_sink, closure_sink],
         &tracker,
-        root.child_token(),
+        outcome_shutdown,
     );
 
     // Five deterministic outcomes over the coalition members: succeed unless
@@ -285,6 +308,9 @@ async fn main() -> Result<()> {
     }
 
     // Drop the sender ⇒ the forwarder drains every buffered outcome, then exits.
+    // The await is the drain-before-print barrier; the task is ALSO on
+    // `tracker` (inherent to spawn_outcome_forwarder), so the final
+    // tracker.wait() covers it uniformly — by then it has already finished.
     drop(outcome_tx);
     forwarder.await?;
 
