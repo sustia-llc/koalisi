@@ -193,6 +193,10 @@ fn main() {
     println!("{}", "=".repeat(72));
     println!();
     part4c_persistent_aif();
+    println!();
+    println!("{}", "=".repeat(72));
+    println!();
+    part4d_e1_persistent_aif();
 }
 
 // ===========================================================================
@@ -1814,19 +1818,23 @@ fn run_seed_b(
     }
 }
 
-/// Run the `aif-pers` battery over `seeds` Scope-B seeds: a FRESH persistent arm
-/// per seed (the `run_fb_arm` factory pattern), with the per-task outcome hook
-/// wired into the arm. Discards a seed-0 warm-up first (warm caches). Returns the
-/// per-seed results and every measured latency (µs).
-fn persistent_battery(config: PersistentAifConfig, seeds: u64) -> (Vec<SeedResultB>, Vec<f64>) {
-    // Warm-up (seed 0), latencies discarded.
+/// Run the `aif-pers` battery over the Scope-B seed range `start..end`: a FRESH
+/// persistent arm per seed (the `run_fb_arm` factory pattern), with the per-task
+/// outcome hook wired into the arm. Discards a warm-up (on `start`) first (warm
+/// caches; warm-up cannot perturb the seed-derived results). Returns the per-seed
+/// results and every measured latency (µs).
+fn persistent_battery_range(
+    config: PersistentAifConfig,
+    start: u64,
+    end: u64,
+) -> (Vec<SeedResultB>, Vec<f64>) {
     {
-        let arm = PersistentAifArm::new(0, config).expect("persistent arm construction");
+        let arm = PersistentAifArm::new(start, config).expect("persistent arm construction");
         let mut warm = Vec::new();
-        let _ = run_seed_b(&arm, 0, &mut warm, |req, succ| arm.observe_outcome(req, succ));
+        let _ = run_seed_b(&arm, start, &mut warm, |req, succ| arm.observe_outcome(req, succ));
     }
     let mut lat = Vec::new();
-    let results = (0..seeds)
+    let results = (start..end)
         .map(|s| {
             let arm = PersistentAifArm::new(s, config).expect("persistent arm construction");
             run_seed_b(&arm, s, &mut lat, |req, succ| arm.observe_outcome(req, succ))
@@ -1835,23 +1843,39 @@ fn persistent_battery(config: PersistentAifConfig, seeds: u64) -> (Vec<SeedResul
     (results, lat)
 }
 
-/// Run a stateless arm (scalar / magnitude) over `seeds` Scope-B seeds with no
-/// outcome hook, capturing act streams. Seed-0 warm-up discarded.
-fn stateless_battery_b(
+/// `persistent_battery_range` over `0..seeds` (Part 4c uses this; byte-identical
+/// to the pre-range code — warm-up seed 0, seeds `0..seeds`).
+fn persistent_battery(config: PersistentAifConfig, seeds: u64) -> (Vec<SeedResultB>, Vec<f64>) {
+    persistent_battery_range(config, 0, seeds)
+}
+
+/// Run a stateless arm (scalar / magnitude) over the Scope-B seed range
+/// `start..end` with no outcome hook, capturing act streams. Warm-up (on `start`)
+/// discarded.
+fn stateless_battery_range(
     make: impl Fn() -> Box<dyn CoalitionDecisionPolicy>,
-    seeds: u64,
+    start: u64,
+    end: u64,
 ) -> (Vec<SeedResultB>, Vec<f64>) {
     {
         let p = make();
         let mut warm = Vec::new();
-        let _ = run_seed_b(&*p, 0, &mut warm, |_, _| {});
+        let _ = run_seed_b(&*p, start, &mut warm, |_, _| {});
     }
     let mut lat = Vec::new();
     let p = make();
-    let results = (0..seeds)
+    let results = (start..end)
         .map(|s| run_seed_b(&*p, s, &mut lat, |_, _| {}))
         .collect();
     (results, lat)
+}
+
+/// `stateless_battery_range` over `0..seeds` (Part 4c uses this).
+fn stateless_battery_b(
+    make: impl Fn() -> Box<dyn CoalitionDecisionPolicy>,
+    seeds: u64,
+) -> (Vec<SeedResultB>, Vec<f64>) {
+    stateless_battery_range(make, 0, seeds)
 }
 
 fn primaries_b(rs: &[SeedResultB]) -> Vec<f64> {
@@ -2031,6 +2055,169 @@ fn print_persistent_exploratory() {
     println!();
 }
 
+// ===========================================================================
+// Part 4d — E1-only persistent AIF arm, out-of-sample (koalisi #53, K4-v5
+// prereg `docs/prereg-K4-v5-e1-persistent-aif.md`). ADDITIVE ONLY.
+//
+// Registered arm `aif-e1` = the #44 PersistentAifArm (943d139, NO code changes)
+// with the v4 E6 configuration: MeanField queries at fixed γ = 16, no
+// PrecisionDynamics (`query_dynamics: false`); everything else the v4 registered
+// config. Confirmatory over the FRESH seed range 30..60 (out-of-sample: the
+// motivating 0..30 E6 win cannot self-confirm on a deterministic battery).
+// Thresholds are computed from THIS run's 30..60 medians; 0..30 numbers are cited
+// as context strings only, never scored.
+// ===========================================================================
+
+/// The registered `aif-e1` configuration (v4 E6 branch): MeanField queries, fixed
+/// γ = 16, no precision dynamics; all other levers at the v4 registered defaults.
+fn e1_config() -> PersistentAifConfig {
+    PersistentAifConfig {
+        query_dynamics: false,
+        ..PersistentAifConfig::default()
+    }
+}
+
+#[allow(clippy::too_many_lines)]
+fn part4d_e1_persistent_aif() {
+    // Confirmatory batteries — Scope B, seeds 30..60 (out-of-sample).
+    let (e1, e1_lat) = persistent_battery_range(e1_config(), 30, 60);
+    let (scalar, _scalar_lat) = stateless_battery_range(
+        || Box::new(AifDecisionPolicy::default()) as Box<dyn CoalitionDecisionPolicy>,
+        30,
+        60,
+    );
+    let mag_policy = MagnitudePolicy::default();
+    let (mag, _mag_lat) = stateless_battery_range(
+        || Box::new(mag_policy.clone()) as Box<dyn CoalitionDecisionPolicy>,
+        30,
+        60,
+    );
+
+    let e1_med = median(primaries_b(&e1));
+    let scalar_med = median(primaries_b(&scalar));
+    let mag_med = median(primaries_b(&mag));
+    let e1_churn_med = median(churns_b(&e1));
+    let scalar_churn_med = median(churns_b(&scalar));
+    let e1_lat_med = median(e1_lat.clone());
+
+    // Confirmatory criteria (prereg §Confirmatory criteria v5) — computed from THIS
+    // run's 30..60 medians only. No cross-seed-range scoring.
+    let h1 = mag_med < 1.25 * e1_med;
+    let h2a = e1_med >= 1.25 * scalar_med;
+    let e1_sup_scalar = superior_count_b(&e1, &scalar);
+    let h2b = e1_sup_scalar >= 18;
+    let h2 = h2a && h2b;
+    let s1 = act_divergence(&e1, &scalar);
+    let verdict = match (h1, h2) {
+        (true, true) => "VALIDATED (gap closed)",
+        (false, true) => "PARTIAL (mechanism only)",
+        (_, false) => "FALSIFIED (E1)",
+    };
+
+    println!("# koalisi #53 — E1-only persistent AIF arm, out-of-sample (K4-v5)");
+    println!();
+    println!(
+        "_registered `aif-e1` = #44 `PersistentAifArm` (943d139, no code changes) in the v4 E6 configuration (MeanField queries, fixed γ = 16, no `PrecisionDynamics`) · Scope B · seeds **30..60** (out-of-sample) · confirmatory_"
+    );
+    println!();
+    println!(
+        "Three arms — `aif-e1` (registered), `aif-scalar` (`AifDecisionPolicy::default()`, frozen), `mag` (`MagnitudePolicy`, frozen) — on 30 fresh instances. All thresholds are this run's own 30..60 medians; cross-range numbers (v4 0..30 E6 0.4042, magnitude 0.2818) are context only, never scored."
+    );
+    println!();
+    println!("## Per-seed PRIMARY_B + churn (seeds 30..60)");
+    println!();
+    println!("| seed | e1_primary | scalar_primary | mag_primary | e1_churn | scalar_churn | acts_differ |");
+    println!("|-----:|-----------:|---------------:|------------:|---------:|-------------:|:-----------:|");
+    for i in 0..e1.len() {
+        let seed = 30 + i as u64;
+        let differ = if e1[i].acts != scalar[i].acts { "yes" } else { "no" };
+        println!(
+            "| {} | {:.4} | {:.4} | {:.4} | {} | {} | {} |",
+            seed, e1[i].primary, scalar[i].primary, mag[i].primary, e1[i].churn, scalar[i].churn, differ
+        );
+    }
+    println!();
+    println!(
+        "**Medians (30..60):** e1 {e1_med:.4} · scalar {scalar_med:.4} · mag {mag_med:.4}. Churn: e1 {e1_churn_med:.2} · scalar {scalar_churn_med:.2}. Latency e1 {e1_lat_med:.3} µs (record-only)."
+    );
+    println!();
+
+    // Confirmatory verdict.
+    println!("## Confirmatory verdict (Scope B, seeds 30..60)");
+    println!();
+    println!(
+        "- **H1 (gap closed):** mag median {mag_med:.4} < 1.25 × e1 median {e1_med:.4} (= {:.4}) → {}",
+        1.25 * e1_med,
+        pass(h1)
+    );
+    println!(
+        "- **H2 (mechanism):** e1 median {e1_med:.4} ≥ 1.25 × scalar median {scalar_med:.4} (= {:.6}) ({}) AND e1 strictly superior to scalar in {e1_sup_scalar}/30 seeds ≥ 18 ({}) → {}",
+        1.25 * scalar_med,
+        pass(h2a),
+        pass(h2b),
+        pass(h2)
+    );
+    println!(
+        "- **S1 (act divergence, non-gating):** e1 act stream differs from scalar on {s1}/30 seeds."
+    );
+    println!(
+        "- **S2 (churn, non-gating):** e1 churn median {e1_churn_med:.2} vs scalar {scalar_churn_med:.2} (the 0..30 E6 churn 210 was flagged high — see whether the pattern persists)."
+    );
+    println!();
+    println!("**VERDICT (E1 arm, #53): {verdict}**");
+    println!();
+    println!(
+        "_VALIDATED (gap closed) = H1 ∧ H2 · PARTIAL (mechanism only) = H2 ∧ ¬H1 · FALSIFIED (E1) = ¬H2. Thresholds (1.25×, 18/30) inherit the v2→v4 family; baselines are this run's own 30..60 rows; nothing is tuned to flip the verdict (koalisi #53)._"
+    );
+    println!();
+
+    // Exploratory X1 / X2.
+    print_e1_exploratory();
+}
+
+/// X1 (novelty off on 30..60) + X2 (0..30 re-score determinism check). Non-gating
+/// except the X2 assertion, which is a run-invalidating determinism gate.
+fn print_e1_exploratory() {
+    println!("## Exploratory X1–X2 (non-gating; X2 is a determinism gate)");
+    println!();
+
+    // X1 — novelty off (the v4 E7 analog) on 30..60.
+    let x1_cfg = PersistentAifConfig {
+        query_novelty: false,
+        ..e1_config()
+    };
+    let (x1, _) = persistent_battery_range(x1_cfg, 30, 60);
+    let x1_med = median(primaries_b(&x1));
+    let x1_churn = median(churns_b(&x1));
+
+    // X2 — re-score the registered arm on 0..30; MUST reproduce the v4 E6 numbers
+    // (0.4042 / 210.00) exactly — a determinism + comparability gate. A mismatch
+    // invalidates the run.
+    let (x2, _) = persistent_battery(e1_config(), SEEDS);
+    let x2_med = median(primaries_b(&x2));
+    let x2_churn = median(churns_b(&x2));
+    assert_eq!(
+        format!("{x2_med:.4}"),
+        "0.4042",
+        "X2 determinism gate: registered arm on seeds 0..30 must reproduce the v4 E6 median 0.4042"
+    );
+    assert_eq!(
+        format!("{x2_churn:.2}"),
+        "210.00",
+        "X2 determinism gate: registered arm on seeds 0..30 must reproduce the v4 E6 churn 210.00"
+    );
+
+    println!("| condition | median PRIMARY_B | churn median |");
+    println!("|-----------|----------------:|-------------:|");
+    println!("| X1 novelty off (30..60) | {x1_med:.4} | {x1_churn:.2} |");
+    println!("| X2 registered arm re-score (0..30, ≡ v4 E6) | {x2_med:.4} | {x2_churn:.2} |");
+    println!();
+    println!(
+        "_X1 isolates the novelty lever on the out-of-sample seeds. X2 re-scores the registered arm on 0..30 as a determinism/comparability check — it reproduces the v4 E6 numbers 0.4042 / 210.00 exactly (asserted in-code)._"
+    );
+    println!();
+}
+
 #[cfg(test)]
 mod part4c_tests {
     use super::*;
@@ -2061,5 +2248,33 @@ mod part4c_tests {
             2,
         );
         assert_eq!(e5.len(), 2);
+    }
+
+    /// 2-seed smoke for Part 4d: the registered `aif-e1` (E6/MeanField) arm runs
+    /// end-to-end on the out-of-sample seeds 30..32 alongside the scalar/mag arms.
+    /// Does NOT run the full 30-seed registered battery.
+    #[test]
+    fn part4d_two_seed_smoke() {
+        let (e1, lat) = persistent_battery_range(e1_config(), 30, 32);
+        assert_eq!(e1.len(), 2);
+        for r in &e1 {
+            assert!(r.primary.is_finite() && (0.0..=1.0).contains(&r.primary));
+            assert!(!r.acts.is_empty(), "some join/leave decisions must have run");
+        }
+        assert!(!lat.is_empty(), "latencies recorded");
+
+        let (scalar, _) = stateless_battery_range(
+            || Box::new(AifDecisionPolicy::default()) as Box<dyn CoalitionDecisionPolicy>,
+            30,
+            32,
+        );
+        assert_eq!(scalar.len(), 2);
+        let mag = MagnitudePolicy::default();
+        let (mag_rs, _) = stateless_battery_range(
+            || Box::new(mag.clone()) as Box<dyn CoalitionDecisionPolicy>,
+            30,
+            32,
+        );
+        assert_eq!(mag_rs.len(), 2);
     }
 }
