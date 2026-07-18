@@ -197,6 +197,10 @@ fn main() {
     println!("{}", "=".repeat(72));
     println!();
     part4d_e1_persistent_aif();
+    println!();
+    println!("{}", "=".repeat(72));
+    println!();
+    part4e_arm_choice_addendum();
 }
 
 // ===========================================================================
@@ -1741,7 +1745,7 @@ fn run_seed_b(
     policy: &dyn CoalitionDecisionPolicy,
     seed: u64,
     lat: &mut Vec<f64>,
-    mut on_task_outcome: impl FnMut(u32, &[bool; 8]),
+    mut on_task_outcome: impl FnMut(u32, &[bool; 8], bool),
 ) -> SeedResultB {
     let (agents, tasks, _rho, perf) = generate_instance_b(seed);
 
@@ -1806,7 +1810,7 @@ fn run_seed_b(
                 .iter()
                 .any(|&i| (agents[i].caps >> b) & 1 == 1 && perf[t][i]);
         }
-        on_task_outcome(task.required, &per_bit);
+        on_task_outcome(task.required, &per_bit, success);
     }
 
     let success_rate = success_count as f64 / tasks.len() as f64;
@@ -1831,13 +1835,13 @@ fn persistent_battery_range(
     {
         let arm = PersistentAifArm::new(start, config).expect("persistent arm construction");
         let mut warm = Vec::new();
-        let _ = run_seed_b(&arm, start, &mut warm, |req, succ| arm.observe_outcome(req, succ));
+        let _ = run_seed_b(&arm, start, &mut warm, |req, succ, _| arm.observe_outcome(req, succ));
     }
     let mut lat = Vec::new();
     let results = (start..end)
         .map(|s| {
             let arm = PersistentAifArm::new(s, config).expect("persistent arm construction");
-            run_seed_b(&arm, s, &mut lat, |req, succ| arm.observe_outcome(req, succ))
+            run_seed_b(&arm, s, &mut lat, |req, succ, _| arm.observe_outcome(req, succ))
         })
         .collect();
     (results, lat)
@@ -1847,6 +1851,38 @@ fn persistent_battery_range(
 /// to the pre-range code — warm-up seed 0, seeds `0..seeds`).
 fn persistent_battery(config: PersistentAifConfig, seeds: u64) -> (Vec<SeedResultB>, Vec<f64>) {
     persistent_battery_range(config, 0, seeds)
+}
+
+/// Like [`persistent_battery_range`], but feeds the arm the DEGRADED outcome
+/// signal (koalisi #54 Step 2): the whole-coalition `success` bool smeared across
+/// every required bit — i.e. the signal a runtime can produce from a single
+/// task-completion event with *no* per-member performance telemetry. Because
+/// `PersistentAifArm::observe_outcome` ignores entries for non-required bits (they
+/// become no-obs), passing `&[success; 8]` means exactly "every required bit
+/// observes the coalition-level outcome" and nothing else. Same warm-up discipline
+/// and fresh-arm-per-seed factory as the oracle-signal battery.
+fn persistent_battery_range_degraded(
+    config: PersistentAifConfig,
+    start: u64,
+    end: u64,
+) -> (Vec<SeedResultB>, Vec<f64>) {
+    {
+        let arm = PersistentAifArm::new(start, config).expect("persistent arm construction");
+        let mut warm = Vec::new();
+        let _ = run_seed_b(&arm, start, &mut warm, |req, _bits, success| {
+            arm.observe_outcome(req, &[success; 8]);
+        });
+    }
+    let mut lat = Vec::new();
+    let results = (start..end)
+        .map(|s| {
+            let arm = PersistentAifArm::new(s, config).expect("persistent arm construction");
+            run_seed_b(&arm, s, &mut lat, |req, _bits, success| {
+                arm.observe_outcome(req, &[success; 8]);
+            })
+        })
+        .collect();
+    (results, lat)
 }
 
 /// Run a stateless arm (scalar / magnitude) over the Scope-B seed range
@@ -1860,12 +1896,12 @@ fn stateless_battery_range(
     {
         let p = make();
         let mut warm = Vec::new();
-        let _ = run_seed_b(&*p, start, &mut warm, |_, _| {});
+        let _ = run_seed_b(&*p, start, &mut warm, |_, _, _| {});
     }
     let mut lat = Vec::new();
     let p = make();
     let results = (start..end)
-        .map(|s| run_seed_b(&*p, s, &mut lat, |_, _| {}))
+        .map(|s| run_seed_b(&*p, s, &mut lat, |_, _, _| {}))
         .collect();
     (results, lat)
 }
@@ -2218,6 +2254,87 @@ fn print_e1_exploratory() {
     println!();
 }
 
+// ===========================================================================
+// Part 4e — arm-choice addendum (koalisi #54). UNREGISTERED, EXPLORATORY.
+//
+// Additive to the frozen Parts 1–4d; no verdict is derived here. Two questions
+// for the #54 cost-quality decision memo: (1) what churn does the frozen `mag`
+// arm incur on the out-of-sample seeds (the quality winner's cost side); and
+// (2) does the E1 persistent arm still work when fed only the runtime-feasible
+// DEGRADED outcome signal (whole-coalition success) instead of the per-bit
+// oracle signal the battery hands it. Everything prints strictly AFTER Part 4d.
+// ===========================================================================
+
+fn part4e_arm_choice_addendum() {
+    println!("# koalisi #54 — arm-choice addendum (unregistered, exploratory)");
+    println!();
+    println!(
+        "_additive to the frozen Parts 1–4d; unregistered and exploratory — informs the #54 cost-quality decision memo; no verdict is derived from this section._"
+    );
+    println!();
+
+    // --- mag churn (the quality winner's cost side) ------------------------
+    let mag_policy = MagnitudePolicy::default();
+    let (mag, _) = stateless_battery_range(
+        || Box::new(mag_policy.clone()) as Box<dyn CoalitionDecisionPolicy>,
+        30,
+        60,
+    );
+    let mag_prim_med = median(primaries_b(&mag));
+    let mag_churn_med = median(churns_b(&mag));
+
+    println!("## mag churn (seeds 30..60)");
+    println!();
+    println!("| seed | mag_primary | mag_churn |");
+    println!("|-----:|------------:|----------:|");
+    for (i, r) in mag.iter().enumerate() {
+        let seed = 30 + i as u64;
+        println!("| {} | {:.4} | {} |", seed, r.primary, r.churn);
+    }
+    println!();
+    println!("**Medians:** mag primary_B {mag_prim_med:.4} · mag churn {mag_churn_med:.2}.");
+    println!();
+    println!(
+        "_mag_primary deterministically reproduces the Part 4d `mag_primary` column; it is reprinted here only so this churn table is self-contained._"
+    );
+    println!();
+
+    // --- degraded outcome signal — e1 (oracle vs runtime-feasible signal) ---
+    let (e1_oracle, _) = persistent_battery_range(e1_config(), 30, 60);
+    let (e1_deg, _) = persistent_battery_range_degraded(e1_config(), 30, 60);
+    let (scalar, _) = stateless_battery_range(
+        || Box::new(AifDecisionPolicy::default()) as Box<dyn CoalitionDecisionPolicy>,
+        30,
+        60,
+    );
+
+    let e1_oracle_med = median(primaries_b(&e1_oracle));
+    let e1_deg_med = median(primaries_b(&e1_deg));
+    let scalar_med = median(primaries_b(&scalar));
+    let e1_deg_churn_med = median(churns_b(&e1_deg));
+
+    println!("## degraded outcome signal — e1 (seeds 30..60)");
+    println!();
+    println!("| seed | e1_oracle_primary | e1_degraded_primary | e1_degraded_churn |");
+    println!("|-----:|------------------:|--------------------:|------------------:|");
+    for i in 0..e1_oracle.len() {
+        let seed = 30 + i as u64;
+        println!(
+            "| {} | {:.4} | {:.4} | {} |",
+            seed, e1_oracle[i].primary, e1_deg[i].primary, e1_deg[i].churn
+        );
+    }
+    println!();
+    println!(
+        "**Medians:** e1 oracle {e1_oracle_med:.4} · e1 degraded {e1_deg_med:.4} · scalar {scalar_med:.4}. Degraded churn {e1_deg_churn_med:.2}."
+    );
+    println!();
+    println!(
+        "_degraded = whole-coalition `success` smeared across the required bits (the runtime-feasible signal). If degraded ≈ oracle, the runtime needs only a task-completion event; if degraded ≈ scalar, the per-bit oracle signal is load-bearing and e1 stays battery-only pending finer telemetry. Assessed in the #54 design note, not here._"
+    );
+    println!();
+}
+
 #[cfg(test)]
 mod part4c_tests {
     use super::*;
@@ -2276,5 +2393,19 @@ mod part4c_tests {
             32,
         );
         assert_eq!(mag_rs.len(), 2);
+    }
+
+    /// 2-seed smoke for Part 4e: the DEGRADED-signal persistent battery (E1 arm
+    /// fed only whole-coalition success, smeared across the required bits) runs
+    /// end-to-end on the out-of-sample seeds 30..32 and produces finite metrics.
+    #[test]
+    fn part4e_two_seed_smoke() {
+        let (deg, lat) = persistent_battery_range_degraded(e1_config(), 30, 32);
+        assert_eq!(deg.len(), 2);
+        for r in &deg {
+            assert!(r.primary.is_finite() && (0.0..=1.0).contains(&r.primary));
+            assert!(!r.acts.is_empty(), "some join/leave decisions must have run");
+        }
+        assert!(!lat.is_empty(), "latencies recorded");
     }
 }
