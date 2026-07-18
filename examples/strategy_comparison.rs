@@ -205,6 +205,10 @@ fn main() {
     println!("{}", "=".repeat(72));
     println!();
     part4f_churn_frontier();
+    println!();
+    println!("{}", "=".repeat(72));
+    println!();
+    part4g_reliability_filtered_mag();
 }
 
 // ===========================================================================
@@ -1749,7 +1753,7 @@ fn run_seed_b(
     policy: &dyn CoalitionDecisionPolicy,
     seed: u64,
     lat: &mut Vec<f64>,
-    mut on_task_outcome: impl FnMut(u32, &[bool; 8], bool),
+    mut on_task_outcome: impl FnMut(u32, &[bool; 8], bool, &[usize]),
 ) -> SeedResultB {
     let (agents, tasks, _rho, perf) = generate_instance_b(seed);
 
@@ -1814,7 +1818,7 @@ fn run_seed_b(
                 .iter()
                 .any(|&i| (agents[i].caps >> b) & 1 == 1 && perf[t][i]);
         }
-        on_task_outcome(task.required, &per_bit, success);
+        on_task_outcome(task.required, &per_bit, success, &members);
     }
 
     let success_rate = success_count as f64 / tasks.len() as f64;
@@ -1839,13 +1843,13 @@ fn persistent_battery_range(
     {
         let arm = PersistentAifArm::new(start, config).expect("persistent arm construction");
         let mut warm = Vec::new();
-        let _ = run_seed_b(&arm, start, &mut warm, |req, succ, _| arm.observe_outcome(req, succ));
+        let _ = run_seed_b(&arm, start, &mut warm, |req, succ, _, _| arm.observe_outcome(req, succ));
     }
     let mut lat = Vec::new();
     let results = (start..end)
         .map(|s| {
             let arm = PersistentAifArm::new(s, config).expect("persistent arm construction");
-            run_seed_b(&arm, s, &mut lat, |req, succ, _| arm.observe_outcome(req, succ))
+            run_seed_b(&arm, s, &mut lat, |req, succ, _, _| arm.observe_outcome(req, succ))
         })
         .collect();
     (results, lat)
@@ -1873,7 +1877,7 @@ fn persistent_battery_range_degraded(
     {
         let arm = PersistentAifArm::new(start, config).expect("persistent arm construction");
         let mut warm = Vec::new();
-        let _ = run_seed_b(&arm, start, &mut warm, |req, _bits, success| {
+        let _ = run_seed_b(&arm, start, &mut warm, |req, _bits, success, _| {
             arm.observe_outcome(req, &[success; 8]);
         });
     }
@@ -1881,7 +1885,7 @@ fn persistent_battery_range_degraded(
     let results = (start..end)
         .map(|s| {
             let arm = PersistentAifArm::new(s, config).expect("persistent arm construction");
-            run_seed_b(&arm, s, &mut lat, |req, _bits, success| {
+            run_seed_b(&arm, s, &mut lat, |req, _bits, success, _| {
                 arm.observe_outcome(req, &[success; 8]);
             })
         })
@@ -1900,12 +1904,12 @@ fn stateless_battery_range(
     {
         let p = make();
         let mut warm = Vec::new();
-        let _ = run_seed_b(&*p, start, &mut warm, |_, _, _| {});
+        let _ = run_seed_b(&*p, start, &mut warm, |_, _, _, _| {});
     }
     let mut lat = Vec::new();
     let p = make();
     let results = (start..end)
-        .map(|s| run_seed_b(&*p, s, &mut lat, |_, _, _| {}))
+        .map(|s| run_seed_b(&*p, s, &mut lat, |_, _, _, _| {}))
         .collect();
     (results, lat)
 }
@@ -2435,11 +2439,11 @@ fn margin_battery_range(
         };
         let mut warm = Vec::new();
         if degraded {
-            let _ = run_seed_b(&wrapper, start, &mut warm, |req, _bits, success| {
+            let _ = run_seed_b(&wrapper, start, &mut warm, |req, _bits, success, _| {
                 arm.observe_outcome(req, &[success; 8]);
             });
         } else {
-            let _ = run_seed_b(&wrapper, start, &mut warm, |req, bits, _| {
+            let _ = run_seed_b(&wrapper, start, &mut warm, |req, bits, _, _| {
                 arm.observe_outcome(req, bits);
             });
         }
@@ -2455,11 +2459,11 @@ fn margin_battery_range(
                 tap,
             };
             if degraded {
-                run_seed_b(&wrapper, s, &mut lat, |req, _bits, success| {
+                run_seed_b(&wrapper, s, &mut lat, |req, _bits, success, _| {
                     arm.observe_outcome(req, &[success; 8]);
                 })
             } else {
-                run_seed_b(&wrapper, s, &mut lat, |req, bits, _| {
+                run_seed_b(&wrapper, s, &mut lat, |req, bits, _, _| {
                     arm.observe_outcome(req, bits);
                 })
             }
@@ -2635,6 +2639,252 @@ fn part4f_churn_frontier() {
     println!();
 }
 
+// ===========================================================================
+// Part 4g — reliability-filtered magnitude (koalisi #54 option-C probe).
+// UNREGISTERED, EXPLORATORY. Additive to the frozen Parts 1–4f; no verdict here.
+//
+// Magnitude stays PURELY STRUCTURAL; reliability gates SEPARATELY. Injecting
+// reliability into the couplings backfires: scaling `A(i→j)` down for an
+// unreliable agent makes it LESS substitutable, which RAISES its Möbius weight
+// (magnitude measures diversity, not dependability). So this composes the two
+// shipped mechanisms — `MagnitudePolicy` for structure + the #41 `FeedbackStore`
+// as a reliability VETO — fed by the whole-task success signal (the same single
+// task-completion event #54 Step 2 established as runtime-feasible).
+// ===========================================================================
+
+/// Reliability-veto wrapper (koalisi #54 option-C, example-only): the structural
+/// `mag` decision, overridden only by a reliability gate sourced from a
+/// [`FeedbackStore`]. See the section comment for why reliability is composed with
+/// magnitude rather than folded into its couplings.
+struct RelFilteredMag<'a> {
+    mag: &'a MagnitudePolicy,
+    store: &'a FeedbackStore,
+    tau: f64,
+    n_min: u64,
+    filter_leave: bool,
+}
+
+impl RelFilteredMag<'_> {
+    /// Reliability estimate for `id`: `1 − failures/history`, or `None` (cold
+    /// start) when fewer than `n_min` episodes are recorded. `None` never vetoes —
+    /// optimistic, mirroring the X1 lesson that epistemic joining is load-bearing.
+    fn rel(&self, id: usize) -> Option<f64> {
+        let h = self.store.history(id);
+        if h < self.n_min {
+            None
+        } else {
+            Some(1.0 - self.store.failures(id) as f64 / h as f64)
+        }
+    }
+}
+
+impl CoalitionDecisionPolicy for RelFilteredMag<'_> {
+    fn should_join(
+        &self,
+        agent: &dyn AgentCapabilities,
+        coalition: &[&dyn AgentCapabilities],
+        ctx: &DecisionContext,
+    ) -> Decision {
+        let d = self.mag.should_join(agent, coalition, ctx);
+        // Veto a structural join when the agent's estimated reliability is below τ.
+        // Score passthrough (exploratory semantics — the score stays the structural
+        // magnitude margin; only `act` is gated).
+        if d.act && matches!(self.rel(agent.agent_id()), Some(r) if r < self.tau) {
+            return Decision {
+                act: false,
+                score: d.score,
+            };
+        }
+        d
+    }
+
+    fn should_leave(
+        &self,
+        agent: &dyn AgentCapabilities,
+        coalition: &[&dyn AgentCapabilities],
+        ctx: &DecisionContext,
+    ) -> Decision {
+        let d = self.mag.should_leave(agent, coalition, ctx);
+        // Reliability eviction: force a leave that mag would have kept, when the
+        // member's estimated reliability is below τ (score passthrough as above).
+        if self.filter_leave
+            && !d.act
+            && matches!(self.rel(agent.agent_id()), Some(r) if r < self.tau)
+        {
+            return Decision {
+                act: true,
+                score: d.score,
+            };
+        }
+        d
+    }
+}
+
+/// Run the reliability-filtered `mag` arm over the Scope-B seed range
+/// `start..end`: one shared-cache [`MagnitudePolicy`] (cache is decision-neutral,
+/// same as Part 4d), a FRESH per-seed [`FeedbackStore`] (the #46 Arm-factory
+/// contract), and a per-seed [`RelFilteredMag`] wrapper at `(tau, n_min,
+/// filter_leave)`. The outcome hook records the whole-task success (`1.0` / `0.0`)
+/// against the final `members` once per task after the leave sweep;
+/// `FeedbackStore::new(0.5)` counts a failure iff the recorded value `< 0.5`.
+/// Warm-up on `start` discarded (fresh store).
+fn rel_mag_battery_range(
+    tau: f64,
+    n_min: u64,
+    filter_leave: bool,
+    start: u64,
+    end: u64,
+) -> (Vec<SeedResultB>, Vec<f64>) {
+    let mag_policy = MagnitudePolicy::default();
+    {
+        let store = FeedbackStore::new(0.5);
+        let policy = RelFilteredMag {
+            mag: &mag_policy,
+            store: &store,
+            tau,
+            n_min,
+            filter_leave,
+        };
+        let mut warm = Vec::new();
+        let _ = run_seed_b(&policy, start, &mut warm, |_req, _bits, success, members| {
+            store.record_outcome(members, if success { 1.0 } else { 0.0 });
+        });
+    }
+    let mut lat = Vec::new();
+    let results = (start..end)
+        .map(|s| {
+            let store = FeedbackStore::new(0.5);
+            let policy = RelFilteredMag {
+                mag: &mag_policy,
+                store: &store,
+                tau,
+                n_min,
+                filter_leave,
+            };
+            run_seed_b(&policy, s, &mut lat, |_req, _bits, success, members| {
+                store.record_outcome(members, if success { 1.0 } else { 0.0 });
+            })
+        })
+        .collect();
+    (results, lat)
+}
+
+#[allow(clippy::too_many_lines)]
+fn part4g_reliability_filtered_mag() {
+    println!(
+        "# koalisi #54 — Part 4g: reliability-filtered magnitude (unregistered, exploratory)"
+    );
+    println!();
+    println!(
+        "_the option-C probe: magnitude stays purely STRUCTURAL, reliability gates SEPARATELY via the #41 `FeedbackStore` (a veto), fed ONLY the whole-task success signal (the runtime-feasible L2 task-completion event, #54 Step 2). Folding reliability into the couplings backfires — down-scaling `A(i→j)` for an unreliable agent makes it LESS substitutable, RAISING its Möbius weight — so the two mechanisms are composed, not merged. Unregistered and exploratory; the grid was fixed before the run._"
+    );
+    println!();
+
+    // --- Identity gate (run-invalidating) ----------------------------------
+    // τ = 0 can never veto (`r < 0.0` is impossible for `r = 1 − failures/h ≥ 0`),
+    // so RelFilteredMag(0, 1, false) must reproduce the bare `mag` arm seed-for-seed.
+    let (idg, _) = rel_mag_battery_range(0.0, 1, false, 30, 60);
+    let mag_policy = MagnitudePolicy::default();
+    let (bare, _) = stateless_battery_range(
+        || Box::new(mag_policy.clone()) as Box<dyn CoalitionDecisionPolicy>,
+        30,
+        60,
+    );
+    assert_eq!(
+        idg.len(),
+        bare.len(),
+        "Part 4g identity gate: RelFilteredMag(τ=0) must reproduce bare mag"
+    );
+    for i in 0..idg.len() {
+        assert!(
+            idg[i].primary.to_bits() == bare[i].primary.to_bits() && idg[i].churn == bare[i].churn,
+            "Part 4g identity gate: RelFilteredMag(τ=0) must reproduce bare mag"
+        );
+    }
+    println!(
+        "**Identity gate:** `RelFilteredMag(τ=0, n_min=1, filter_leave=false)` reproduces the bare `mag` arm on all {} seeds (primary + churn bit-identical; asserted in-code).",
+        idg.len()
+    );
+    println!();
+
+    // --- Grid --------------------------------------------------------------
+    let tau_grid = [0.3, 0.5, 0.7];
+    let nmin_grid = [1u64, 2];
+
+    let run_grid = |filter_leave: bool| -> Vec<(f64, u64, f64, f64)> {
+        let mut cells = Vec::new();
+        for &tau in &tau_grid {
+            for &nmin in &nmin_grid {
+                let (rs, _) = rel_mag_battery_range(tau, nmin, filter_leave, 30, 60);
+                cells.push((tau, nmin, median(primaries_b(&rs)), median(churns_b(&rs))));
+            }
+        }
+        cells
+    };
+    let cells_noleave = run_grid(false);
+    let cells_leave = run_grid(true);
+
+    let print_grid = |title: &str, cells: &[(f64, u64, f64, f64)]| {
+        println!("{title}");
+        println!();
+        print!("| τ\\n_min |");
+        for &nmin in &nmin_grid {
+            print!(" n={nmin} |");
+        }
+        println!();
+        print!("|---|");
+        for _ in &nmin_grid {
+            print!("---|");
+        }
+        println!();
+        for (ti, &tau) in tau_grid.iter().enumerate() {
+            print!("| τ={tau:.1} |");
+            for ni in 0..nmin_grid.len() {
+                let c = &cells[ti * nmin_grid.len() + ni];
+                print!(" {:.4}/{:.0} |", c.2, c.3);
+            }
+            println!();
+        }
+        println!();
+        println!("_cell = median PRIMARY_B / median churn over seeds 30..60._");
+        println!();
+    };
+    print_grid("## grid — filter_leave = false (join veto only)", &cells_noleave);
+    print_grid(
+        "## grid — filter_leave = true (join veto + reliability eviction)",
+        &cells_leave,
+    );
+
+    // --- Summary -----------------------------------------------------------
+    println!("## Summary");
+    println!();
+    println!(
+        "_Reference (cited, not recomputed): mag 0.2720/8 · e1 oracle 0.4406/136 · e1 degraded 0.4381/143 · scalar 0.1267/79.5._"
+    );
+    println!();
+    let mut all: Vec<(f64, u64, bool, f64, f64)> = Vec::new();
+    for c in &cells_noleave {
+        all.push((c.0, c.1, false, c.2, c.3));
+    }
+    for c in &cells_leave {
+        all.push((c.0, c.1, true, c.2, c.3));
+    }
+    all.sort_by(|a, b| b.3.partial_cmp(&a.3).unwrap_or(std::cmp::Ordering::Equal));
+    println!("Top cells by median PRIMARY_B (descending):");
+    println!();
+    for c in all.iter().take(5) {
+        println!(
+            "- (τ={:.1}, n_min={}, leave={}) {:.4}/{:.0}",
+            c.0, c.1, c.2, c.3, c.4
+        );
+    }
+    println!();
+    println!(
+        "_Unregistered exploratory probe — nothing here is a verdict. If a cell approaches e1's ~0.44 at mag-like churn, option C becomes the v6-registration candidate (fresh prereg, seeds 60..90); otherwise it is ruled out._"
+    );
+    println!();
+}
+
 #[cfg(test)]
 mod part4c_tests {
     use super::*;
@@ -2728,6 +2978,35 @@ mod part4c_tests {
         let (deg, _) = margin_battery_range(e1_config(), 0.15, 0.05, true, 30, 32, None);
         assert_eq!(deg.len(), 2);
         for x in &deg {
+            assert!(x.primary.is_finite() && (0.0..=1.0).contains(&x.primary));
+        }
+    }
+
+    /// 2-seed smoke for Part 4g: (a) `RelFilteredMag(τ=0)` reproduces the bare mag
+    /// arm (the identity property at 2-seed scale), and (b) one active cell runs
+    /// end-to-end with finite in-range metrics.
+    #[test]
+    fn part4g_two_seed_smoke() {
+        let (idg, _) = rel_mag_battery_range(0.0, 1, false, 30, 32);
+        let mag = MagnitudePolicy::default();
+        let (bare, _) = stateless_battery_range(
+            || Box::new(mag.clone()) as Box<dyn CoalitionDecisionPolicy>,
+            30,
+            32,
+        );
+        assert_eq!(idg.len(), 2);
+        assert_eq!(bare.len(), 2);
+        for i in 0..idg.len() {
+            assert!(
+                idg[i].primary.to_bits() == bare[i].primary.to_bits()
+                    && idg[i].churn == bare[i].churn,
+                "RelFilteredMag(τ=0) must reproduce bare mag"
+            );
+        }
+
+        let (active, _) = rel_mag_battery_range(0.5, 1, true, 30, 32);
+        assert_eq!(active.len(), 2);
+        for x in &active {
             assert!(x.primary.is_finite() && (0.0..=1.0).contains(&x.primary));
         }
     }
