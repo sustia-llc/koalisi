@@ -169,20 +169,6 @@ cargo test --features durable              # + container-backed restart-durabili
 - [aif](https://github.com/sustia-llc/tira) (tag `aif-v0.11.0`, **optional**, feature `decision`) — active-inference engine for the AIF decision strategies (scalar, multimodal, persistent); `nalgebra` is only compiled when the feature is enabled
 - [catgraph-magnitude](https://github.com/sustia-llc/catgraph) (tag `v0.2.0`, **optional**, feature `magnitude`) — enriched-category coalition magnitude for the categorical decision strategy
 
-## Origin
-
-koalisi consolidates four prior coalition projects into a single layered architecture:
-- **dynamo** — temporal hypergraph + event sourcing + CoalitionManager
-- **coalesce** — DCVC + AIPA + value calculators
-- **coalition_aif** — Active Inference + EFE (retired; its ideas re-expressed on the `aif` reference engine, available behind the optional `decision` feature)
-- **forex-arbitrage-swarm** — the runtime layer (originally kameo actors + PubSub; since K3 pure `tokio::sync` task seams)
-
-koalisi is domain-agnostic. It began as a forex triangular-arbitrage tool;
-that domain was removed in v0.11.0 (market/trading work now lives in the
-sibling [`biome`](https://github.com/sustia-llc/biome) project). The
-demonstrated runtime is a synthetic, non-financial coalition-formation
-pipeline (`examples/synthetic_ingestion.rs`).
-
 ## References
 
 - Zhang, Y., Lin, C., Tang, S., Chen, H., Zhou, S., Ma, Y., Tresp, V. (2025).
