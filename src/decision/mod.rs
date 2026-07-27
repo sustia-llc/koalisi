@@ -5,7 +5,7 @@
 //! *leave* a coalition it currently belongs to. The trait is object-safe so
 //! policies can be swapped behind a `Box<dyn CoalitionDecisionPolicy>`.
 //!
-//! Three implementations are provided:
+//! Policy implementations:
 //!
 //! - [`ThresholdPolicy`] (always available) — decides on the *marginal value*
 //!   an agent contributes, measured by any existing
@@ -14,11 +14,21 @@
 //!   energy from the Active Inference engine, where coalition membership
 //!   changes the agent's *observation model* (capability coverage of the
 //!   required capabilities). Higher coverage lowers expected free energy `G`.
+//!   Two further AIF arms live beside it: `AifMmDecisionPolicy` (the K4-v3
+//!   multimodal bridge) and `PersistentAifArm` (the K4-v4/v5 persistent
+//!   world-model arm).
 //! - `MagnitudePolicy` (feature `magnitude`) — the categorical A/B mirror of the
 //!   AIF arm: it scores a coalition by its *magnitude* (effective-member
 //!   diversity, via `catgraph`'s enriched-category magnitude) instead of `−G`,
 //!   mapping capability coverage onto directed substitutability couplings. The
 //!   two feature arms are independent — either, both, or neither may be enabled.
+//!
+//! The module also hosts one non-policy item: `ReliabilityCoverage` (feature
+//! `decision`, issue #57) — a [`ValueCalculator`] derived from the persistent
+//! arm's world-model snapshot, giving the population structure-search
+//! (`crate::algorithms::search`) a reliability-weighted fitness. It lives here,
+//! not in `algorithms`, because its snapshot constructor needs the
+//! feature-gated AIF types.
 //!
 //! # Membership conventions
 //!
@@ -248,6 +258,11 @@ mod aif_persistent_policy;
 pub use aif_persistent_policy::{
     PersistentAifArm, PersistentAifConfig, PersistentAifState, TrialBoundary,
 };
+
+#[cfg(feature = "decision")]
+mod reliability_value;
+#[cfg(feature = "decision")]
+pub use reliability_value::ReliabilityCoverage;
 
 #[cfg(feature = "magnitude")]
 mod magnitude_policy;
