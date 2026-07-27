@@ -4,3 +4,4 @@ config/production*
 README.local.md
 TODO.md
 .claude
+CLAUDE.local.md
