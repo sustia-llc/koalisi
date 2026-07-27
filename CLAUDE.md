@@ -8,6 +8,9 @@ When you bump the project's behaviour, also:
 - add a new top section to `CHANGELOG.md` (Keep a Changelog format)
 - update the relevant entries here (Current state, Worth flagging,
   File inventory) so future-me doesn't relitigate decisions
+- cut + push an annotated `v{X.Y.Z}` tag on the release commit (the merge,
+  for PR releases) — per-release tagging resumed 2026-07-27, owner call;
+  v0.7.0–v0.15.0 were backfilled onto their merges the same day
 
 ## Mission (one paragraph)
 
@@ -52,6 +55,23 @@ forex domain since removed).
 
 ### Done
 
+- **#57 e1-derived ValueCalculator — v0.16.0 (2026-07-27)**: the #54
+  option-D slow-loop seam, shipped. New `src/decision/reliability_value.rs`
+  (feature `decision`): `ReliabilityCoverage` — the `TaskCoverage`
+  interior-optimum shape with each required bit weighted by the persistent
+  world model's reliability posterior (`beliefs[b][0]`, state 0 = reliable;
+  `from_state(&PersistentAifState)` + plain-array `new`). Design sketch
+  posted to #57 BEFORE code (prereg-lite; owner calls: beliefs source /
+  TaskCoverage skeleton / decision-gated placement). All-ones reduces
+  EXACTLY to `TaskCoverage` (low 8 bits); 5 unit tests incl. the gotcha-21
+  non-degeneracy discipline. Example `population_reliability` (E1 config)
+  = the #42 acceptance pattern end-to-end. 3-lens review (correctness /
+  gating-conventions / modeling-semantics): 2 blocking + 6 important +
+  9 minor, ALL applied — the semantics lens measured two doc overclaims
+  (recency-dominated beliefs; "routes around weak bits" false at these
+  coefficients) now corrected as contracts — see **gotcha 24**. Suites:
+  103 default / **152** decision / **174** decision,magnitude (frozen
+  battery untouched). First contemporaneous resumed tag: `v0.16.0`.
 - **Public-release sweep — 2026-07-27 (docs+metadata, no bump)**: the
   repo is flip-ready. History audit CLEAN (no plans/notes/secrets ever
   tracked; accept-history recommended — a rewrite would churn every tag
@@ -428,9 +448,9 @@ forex domain since removed).
   | Suite | Tests | Command |
   |---|---|---|
   | Default | 103 | `cargo test` |
-  | `--features decision` | 147 | `cargo test --features decision` |
+  | `--features decision` | 152 | `cargo test --features decision` |
   | `--features magnitude` | 125 | `cargo test --features magnitude` |
-  | `--features decision,magnitude` | 169 | `cargo test --features decision,magnitude` |
+  | `--features decision,magnitude` | 174 | `cargo test --features decision,magnitude` |
   | `--features persistence` | 123 | `cargo test --features persistence` |
   | `--features persistence,magnitude` | 146 (incl. the #18/#30 replay parity gate) | `cargo test --features persistence,magnitude` |
   | `--features durable` | +1 container-backed restart test; needs Docker | `cargo test --features durable` |
@@ -473,6 +493,7 @@ koalisi/
 │   ├── decision/
 │   │   ├── mod.rs                          CoalitionDecisionPolicy + ThresholdPolicy (always compiled)
 │   │   ├── aif_policy.rs                   AifDecisionPolicy + EfeValueCalculator (feature `decision`)
+│   │   ├── reliability_value.rs            ReliabilityCoverage (#57, v0.16.0): reliability-weighted coverage ValueCalculator from the persistent world-model snapshot (feature `decision`; gotcha 24)
 │   │   └── magnitude_policy.rs             MagnitudePolicy + MagnitudeValueCalculator + CouplingModel + CoalitionEvaluator cache (K6) (feature `magnitude`); relevant_masks/magnitude_or_zero pub(crate) for #18
 │   ├── ingest/                             K5 (#8): domain-neutral ingestion layer (always compiled, no new deps)
 │   │   ├── mod.rs                          re-exports
@@ -501,6 +522,8 @@ koalisi/
 │   ├── algorithm_values.rs                 value calculators + DCVC + AIPA
 │   ├── synthetic_ingestion.rs              FLAGSHIP (v0.11.0): NEST + sensor fixtures → generic monitors → coalition formation via CoalitionService (default features)
 │   ├── supervised_monitor.rs               spawn_supervised restart demo over SampleMonitor<SensorEvent> (v0.11.0; was supervised_swarm)
+│   ├── population_search.rs                #42: TaskCoverage-driven structure search + record/replay (default features; was missing from this inventory — added v0.16.0)
+│   ├── population_reliability.rs           #57 (v0.16.0): outcome stream → world-model snapshot → ReliabilityCoverage → search + replay (feature decision)
 │   ├── strategy_comparison.rs              divergence demo + K4 A/B battery (features decision,magnitude)
 │   └── durable_decisions.rs                durable decision log end-to-end (feature `durable`)
 ├── .claude/docs/                           TRACKED internal design docs + references (docs/ reorg 2026-07-27; rest of .claude/ stays gitignored)
@@ -830,12 +853,38 @@ These cost time during the build; future-me should not relearn them.
       re-try this lever; churn work must target membership STATE (dwell-time /
       cooldown / rejoin-lockout), which is a new arm design + registration.
 
+24. **`ReliabilityCoverage` contracts (#57, v0.16.0) — rely on these.**
+    All three were measured by the semantics review lens, not inferred.
+    - **The belief read is RECENCY-dominated, not an aggregate.**
+      `beliefs[b][0]` = the smoothed posterior at the last node of the 2-step
+      MMP window: the same 19-success stream reads 0.88 or 0.28 depending on
+      where the single failure sits, and one truncated task moves the number
+      3.1×. Cross-bit ORDERING is the robust signal; never present the value
+      as a success rate (the example prints last-3-tasks context, not
+      success counts, for exactly this reason).
+    - **Reliability RESCALES the coverage optimum; it does not route around
+      weak bits.** For `|required| ≤ 6`, full-coverage weight per unit
+      reliability (`100/|required| ≥ 16.7`) > partial weight (15), so
+      skipping a bit never pays at equal member count — the example's best
+      structure is IDENTICAL to unweighted `TaskCoverage`'s (fitness rescaled
+      152.0 → −2.50). Re-ranking happens only via the number of full-coverage
+      blocks + which bits partial blocks cover. (At `|required| ≥ 7` skipping
+      can win, but that's a TaskCoverage-coefficient artifact present at
+      r ≡ 1 too.) Member cost is CONSTANT (−8·N) across partitions of a fixed
+      pool — it never affects `search()`'s argmax.
+    - **The 0.5 unknown-bit prior is OPTIMISTIC**: learned posteriors in the
+      example read 0.07–0.28, so an unobserved bit outranks every measured
+      one. Also: the belief read is identical under `query_dynamics`
+      true/false (dynamics shape only the query POMDP) — the example pins
+      `false` so its "E1 (K4-v5)" label is honest; `default()` is the
+      FALSIFIED v4 config, don't relabel it v5.
+
 ## Reproducers
 
 All assume `cwd = koalisi/`.
 
 ```sh
-# === default features (98 tests) ===
+# === default features (103 tests) ===
 timeout 60s  cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target
 timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example topology_coalition
 timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example algorithm_values
@@ -843,15 +892,16 @@ timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-tar
 timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example supervised_monitor
 timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example population_search   # P5.2 (#42)
 
-# === decision-layer feature combos (129 / 120 / 151 tests) ===
+# === decision-layer feature combos (152 / 125 / 174 tests) ===
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features magnitude
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision,magnitude
 timeout 120s cargo run --release --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision,magnitude --example strategy_comparison
+timeout 60s  cargo run --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision --example population_reliability   # #57 (v0.16.0)
 
-# === with persistence feature (P7.1 store + P7.2 replay, 108 tests) ===
+# === with persistence feature (P7.1 store + P7.2 replay, 123 tests) ===
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features persistence
-timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features persistence,magnitude   # 131, incl. the replay parity gate
+timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features persistence,magnitude   # 146, incl. the replay parity gate
 
 # === with durable feature (needs Docker; container-backed restart test) ===
 timeout 300s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features durable

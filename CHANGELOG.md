@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Planned work — issue-tracked (details in [`CLAUDE.md`](./CLAUDE.md)
+§"Next steps"):
+- **Phase 5 — SwarmAgentic meta-layer remainder** ([#20]): configurator,
+  velocity-rewrite loop, transferability (needs an LLM backend behind
+  `src/llm/mod.rs`).
+- **Phase 7 — Persistence implementation**: [#31] sealing + revocation
+  registry (*blocked on the tauhokohoko KEK-granularity answer*), [#32]
+  decision/belief streams (the `TaskOutcome` durable home), [#33] federation
+  manifests + FAIR provenance.
+- **[#38]** domain-neutral remote coalition-event gateway (successor to the
+  removed `remote` feature; folds in the [#24] hardening ideas).
+- **[#25]** metrics example, reframed onto the `CoalitionService` decision
+  path / topology events.
+
+## [0.16.0] — 2026-07-27
+
+The public-release version: the repo went PUBLIC 2026-07-27, and per-release
+tagging resumed with this release (`v0.7.0`–`v0.15.0` backfilled onto their
+release merges the same day).
+
+### Added
+
+- **`ReliabilityCoverage`** (feature `decision`,
+  [#57](https://github.com/sustia-llc/koalisi/issues/57)) — a
+  `ValueCalculator` derived from the persistent AIF world model
+  (`PersistentAifState`), giving the population structure-search (#42) a
+  reliability-weighted fitness: the `TaskCoverage` interior-optimum shape
+  with each required bit weighted by the world model's per-bit reliability
+  posterior (`beliefs[b][0]`, state 0 = reliable). Constructors `new`
+  (explicit vector; clamps, sanitizes non-finite entries to 0.0) and
+  `from_state` (snapshot read; short/ragged snapshots fall back to the
+  uniform prior per bit). With reliability ≡ 1 it reduces exactly to
+  `TaskCoverage` (within the low 8 bits). Reliability *rescales* the
+  coverage optimum rather than routing around weak bits (for
+  `|required| ≤ 6` skipping never pays at equal member count) — documented,
+  with the BIT-level scope constraint (no agent-level discrimination; the
+  world model has no agent-indexed factor). 5 unit tests including the
+  gotcha-21 non-degeneracy discipline.
+- **`examples/population_reliability.rs`** (requires `decision`) — feeds a
+  `PersistentAifArm` (E1 configuration, `query_dynamics: false`) a
+  deterministic 20-task outcome stream with one flaky bit, snapshots it,
+  runs `search()` under the derived calculator, and records + replays the
+  best structure (the #42 acceptance pattern). Output prints the per-bit
+  posteriors with a recency caveat (the belief is a 2-step-MMP-window
+  smoothed posterior, not a success-rate average).
+
 ### Changed — public-release prep (2026-07-27, no behavior change)
 
 - All git-tag dependencies re-pinned SSH → HTTPS (`aif`,
@@ -25,23 +71,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   references moved to the tracked `.claude/docs/` (phase7 persistence
   design, K3 bench, SwarmAgentic digest + CC0 paper copy); all
   references updated — registered prereg/report docs untouched.
-
-Planned work — issue-tracked (details in [`CLAUDE.md`](./CLAUDE.md)
-§"Next steps"):
-
-- **[#57]** e1-derived `ValueCalculator` for the population-search fitness
-  (#42/#20 slow-loop seam; depends on #55).
-- **Phase 5 — SwarmAgentic meta-layer remainder** ([#20]): configurator,
-  velocity-rewrite loop, transferability (needs an LLM backend behind
-  `src/llm/mod.rs`).
-- **Phase 7 — Persistence implementation**: [#31] sealing + revocation
-  registry (*blocked on the tauhokohoko KEK-granularity answer*), [#32]
-  decision/belief streams (the `TaskOutcome` durable home), [#33] federation
-  manifests + FAIR provenance.
-- **[#38]** domain-neutral remote coalition-event gateway (successor to the
-  removed `remote` feature; folds in the [#24] hardening ideas).
-- **[#25]** metrics example, reframed onto the `CoalitionService` decision
-  path / topology events.
+- `decision` module docs: implementation list brought current
+  (`AifMmDecisionPolicy`, `PersistentAifArm`, `ReliabilityCoverage`).
 
 ## [0.15.0] — 2026-07-18
 

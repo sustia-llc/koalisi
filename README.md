@@ -101,6 +101,7 @@ cargo run --example population_search
 
 # Feature-gated
 cargo run --release --features decision,magnitude --example strategy_comparison   # divergence demo + AIF-vs-magnitude A/B report (#7)
+cargo run --features decision --example population_reliability                    # learned-reliability fitness for the structure search (#57)
 cargo run --features durable --example durable_decisions                          # durable decision log (needs Docker)
 ```
 
@@ -152,9 +153,9 @@ upstream side.
 
 ```sh
 cargo test                                 # 103 tests (core + topology + algorithms + population search + decision + ingestion)
-cargo test --features decision             # 147 tests (+ Active Inference decision strategies: scalar, multimodal, persistent)
+cargo test --features decision             # 152 tests (+ Active Inference decision strategies: scalar, multimodal, persistent + the derived ReliabilityCoverage calculator)
 cargo test --features magnitude            # 125 tests (+ categorical-magnitude decision strategy + trajectory analytics)
-cargo test --features decision,magnitude   # 169 tests (both decision arms)
+cargo test --features decision,magnitude   # 174 tests (both decision arms)
 cargo test --features persistence          # 123 tests (+ chained event store + topology replay)
 cargo test --features persistence,magnitude # 146 tests (incl. the live-vs-replayed parity gate)
 cargo test --features durable              # + container-backed restart-durability test (needs Docker)
