@@ -116,15 +116,47 @@ cargo run --features durable --example durable_decisions                        
 > needs an interior-optimum value model — coverage-style, or the `magnitude` / EFE /
 > `FeedbackCalculator` arms.
 
+## The A/B process: pre-registered decision-strategy evaluation
+
+`examples/strategy_comparison.rs` is the showcase: a head-to-head battery of
+coalition-decision strategies — Active Inference arms built on
+[aif](https://github.com/sustia-llc/tira) vs a categorical (magnitude-based)
+baseline built on [catgraph](https://github.com/sustia-llc/catgraph) — run as
+**pre-registered A/B experiments**. Criteria are fixed and committed *before*
+each run (`docs/prereg-*.md`), verdicts are recorded against them
+(`docs/ab-report-*.md`), and falsified arms stay falsified — the reports are
+never rewritten.
+
+The run history is deliberately adversarial:
+
+| Run | Challenger arm | Verdict |
+|-----|----------------|---------|
+| K4 v1 ([#7](https://github.com/sustia-llc/koalisi/issues/7)) | scalar AIF bridge | `FALSIFIED (latency)` under v1 criteria; `VALIDATED (B)` under the pre-posted v2 amendment — magnitude superior on quality 30/30 seeds |
+| K4 v3 | multimodal AIF (one modality per capability bit) | `FALSIFIED (multimodality)` — proved decision-equivalent to the scalar bridge, all 30 seeds |
+| K4 v4 ([#44](https://github.com/sustia-llc/koalisi/issues/44)) | persistent AIF (learning + precision dynamics) | `FALSIFIED (persistence)` — genuinely escapes the v3 equivalence theorem, but loses on quality |
+| K4 v5 ([#53](https://github.com/sustia-llc/koalisi/issues/53)) | E1-only persistent AIF (learned precisions + novelty, fixed γ) | `VALIDATED (gap closed)` — first arm to beat magnitude on out-of-sample quality (0.4406 vs 0.2720), at a churn + latency cost |
+| K4 v6 ([#56](https://github.com/sustia-llc/koalisi/issues/56)) | v5 + never-evict state damping | `FALSIFIED (never-evict)` — the eviction churn *is* the winning mechanism (monotone cap series) |
+
+Two feedback-calculator arms ran the same gauntlet
+([#46](https://github.com/sustia-llc/koalisi/issues/46) `FALSIFIED`,
+[#48](https://github.com/sustia-llc/koalisi/issues/48) `PARTIAL (mechanism
+only)`). The arm-choice decision is recorded in
+`docs/k4-arm-choice-memo.md`: magnitude remains the demonstrated default;
+the E1 arm stands as capability evidence, arm selection being a cost–quality
+tradeoff. The competitive pressure also flowed upstream — several `aif`
+engine features (seed API, novelty EFE term, Dirichlet-count injection) were
+cut specifically for these arms; tira's README tells the same story from the
+upstream side.
+
 ## Tests
 
 ```sh
-cargo test                                 # 98 tests (core + topology + algorithms + population search + decision + ingestion)
-cargo test --features decision             # 129 tests (+ Active Inference decision strategies, scalar + multimodal)
-cargo test --features magnitude            # 120 tests (+ categorical-magnitude decision strategy + trajectory analytics)
-cargo test --features decision,magnitude   # 151 tests (both decision arms)
-cargo test --features persistence          # 118 tests (+ chained event store + topology replay)
-cargo test --features persistence,magnitude # 141 tests (incl. the live-vs-replayed parity gate)
+cargo test                                 # 103 tests (core + topology + algorithms + population search + decision + ingestion)
+cargo test --features decision             # 147 tests (+ Active Inference decision strategies: scalar, multimodal, persistent)
+cargo test --features magnitude            # 125 tests (+ categorical-magnitude decision strategy + trajectory analytics)
+cargo test --features decision,magnitude   # 169 tests (both decision arms)
+cargo test --features persistence          # 123 tests (+ chained event store + topology replay)
+cargo test --features persistence,magnitude # 146 tests (incl. the live-vs-replayed parity gate)
 cargo test --features durable              # + container-backed restart-durability test (needs Docker)
 ```
 
@@ -134,7 +166,7 @@ cargo test --features durable              # + container-backed restart-durabili
 - tokio + tokio-util — async runtime + lifecycle primitives
 - rayon + tokio-rayon — CPU-bound graph operations bridge
 - [surrealdb-live-message](https://github.com/sustia-llc/surrealdb-live-message) (tag `v0.2.1`, **optional**, feature `durable`) — two-tier restart-durable message bus for the coalition decision log
-- [aif](https://github.com/sustia-llc/tira) (tag `aif-v0.9.0`, **optional**, feature `decision`) — active-inference engine for the AIF decision strategies (scalar + multimodal); `nalgebra` is only compiled when the feature is enabled
+- [aif](https://github.com/sustia-llc/tira) (tag `aif-v0.11.0`, **optional**, feature `decision`) — active-inference engine for the AIF decision strategies (scalar, multimodal, persistent); `nalgebra` is only compiled when the feature is enabled
 - [catgraph-magnitude](https://github.com/sustia-llc/catgraph) (tag `v0.2.0`, **optional**, feature `magnitude`) — enriched-category coalition magnitude for the categorical decision strategy
 
 ## Origin

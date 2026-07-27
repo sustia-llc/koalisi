@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — public-release prep (2026-07-27, no behavior change)
+
+- All git-tag dependencies re-pinned SSH → HTTPS (`aif`,
+  `catgraph-applied`, `catgraph-magnitude`, `surrealdb-live-message` —
+  every upstream is public now), so outside builds work for every feature.
+- `LICENSE-MIT` + `LICENSE-APACHE` added (dual MIT OR Apache-2.0, matching
+  the existing `Cargo.toml` `license` field); `repository` + `readme`
+  metadata added.
+- `Cargo.lock` is now tracked (was gitignored) — pins the reproducibility
+  story the A/B reports rely on.
+- README: new "The A/B process" section (the pre-registered
+  K4 v1→v6 verdict trail); aif dep tag drift fixed (0.9.0 → 0.11.0);
+  test counts re-measured.
+
 Planned work — issue-tracked (details in [`CLAUDE.md`](./CLAUDE.md)
 §"Next steps"):
 

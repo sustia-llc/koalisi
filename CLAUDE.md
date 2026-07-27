@@ -48,10 +48,22 @@ forex domain since removed).
   `surrealdb:surrealql-language` — for K3 (#6) surrealdb-live-message work,
   per the user CLAUDE.md routing rules.
 
-## Current state — 2026-07-18
+## Current state — 2026-07-27
 
 ### Done
 
+- **Public-release sweep — 2026-07-27 (docs+metadata, no bump)**: the
+  repo is flip-ready. History audit CLEAN (no plans/notes/secrets ever
+  tracked; accept-history recommended — a rewrite would churn every tag
+  hash). All four git-tag deps re-pinned SSH→HTTPS (tira went public
+  mid-session; catgraph + surrealdb-live-message already were) — outside
+  builds work for every feature. Added `LICENSE-MIT`/`LICENSE-APACHE` +
+  Cargo.toml `repository`/`readme`; `Cargo.lock` now TRACKED (was
+  gitignored); README gained "The A/B process" (K4 v1→v6 verdict trail,
+  mirrors tira's "Downstream A/B" section) and the aif tag drift fix;
+  CLAUDE.md scrubbed of private notes-repo wiring. Prereg/ab-report docs
+  untouched (registered docs are immutable). Remaining = owner ratifies
+  accept-history + flips visibility.
 - **#56 K4-v6 never-evict arm — v0.15.0 (2026-07-18): `FALSIFIED
   (never-evict)`**. The #54 option-B registered adoption path, run and closed
   same day (prereg 68ba8fc posted PRE-implementation; owner-locked lever =
@@ -363,8 +375,8 @@ forex domain since removed).
 - **Magnitude decision arm (K2, issue #5)**: `MagnitudePolicy` +
   `MagnitudeValueCalculator` behind a new `magnitude` feature — the categorical
   A/B mirror of the AIF arm, backed by `catgraph_magnitude::coalition_value`
-  (git tag `v0.1.1`, SSH URL — catgraph is private, same rationale as `aif`;
-  pinned `t = 1`). Capabilities map to directed substitutability couplings
+  (git tag `v0.1.1` then; HTTPS URL since the 2026-07-27 release sweep —
+  catgraph is public now; pinned `t = 1`). Capabilities map to directed substitutability couplings
   `A(i→j) = |rel_i ∩ rel_j| / |rel_i|`; clones skeletalize into one effective
   agent; **task-irrelevant agents (`rel == 0`) are excluded** (a vacuous 1.0
   coupling collapses diversity — review-confirmed). Feature-independent of
@@ -415,12 +427,12 @@ forex domain since removed).
 - **Tests passing**:
   | Suite | Tests | Command |
   |---|---|---|
-  | Default | 98 | `cargo test` |
-  | `--features decision` | 129 | `cargo test --features decision` |
-  | `--features magnitude` | 120 | `cargo test --features magnitude` |
-  | `--features decision,magnitude` | 151 | `cargo test --features decision,magnitude` |
-  | `--features persistence` | 118 | `cargo test --features persistence` |
-  | `--features persistence,magnitude` | 141 (incl. the #18/#30 replay parity gate) | `cargo test --features persistence,magnitude` |
+  | Default | 103 | `cargo test` |
+  | `--features decision` | 147 | `cargo test --features decision` |
+  | `--features magnitude` | 125 | `cargo test --features magnitude` |
+  | `--features decision,magnitude` | 169 | `cargo test --features decision,magnitude` |
+  | `--features persistence` | 123 | `cargo test --features persistence` |
+  | `--features persistence,magnitude` | 146 (incl. the #18/#30 replay parity gate) | `cargo test --features persistence,magnitude` |
   | `--features durable` | +1 container-backed restart test; needs Docker | `cargo test --features durable` |
   | All examples | exit 0 | see Reproducers below |
 
@@ -972,12 +984,13 @@ its AIF math was buggy — unnormalized belief updates, obs/state dim confusion,
 learning, ad-hoc RNG). Instead koalisi depends on the code-reviewed `aif` reference
 engine from the `tira` repo and bridges to it.
 
-- **Dependency:** `aif = { git = "ssh://git@github.com/sustia-llc/tira", tag =
-  "aif-v0.9.0", optional = true }` (shipped at `aif-v0.4.0`; → `v0.5.0` by follow-up #2;
-  → `v0.9.0` by #43 Part 1, 2026-07-16 — decision suite passed unchanged),
-  behind `[features] decision = ["dep:aif"]`. SSH
-  URL (not HTTPS) because `tira` is private and git here is SSH-only — cargo's libgit2
-  HTTPS fetch can't authenticate. Feature-off builds compile **no `aif` and no
+- **Dependency:** `aif = { git = "https://github.com/sustia-llc/tira", tag =
+  "aif-v0.11.0", optional = true }` (shipped at `aif-v0.4.0`; → `v0.5.0` by follow-up #2;
+  → `v0.9.0` by #43 Part 1, 2026-07-16 — decision suite passed unchanged;
+  → `v0.11.0` by the #44 K4-v4 cycle), behind `[features] decision = ["dep:aif"]`.
+  Originally an SSH URL (tira was private; cargo's libgit2 HTTPS fetch can't
+  authenticate) — re-pinned to HTTPS in the 2026-07-27 release sweep after
+  tira went public. Feature-off builds compile **no `aif` and no
   `nalgebra`**. (`aif` uses `nalgebra` internally — NOT `ndarray`; the old "adds
   ndarray dependency" note was wrong. Since the K4-v3 `aif-mm` arm, koalisi carries a
   **direct optional `nalgebra` dep under `decision`** — the multimodal bridge
@@ -1123,22 +1136,21 @@ meet at the `src/llm/mod.rs` trait surface.
   `TrustGraph` exists). Tested in `decision/aif_policy.rs` (7 unit) + `decision_integration.rs`
   (belief-aware join through the live actor). 86 tests `--features decision`.
 
-Cross-project plan (upstream `aif` + this Phase B): see
-`~/Documents/sustia-llc/tira/.claude/plans/aif-merge-koalisi-integration.md`
-(tira's local checkout moved from `~/Documents/iwahi/tira` on 2026-07-02; the GitHub
-remote was always `sustia-llc/tira`).
+Cross-project plan (upstream `aif` + this Phase B): tracked in tira's
+private planning notes; the public record is the issue trail on
+`sustia-llc/tira` + `sustia-llc/koalisi` (#1/#2 here).
 
 **K2 — magnitude decision arm ([#5](https://github.com/sustia-llc/koalisi/issues/5), DONE 2026-07-02).**
-Part of the coalition semantic-layer roadmap (Phase K, plan in
-`~/Documents/tsondru/tsondru-notes/catgraph/plans/2026-07-01-coalition-semantic-layer.md`).
+Part of the coalition semantic-layer roadmap (Phase K, planned upstream in
+the catgraph project's notes).
 The categorical A/B mirror of the AIF arm, behind feature `magnitude`
 (independent of `decision` — either, both, or neither):
-- Dep: `catgraph-magnitude = { git = "ssh://git@github.com/sustia-llc/catgraph",
-  tag = "v0.1.1", optional = true }` (shipped at `v0.1.0`; bumped for the
-  catgraph#29 triangle-tolerance fix; **K6 (#14) bumped again to `v0.2.0`**
-  for the catgraph#31 `CoalitionEvaluator`). SSH not HTTPS (catgraph is private; the
-  issue-#5 pinned dep line says HTTPS but cargo's libgit2 can't authenticate —
-  same story as `aif`/tira). `coalition_value` = magnitude at pinned `t = 1`;
+- Dep: `catgraph-magnitude` by git tag (shipped at `v0.1.0`; bumped to
+  `v0.1.1` for the catgraph#29 triangle-tolerance fix; **K6 (#14) bumped
+  again to `v0.2.0`** for the catgraph#31 `CoalitionEvaluator`). Originally
+  an SSH URL (catgraph was private then; cargo's libgit2 can't authenticate
+  HTTPS) — re-pinned to HTTPS in the 2026-07-27 release sweep after catgraph
+  went public. `coalition_value` = magnitude at pinned `t = 1`;
   the t-sweep belongs to the K4 A/B harness (#7).
 - **Mapping (the semantic heart)**: directed substitutability
   `A(i→j) = |rel_i ∩ rel_j| / |rel_i|`, `rel = caps & required`. Clones
@@ -1233,9 +1245,8 @@ coalition formation runs on synthetic non-financial data
 Shipped as `TemporalAnalytics::magnitude_history` + `MagnitudePoint`
 (feature `magnitude`) — see §Current state and gotcha 16 for the contracts.
 Original salvage note kept below for provenance:
-Fold-in salvage from the superseded `tsondru/catgraph-coalition` (decision
-2026-07-03; see `tsondru-notes/catgraph/docs/refresh-candidates.md` triage
-banner — salvage split across catgraph#53 / catgraph#36-addendum / this):
+Fold-in salvage from a superseded catgraph-coalition prototype (decision
+2026-07-03; salvage split across catgraph#53 / catgraph#36-addendum / this):
 a temporal-analytics query that replays coalition membership at sample points
 along the event-sourced history and evaluates the pinned t=1
 `coalition_value` (or `CoalitionEvaluator` where the membership delta allows
@@ -1263,7 +1274,7 @@ durability).
 ### Phase 7: Persistence  *(DESIGN SHIPPED 2026-07-04, v0.7.0 — [#21](https://github.com/sustia-llc/koalisi/issues/21); implementation = follow-up issues P7.1–P7.5)*
 
 **The design of record is `docs/phase7-persistence-design.md`** — it
-supersedes both the original `.claude/plans/` design (graph-snapshot half
+supersedes both the original pre-design sketch (graph-snapshot half
 dead since K1; `EventStore` idea survived) and the rmp-serde default (CBOR
 won on the RFC 8949 deterministic-encoding profile; user-confirmed).
 Summary: layered (portable CBOR append-only hash-chained log = source of
