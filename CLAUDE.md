@@ -283,7 +283,7 @@ forex domain since removed).
   Lineage reserved (#20). Writer seam is **at-most-once** from the tee
   (K3's cursor-replay has no analogue here yet). See gotcha 17.
 - **Phase 7 persistence DESIGN (#21) — v0.7.0**: the RE-PLAN deliverable is
-  `docs/phase7-persistence-design.md` (design only; NO EventStore code ships
+  `.claude/docs/phase7-persistence-design.md` (design only; NO EventStore code ships
   in 0.7.0). Layered: portable CBOR append-only hash-chained log = source of
   truth, K3 `durable` bus demoted to optional rebuildable projection.
   Envelope records (`Plain | Sealed` payloads, `parents: Vec<EventRef>` DAG)
@@ -344,7 +344,7 @@ forex domain since removed).
   `surrealdb-live-message` v0.2.0 two-tier bus; `CoalitionService` decision
   tap (`DecisionRecord`, feature-independent) → `subsystems::durable`
   forwarder → restart-durable decision log; container-backed restart test.
-  Bench: every hot-path metric improved (`docs/k3-hot-path-bench.md`,
+  Bench: every hot-path metric improved (`.claude/docs/k3-hot-path-bench.md`,
   alert RTT median 22.5 → 9.0 µs, throughput +56%). See §"Worth flagging"
   entries 13–14; gotchas 1/2/6/9/10 are obsolete.
 - **catgraph backend swap (K1, issue #4)**: `TemporalHypergraph`/`SharedGraph`
@@ -503,11 +503,15 @@ koalisi/
 │   ├── supervised_monitor.rs               spawn_supervised restart demo over SampleMonitor<SensorEvent> (v0.11.0; was supervised_swarm)
 │   ├── strategy_comparison.rs              divergence demo + K4 A/B battery (features decision,magnitude)
 │   └── durable_decisions.rs                durable decision log end-to-end (feature `durable`)
-├── docs/
-│   ├── ab-report-K4-{yamafaktory,catgraph}.md   K4 A/B + backend-parity reports
-│   ├── ab-report-K4-catgraph-evaluator.md  K6 post-optimization re-run + parity + latency profile (#33 evidence)
+├── .claude/docs/                           TRACKED internal design docs + references (docs/ reorg 2026-07-27; rest of .claude/ stays gitignored)
 │   ├── phase7-persistence-design.md        Phase 7 EventStore design (#21 deliverable; P7.1–P7.5 phasing)
 │   ├── k3-hot-path-bench.md                K3 kameo-vs-tokio bench evidence
+│   ├── SwarmAgentic-summary.md             Phase 5 paper digest (Zhang et al. 2025)
+│   └── 2506.15672v1.{md,pdf} + _images/    the SwarmAgentic paper itself (CC0 per its PDF metadata)
+├── docs/                                   PUBLIC A/B showcase trail — pre-registrations, reports, evidence (registered docs are immutable)
+│   ├── ab-report-K4-{yamafaktory,catgraph}.md   K4 A/B + backend-parity reports
+│   ├── ab-report-K4-catgraph-evaluator.md  K6 post-optimization re-run + parity + latency profile (#33 evidence)
+│   ├── baseline-aif-scalar-scope-b.md      frozen scalar Scope-B baseline (v4/v5 prereg anchor)
 │   ├── prereg-feedback-arm-k4.md           #46 pre-registration (feedback-arm K4 rematch; result appended)
 │   ├── ab-report-feedback-arm-k4.md        #46 run — FALSIFIED (feedback); Scope A null + Scope B reliability contest + E1 sweep
 │   ├── prereg-feedback-arm-k4-v2.md        #48 pre-registration (selective-base rematch, join=100, hw=0/fw=1; result appended)
@@ -871,7 +875,7 @@ timeout 120s cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-tar
 > requirements: append-only + crypto-deletion + bilateral federation +
 > portable format + EffectLog-compatible traces + FAIR provenance).
 > **Status: the Phase 7 RE-PLAN (#21) is DONE and CLOSED — design doc
-> shipped v0.7.0 (2026-07-04, `docs/phase7-persistence-design.md`), signed
+> shipped v0.7.0 (2026-07-04, `.claude/docs/phase7-persistence-design.md`), signed
 > off, implementation filed as #29–#33 (P7.1–P7.5). Phase 5 DE-GATED
 > 2026-07-15 (owner decision: NEST is slow — first session was
 > administrative — so Phase 5 no longer blocks on the Year-1 ownership
@@ -887,7 +891,7 @@ timeout 120s cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-tar
 ### Phase 5: SwarmAgentic-style optimisation  *(DE-GATED 2026-07-15 — LLM-free slices: [#41](https://github.com/sustia-llc/koalisi/issues/41) idea 3 **DONE v0.12.0**, [#42](https://github.com/sustia-llc/koalisi/issues/42) idea 4 **DONE v0.13.0**; LLM meta-layer remainder tracked: [#20](https://github.com/sustia-llc/koalisi/issues/20))*
 
 Lift the SwarmAgentic framework (Zhang et al., 2025 — see
-`docs/SwarmAgentic-summary.md` for full paper digest) into koalisi as a
+`.claude/docs/SwarmAgentic-summary.md` for full paper digest) into koalisi as a
 meta-layer that *evolves coalition designs* by language-driven PSO.
 Five concrete integration ideas, ported verbatim from the summary's
 "Concrete integration ideas worth flagging for Phase 6+" section:
@@ -1265,7 +1269,7 @@ restart layer (`core::supervision`), remote gateway on raw libp2p
 decision-event stream on `surrealdb-live-message` v0.2.0's two-tier
 restart-durable bus (tag cut for K3 — the #6 pin's "v0.1.0" was stale; the
 restart-durability acceptance needs the v0.2.0 cursor-replay bus). Acceptance
-evidence: `docs/k3-hot-path-bench.md` (every hot-path metric improved) +
+evidence: `.claude/docs/k3-hot-path-bench.md` (every hot-path metric improved) +
 `tests/durable_integration.rs` (container-backed restart replay). Gotchas 13–14.
 The durable decision log seeds Phase 7's message-event stream (retention sweep
 is a bounded window, NOT a full event store — Phase 7 still owns real
@@ -1273,7 +1277,7 @@ durability).
 
 ### Phase 7: Persistence  *(DESIGN SHIPPED 2026-07-04, v0.7.0 — [#21](https://github.com/sustia-llc/koalisi/issues/21); implementation = follow-up issues P7.1–P7.5)*
 
-**The design of record is `docs/phase7-persistence-design.md`** — it
+**The design of record is `.claude/docs/phase7-persistence-design.md`** — it
 supersedes both the original pre-design sketch (graph-snapshot half
 dead since K1; `EventStore` idea survived) and the rmp-serde default (CBOR
 won on the RFC 8949 deterministic-encoding profile; user-confirmed).

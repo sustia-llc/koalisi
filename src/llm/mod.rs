@@ -4,7 +4,7 @@
 //! Inference decision layer) both depend on an LLM provider —
 //! SwarmAgentic for flaw analysis and velocity rewrites, the decision
 //! layer for the LLM-augmented belief updates discussed in
-//! `docs/SwarmAgentic-summary.md` §"Relevance to koalisi" idea #2.
+//! `.claude/docs/SwarmAgentic-summary.md` §"Relevance to koalisi" idea #2.
 //!
 //! This module ships the trait surface so plan documents and future
 //! code can reference `LlmProvider::complete(prompt)` without

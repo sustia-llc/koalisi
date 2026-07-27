@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - README: new "The A/B process" section (the pre-registered
   K4 v1→v6 verdict trail); aif dep tag drift fixed (0.9.0 → 0.11.0);
   test counts re-measured.
+- `docs/` reorg: now purely the A/B showcase trail (pre-registrations,
+  reports, decision memo, evidence). Internal design docs + paper
+  references moved to the tracked `.claude/docs/` (phase7 persistence
+  design, K3 bench, SwarmAgentic digest + CC0 paper copy); all
+  references updated — registered prereg/report docs untouched.
 
 Planned work — issue-tracked (details in [`CLAUDE.md`](./CLAUDE.md)
 §"Next steps"):
@@ -377,7 +382,7 @@ is recoverable from the `v0.10.0` tag.
 
 ### Added (issue [#21] Phase 7 persistence design + issue [#18] magnitude trajectory)
 
-- **`docs/phase7-persistence-design.md`** ([#21], the Phase 7 RE-PLAN
+- **`.claude/docs/phase7-persistence-design.md`** ([#21], the Phase 7 RE-PLAN
   deliverable — design only, no `EventStore` code ships in 0.7.0): layered
   architecture with a portable CBOR append-only hash-chained log as source
   of truth (the K3 `durable` bus becomes an optional, rebuildable live
@@ -449,7 +454,7 @@ is recoverable from the `v0.10.0` tag.
   (two `String` allocs for `Pair`) and measurably bumped the K3 bench's alert
   RTT median to ~11.9 µs; the by-ref design restores exact pre-K5 allocation
   parity, re-measured at 8.90 µs / 118.7k ticks/s vs the committed K3 baseline
-  9.02 µs / 120.2k (`docs/k3-hot-path-bench.md`) — within run noise.
+  9.02 µs / 120.2k (`.claude/docs/k3-hot-path-bench.md`) — within run noise.
   Signature notes: `pump_source`/`spawn_source_pump` are hasher-generic
   (`H: BuildHasher`), the synthetic sources take `&[…Spec]`, and
   `ArbitrageCoordinator::ingest` takes `&TickUpdate`.
@@ -584,7 +589,7 @@ is recoverable from the `v0.10.0` tag.
     restart — **the pre-registered "durable messaging survives restart"
     acceptance**. `examples/durable_decisions.rs` shows the end-to-end story.
 - **Hot-path bench** (`examples/hot_path_bench.rs`, run on both runtimes —
-  see `docs/k3-hot-path-bench.md`): alert round-trip median 22.5 → 9.0 µs,
+  see `.claude/docs/k3-hot-path-bench.md`): alert round-trip median 22.5 → 9.0 µs,
   p99 56.1 → 26.0 µs; ask round-trip median 7.6 → 7.5 µs, p99 17.3 → 13.3 µs;
   throughput 77.2k → 120.2k ticks/sec. **Not regressed** (every metric
   improved) — the pre-registered acceptance.

@@ -39,7 +39,7 @@ from temporal hypergraph topology to coalition formation algorithms to
 | `algorithms` | `ValueCalculator` trait + 4 base calculators + a feedback-weighting `FeedbackCalculator` wrapper (history/failure signals from a shared `FeedbackStore`), `DCVCDistributor`, AIPA partition search, population coalition-structure search (`search`/`record_trajectory`, #42) |
 | `ingest` | Domain-neutral ingestion (K5): `Sample`/`DataSource` traits, generic `SampleMonitor<S>`, `Pacing` + `pump_source`, synthetic NEST-shaped multi-resolution and tauhokohoko-shaped sensor-event fixture sources (seeded, no credentials) |
 | `decision` | `CoalitionDecisionPolicy` trait + always-available `ThresholdPolicy`; optional Active Inference strategy (`EfeValueCalculator`, `AifDecisionPolicy`) behind the `decision` feature; optional categorical-magnitude strategy (`MagnitudeValueCalculator`, `MagnitudePolicy`) behind the `magnitude` feature |
-| `persistence` | Append-only event store (feature `persistence`): hash-chained streams, CBOR frame log (`FileEventStore`), crash-tail recovery, writer task; topology events tap in and replay back into a fresh `EventLog` all queries run on unchanged (P7.1 + P7.2) — see `docs/phase7-persistence-design.md` |
+| `persistence` | Append-only event store (feature `persistence`): hash-chained streams, CBOR frame log (`FileEventStore`), crash-tail recovery, writer task; topology events tap in and replay back into a fresh `EventLog` all queries run on unchanged (P7.1 + P7.2) — see `.claude/docs/phase7-persistence-design.md` |
 | `subsystems` | `CoalitionService` — the policy-gated coalition-membership seam (join/leave consult a `CoalitionDecisionPolicy` before mutating the hypergraph) — plus an optional durable decision log (`durable`) |
 
 ## Quick start
@@ -182,6 +182,19 @@ that domain was removed in v0.11.0 (market/trading work now lives in the
 sibling [`biome`](https://github.com/sustia-llc/biome) project). The
 demonstrated runtime is a synthetic, non-financial coalition-formation
 pipeline (`examples/synthetic_ingestion.rs`).
+
+## References
+
+- Zhang, Y., Lin, C., Tang, S., Chen, H., Zhou, S., Ma, Y., Tresp, V. (2025).
+  *SwarmAgentic: Towards Fully Automated Agentic System Generation via Swarm
+  Intelligence.* [arXiv:2506.15672](https://arxiv.org/abs/2506.15672) — the
+  design inspiration for the population-based coalition-structure search
+  (`algorithms::population`) and the feedback-weighted value calculator
+  (`FeedbackCalculator`). A working digest (and a CC0 copy of the paper)
+  lives in `.claude/docs/`.
+- The Active Inference side of the A/B battery builds on the
+  [aif](https://github.com/sustia-llc/tira) engine — see tira's README for
+  its own paper-reproduction lineage (Waade et al.).
 
 ## License
 

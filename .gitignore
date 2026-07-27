@@ -2,5 +2,6 @@
 config/production*
 README.local.md
 TODO.md
-.claude
+.claude/*
+!.claude/docs
 CLAUDE.local.md
