@@ -51,10 +51,27 @@ forex domain since removed).
   `surrealdb:surrealql-language` — for K3 (#6) surrealdb-live-message work,
   per the user CLAUDE.md routing rules.
 
-## Current state — 2026-07-27
+## Current state — 2026-07-30
 
 ### Done
 
+- **catgraph re-pin v0.2.0 → v0.5.0 — v0.17.0 (2026-07-30)**: the EQ1
+  ([#61](https://github.com/sustia-llc/koalisi/issues/61)) pin-first step —
+  battery-v2 registrations must be born on the final pins. Both catgraph
+  deps bumped in lockstep (K6). **Drift check CLEAN**: six suites at
+  baseline counts (103/152/125/174/123/146 incl. the replay parity gate),
+  default clippy `--all-targets` clean, and the frozen K4 battery
+  reproduced with all quality/churn/verdict content byte-identical —
+  latency-only diff lines, per the protocol's standing exclusion. Recorded
+  finding: **MSRV 1.88 → 1.93** (forced by `deep_causality_num 0.4.1`;
+  catgraph itself declares no rust-version); lockfile also dropped the
+  `primal`/`hamming` tree. **EQ1 itself is the next arc** (stack E-queue
+  rank 1; #61 carries the hypothesis + the five design decisions to lock
+  with the owner BEFORE prereg; kickoff
+  `.claude/plans/2026-07-30-eq1-battery-v2-kickoff.md`). Rider queued on
+  #61: the aif `0.11.0 → 0.12.0` adoption decision (breaking serde
+  feature-gating) resolves before the EQ1 prereg — tag NOT yet on the tira
+  remote as of 2026-07-30, confirm before acting.
 - **#57 e1-derived ValueCalculator — v0.16.0 (2026-07-27)**: the #54
   option-D slow-loop seam, shipped. New `src/decision/reliability_value.rs`
   (feature `decision`): `ReliabilityCoverage` — the `TaskCoverage`
@@ -460,7 +477,7 @@ forex domain since removed).
 
 ```
 koalisi/
-├── Cargo.toml                              git tag deps: catgraph-applied + catgraph-magnitude v0.2.0 in lockstep (one checkout — K6); aif, surrealdb-live-message (optional); no path deps since K3
+├── Cargo.toml                              git tag deps: catgraph-applied + catgraph-magnitude v0.5.0 in lockstep (one checkout — K6); aif, surrealdb-live-message (optional); no path deps since K3; MSRV 1.93
 ├── README.md                               user-facing
 ├── CLAUDE.md                               THIS FILE
 ├── config/{default,development,test}.toml  coalition threshold, history capacity; [sdb]+[docker] for the durable feature's upstream SETTINGS (cwd-resolved)
@@ -1201,7 +1218,8 @@ The categorical A/B mirror of the AIF arm, behind feature `magnitude`
 (independent of `decision` — either, both, or neither):
 - Dep: `catgraph-magnitude` by git tag (shipped at `v0.1.0`; bumped to
   `v0.1.1` for the catgraph#29 triangle-tolerance fix; **K6 (#14) bumped
-  again to `v0.2.0`** for the catgraph#31 `CoalitionEvaluator`). Originally
+  again to `v0.2.0`** for the catgraph#31 `CoalitionEvaluator`; re-pinned
+  `v0.5.0` 2026-07-30, EQ1 pin-first, drift-free — see Current state). Originally
   an SSH URL (catgraph was private then; cargo's libgit2 can't authenticate
   HTTPS) — re-pinned to HTTPS in the 2026-07-27 release sweep after catgraph
   went public. `coalition_value` = magnitude at pinned `t = 1`;

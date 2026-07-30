@@ -21,6 +21,30 @@ Planned work — issue-tracked (details in [`CLAUDE.md`](./CLAUDE.md)
 - **[#25]** metrics example, reframed onto the `CoalitionService` decision
   path / topology events.
 
+## [0.17.0] — 2026-07-30
+
+The EQ1 ([#61]) pin-first release: catgraph re-pinned two majors ahead with
+a clean drift check, clearing the instrument's substrate before the
+battery-v2 registrations.
+
+### Changed
+- **catgraph deps re-pinned `v0.2.0` → `v0.5.0`** (`catgraph-applied` +
+  `catgraph-magnitude`, lockstep per K6). Drift check CLEAN: all six
+  feature suites at baseline counts (103/152/125/174/123/146, incl. the
+  #18/#30 replay parity gate) and the frozen K4 battery
+  (`strategy_comparison` Parts 1–4h, `--release`) reproduced with every
+  quality median, churn column, seed table, and verdict byte-identical to
+  the `v0.2.0` baseline — the only diff lines are latency measurements,
+  the column the K4 protocol has always excluded from determinism.
+  Expected per the stack file: the in-hop catgraph revisions (column
+  pass / eq_mod / worded surface / display) never touch the magnitude
+  evaluation path koalisi consumes.
+- **MSRV `1.88.0` → `1.93.0`** — forced by catgraph `v0.5.0`'s
+  `deep_causality_num 0.4.1` floor (recorded finding; not a koalisi
+  code change).
+- Lockfile: `deep_causality_num 0.3.3 → 0.4.1`; the `primal`/`hamming`
+  transitive tree dropped upstream.
+
 ## [0.16.0] — 2026-07-27
 
 The public-release version: the repo went PUBLIC 2026-07-27, and per-release
@@ -267,6 +291,7 @@ rematch) that landed on `main` after 0.11.0.
 [#42]: https://github.com/sustia-llc/koalisi/issues/42
 [#43]: https://github.com/sustia-llc/koalisi/issues/43
 [#44]: https://github.com/sustia-llc/koalisi/issues/44
+[#61]: https://github.com/sustia-llc/koalisi/issues/61
 
 ## [0.11.0] — 2026-07-14
 
