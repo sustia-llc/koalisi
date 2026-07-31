@@ -21,6 +21,53 @@ Planned work — issue-tracked (details in [`CLAUDE.md`](./CLAUDE.md)
 - **[#25]** metrics example, reframed onto the `CoalitionService` decision
   path / topology events.
 
+## [0.18.0] — 2026-07-31
+
+The EQ1 ([#61]) battery-v2 release: the registered de-saturated-regime run.
+Both confirmatory levers landed negative — `FALSIFIED (de-saturation)` and
+`RUN-INVALID (sanity leg)` — with the mechanism and the criterion flaws
+measured and documented; the v2-regime context rows invert the v1 quality
+ordering (mag < scalar < e1-degraded). Falsification discipline unchanged:
+nothing was tuned, everything is reported.
+
+### Added
+- **`PersistentAifConfig::query_gamma: Option<f64>`** (feature `decision`):
+  the EQ1 de-saturation lever — fixed query-POMDP softmax temperature γ on
+  the MeanField path (`query_dynamics: false`). Identity default `None` =
+  engine γ 16, the registered arm-E1/K4-v5 value; `Some(16.0)` is asserted
+  bit-identical. Ignored under `query_dynamics: true` (`PrecisionDynamics`
+  owns γ there). Battery-v2 arm-config labels: `arm-E1g1` / `arm-E1g4` /
+  `arm-E1g16`; arm-E1 itself stays `None`. +2 unit tests (identity,
+  non-degeneracy).
+- **`examples/strategy_comparison.rs` Parts 5a + 5b** (additive; every
+  pre-existing printed line byte-identical, gate X-C): the registered
+  battery-v2 parts — 5a: γ × regime × margin factorial on seeds 120..150
+  with the degraded/L2 signal, score-quantile mechanism observable, H-S
+  evaluation; 5b: `TaskCoverageV2` reliability-routing test with planted
+  weak bit, closed-form `REAL`, H-R evaluation + structural notes.
+  `run_seed_b` became a thin `Regime::V1` wrapper over a new
+  `run_seed_b_regime` (the regime parameter selects the v1/v2 instance
+  draw); the 4-arg outcome hook is UNCHANGED — it has carried the member
+  list since Part 4g (gotcha 23). Call-site refactor output-neutral,
+  proven by gate X-C.
+- **`docs/prereg-K4-battery-v2.md`** (registered pre-implementation,
+  immutable) and **`docs/ab-report-K4-battery-v2.md`** (the run's immutable
+  report: lever 2 `FALSIFIED (de-saturation)` — γ frees only the leave
+  stream, the join rail at p = 1.0 defeats any margin; lever 1
+  `RUN-INVALID (sanity leg)` — corrected registration filed as [#63];
+  lever 3 exploratory: the oracle–degraded gap widens ~2% → ~16% in the v2
+  regime). Of Part 5c's five registered exploratory items, the
+  oracle-vs-degraded pricing ran (as the Part 5a oracle twins, the lever-3
+  rows above); the other four (12-bit slice, leave-side hysteresis,
+  expected-outcome model, learned-posterior twins) are deferred to a
+  follow-up session and will land as an appended addendum.
+
+### Changed
+- Suites: decision 152 → **154**, decision,magnitude 174 → **176** (the two
+  `query_gamma` tests). All other feature suites unchanged.
+- `Cargo.lock`: koalisi's own entry synced to the crate version (was stale
+  at 0.16.0 since the v0.17.0 release commit).
+
 ## [0.17.0] — 2026-07-30
 
 The EQ1 ([#61]) pin-first release: catgraph re-pinned two majors ahead with
@@ -292,6 +339,7 @@ rematch) that landed on `main` after 0.11.0.
 [#43]: https://github.com/sustia-llc/koalisi/issues/43
 [#44]: https://github.com/sustia-llc/koalisi/issues/44
 [#61]: https://github.com/sustia-llc/koalisi/issues/61
+[#63]: https://github.com/sustia-llc/koalisi/issues/63
 
 ## [0.11.0] — 2026-07-14
 

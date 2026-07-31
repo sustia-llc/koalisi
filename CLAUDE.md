@@ -55,6 +55,33 @@ forex domain since removed).
 
 ### Done
 
+- **EQ1 battery v2 RUN — v0.18.0 (2026-07-31, #61)**: the registered
+  de-saturated-regime run; BOTH confirmatory levers negative, everything
+  measured and reported (`docs/prereg-K4-battery-v2.md` d9881e1 pre-impl +
+  `docs/ab-report-K4-battery-v2.md`). Design-lock (owner, 5 decisions +
+  sub-params) posted to #61 BEFORE prereg; prereg BEFORE implementation.
+  **Lever 2 `FALSIFIED (de-saturation)`**: no (γ ∈ {1,4}, v2-draw, δ>0)
+  cell nears churn ≤ 0.5× (best 173 vs 175 base; bar 87.5) — mechanism:
+  γ de-saturates ONLY the leave stream (g1/v2 leave p25 0.1137); the JOIN
+  stream stays at p = 1.0 in every cell and the registered margin acts on
+  joins (see gotcha 25). **Lever 1 `RUN-INVALID (sanity leg)`** (25/30 <
+  27): pool draw doesn't guarantee coverage + the skip predicate is
+  unsatisfiable under `search()` partition semantics — corrected
+  registration = **#63**; gotcha 24 untouched either way. **Lever 3
+  (exploratory)**: oracle–degraded gap ~2% (v1-draw) → ~16% (v2-draw).
+  **Context rows (non-gating): the v2 regime INVERTS the v1 ordering —
+  mag 0.1286 < scalar 0.1332 < e1-degraded 0.1621** (mag churn ~10; #54
+  B+D untouched per non-goals). New lever
+  `PersistentAifConfig::query_gamma: Option<f64>` (identity `None` = γ16;
+  MeanField path only; labels arm-E1g1/g4/g16, arm-E1 frozen). Parts
+  5a/5b additive (X-C byte-identity PASS; `run_seed_b` → thin V1 wrapper
+  over `run_seed_b_regime` — regime param only, hook unchanged since 4g). **Part 5c (registered exploratory: 12-bit slice,
+  leave-side hysteresis h, expected-outcome model, learned-posterior
+  twins) DEFERRED to a follow-up session — lands as an appended addendum,
+  never edits to registered sections.** Seeds: 120..150 consumed;
+  150..180 reserved-unconsumed; 90..120 still soft-reserved. Suites:
+  **154** decision / **176** decision,magnitude (+2 query_gamma tests);
+  others unchanged.
 - **catgraph re-pin v0.2.0 → v0.5.0 — v0.17.0 (2026-07-30)**: the EQ1
   ([#61](https://github.com/sustia-llc/koalisi/issues/61)) pin-first step —
   battery-v2 registrations must be born on the final pins. Both catgraph
@@ -465,9 +492,9 @@ forex domain since removed).
   | Suite | Tests | Command |
   |---|---|---|
   | Default | 103 | `cargo test` |
-  | `--features decision` | 152 | `cargo test --features decision` |
+  | `--features decision` | 154 | `cargo test --features decision` |
   | `--features magnitude` | 125 | `cargo test --features magnitude` |
-  | `--features decision,magnitude` | 174 | `cargo test --features decision,magnitude` |
+  | `--features decision,magnitude` | 176 | `cargo test --features decision,magnitude` |
   | `--features persistence` | 123 | `cargo test --features persistence` |
   | `--features persistence,magnitude` | 146 (incl. the #18/#30 replay parity gate) | `cargo test --features persistence,magnitude` |
   | `--features durable` | +1 container-backed restart test; needs Docker | `cargo test --features durable` |
@@ -559,7 +586,9 @@ koalisi/
 │   ├── per-bit-outcome-plumbing-design.md  #54 Step 2 design note — outcome-signal fidelity ladder; degraded ≈ oracle result (gotcha 23)
 │   ├── k4-arm-choice-memo.md               #54 Step 4 decision memo — DECIDED B+D 2026-07-18; postscript: #56 FALSIFIED ⇒ B's park final
 │   ├── prereg-K4-v6-never-evict.md         #56 pre-registration (never-evict, dual-signal, 60..90; result appended)
-│   └── ab-report-K4-v6-never-evict.md      #56 run — FALSIFIED (never-evict); cap-series monotonicity = churn is the mechanism
+│   ├── ab-report-K4-v6-never-evict.md      #56 run — FALSIFIED (never-evict); cap-series monotonicity = churn is the mechanism
+│   ├── prereg-K4-battery-v2.md             #61 EQ1 pre-registration (de-saturated regime; Part 5c scope still pending)
+│   └── ab-report-K4-battery-v2.md          #61 run — lever 2 FALSIFIED (de-saturation), lever 1 RUN-INVALID (sanity leg → #63); v2-regime context inversion
 └── tests/
     ├── topology_test.rs                    12 tests
     ├── algorithms_test.rs                  18 tests (incl. 3 feedback-loop/seeding tests, #41)
@@ -895,6 +924,33 @@ These cost time during the build; future-me should not relearn them.
       true/false (dynamics shape only the query POMDP) — the example pins
       `false` so its "E1 (K4-v5)" label is honest; `default()` is the
       FALSIFIED v4 config, don't relabel it v5.
+
+25. **Battery-v2 contracts (#61, v0.18.0) — rely on these.**
+    - **The e1 join rail is margin-proof.** Under MeanField queries the
+      join-score quantiles sit at exactly +0.5 (p = 1.0, certainty) in EVERY
+      measured (γ, regime) cell — γ ∈ {1, 4, 16} × both draws. γ de-saturates
+      only the LEAVE stream. Any future churn lever in score space must act
+      on leaves (hysteresis h) or membership state (#56 lineage); join
+      margins are a dead lever twice over (Part 4f + Part 5a).
+    - **Never write a "skips a bit" predicate over `search()` output.**
+      `search()` returns a partition of the ENTIRE pool, so the union over
+      blocks == the pool union: "no block covers b" ⟺ "no pool agent has b",
+      independent of the calculator. Likewise the per-member cost sums to a
+      constant across partitions of a fixed pool — member-savings arguments
+      cannot express at partition level. Routing questions must be asked at
+      BLOCK level (which bits do value-bearing blocks cover) — see #63.
+    - **`TaskCoverageV2`-style reliability weighting cannot flip full→skip
+      at equal size**: full pays 100/m per unit r per bit vs partial's 80/m —
+      full wins per covered bit at ANY reliability. Reliability re-ranks only
+      through which bits partial blocks cover. A routing-capable model needs
+      a reliability-INsensitive full bonus or a flip via member savings
+      (near-zero r), per the #63 requirements.
+    - **Random pools don't cover big requirements**: n ∈ 8..=16 × caps 1..=4
+      bits misses a 7–8-bit requirement ~1/6 of the time — any battery whose
+      legs assume pool coverage must GUARANTEE it in the draw.
+    - `query_gamma` is inert under `query_dynamics: true` (PrecisionDynamics
+      owns γ); `Some(16.0)` ≡ `None` is asserted — don't "simplify" the
+      Option away.
 
 ## Reproducers
 
