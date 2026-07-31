@@ -87,7 +87,8 @@ use std::time::{Duration, Instant};
 
 use catgraph_magnitude::CatgraphError;
 use koalisi::algorithms::{
-    AgentCapabilities, FeedbackCalculator, FeedbackStore, SynergisticCalculator,
+    AgentCapabilities, CoalitionStructure, FeedbackCalculator, FeedbackStore, PopulationConfig,
+    SynergisticCalculator, ValueCalculator, search,
 };
 use koalisi::decision::{
     AifDecisionPolicy, AifMmDecisionPolicy, CoalitionDecisionPolicy, CouplingModel, Decision,
@@ -213,6 +214,14 @@ fn main() {
     println!("{}", "=".repeat(72));
     println!();
     part4h_v6_never_evict();
+    println!();
+    println!("{}", "=".repeat(72));
+    println!();
+    part5a_battery_v2();
+    println!();
+    println!("{}", "=".repeat(72));
+    println!();
+    part5b_reliability_routing();
 }
 
 // ===========================================================================
@@ -387,6 +396,52 @@ fn draw_prefix(rng: &mut SplitMix64) -> (Vec<Worker>, Vec<Task>) {
     (agents, tasks)
 }
 
+/// Which task-draw regime an instance is generated under (koalisi #61, EQ1).
+///
+/// The regimes differ ONLY in the per-task `|required|` draw; the pool draw
+/// (`n ∈ 4..=16`, caps `k ∈ 1..=4`) and the arrival-order shuffle are identical.
+/// Everything registered before battery v2 runs under [`Regime::V1`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Regime {
+    /// The v1 draw: `|required| ∈ 1..=5` (Parts 2–4h, frozen).
+    V1,
+    /// The battery-v2 draw: `|required| ∈ 2..=8` — the de-saturated regime the
+    /// `docs/prereg-K4-battery-v2.md` registration fixes.
+    V2,
+}
+
+/// The battery-v2 instance prefix (koalisi #61, EQ1): identical to
+/// [`draw_prefix`] in shape and draw ORDER, but each task requires `r ∈ [2, 8]`
+/// distinct bits instead of `r ∈ [1, 5]`. Deliberately a separate function
+/// rather than a parameterization of [`draw_prefix`] — the v1 draw is frozen and
+/// must stay literally untouched for the byte-identity gate.
+///
+/// The streams diverge from the first task draw onward (`draw_distinct_bits`
+/// consumes a variable number of `next_u64`s), so v2 instances are genuinely
+/// new instances, not re-labelled v1 ones.
+fn draw_prefix_v2(rng: &mut SplitMix64) -> (Vec<Worker>, Vec<Task>) {
+    let n = (4 + rng.next_u64() % 13) as usize;
+    let agents: Vec<Worker> = (0..n)
+        .map(|id| {
+            let k = 1 + rng.next_u64() % 4;
+            let caps = draw_distinct_bits(rng, k);
+            let trust = (20 + rng.next_u64() % 80) as u32;
+            Worker { id, caps, trust }
+        })
+        .collect();
+
+    let tasks: Vec<Task> = (0..TASKS)
+        .map(|_| {
+            let r = 2 + rng.next_u64() % 7;
+            let required = draw_distinct_bits(rng, r);
+            let order = fisher_yates(rng, n);
+            Task { required, order }
+        })
+        .collect();
+
+    (agents, tasks)
+}
+
 /// Generate one seeded instance: the agent pool and the task stream. Called by
 /// BOTH the arm runners and the oracle, guaranteeing byte-identical instances.
 fn generate_instance(seed: u64) -> (Vec<Worker>, Vec<Task>) {
@@ -413,8 +468,22 @@ fn next_unit(rng: &mut SplitMix64) -> f64 {
 /// `perf` is pre-drawn once per instance and identical for every arm — the
 /// prereg's core invariant that arms only differ in their value model.
 fn generate_instance_b(seed: u64) -> (Vec<Worker>, Vec<Task>, Vec<f64>, Vec<Vec<bool>>) {
+    generate_instance_b_regime(seed, Regime::V1)
+}
+
+/// [`generate_instance_b`] under a chosen [`Regime`] (koalisi #61, EQ1). The
+/// post-prefix draw order (`ρ` per agent, then the `perf[t][i]` matrix) is the
+/// same in both regimes; only the prefix draw differs, so `Regime::V1` is
+/// bit-identical to the frozen generator by construction.
+fn generate_instance_b_regime(
+    seed: u64,
+    regime: Regime,
+) -> (Vec<Worker>, Vec<Task>, Vec<f64>, Vec<Vec<bool>>) {
     let mut rng = SplitMix64::new(seed);
-    let (agents, tasks) = draw_prefix(&mut rng);
+    let (agents, tasks) = match regime {
+        Regime::V1 => draw_prefix(&mut rng),
+        Regime::V2 => draw_prefix_v2(&mut rng),
+    };
     let n = agents.len();
 
     let rho: Vec<f64> = (0..n)
@@ -1757,9 +1826,23 @@ fn run_seed_b(
     policy: &dyn CoalitionDecisionPolicy,
     seed: u64,
     lat: &mut Vec<f64>,
+    on_task_outcome: impl FnMut(u32, &[bool; 8], bool, &[usize]),
+) -> SeedResultB {
+    run_seed_b_regime(policy, seed, Regime::V1, lat, on_task_outcome)
+}
+
+/// [`run_seed_b`] under a chosen [`Regime`] (koalisi #61, EQ1) — the instance
+/// draw is the ONLY difference; the metric path, the decision stream, and the
+/// outcome hook are shared verbatim, so `Regime::V1` reproduces the frozen
+/// batteries exactly.
+fn run_seed_b_regime(
+    policy: &dyn CoalitionDecisionPolicy,
+    seed: u64,
+    regime: Regime,
+    lat: &mut Vec<f64>,
     mut on_task_outcome: impl FnMut(u32, &[bool; 8], bool, &[usize]),
 ) -> SeedResultB {
-    let (agents, tasks, _rho, perf) = generate_instance_b(seed);
+    let (agents, tasks, _rho, perf) = generate_instance_b_regime(seed, regime);
 
     let mut success_count = 0usize;
     let mut cov_eff_sum = 0.0f64;
@@ -1844,16 +1927,68 @@ fn persistent_battery_range(
     start: u64,
     end: u64,
 ) -> (Vec<SeedResultB>, Vec<f64>) {
+    persistent_battery_mode(config, RunMode::V1_ORACLE, start, end)
+}
+
+/// How a Scope-B battery draws its instances and feeds outcomes back to a
+/// learning arm (koalisi #61, EQ1). Factors the two axes the battery-v2
+/// factorial varies over the frozen runners' fixed choices.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RunMode {
+    /// Instance draw (see [`Regime`]).
+    regime: Regime,
+    /// `true` = the degraded/L2 signal (whole-task `success` smeared across the
+    /// required bits — the runtime-feasible #55 contract); `false` = the per-bit
+    /// oracle signal.
+    degraded: bool,
+}
+
+impl RunMode {
+    /// The frozen Parts 2–4h mode: v1 draw, per-bit oracle signal.
+    const V1_ORACLE: Self = Self {
+        regime: Regime::V1,
+        degraded: false,
+    };
+    /// The frozen Part 4e/4f/4h degraded mode: v1 draw, whole-task signal.
+    const V1_DEGRADED: Self = Self {
+        regime: Regime::V1,
+        degraded: true,
+    };
+}
+
+/// The generalized persistent battery: [`persistent_battery_range`] (oracle) and
+/// [`persistent_battery_range_degraded`] are its `RunMode::V1_*` instantiations,
+/// so both keep their frozen behaviour by construction. Fresh arm per seed,
+/// warm-up on `start` discarded.
+fn persistent_battery_mode(
+    config: PersistentAifConfig,
+    mode: RunMode,
+    start: u64,
+    end: u64,
+) -> (Vec<SeedResultB>, Vec<f64>) {
+    let degraded = mode.degraded;
     {
         let arm = PersistentAifArm::new(start, config).expect("persistent arm construction");
         let mut warm = Vec::new();
-        let _ = run_seed_b(&arm, start, &mut warm, |req, succ, _, _| arm.observe_outcome(req, succ));
+        let _ = run_seed_b_regime(&arm, start, mode.regime, &mut warm, |req, bits, success, _| {
+            if degraded {
+                arm.observe_outcome(req, &[success; 8]);
+            } else {
+                arm.observe_outcome(req, bits);
+            }
+        });
     }
     let mut lat = Vec::new();
     let results = (start..end)
         .map(|s| {
             let arm = PersistentAifArm::new(s, config).expect("persistent arm construction");
-            run_seed_b(&arm, s, &mut lat, |req, succ, _, _| arm.observe_outcome(req, succ))
+            run_seed_b_regime(&arm, s, mode.regime, &mut lat, |req, bits, success, _| {
+                if degraded {
+                    arm.observe_outcome(req, &[success; 8]);
+                } else {
+                    arm.observe_outcome(req, bits);
+                }
+            })
         })
         .collect();
     (results, lat)
@@ -1878,23 +2013,7 @@ fn persistent_battery_range_degraded(
     start: u64,
     end: u64,
 ) -> (Vec<SeedResultB>, Vec<f64>) {
-    {
-        let arm = PersistentAifArm::new(start, config).expect("persistent arm construction");
-        let mut warm = Vec::new();
-        let _ = run_seed_b(&arm, start, &mut warm, |req, _bits, success, _| {
-            arm.observe_outcome(req, &[success; 8]);
-        });
-    }
-    let mut lat = Vec::new();
-    let results = (start..end)
-        .map(|s| {
-            let arm = PersistentAifArm::new(s, config).expect("persistent arm construction");
-            run_seed_b(&arm, s, &mut lat, |req, _bits, success, _| {
-                arm.observe_outcome(req, &[success; 8]);
-            })
-        })
-        .collect();
-    (results, lat)
+    persistent_battery_mode(config, RunMode::V1_DEGRADED, start, end)
 }
 
 /// Run a stateless arm (scalar / magnitude) over the Scope-B seed range
@@ -1905,15 +2024,26 @@ fn stateless_battery_range(
     start: u64,
     end: u64,
 ) -> (Vec<SeedResultB>, Vec<f64>) {
+    stateless_battery_mode(make, Regime::V1, start, end)
+}
+
+/// [`stateless_battery_range`] under a chosen [`Regime`] (koalisi #61, EQ1) —
+/// the battery-v2 context rows for `mag` and `scalar`.
+fn stateless_battery_mode(
+    make: impl Fn() -> Box<dyn CoalitionDecisionPolicy>,
+    regime: Regime,
+    start: u64,
+    end: u64,
+) -> (Vec<SeedResultB>, Vec<f64>) {
     {
         let p = make();
         let mut warm = Vec::new();
-        let _ = run_seed_b(&*p, start, &mut warm, |_, _, _, _| {});
+        let _ = run_seed_b_regime(&*p, start, regime, &mut warm, |_, _, _, _| {});
     }
     let mut lat = Vec::new();
     let p = make();
     let results = (start..end)
-        .map(|s| run_seed_b(&*p, s, &mut lat, |_, _, _, _| {}))
+        .map(|s| run_seed_b_regime(&*p, s, regime, &mut lat, |_, _, _, _| {}))
         .collect();
     (results, lat)
 }
@@ -2433,6 +2563,26 @@ fn margin_battery_range(
     end: u64,
     tap: Option<&std::sync::Mutex<ScoreTap>>,
 ) -> (Vec<SeedResultB>, Vec<f64>) {
+    let mode = RunMode {
+        regime: Regime::V1,
+        degraded,
+    };
+    margin_battery_mode(config, jd, ld, mode, start, end, tap)
+}
+
+/// [`margin_battery_range`] under a chosen [`RunMode`] (koalisi #61, EQ1) — the
+/// Part 5a factorial runs every cell through this one path, δ = 0 included, so
+/// the wrapper is common to the cell and its own baseline.
+fn margin_battery_mode(
+    config: PersistentAifConfig,
+    jd: f64,
+    ld: f64,
+    mode: RunMode,
+    start: u64,
+    end: u64,
+    tap: Option<&std::sync::Mutex<ScoreTap>>,
+) -> (Vec<SeedResultB>, Vec<f64>) {
+    let degraded = mode.degraded;
     {
         let arm = PersistentAifArm::new(start, config).expect("persistent arm construction");
         let wrapper = MarginE1 {
@@ -2442,15 +2592,19 @@ fn margin_battery_range(
             tap: None,
         };
         let mut warm = Vec::new();
-        if degraded {
-            let _ = run_seed_b(&wrapper, start, &mut warm, |req, _bits, success, _| {
-                arm.observe_outcome(req, &[success; 8]);
-            });
-        } else {
-            let _ = run_seed_b(&wrapper, start, &mut warm, |req, bits, _, _| {
-                arm.observe_outcome(req, bits);
-            });
-        }
+        let _ = run_seed_b_regime(
+            &wrapper,
+            start,
+            mode.regime,
+            &mut warm,
+            |req, bits, success, _| {
+                if degraded {
+                    arm.observe_outcome(req, &[success; 8]);
+                } else {
+                    arm.observe_outcome(req, bits);
+                }
+            },
+        );
     }
     let mut lat = Vec::new();
     let results = (start..end)
@@ -2462,15 +2616,13 @@ fn margin_battery_range(
                 leave_delta: ld,
                 tap,
             };
-            if degraded {
-                run_seed_b(&wrapper, s, &mut lat, |req, _bits, success, _| {
+            run_seed_b_regime(&wrapper, s, mode.regime, &mut lat, |req, bits, success, _| {
+                if degraded {
                     arm.observe_outcome(req, &[success; 8]);
-                })
-            } else {
-                run_seed_b(&wrapper, s, &mut lat, |req, bits, _, _| {
+                } else {
                     arm.observe_outcome(req, bits);
-                })
-            }
+                }
+            })
         })
         .collect();
     (results, lat)
@@ -3084,6 +3236,829 @@ fn part4h_v6_never_evict() {
     println!();
 }
 
+// ===========================================================================
+// Part 5a — battery v2 core: γ × regime × margin factorial (koalisi #61, EQ1).
+// THE REGISTERED RUN for lever 2 (de-saturation). Governed by
+// `docs/prereg-K4-battery-v2.md` (committed + posted to #61 before
+// implementation); seeds 120..150, degraded/L2 signal confirmatory; every
+// threshold is THIS run's own 120..150 medians. Additive; every existing
+// printed line byte-identical.
+//
+// The lever is `PersistentAifConfig::query_gamma` — the fixed softmax
+// temperature over the query's policy EFE, live only on the MeanField path the
+// registered `aif-e1` arm runs on. γ = 16 restates the engine default, so
+// arm-E1g16 IS arm-E1 (asserted); γ ∈ {1, 4} flatten the policy posterior.
+// ===========================================================================
+
+/// Part 5a confirmatory seed range (150..180 stays held out for the
+/// pre-committed replication).
+const V2_SEED_START: u64 = 120;
+const V2_SEED_END: u64 = 150;
+/// Registered query-γ grid (`query_gamma`); 16 = the engine default = arm-E1.
+const V2_GAMMA_GRID: [f64; 3] = [1.0, 4.0, 16.0];
+/// Registered join-margin grid (join requires `p > 0.5 + δ`). Leave hysteresis
+/// is h = 0 in every registered cell — h is exploratory-only in battery v2.
+const V2_DELTA_GRID: [f64; 3] = [0.0, 0.15, 0.30];
+/// H-S churn leg: a passing cell's churn median ≤ this × its δ = 0 baseline.
+const HS_CHURN_FACTOR: f64 = 0.5;
+/// H-S quality leg: a passing cell's PRIMARY_B median ≥ this × its baseline.
+const HS_PRIMARY_FACTOR: f64 = 0.9;
+/// H-S consistency leg: paired per-seed churn reductions needed (of 30).
+const HS_PAIRED_MIN: usize = 18;
+/// A score quantile at least this far from zero counts as saturated at ±0.5 —
+/// the recorded (non-gating) mechanism observable behind the Part 4f NULL.
+const SATURATION_BAND: f64 = 0.4999;
+
+/// One factorial cell of the Part 5a grid: an arm config (γ), an instance
+/// regime, and a join margin, scored over the confirmatory seed range.
+struct V2Cell {
+    gamma: f64,
+    regime: Regime,
+    delta: f64,
+    primaries: Vec<f64>,
+    churns: Vec<f64>,
+}
+
+impl V2Cell {
+    fn primary_med(&self) -> f64 {
+        median(self.primaries.clone())
+    }
+    fn churn_med(&self) -> f64 {
+        median(self.churns.clone())
+    }
+}
+
+/// The Part 5a arm config: the frozen `aif-e1` (K4-v5) shape with the EQ1
+/// `query_gamma` lever set. The registered `aif-e1` config itself is untouched —
+/// it keeps `query_gamma: None`.
+fn e1_gamma_config(gamma: f64) -> PersistentAifConfig {
+    PersistentAifConfig {
+        query_gamma: Some(gamma),
+        ..e1_config()
+    }
+}
+
+/// Registered arm-config label for a γ cell (`arm-E1g1` / `arm-E1g4` /
+/// `arm-E1g16`).
+fn arm_label(gamma: f64) -> String {
+    format!("arm-E1g{gamma:.0}")
+}
+
+fn regime_label(regime: Regime) -> &'static str {
+    match regime {
+        Regime::V1 => "v1-draw",
+        Regime::V2 => "v2-draw",
+    }
+}
+
+/// Seeds on which `cell` churned strictly less than `base` (paired, same seed) —
+/// the H-S consistency leg.
+fn paired_churn_reduced(cell: &[f64], base: &[f64]) -> usize {
+    (0..cell.len()).filter(|&i| cell[i] < base[i]).count()
+}
+
+/// Assert that two batteries are bit-identical on PRIMARY_B and churn per seed
+/// (the Part 5a X-B identity gates).
+fn assert_battery_identical(a: &[SeedResultB], b: &[SeedResultB], what: &str) {
+    assert_eq!(a.len(), b.len(), "{what}");
+    for i in 0..a.len() {
+        assert!(
+            a[i].primary.to_bits() == b[i].primary.to_bits() && a[i].churn == b[i].churn,
+            "{what} (seed index {i})"
+        );
+    }
+}
+
+#[allow(clippy::too_many_lines)]
+fn part5a_battery_v2() {
+    println!("# koalisi #61 — Part 5a: battery v2 core, γ × regime × margin factorial (REGISTERED)");
+    println!();
+    println!(
+        "_governed by `docs/prereg-K4-battery-v2.md` (committed + posted to #61 pre-implementation); lever 2 = de-saturation, CONFIRMATORY. Factorial γ ∈ {{1, 4, 16}} × regime ∈ {{v1-draw, v2-draw}} × join margin δ ∈ {{0, 0.15, 0.30}} (hysteresis h = 0 everywhere) over the registered `aif-e1` arm, Scope B · seeds **120..150** (out-of-sample; 150..180 held out for replication) · **degraded/L2 signal** confirmatory. The v2 draw is `|required| ∈ 2..=8` (v1: 1..=5) over the same 8-bit universe and the same pool draw. All bars are THIS run's own 120..150 medians._"
+    );
+    println!();
+
+    // --- X-B(a) identity gate (run-invalidating) ---------------------------
+    // `query_gamma: Some(16.0)` restates the engine default, so arm-E1g16 must
+    // reproduce the frozen arm-E1 on the X-A cell bit-for-bit.
+    let (g16, _) = persistent_battery_range(e1_gamma_config(16.0), 30, 60);
+    let (g_none, _) = persistent_battery_range(e1_config(), 30, 60);
+    assert_battery_identical(
+        &g16,
+        &g_none,
+        "X-B(a) gate: query_gamma Some(16.0) must reproduce the engine default None",
+    );
+    println!(
+        "**X-B(a) gate:** `query_gamma: Some(16.0)` reproduces the identity default `None` on the X-A cell (`aif-e1`, oracle, seeds 30..60) — PRIMARY_B + churn bit-identical on all {} seeds (asserted in-code).",
+        g16.len()
+    );
+    println!();
+
+    // --- Factorial cells (degraded signal, confirmatory) -------------------
+    // δ = 0 cells additionally tap the raw decision scores (the saturation
+    // observable) and are checked against the unwrapped arm — gate X-B(b).
+    let mut cells: Vec<V2Cell> = Vec::new();
+    let mut score_rows: Vec<(Regime, f64, Vec<f64>, Vec<f64>)> = Vec::new();
+    for &regime in &[Regime::V1, Regime::V2] {
+        for &gamma in &V2_GAMMA_GRID {
+            let cfg = e1_gamma_config(gamma);
+            let mode = RunMode {
+                regime,
+                degraded: true,
+            };
+            for (di, &delta) in V2_DELTA_GRID.iter().enumerate() {
+                let tap = (di == 0).then(|| std::sync::Mutex::new(ScoreTap::default()));
+                let (rs, _) = margin_battery_mode(
+                    cfg,
+                    delta,
+                    0.0,
+                    mode,
+                    V2_SEED_START,
+                    V2_SEED_END,
+                    tap.as_ref(),
+                );
+                if let Some(t) = tap {
+                    let (bare, _) =
+                        persistent_battery_mode(cfg, mode, V2_SEED_START, V2_SEED_END);
+                    assert_battery_identical(
+                        &rs,
+                        &bare,
+                        "X-B(b) gate: the delta = 0 margin wrapper must reproduce the unwrapped arm",
+                    );
+                    let g = t.into_inner().expect("score tap poisoned");
+                    score_rows.push((regime, gamma, g.join_scores, g.leave_scores));
+                }
+                cells.push(V2Cell {
+                    gamma,
+                    regime,
+                    delta,
+                    primaries: primaries_b(&rs),
+                    churns: churns_b(&rs),
+                });
+            }
+        }
+    }
+    println!(
+        "**X-B(b) gate:** the `MarginE1(δ = 0, h = 0)` wrapper reproduces the unwrapped arm per seed in all {} (γ, regime) cells (PRIMARY_B + churn bit-identical; asserted in-code).",
+        score_rows.len()
+    );
+    println!();
+
+    let cell_at = |gamma: f64, regime: Regime, delta: f64| -> &V2Cell {
+        cells
+            .iter()
+            .find(|c| {
+                c.gamma.to_bits() == gamma.to_bits()
+                    && c.regime == regime
+                    && c.delta.to_bits() == delta.to_bits()
+            })
+            .expect("every factorial cell was run")
+    };
+
+    println!("## Factorial cells — degraded signal, seeds 120..150 (confirmatory)");
+    println!();
+    println!("| regime | arm | δ | median PRIMARY_B | churn median |");
+    println!("|--------|-----|--:|-----------------:|-------------:|");
+    for c in &cells {
+        println!(
+            "| {} | {} | {:.2} | {:.4} | {:.2} |",
+            regime_label(c.regime),
+            arm_label(c.gamma),
+            c.delta,
+            c.primary_med(),
+            c.churn_med()
+        );
+    }
+    println!();
+
+    // --- In-run baselines (context rows, non-gating) -----------------------
+    println!("## In-run baselines on the same instances (context, non-gating)");
+    println!();
+    println!("| regime | arm | median PRIMARY_B | churn median |");
+    println!("|--------|-----|-----------------:|-------------:|");
+    for &regime in &[Regime::V1, Regime::V2] {
+        let (scalar, _) = stateless_battery_mode(
+            || Box::new(AifDecisionPolicy::default()) as Box<dyn CoalitionDecisionPolicy>,
+            regime,
+            V2_SEED_START,
+            V2_SEED_END,
+        );
+        let mag_policy = MagnitudePolicy::default();
+        let (mag, _) = stateless_battery_mode(
+            || Box::new(mag_policy.clone()) as Box<dyn CoalitionDecisionPolicy>,
+            regime,
+            V2_SEED_START,
+            V2_SEED_END,
+        );
+        println!(
+            "| {} | mag | {:.4} | {:.2} |",
+            regime_label(regime),
+            median(primaries_b(&mag)),
+            median(churns_b(&mag))
+        );
+        println!(
+            "| {} | scalar | {:.4} | {:.2} |",
+            regime_label(regime),
+            median(primaries_b(&scalar)),
+            median(churns_b(&scalar))
+        );
+    }
+    println!();
+
+    // --- Saturation observable (record-only, non-gating) -------------------
+    println!("## Decision-score quantiles at δ = 0 (record-only, non-gating)");
+    println!();
+    println!("| regime | arm | stream | n | p25 | p50 | p75 |");
+    println!("|--------|-----|--------|--:|----:|----:|----:|");
+    let mut desaturated_any = false;
+    for (regime, gamma, join, leave) in &score_rows {
+        for (stream, raw) in [("join", join), ("leave", leave)] {
+            let mut s = raw.clone();
+            s.sort_by(f64::total_cmp);
+            let (q25, q50, q75) = (
+                percentile(&s, 0.25),
+                percentile(&s, 0.5),
+                percentile(&s, 0.75),
+            );
+            if *regime == Regime::V2
+                && gamma.to_bits() != 16.0f64.to_bits()
+                && [q25, q50, q75].iter().any(|q| q.abs() < SATURATION_BAND)
+            {
+                desaturated_any = true;
+            }
+            println!(
+                "| {} | {} | {} | {} | {:.4} | {:.4} | {:.4} |",
+                regime_label(*regime),
+                arm_label(*gamma),
+                stream,
+                s.len(),
+                q25,
+                q50,
+                q75
+            );
+        }
+    }
+    println!();
+    println!(
+        "_linear-interpolated quantiles of the arm's raw `score = p(control 1) − 0.5`, collected on the δ = 0 cells. Part 4f measured every v1 γ = 16 quantile from p25 up at exactly 0.5000 (saturated), which is why no sub-0.5 margin could separate decisions there. A |quantile| < {SATURATION_BAND} in a (γ ∈ {{1, 4}}, v2-draw) row is the de-saturation this battery set out to create._"
+    );
+    println!();
+
+    // --- H-S evaluation (prereg rule, from THIS run's 120..150 medians) ----
+    println!("## H-S evaluation — lever 2 (γ ∈ {{1, 4}}, v2-draw, δ > 0 vs its own δ = 0)");
+    println!();
+    println!(
+        "| arm | δ | churn med | base churn | ≤ 0.5× | PRIMARY_B med | base | ≥ 0.9× | paired churn↓ | ≥ 18/30 | cell |"
+    );
+    println!(
+        "|-----|--:|----------:|-----------:|:------:|--------------:|-----:|:------:|--------------:|:-------:|:----:|"
+    );
+    let mut hs_pass = false;
+    for &gamma in &[1.0f64, 4.0] {
+        let base = cell_at(gamma, Regime::V2, 0.0);
+        for &delta in &V2_DELTA_GRID[1..] {
+            let cell = cell_at(gamma, Regime::V2, delta);
+            let churn_leg = cell.churn_med() <= HS_CHURN_FACTOR * base.churn_med();
+            let quality_leg = cell.primary_med() >= HS_PRIMARY_FACTOR * base.primary_med();
+            let paired = paired_churn_reduced(&cell.churns, &base.churns);
+            let paired_leg = paired >= HS_PAIRED_MIN;
+            let cell_pass = churn_leg && quality_leg && paired_leg;
+            hs_pass |= cell_pass;
+            println!(
+                "| {} | {:.2} | {:.2} | {:.2} | {} | {:.4} | {:.4} | {} | {}/30 | {} | {} |",
+                arm_label(gamma),
+                delta,
+                cell.churn_med(),
+                base.churn_med(),
+                pass(churn_leg),
+                cell.primary_med(),
+                base.primary_med(),
+                pass(quality_leg),
+                paired,
+                pass(paired_leg),
+                pass(cell_pass)
+            );
+        }
+    }
+    println!();
+
+    let verdict = if hs_pass {
+        "VALIDATED (de-saturation)"
+    } else {
+        "FALSIFIED (de-saturation)"
+    };
+    println!("**VERDICT (K4 battery v2 — lever 2, #61): {verdict}**");
+    println!();
+    println!(
+        "_VALIDATED (de-saturation) = there EXISTS a (γ ∈ {{1, 4}}, v2-draw, δ > 0) cell whose churn median ≤ {HS_CHURN_FACTOR:.1} × its own δ = 0 baseline AND whose PRIMARY_B median ≥ {HS_PRIMARY_FACTOR:.1} × that baseline AND whose per-seed churn reduction holds on ≥ {HS_PAIRED_MIN}/30 paired seeds; FALSIFIED (de-saturation) = anything less. Thresholds (0.5×, 0.9×, 18/30) inherit the v2→v6 family conventions; the grids, draw, signal, and bars were locked in the prereg before implementation._"
+    );
+    if !hs_pass {
+        let scope = if desaturated_any {
+            "the δ = 0 scores DID de-saturate in at least one (γ ∈ {1, 4}, v2-draw) row, so the falsification is about the margin lever itself, not about reaching a de-saturated regime"
+        } else {
+            "the (γ ∈ {1, 4}, v2-draw, δ = 0) scores are STILL saturated at ±0.5, so this falsification reads \"γ is not the de-saturation lever\" and is scoped accordingly"
+        };
+        println!();
+        println!("_Scoping (prereg verdict rule): {scope}._");
+    }
+    println!();
+
+    print_v2_oracle_twins();
+}
+
+/// Exploratory (non-gating, printed after the verdict): the Part 5a factorial
+/// re-run under the per-bit ORACLE signal — the lever-3 pricing rows. Medians
+/// only; nothing here is scored and no verdict depends on it.
+fn print_v2_oracle_twins() {
+    println!("## Exploratory (non-gating): oracle-signal twins of the Part 5a cells");
+    println!();
+    println!("| regime | arm | δ | median PRIMARY_B | churn median |");
+    println!("|--------|-----|--:|-----------------:|-------------:|");
+    for &regime in &[Regime::V1, Regime::V2] {
+        for &gamma in &V2_GAMMA_GRID {
+            let cfg = e1_gamma_config(gamma);
+            let mode = RunMode {
+                regime,
+                degraded: false,
+            };
+            for &delta in &V2_DELTA_GRID {
+                let (rs, _) =
+                    margin_battery_mode(cfg, delta, 0.0, mode, V2_SEED_START, V2_SEED_END, None);
+                println!(
+                    "| {} | {} | {:.2} | {:.4} | {:.2} |",
+                    regime_label(regime),
+                    arm_label(gamma),
+                    delta,
+                    median(primaries_b(&rs)),
+                    median(churns_b(&rs))
+                );
+            }
+        }
+    }
+    println!();
+    println!(
+        "_lever 3 (oracle-vs-degraded signal fidelity) is EXPLORATORY by registration: these rows price the confirmatory cells against the per-bit oracle signal a runtime cannot emit. Any confirmatory claim about signal fidelity needs its own registration._"
+    );
+    println!();
+}
+
+// ===========================================================================
+// Part 5b — reliability-routing test (koalisi #61, EQ1). THE REGISTERED RUN for
+// lever 1 (routing). Governed by `docs/prereg-K4-battery-v2.md` §"Part 5b —
+// reliability-routing test" + §H-R; seeds 120..150; PLANTED per-bit
+// reliabilities (confirmatory cells use no learned beliefs — this is the
+// mechanism test). Additive; every existing printed line byte-identical.
+//
+// The question: does reliability weighting make the population search route
+// AROUND a weak required bit, or does it only rescale the same optimum
+// (gotcha 24)? v1's fixed 15-per-bit partial weight inverted against the
+// full-coverage weight at |required| ≥ 7 (15 > 100/7), so the prereg re-derives
+// the model as size-normalized `w(m) = 80/m`.
+// ===========================================================================
+
+/// Part 5b full-coverage bonus (unchanged from the v1 `TaskCoverage`).
+const V2B_FULL_BONUS: f64 = 100.0;
+/// Part 5b partial-coverage budget: the per-bit weight is `w(m) = 80/m`.
+const V2B_PARTIAL_BUDGET: f64 = 80.0;
+/// Part 5b per-member cost (unchanged from v1).
+const V2B_MEMBER_COST: f64 = 8.0;
+/// Planted reliability of the single weak required bit `b*`.
+const V2B_WEAK_R: f64 = 0.15;
+/// Planted reliability of every other required bit.
+const V2B_STRONG_R: f64 = 0.9;
+/// H-R sanity leg: the unweighted argmax must cover all required bits on at
+/// least this many of the 30 seeds, else the run is INVALID.
+const HR_SANITY_MIN: usize = 27;
+/// H-R skip / REAL-superiority legs — the family's 60% consistency bar.
+const HR_CONSISTENCY_MIN: usize = 18;
+/// H-R median bar: weighted median `REAL` ≥ this × the unweighted median.
+const HR_REAL_FACTOR: f64 = 1.05;
+
+/// Universe width as a `usize` (the reliability vector's length).
+const UNIVERSE: usize = UNIVERSE_BITS as usize;
+
+/// The Part 5b value model (prereg §5b): **size-normalized** coverage.
+///
+/// For a block `S` against `required` (`m = |required|`), per-bit reliabilities `r`:
+///
+/// - full coverage (`union(S) ⊇ required`): `100 · mean(r_b : b ∈ required)`
+/// - partial coverage: `w(m) · Σ(r_b : b ∈ union(S) ∩ required)`, `w(m) = 80/m`
+/// - minus `8` per member
+///
+/// The **unweighted** confirmatory model is this same type at `r ≡ 1`
+/// ([`unweighted`](Self::unweighted)), so the two argmaxes the H-R legs compare
+/// differ ONLY in the reliability vector — the prereg's requirement.
+///
+/// This is the `ReliabilityCoverage` SHAPE (`src/decision/reliability_value.rs`)
+/// re-based on the v2 coefficients; the library type is untouched and keeps its
+/// registered v1 constants (100 / 15 / 8).
+struct TaskCoverageV2 {
+    required: u32,
+    reliability: [f64; UNIVERSE],
+}
+
+impl TaskCoverageV2 {
+    /// The confirmatory unweighted model — `r ≡ 1`.
+    fn unweighted(required: u32) -> Self {
+        Self {
+            required,
+            reliability: [1.0; UNIVERSE],
+        }
+    }
+
+    /// The reliability-weighted twin. Identical in every respect but `r`.
+    fn weighted(required: u32, reliability: [f64; UNIVERSE]) -> Self {
+        Self {
+            required,
+            reliability,
+        }
+    }
+
+    /// `w(m) = 80/m`. `m = 0` cannot reach the partial branch (an empty
+    /// requirement is trivially fully covered), so the `max(1)` is only a guard.
+    fn partial_weight(&self) -> f64 {
+        V2B_PARTIAL_BUDGET / f64::from(self.required.count_ones().max(1))
+    }
+
+    fn sum_reliability(&self, mask: u32) -> f64 {
+        sum_reliability_of(mask, &self.reliability)
+    }
+}
+
+/// Σ of `reliability[b]` over the bits set in `mask` (low [`UNIVERSE`] bits).
+fn sum_reliability_of(mask: u32, reliability: &[f64; UNIVERSE]) -> f64 {
+    (0..UNIVERSE)
+        .filter(|b| mask & (1u32 << b) != 0)
+        .map(|b| reliability[b])
+        .sum()
+}
+
+impl ValueCalculator for TaskCoverageV2 {
+    fn calculate_value(&self, agents: &[&dyn AgentCapabilities]) -> f64 {
+        if agents.is_empty() {
+            return 0.0;
+        }
+        let union = agents.iter().fold(0u32, |acc, a| acc | a.capabilities());
+        let covered = union & self.required;
+
+        let coverage = if covered == self.required {
+            let m = self.required.count_ones();
+            let mean = if m == 0 {
+                1.0
+            } else {
+                self.sum_reliability(self.required) / f64::from(m)
+            };
+            V2B_FULL_BONUS * mean
+        } else {
+            self.partial_weight() * self.sum_reliability(covered)
+        };
+
+        coverage - agents.len() as f64 * V2B_MEMBER_COST
+    }
+}
+
+/// One Part 5b instance: the pool, the requirement, the planted weak bit, and
+/// the planted per-bit reliability vector.
+struct RoutingInstance {
+    agents: Vec<Worker>,
+    required: u32,
+    b_star: usize,
+    reliability: [f64; UNIVERSE],
+}
+
+/// Draw one Part 5b instance off a FRESH `SplitMix64` stream (prereg §5b): pool
+/// `n ∈ 8..=16` with caps `k ∈ 1..=4` distinct bits, `m = |required|` uniform on
+/// `{7, 8}`, then `b*` uniform among the required bits. Reliabilities are
+/// PLANTED — `r[b*] = 0.15`, every other required bit `0.9`.
+///
+/// This is its own stream (a new `SplitMix64` per seed), so it cannot perturb any
+/// existing battery's draw schedule; the shared draw helpers are reused unchanged.
+/// Entries for non-required bits are never read by the model (it only sums over
+/// `required` and over subsets of it), and are left at the strong value.
+fn draw_routing_instance(seed: u64) -> RoutingInstance {
+    let mut rng = SplitMix64::new(seed);
+
+    let n = (8 + rng.next_u64() % 9) as usize;
+    let agents: Vec<Worker> = (0..n)
+        .map(|id| {
+            let k = 1 + rng.next_u64() % 4;
+            let caps = draw_distinct_bits(&mut rng, k);
+            let trust = (20 + rng.next_u64() % 80) as u32;
+            Worker { id, caps, trust }
+        })
+        .collect();
+
+    let m = 7 + rng.next_u64() % 2;
+    let required = draw_distinct_bits(&mut rng, m);
+
+    let req_bits: Vec<usize> = (0..UNIVERSE).filter(|b| required & (1u32 << b) != 0).collect();
+    let b_star = req_bits[(rng.next_u64() % req_bits.len() as u64) as usize];
+
+    let mut reliability = [V2B_STRONG_R; UNIVERSE];
+    reliability[b_star] = V2B_WEAK_R;
+
+    RoutingInstance {
+        agents,
+        required,
+        b_star,
+        reliability,
+    }
+}
+
+/// `REAL(structure)` — the expected realized payoff at the UNWEIGHTED
+/// `TaskCoverageV2` coefficients when each covered required bit `b` independently
+/// succeeds with probability `r_b` and a failed bit counts as uncovered. This is
+/// the yardstick that is NOT tautological w.r.t. either argmax: neither
+/// calculator computes it.
+///
+/// Closed form, per block with covered set `C = union(S) ∩ required`:
+///
+/// ```text
+/// E[block] = w(m)·Σ_{b∈C} r_b − 8·|S| + (C == required ? (100 − 80)·Π_{b∈required} r_b : 0)
+/// ```
+///
+/// Derivation: the realized covered set `C' ⊆ C` has `E|C'| = Σ_{b∈C} r_b`, and
+/// the block earns the full bonus only when `C' = required`, which requires
+/// `C = required` AND every required bit to succeed — probability
+/// `P = Π_{b∈required} r_b`. Splitting the expectation on that event gives
+/// `E = 100·P + w(m)·(Σ_{b∈C} r_b − m·P) − 8|S|`; since `w(m)·m = 80`, the two
+/// `P` terms collapse to the `(100 − 80)·P` residual above.
+fn real_payoff(
+    structure: &CoalitionStructure,
+    agents: &[Worker],
+    required: u32,
+    reliability: &[f64; UNIVERSE],
+) -> f64 {
+    let m = required.count_ones();
+    let w = V2B_PARTIAL_BUDGET / f64::from(m.max(1));
+    let p_full: f64 = (0..UNIVERSE)
+        .filter(|b| required & (1u32 << b) != 0)
+        .map(|b| reliability[b])
+        .product();
+
+    structure
+        .blocks()
+        .iter()
+        .map(|blk| {
+            let union = blk.iter().fold(0u32, |acc, &i| acc | agents[i].caps);
+            let covered = union & required;
+            let full_term = if covered == required {
+                (V2B_FULL_BONUS - V2B_PARTIAL_BUDGET) * p_full
+            } else {
+                0.0
+            };
+            w * sum_reliability_of(covered, reliability) - blk.len() as f64 * V2B_MEMBER_COST
+                + full_term
+        })
+        .sum()
+}
+
+/// Union of the required bits any block of `structure` covers. Because
+/// `search` returns a **partition of the whole pool**, this is identically the
+/// pool's own coverage — see the structural note printed by Part 5b.
+fn structure_required_coverage(
+    structure: &CoalitionStructure,
+    agents: &[Worker],
+    required: u32,
+) -> u32 {
+    structure
+        .blocks()
+        .iter()
+        .fold(0u32, |acc, blk| {
+            acc | blk.iter().fold(0u32, |b, &i| b | agents[i].caps)
+        })
+        & required
+}
+
+/// The two coefficient properties the prereg requires ASSERTED before the run.
+///
+/// 1. At `r ≡ 1` the optimum covers all required bits for every `m ∈ 2..=8`
+///    (`w(m) = 80/m < 100/m` strictly, so full coverage always outscores partial
+///    at equal member count) — verified through the real `search` on a pool of
+///    `m` pure specialists.
+/// 2. A sufficiently weak bit flips the optimum to skipping it. This holds at the
+///    **block** level — comparing a full-coverage block against the
+///    one-member-smaller block that omits `b*` — which is the only level at which
+///    it can hold: over a *partition* of a fixed pool the `8·N` member cost is
+///    constant, so "skipping" never buys back a member. Asserted as the exact
+///    algebraic condition `8m > 20·Σ_{b≠b*} r_b + 100·r[b*]`.
+fn assert_v2b_coefficient_properties() {
+    for m in 2u32..=8 {
+        let required = (1u32 << m) - 1;
+        let agents: Vec<Worker> = (0..m as usize)
+            .map(|b| Worker {
+                id: b,
+                caps: 1u32 << b,
+                trust: 50,
+            })
+            .collect();
+        let calc = TaskCoverageV2::unweighted(required);
+        let cfg = PopulationConfig::default().with_seed(u64::from(m));
+        let best = search(&agents, &calc, &cfg).best;
+        assert_eq!(
+            structure_required_coverage(&best, &agents, required),
+            required,
+            "r = 1: the optimum must cover every required bit at m = {m}"
+        );
+        assert_eq!(
+            best.blocks().len(),
+            1,
+            "r = 1: the optimum must be a single full-coverage block at m = {m}"
+        );
+    }
+
+    // Property 2 — the block-level flip, at m = 8 with a uniformly weak pool.
+    let m = 8.0f64;
+    let r_star = 0.0f64;
+    let others = 0.4f64;
+    let s: f64 = 7.0 * others;
+    assert!(
+        8.0 * m > 20.0 * s + 100.0 * r_star,
+        "a sufficiently weak bit must flip the block-level optimum to skipping it"
+    );
+    // ...and the planted (0.9 / 0.15) values do NOT satisfy it — recorded, not a
+    // failure: it is the measured content of the H-R result.
+    let planted_s = 7.0 * V2B_STRONG_R;
+    assert!(
+        8.0 * m <= 20.0 * planted_s + 100.0 * V2B_WEAK_R,
+        "the planted reliabilities are expected NOT to flip the block-level optimum"
+    );
+}
+
+#[allow(clippy::too_many_lines)]
+fn part5b_reliability_routing() {
+    println!("# koalisi #61 — Part 5b: reliability-routing test (REGISTERED)");
+    println!();
+    println!(
+        "_governed by `docs/prereg-K4-battery-v2.md` §\"Part 5b\" + §H-R; lever 1 = routing, CONFIRMATORY. Value model `TaskCoverageV2` — full-coverage bonus 100, partial per-bit weight `w(m) = 80/m`, member cost 8·N — and its reliability-weighted twin (the `ReliabilityCoverage` shape re-based on these coefficients; the library type is untouched). Per seed: pool `n ∈ 8..=16` (caps 1..=4 bits), `m = |required|` uniform on {{7, 8}}, one uniformly-chosen required bit `b*` PLANTED at r = 0.15 with every other required bit at 0.9. Both argmaxes come from `search()` at the same pinned `PopulationConfig` and the same seed, differing ONLY in the calculator. Seeds **120..150**._"
+    );
+    println!();
+
+    assert_v2b_coefficient_properties();
+    println!(
+        "**Coefficient gate:** at `r ≡ 1` the `search()` optimum is a single full-coverage block for every `m ∈ 2..=8` (`w(m) = 80/m < 100/m`), and the block-level skip condition `8m > 20·Σ_{{b≠b*}} r_b + 100·r[b*]` is satisfiable for a sufficiently weak pool — both asserted in-code before the run."
+    );
+    println!();
+
+    // --- Per-seed confirmatory run ----------------------------------------
+    let mut rows: Vec<(u64, u32, usize, bool, f64, f64)> = Vec::new();
+    let mut sanity_ok = 0usize;
+    let mut skipped = 0usize;
+    let mut real_superior = 0usize;
+    let mut reals_w: Vec<f64> = Vec::new();
+    let mut reals_u: Vec<f64> = Vec::new();
+    // Exploratory (non-gating): does the argmax's single best-valued block omit b*?
+    let mut best_block_routed = 0usize;
+
+    for seed in V2_SEED_START..V2_SEED_END {
+        let inst = draw_routing_instance(seed);
+        let cfg = PopulationConfig::default().with_seed(seed);
+
+        let unweighted = search(
+            &inst.agents,
+            &TaskCoverageV2::unweighted(inst.required),
+            &cfg,
+        )
+        .best;
+        let weighted = search(
+            &inst.agents,
+            &TaskCoverageV2::weighted(inst.required, inst.reliability),
+            &cfg,
+        )
+        .best;
+
+        let u_cov = structure_required_coverage(&unweighted, &inst.agents, inst.required);
+        if u_cov == inst.required {
+            sanity_ok += 1;
+        }
+
+        let w_cov = structure_required_coverage(&weighted, &inst.agents, inst.required);
+        let b_star_bit = 1u32 << inst.b_star;
+        let skips = w_cov & b_star_bit == 0;
+        if skips {
+            skipped += 1;
+        }
+
+        let real_w = real_payoff(&weighted, &inst.agents, inst.required, &inst.reliability);
+        let real_u = real_payoff(&unweighted, &inst.agents, inst.required, &inst.reliability);
+        if real_w > real_u {
+            real_superior += 1;
+        }
+        reals_w.push(real_w);
+        reals_u.push(real_u);
+
+        // Exploratory: the highest-value block under each model.
+        let top_block = |s: &CoalitionStructure, calc: &TaskCoverageV2| -> u32 {
+            s.blocks()
+                .iter()
+                .max_by(|a, b| {
+                    let va = calc.calculate_value(&coalition_view(&inst.agents, a));
+                    let vb = calc.calculate_value(&coalition_view(&inst.agents, b));
+                    va.partial_cmp(&vb).unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .map(|blk| blk.iter().fold(0u32, |acc, &i| acc | inst.agents[i].caps))
+                .unwrap_or(0)
+        };
+        let w_top = top_block(
+            &weighted,
+            &TaskCoverageV2::weighted(inst.required, inst.reliability),
+        );
+        let u_top = top_block(&unweighted, &TaskCoverageV2::unweighted(inst.required));
+        if w_top & b_star_bit == 0 && u_top & b_star_bit != 0 {
+            best_block_routed += 1;
+        }
+
+        rows.push((
+            seed,
+            inst.required.count_ones(),
+            inst.b_star,
+            skips,
+            real_w,
+            real_u,
+        ));
+    }
+
+    println!("## Per-seed argmax comparison (seeds 120..150)");
+    println!();
+    println!("| seed | m | b* | weighted skips b* | REAL_w | REAL_u |");
+    println!("|-----:|--:|---:|:-----------------:|-------:|-------:|");
+    for (seed, m, b_star, skips, real_w, real_u) in &rows {
+        println!(
+            "| {} | {} | {} | {} | {:.4} | {:.4} |",
+            seed,
+            m,
+            b_star,
+            if *skips { "yes" } else { "no" },
+            real_w,
+            real_u
+        );
+    }
+    println!();
+
+    let med_w = median(reals_w.clone());
+    let med_u = median(reals_u.clone());
+    println!("**Medians (120..150):** REAL_w {med_w:.4} · REAL_u {med_u:.4}.");
+    println!();
+
+    // --- H-R evaluation ----------------------------------------------------
+    let sanity_leg = sanity_ok >= HR_SANITY_MIN;
+    let skip_leg = skipped >= HR_CONSISTENCY_MIN;
+    let real_sup_leg = real_superior >= HR_CONSISTENCY_MIN;
+    let real_med_leg = med_w >= HR_REAL_FACTOR * med_u;
+    let real_leg = real_sup_leg && real_med_leg;
+
+    println!("## H-R evaluation — lever 1 (routing)");
+    println!();
+    println!(
+        "- **Sanity leg (run-invalidating):** the unweighted argmax covers every required bit (incl. `b*`) on {sanity_ok}/30 ≥ {HR_SANITY_MIN} → {}",
+        pass(sanity_leg)
+    );
+    println!(
+        "- **Skip leg:** the weighted argmax skips `b*` (no block covers it) on {skipped}/30 ≥ {HR_CONSISTENCY_MIN} → {}",
+        pass(skip_leg)
+    );
+    println!(
+        "- **REAL leg:** weighted `REAL` strictly greater on {real_superior}/30 ≥ {HR_CONSISTENCY_MIN} ({}) AND median REAL_w {med_w:.4} ≥ {HR_REAL_FACTOR} × REAL_u {med_u:.4} (= {:.4}) ({}) → {}",
+        pass(real_sup_leg),
+        HR_REAL_FACTOR * med_u,
+        pass(real_med_leg),
+        pass(real_leg)
+    );
+    println!();
+
+    if sanity_leg {
+        let verdict = if skip_leg && real_leg {
+            "VALIDATED (routing)"
+        } else {
+            "FALSIFIED (routing)"
+        };
+        println!("**VERDICT (K4 battery v2 — lever 1, #61): {verdict}**");
+    } else {
+        println!("**VERDICT (K4 battery v2 — lever 1, #61): RUN-INVALID (sanity leg)**");
+    }
+    println!();
+    println!(
+        "_VALIDATED (routing) = the skip leg AND the REAL leg, with the sanity leg intact; FALSIFIED (routing) = anything less; a sanity-leg failure invalidates the run rather than producing a verdict. Bars (27/30, 18/30, 1.05×) were locked in the prereg before implementation._"
+    );
+    println!();
+
+    // --- Structural note (observed mechanism; non-gating) ------------------
+    println!("## Structural note on the skip leg (observed, non-gating)");
+    println!();
+    println!(
+        "`search()` returns a **partition of the entire pool** (`assignment[i]` is defined for every agent index `i`), so the union of the blocks' capabilities is identically the union of the whole pool. \"No block covers `b*`\" is therefore equivalent to \"no agent in the pool provides `b*`\" — it cannot depend on the calculator at all. The same identity makes the sanity leg a statement about pool coverage rather than about the argmax, and it makes the two legs **mutually exclusive**: whenever the sanity leg holds (the pool covers every required bit, `b*` included), the skip leg is 0/30 by construction. Measured this run: sanity {sanity_ok}/30, skip {skipped}/30."
+    );
+    println!();
+    println!(
+        "Related: over a partition of a fixed pool the `8·N` member-cost term sums to the same constant for every structure, so skipping a bit never buys back a member — the block-level flip condition asserted by the coefficient gate cannot express itself at the partition level. Reliability re-ranks structures only through *which* bits the partial blocks cover."
+    );
+    println!();
+    println!(
+        "**Exploratory (non-gating, not a registered criterion):** the weaker block-level reading of the same question — the weighted argmax's single highest-value block omits `b*` while the unweighted argmax's does not — holds on {best_block_routed}/30 seeds."
+    );
+    println!();
+}
+
 #[cfg(test)]
 mod part4c_tests {
     use super::*;
@@ -3230,5 +4205,104 @@ mod part4c_tests {
         for r in &lk {
             assert!(r.primary.is_finite() && (0.0..=1.0).contains(&r.primary));
         }
+    }
+
+    /// The battery-v2 draw (#61) has the registered shape: `|required| ∈ 2..=8`
+    /// distinct bits of the 8-bit universe, pool and cap draws unchanged.
+    #[test]
+    fn v2_draw_shape() {
+        for seed in 120..126 {
+            let mut rng = SplitMix64::new(seed);
+            let (agents, tasks) = draw_prefix_v2(&mut rng);
+            assert!((4..=16).contains(&agents.len()), "pool draw unchanged");
+            for a in &agents {
+                assert!((1..=4).contains(&a.caps.count_ones()), "cap draw unchanged");
+            }
+            assert_eq!(tasks.len(), TASKS);
+            for t in &tasks {
+                let r = t.required.count_ones();
+                assert!((2..=8).contains(&r), "v2 draw is |required| in 2..=8, got {r}");
+                assert_eq!(t.order.len(), agents.len());
+            }
+        }
+    }
+
+    /// 2-seed smoke for Part 5a (#61): (a) the δ = 0 margin wrapper reproduces
+    /// the unwrapped arm in the v2 regime (the X-B(b) property at 2-seed scale),
+    /// and (b) a de-saturated cell (γ = 1, δ = 0.15) runs end-to-end with finite
+    /// in-range metrics. Does NOT run the 18-cell registered factorial.
+    #[test]
+    fn part5a_two_seed_smoke() {
+        let cfg = e1_gamma_config(1.0);
+        let mode = RunMode { regime: Regime::V2, degraded: true };
+        let (wrapped, _) = margin_battery_mode(cfg, 0.0, 0.0, mode, 120, 122, None);
+        let (bare, _) = persistent_battery_mode(cfg, mode, 120, 122);
+        assert_battery_identical(&wrapped, &bare, "MarginE1(0,0) must reproduce the bare arm");
+
+        let (active, lat) = margin_battery_mode(cfg, 0.15, 0.0, mode, 120, 122, None);
+        assert_eq!(active.len(), 2);
+        for r in &active {
+            assert!(r.primary.is_finite() && (0.0..=1.0).contains(&r.primary));
+        }
+        assert!(!lat.is_empty(), "latencies recorded");
+    }
+
+    /// Part 5b (#61) instance draw has the registered shape.
+    #[test]
+    fn v2b_routing_instance_shape() {
+        for seed in 120..126 {
+            let inst = draw_routing_instance(seed);
+            assert!((8..=16).contains(&inst.agents.len()), "pool n in 8..=16");
+            for a in &inst.agents {
+                assert!((1..=4).contains(&a.caps.count_ones()), "caps 1..=4 bits");
+            }
+            let m = inst.required.count_ones();
+            assert!(m == 7 || m == 8, "m must be 7 or 8, got {m}");
+            assert!(
+                inst.required & (1u32 << inst.b_star) != 0,
+                "b* must be a required bit"
+            );
+            assert!((inst.reliability[inst.b_star] - V2B_WEAK_R).abs() < 1e-12);
+            for b in (0..UNIVERSE).filter(|&b| b != inst.b_star) {
+                assert!((inst.reliability[b] - V2B_STRONG_R).abs() < 1e-12);
+            }
+        }
+    }
+
+    /// At `r ≡ 1` every bit succeeds with certainty, so the expected realized
+    /// payoff must equal the unweighted model's own fitness exactly — a closed-form
+    /// self-check on [`real_payoff`] independent of how it is derived.
+    #[test]
+    fn v2b_real_reduces_to_fitness_at_r_one() {
+        let inst = draw_routing_instance(123);
+        let calc = TaskCoverageV2::unweighted(inst.required);
+        let cfg = PopulationConfig::default().with_seed(123);
+        let best = search(&inst.agents, &calc, &cfg).best;
+
+        let direct: f64 = best
+            .blocks()
+            .iter()
+            .map(|blk| calc.calculate_value(&coalition_view(&inst.agents, blk)))
+            .sum();
+        let real = real_payoff(&best, &inst.agents, inst.required, &[1.0; UNIVERSE]);
+        assert!(
+            (real - direct).abs() < 1e-9,
+            "REAL at r = 1 must equal the unweighted fitness: {real} vs {direct}"
+        );
+    }
+
+    /// The prereg's coefficient properties hold (also asserted in the run path).
+    #[test]
+    fn v2b_coefficient_properties() {
+        assert_v2b_coefficient_properties();
+    }
+
+    /// `query_gamma: Some(16.0)` restates the engine default, so arm-E1g16 must
+    /// reproduce the frozen arm-E1 — the X-B(a) identity property at 2-seed scale.
+    #[test]
+    fn part5a_gamma16_identity() {
+        let (g16, _) = persistent_battery_range(e1_gamma_config(16.0), 30, 32);
+        let (g_none, _) = persistent_battery_range(e1_config(), 30, 32);
+        assert_battery_identical(&g16, &g_none, "Some(16.0) must reproduce None");
     }
 }

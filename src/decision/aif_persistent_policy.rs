@@ -152,6 +152,19 @@ pub struct PersistentAifConfig {
     /// increment). Within-task rejoin can't occur anyway (the join pass precedes
     /// the leave sweep), so the bar effectively covers the next `k` tasks.
     pub rejoin_lockout_tasks: u64,
+    /// Fixed softmax temperature γ over the query's policy EFE (koalisi #61, EQ1).
+    /// **Identity default `None`** — the engine default `16.0`, which is the value
+    /// the registered arm-E1 / K4-v5 arm runs at.
+    ///
+    /// Only the MeanField query path reads this: under `query_dynamics: true` the
+    /// engine initializes γ from `1/β₀` and updates it live via
+    /// [`aif::PrecisionDynamics`], so a fixed γ is ignored there.
+    ///
+    /// This is the EQ1 de-saturation lever — γ = 16 peaks the policy posterior hard
+    /// enough that the join/leave scores saturate at ±0.5 (gotcha 23). The
+    /// battery-v2 arm-config labels are `arm-E1g1` / `arm-E1g4` / `arm-E1g16`;
+    /// arm-E1 itself stays `None`.
+    pub query_gamma: Option<f64>,
 }
 
 impl Default for PersistentAifConfig {
@@ -165,6 +178,7 @@ impl Default for PersistentAifConfig {
             initial_precision_b: 4.0,
             eviction_cap: None,
             rejoin_lockout_tasks: 0,
+            query_gamma: None,
         }
     }
 }
@@ -592,7 +606,7 @@ fn build_query(
         (aif::StateInference::MeanField, None)
     };
 
-    let params = aif::AgentParams {
+    let mut params = aif::AgentParams {
         alpha: QUERY_ALPHA,
         policy_depth: QUERY_POLICY_DEPTH,
         learn_a: query_learn,
@@ -607,6 +621,11 @@ fn build_query(
         seed: Some(seed),
         ..Default::default()
     };
+    // EQ1 (#61): overriding γ is opt-in, so `None` leaves the engine default in
+    // place rather than re-stating it — identity by construction.
+    if let Some(g) = config.query_gamma {
+        params.gamma = g;
+    }
 
     let query = aif::POMDPAgent::from_model(aif::GenerativeModel { a, b, c, d }, params)?;
 
@@ -1074,6 +1093,54 @@ mod tests {
             run(PersistentAifConfig::default()),
             "explicit None/0 must decide identically to the defaults"
         );
+    }
+
+    /// A fixed join/leave/observe stream under `cfg`, as `(act, score bits)` pairs.
+    /// The base config is arm-E1 (K4-v5): MeanField queries, where γ is live.
+    fn e1_stream(query_gamma: Option<f64>) -> Vec<(bool, u64)> {
+        let ctx = DecisionContext { required_capabilities: 0b0111 };
+        let a0 = TestAgent { id: 0, caps: 0b0001, trust: 50 };
+        let a1 = TestAgent { id: 1, caps: 0b0010, trust: 50 };
+        let a2 = TestAgent { id: 2, caps: 0b0100, trust: 50 };
+        let coalition: [&dyn AgentCapabilities; 2] = [&a1, &a2];
+        let full: [&dyn AgentCapabilities; 3] = [&a0, &a1, &a2];
+
+        let cfg = PersistentAifConfig {
+            query_dynamics: false,
+            query_gamma,
+            ..Default::default()
+        };
+        let arm = PersistentAifArm::new(42, cfg).unwrap();
+        let mut out = Vec::new();
+        for _ in 0..3 {
+            let j = arm.should_join(&a0, &coalition, &ctx);
+            out.push((j.act, j.score.to_bits()));
+            let l = arm.should_leave(&a0, &full, &ctx);
+            out.push((l.act, l.score.to_bits()));
+            let succ = [false, true, true, false, false, false, false, false];
+            arm.observe_outcome(0b0111, &succ);
+        }
+        out
+    }
+
+    /// #61 EQ1: `query_gamma: Some(16.0)` restates the engine default, so it must
+    /// decide bit-identically to the identity default `None` (arm-E1g16 == arm-E1).
+    #[test]
+    fn query_gamma_sixteen_is_identity() {
+        assert_eq!(
+            e1_stream(Some(16.0)),
+            e1_stream(None),
+            "Some(16.0) must reproduce the engine default exactly"
+        );
+    }
+
+    /// #61 EQ1: the lever is live on the MeanField path — γ = 1 flattens the policy
+    /// softmax, so at least one decision differs from the saturated γ = 16 default.
+    #[test]
+    fn query_gamma_one_changes_decisions() {
+        let flat = e1_stream(Some(1.0));
+        let base = e1_stream(None);
+        assert_ne!(flat, base, "γ = 1 must de-saturate at least one decision");
     }
 
     /// Object-safety: the arm is usable behind the decision trait object.
