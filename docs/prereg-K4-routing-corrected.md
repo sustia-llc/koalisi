@@ -89,8 +89,11 @@ cost 8·N). Per seed, three `search()` argmaxes at the same pinned
 
 **Top block** of a structure = the block maximizing the respective
 calculator's `calculate_value` (the Part 5b diagnostic's `max_by` with
-`partial_cmp`, ties resolved by first-encountered order — deterministic for
-a fixed structure).
+`partial_cmp`; on exact value ties `max_by` keeps the LAST maximal block in
+the structure's canonical block order — deterministic for a fixed
+structure). _[Amended pre-implementation 2026-07-31: the original wording
+said "first-encountered"; the operational definition — the Part 5b helper —
+was always `max_by`, whose tie-break is last-maximal.]_
 
 **Coefficient gate (asserted in-code before the run):** the block-level flip
 condition `8m > 100·r[b*] + 20·Σ_{b≠b*} r_b` HOLDS at the leg-A planting for
