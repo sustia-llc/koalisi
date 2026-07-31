@@ -230,6 +230,10 @@ fn main() {
     println!("{}", "=".repeat(72));
     println!();
     part5c_addendum();
+    println!();
+    println!("{}", "=".repeat(72));
+    println!();
+    part6_corrected_routing();
 }
 
 // ===========================================================================
@@ -3900,6 +3904,46 @@ fn structure_required_coverage(
         & required
 }
 
+/// Capability mask of `structure`'s **top block** — the block maximizing `calc`'s
+/// own `calculate_value`.
+///
+/// This is the free-function form of the Part 5b exploratory diagnostic's local
+/// closure (which is left untouched, so Part 5b's printed lines cannot move), and
+/// it is the operational definition of "top block" the #63 registration amended
+/// itself to: `max_by` with `partial_cmp`, whose tie-break keeps the **last**
+/// maximal element in the structure's canonical block order — deterministic for a
+/// fixed structure. Non-finite values compare `Equal` rather than panicking.
+///
+/// The returned mask is the block's raw capability union (NOT masked to
+/// `required`), so callers test coverage with `mask & required` / `mask & bit`.
+fn top_block_mask<C: ValueCalculator>(
+    structure: &CoalitionStructure,
+    agents: &[Worker],
+    calc: &C,
+) -> u32 {
+    top_block(structure, agents, calc)
+        .iter()
+        .fold(0u32, |acc, &i| acc | agents[i].caps)
+}
+
+/// The top block itself (agent indices), under the same rule
+/// [`top_block_mask`] uses. Empty for an empty structure.
+fn top_block<C: ValueCalculator>(
+    structure: &CoalitionStructure,
+    agents: &[Worker],
+    calc: &C,
+) -> Vec<usize> {
+    structure
+        .blocks()
+        .into_iter()
+        .max_by(|a, b| {
+            let va = calc.calculate_value(&coalition_view(agents, a));
+            let vb = calc.calculate_value(&coalition_view(agents, b));
+            va.partial_cmp(&vb).unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .unwrap_or_default()
+}
+
 /// The two coefficient properties the prereg requires ASSERTED before the run.
 ///
 /// 1. At `r ≡ 1` the optimum covers all required bits for every `m ∈ 2..=8`
@@ -4588,9 +4632,23 @@ fn part5c_item3_expected_outcome() {
 /// `ReliabilityCoverage::from_state`). Gotcha 24 applies: this posterior is
 /// recency-dominated, so cross-bit ORDERING is the signal, not the level.
 fn p5c_learned_reliability(inst: &RoutingInstance, seed: u64) -> [f64; UNIVERSE] {
+    learned_reliability(inst, seed, P5C_TWIN_SEED_SALT, P5C_TWIN_TASKS)
+}
+
+/// The learned-posterior pipeline itself, parameterized by the stream `salt` and
+/// the task count. [`p5c_learned_reliability`] is the item-4 instantiation;
+/// Part 6's leg L is the same pipeline on its own salt, so the two streams have
+/// independent starting states and no draws are shared between them (the
+/// `run_seed_b` thin-wrapper precedent).
+fn learned_reliability(
+    inst: &RoutingInstance,
+    seed: u64,
+    salt: u64,
+    tasks: usize,
+) -> [f64; UNIVERSE] {
     let arm = PersistentAifArm::new(seed, e1_config()).expect("persistent arm construction");
-    let mut rng = SplitMix64::new(seed ^ P5C_TWIN_SEED_SALT);
-    for _ in 0..P5C_TWIN_TASKS {
+    let mut rng = SplitMix64::new(seed ^ salt);
+    for _ in 0..tasks {
         let mut per_bit = [false; UNIVERSE];
         for (b, slot) in per_bit.iter_mut().enumerate() {
             if inst.required & (1u32 << b) != 0 {
@@ -4728,6 +4786,841 @@ fn part5c_addendum() {
     part5c_item2_hysteresis();
     part5c_item3_expected_outcome();
     part5c_item4_learned_twins();
+}
+
+// ===========================================================================
+// Part 6 — corrected block-level routing test (koalisi #63, EQ1 tail).
+//
+// Registered in `docs/prereg-K4-routing-corrected.md` (2026-07-31, posted to #63
+// BEFORE any implementation). The #61 lever-1 formulation (Part 5b) landed
+// `RUN-INVALID (sanity leg)` for three structural reasons, all of which this part
+// corrects: its skip predicate was partition-level and therefore vacuous under
+// `search()` (which partitions the WHOLE pool), member-cost savings cannot
+// express across partitions of a fixed pool, and its instance draw missed pool
+// coverage on 5/30 seeds.
+//
+//   Leg A — CONFIRMATORY: flip-region planting at the registered v2 coefficients,
+//           a BLOCK-level skip predicate, and an attribution counterfactual.
+//   Leg C — EXPLORATORY: the product-form full bonus, gated on its own degeneracy
+//           analysis (which runs FIRST, per the registration's order).
+//   Leg L — EXPLORATORY: the learned-posterior twin of leg A.
+//
+// Additive: every Part 1–5c printed line is unchanged. Part 5b's own draw,
+// closure, and constants are untouched.
+// ===========================================================================
+
+/// Part 6 seed range (registration §Registered design) — fresh seeds; 90..120
+/// (lockout) and 150..180 (replication) both stay reserved.
+const P6_SEED_START: u64 = 180;
+/// Exclusive end of the Part 6 seed range.
+const P6_SEED_END: u64 = 210;
+/// Leg-A planting: the weak bit `b*`, chosen inside the algebraic flip region.
+const P6A_WEAK_R: f64 = 0.02;
+/// Leg-A planting: every other required bit. The attribution counterfactual is
+/// this same value at `b*` too (uniform), which must NOT flip.
+const P6A_OTHERS_R: f64 = 0.35;
+/// Leg-C planting: the weak bit under the product-form full bonus.
+const P6C_WEAK_R: f64 = 0.15;
+/// Leg-C planting: every other required bit. Near 1 by necessity — the
+/// product-form bonus collapses under a 0.35 counterfactual too, so the
+/// attribution conjunct could never fire at the leg-A values (registration
+/// §"Design-lock refinement").
+const P6C_OTHERS_R: f64 = 0.98;
+/// Leg-L outcome-stream salt. Distinct from [`P5C_TWIN_SEED_SALT`], so the two
+/// learned twins start from independent starting states; no draws are shared with
+/// item 4's stream.
+const P6_TWIN_SEED_SALT: u64 = 0x6300_0000_0000_0000;
+/// Leg-C degeneracy gate: all-singletons tying-or-beating the argmax on at least
+/// this many seeds labels leg C `DEGENERATE (context only)`.
+const P6C_DEGEN_MIN: usize = 15;
+
+/// Build a planted reliability vector: `others` at every index, `weak` at `b_star`.
+///
+/// All four Part 6 plantings (leg A, leg A counterfactual, leg C, leg C
+/// counterfactual) are instances of this shape; entries outside `required` are
+/// never read by any of the value models.
+fn plant(b_star: usize, weak: f64, others: f64) -> [f64; UNIVERSE] {
+    let mut reliability = [others; UNIVERSE];
+    reliability[b_star] = weak;
+    reliability
+}
+
+/// The corrected Part 6 draw (registration §"Instance draw"): [`draw_routing_instance`]'s
+/// draw logic with a **coverage guarantee** — the whole instance is re-drawn off
+/// the SAME per-seed `SplitMix64` stream until the pool union covers `required`.
+///
+/// Returns the accepted instance plus the number of rejected draws (recorded as
+/// context — the #61 draw missed coverage on 5/30 seeds, which is what made its
+/// sanity leg a statement about the pool rather than about the argmax).
+///
+/// The returned `reliability` carries the **leg-A** planting (`r[b*] = 0.02`,
+/// every other bit `0.35`); the other three plantings are built with [`plant`]
+/// from the same `b_star`. Deterministic per seed, on its own stream, so Part 5b's
+/// draw is untouched.
+fn draw_routing_instance_corrected(seed: u64) -> (RoutingInstance, usize) {
+    let mut rng = SplitMix64::new(seed);
+    let mut rejections = 0usize;
+
+    loop {
+        let n = (8 + rng.next_u64() % 9) as usize;
+        let agents: Vec<Worker> = (0..n)
+            .map(|id| {
+                let k = 1 + rng.next_u64() % 4;
+                let caps = draw_distinct_bits(&mut rng, k);
+                let trust = (20 + rng.next_u64() % 80) as u32;
+                Worker { id, caps, trust }
+            })
+            .collect();
+
+        let m = 7 + rng.next_u64() % 2;
+        let required = draw_distinct_bits(&mut rng, m);
+
+        let req_bits: Vec<usize> = (0..UNIVERSE).filter(|b| required & (1u32 << b) != 0).collect();
+        let b_star = req_bits[(rng.next_u64() % req_bits.len() as u64) as usize];
+
+        let pool_union = agents.iter().fold(0u32, |acc, a| acc | a.caps);
+        if pool_union & required != required {
+            rejections += 1;
+            continue;
+        }
+
+        return (
+            RoutingInstance {
+                agents,
+                required,
+                b_star,
+                reliability: plant(b_star, P6A_WEAK_R, P6A_OTHERS_R),
+            },
+            rejections,
+        );
+    }
+}
+
+/// Leg C's value model: [`TaskCoverageV2`] with a **product-form** full-coverage
+/// bonus — `100 · Π_{b∈required} r_b`, the probability that a fully-covering block
+/// actually delivers every required bit. The partial branch (`w(m) = 80/m` per
+/// covered bit) and the `8` per-member cost are identical.
+///
+/// At `r ≡ 1` the product is 1 and this coincides EXACTLY with
+/// `TaskCoverageV2::unweighted`, which is why leg C reuses argmax `U` as its
+/// unweighted basis rather than drawing a sixth one.
+///
+/// **Degeneracy risk (gotcha 21 / 25):** the full bonus decays geometrically in
+/// `m`, so at any planting materially below 1 it stops being able to pay for the
+/// overlap a merge destroys — exactly the mechanism that made
+/// [`ExpectedOutcomeV2`] degenerate. The registration therefore gates leg C on an
+/// explicit degeneracy analysis that runs BEFORE the comparison.
+struct TaskCoverageV2P {
+    required: u32,
+    reliability: [f64; UNIVERSE],
+}
+
+impl TaskCoverageV2P {
+    fn new(required: u32, reliability: [f64; UNIVERSE]) -> Self {
+        Self {
+            required,
+            reliability,
+        }
+    }
+}
+
+impl ValueCalculator for TaskCoverageV2P {
+    fn calculate_value(&self, agents: &[&dyn AgentCapabilities]) -> f64 {
+        if agents.is_empty() {
+            return 0.0;
+        }
+        let union = agents.iter().fold(0u32, |acc, a| acc | a.capabilities());
+        let covered = union & self.required;
+
+        let coverage = if covered == self.required {
+            let p_full: f64 = (0..UNIVERSE)
+                .filter(|b| self.required & (1u32 << b) != 0)
+                .map(|b| self.reliability[b])
+                .product();
+            V2B_FULL_BONUS * p_full
+        } else {
+            let w = V2B_PARTIAL_BUDGET / f64::from(self.required.count_ones().max(1));
+            w * sum_reliability_of(covered, &self.reliability)
+        };
+
+        coverage - agents.len() as f64 * V2B_MEMBER_COST
+    }
+}
+
+/// Run-validity gate X-B (registration §"Run-validity gates"): the leg-A and
+/// leg-C coefficient conditions, asserted before the battery loop.
+///
+/// Every bound is written as the algebraic condition over the registered
+/// constants, not as a transcribed decimal, so a constant change breaks the gate
+/// rather than silently invalidating the reading.
+///
+/// **Leg A** — the block-level flip compares a full-coverage block of `m`
+/// specialists against the one-member-smaller block that omits `b*`:
+/// `8m > 100·r[b*] + 20·Σ_{b≠b*} r_b` (the `20` is the full/partial budget gap).
+/// It must HOLD at the planting for both `m ∈ {7, 8}` and FAIL at the uniform
+/// counterfactual for every bit — the attribution property leg A's conjunct 3
+/// tests empirically.
+///
+/// **Leg C** — three conditions on the product form: full coverage is strictly
+/// optimal at `r ≡ 1` with margin for every `m ∈ 2..=8`; the equal-size flip holds
+/// at the leg-C planting (a partial block that skips `b*` outscores the
+/// full-coverage block of the same size); and the counterfactual does NOT flip,
+/// including against the one-member-smaller comparison that gets the `8` back.
+fn assert_p6_coefficient_gates() {
+    let budget_gap = V2B_FULL_BONUS - V2B_PARTIAL_BUDGET;
+
+    // Leg A: flip at the planting, no flip at the counterfactual.
+    for m in 7u32..=8 {
+        let mf = f64::from(m);
+        let flip_rhs = V2B_FULL_BONUS * P6A_WEAK_R + budget_gap * (mf - 1.0) * P6A_OTHERS_R;
+        assert!(
+            V2B_MEMBER_COST * mf > flip_rhs,
+            "leg A: the planting must sit inside the block-level flip region at m = {m} \
+             ({} vs {flip_rhs})",
+            V2B_MEMBER_COST * mf
+        );
+        let cf_rhs = V2B_FULL_BONUS * P6A_OTHERS_R + budget_gap * (mf - 1.0) * P6A_OTHERS_R;
+        assert!(
+            V2B_MEMBER_COST * mf <= cf_rhs,
+            "leg A: the uniform counterfactual must NOT flip at m = {m} ({} vs {cf_rhs})",
+            V2B_MEMBER_COST * mf
+        );
+    }
+
+    // Leg C, property 1: full coverage strictly optimal at r = 1, with margin.
+    for m in 2u32..=8 {
+        let mf = f64::from(m);
+        let skip = (V2B_PARTIAL_BUDGET / mf) * (mf - 1.0) + V2B_MEMBER_COST;
+        assert!(
+            V2B_FULL_BONUS > skip,
+            "leg C: at r = 1 the product form must prefer full coverage at m = {m} \
+             ({V2B_FULL_BONUS} vs {skip})"
+        );
+    }
+
+    // Leg C, properties 2 and 3: the equal-size flip at the planting, and the
+    // counterfactual non-flip against the one-member-smaller comparison.
+    for m in 7u32..=8 {
+        let mf = f64::from(m);
+        let partial_skip = (V2B_PARTIAL_BUDGET / mf) * (mf - 1.0) * P6C_OTHERS_R;
+        let full_planted = V2B_FULL_BONUS * P6C_WEAK_R * P6C_OTHERS_R.powi(m as i32 - 1);
+        assert!(
+            partial_skip > full_planted,
+            "leg C: the planting must flip the equal-size comparison at m = {m} \
+             ({partial_skip} vs {full_planted})"
+        );
+        let full_cf = V2B_FULL_BONUS * P6C_OTHERS_R.powi(m as i32);
+        assert!(
+            full_cf > partial_skip + V2B_MEMBER_COST,
+            "leg C: the counterfactual must NOT flip, even one member smaller, at m = {m} \
+             ({full_cf} vs {})",
+            partial_skip + V2B_MEMBER_COST
+        );
+    }
+}
+
+/// Minimum total capability multiplicity `Σ_i |caps_i ∩ required|` over pool
+/// subsets whose union covers `required` — a weighted set cover, solved exactly by
+/// a DP over the `2^m ≤ 256` submasks of `required` × the ≤ 16 pool agents
+/// (microseconds per instance). `None` iff the pool cannot cover `required` at
+/// all, which the corrected draw rules out.
+///
+/// Diagnostic role: this is how much REDUNDANT capability any covering block is
+/// forced to carry on this pool. It is printed beside the analytic feasibility
+/// bound `1.25·m`, so a reader can see whether a seed's geometry admits the
+/// leg-A flip at all before reading its conjunct columns.
+fn min_cover_multiplicity(agents: &[Worker], required: u32) -> Option<u32> {
+    let req_bits: Vec<usize> = (0..UNIVERSE).filter(|b| required & (1u32 << b) != 0).collect();
+    let m = req_bits.len();
+    let compact = |caps: u32| -> u32 {
+        req_bits
+            .iter()
+            .enumerate()
+            .filter(|&(_, &b)| caps & (1u32 << b) != 0)
+            .fold(0u32, |acc, (k, _)| acc | (1u32 << k))
+    };
+
+    let full = (1usize << m) - 1;
+    let mut dp = vec![u32::MAX; full + 1];
+    dp[0] = 0;
+    // Ascending states are a valid order: adding an agent only ever SETS bits, so
+    // every relaxation moves strictly forward through the mask lattice.
+    for s in 0..=full {
+        if dp[s] == u32::MAX {
+            continue;
+        }
+        for a in agents {
+            let am = compact(a.caps);
+            if am == 0 {
+                continue;
+            }
+            let ns = s | am as usize;
+            let cost = dp[s] + am.count_ones();
+            if cost < dp[ns] {
+                dp[ns] = cost;
+            }
+        }
+    }
+
+    (dp[full] != u32::MAX).then_some(dp[full])
+}
+
+/// Per-seed prepass: the corrected draw plus the leg-C argmax `P`.
+///
+/// The degeneracy gate runs FIRST (the registration's order) and the main loop
+/// reads the same instances and the same `P`, so both are computed once per seed
+/// here. Both are pure functions of the seed, so recomputing them in the second
+/// loop would give identical values — this only avoids a second `search()`.
+struct P6Prepass {
+    seed: u64,
+    inst: RoutingInstance,
+    rejections: usize,
+    /// The leg-C planting (`r[b*] = 0.15`, every other bit `0.98`).
+    r_leg_c: [f64; UNIVERSE],
+    /// Argmax under [`TaskCoverageV2P`] at [`Self::r_leg_c`].
+    p_best: CoalitionStructure,
+}
+
+/// One printed row of the leg-A (confirmatory) table.
+struct LegARow {
+    seed: u64,
+    m: u32,
+    b_star: usize,
+    rejections: usize,
+    /// Conjunct 1: the weighted argmax's top block omits `b*`.
+    c1_weighted_omits: bool,
+    /// Conjunct 2: the unweighted argmax's top block covers `b*`.
+    c2_unweighted_covers: bool,
+    /// Conjunct 3: the counterfactual argmax's top block covers `b*` again.
+    c3_counterfactual_covers: bool,
+    fired: bool,
+    real_w: f64,
+    real_u: f64,
+}
+
+/// One printed row of the leg-A **mechanism-diagnostics** table (context only).
+///
+/// These columns exist because a bare firing count cannot distinguish "reliability
+/// weighting does not route" from "the b\*-window is narrower than the spacing of
+/// the competing block values" — see the mechanism-scope paragraph printed below
+/// the table.
+struct LegADiagRow {
+    seed: u64,
+    m: u32,
+    /// Member count of `U`'s top block.
+    s: usize,
+    /// Leg-A-weighted value of `U`'s top block — the LOW edge of the b\* window.
+    win_lo: f64,
+    /// Counterfactual-weighted value of the SAME block — the HIGH edge.
+    win_hi: f64,
+    /// Best leg-A-weighted singleton value among agents OUTSIDE `U`'s top block,
+    /// with the `|caps ∩ required|` of the agent achieving it. `None` when the top
+    /// block is the whole pool.
+    left: Option<(f64, u32)>,
+    /// Minimum `Σ|caps ∩ required|` over pool subsets covering `required`.
+    min_mult: Option<u32>,
+    /// Does `W`'s argmax contain ANY full-coverage block? Separates the RANKING
+    /// channel (formed but ranked below a leftover) from the FORMATION channel.
+    w_has_full: bool,
+}
+
+/// One printed row of the leg-C (exploratory, product-form) table.
+struct LegCRow {
+    seed: u64,
+    p_omits: bool,
+    p_bar_covers: bool,
+    u_covers: bool,
+    real_p: f64,
+    real_u: f64,
+}
+
+/// One printed row of the leg-L (exploratory, learned-posterior) table.
+struct LegLRow {
+    seed: u64,
+    b_star: usize,
+    /// The reference strong bit: the lowest-indexed required bit other than `b*`.
+    strong: usize,
+    r_hat_weak: f64,
+    r_hat_strong: f64,
+    ordered: bool,
+    l_omits: bool,
+    /// Leg A's conjunct 2, repeated here so the skip column has its control in
+    /// the same row.
+    u_covers: bool,
+    /// `max − min` of `r̂` over the required bits. A near-zero spread collapses
+    /// `L`'s partition ranking onto `U`'s, which is what makes the skip column
+    /// unreadable on those seeds.
+    spread: f64,
+    real_l: f64,
+    real_u: f64,
+}
+
+/// Part 6 — the corrected block-level routing test (#63).
+#[allow(clippy::too_many_lines)]
+fn part6_corrected_routing() {
+    println!("# koalisi #63 — Part 6: corrected block-level routing test (REGISTERED)");
+    println!();
+    println!(
+        "_governed by `docs/prereg-K4-routing-corrected.md` (registered 2026-07-31, BEFORE any implementation; owner design-lock D1–D6 on #63). The corrected re-formulation of the #61 lever-1 test, which landed `RUN-INVALID (sanity leg)`: the draw now GUARANTEES pool coverage by rejection re-draw, the skip predicate is **block-level** (the highest-value block under each calculator's own value, `max_by`/`partial_cmp`, last-maximal on ties) rather than the structurally-vacuous partition-level one, and the planting sits inside the algebraic flip region. Three legs: **A** (CONFIRMATORY) — `TaskCoverageV2` at the registered v2 coefficients, `r[b*] = {P6A_WEAK_R}` against `{P6A_OTHERS_R}` elsewhere, with a uniform-`{P6A_OTHERS_R}` attribution counterfactual; **C** (EXPLORATORY) — the product-form full bonus `100·Π r`, planting `{P6C_WEAK_R}`/`{P6C_OTHERS_R}`, gated on its own degeneracy analysis; **L** (EXPLORATORY) — leg A with `r̂` LEARNED from an outcome stream. Seeds **{P6_SEED_START}..{P6_SEED_END}**; structure-level `REAL` is context ONLY (member costs are partition-constant, so no partition-level flip can be bought by dropping a member; the registered flip condition is derived and tested at BLOCK level)._"
+    );
+    println!();
+
+    assert_p6_coefficient_gates();
+    println!(
+        "**Coefficient gate (X-B):** asserted in-code before the loop — leg A's block-level flip `8m > 100·r[b*] + 20·Σ_{{b≠b*}} r_b`, **on the stylized `m`-specialist configuration** (a full-coverage block of `m` one-bit specialists against the one-member-smaller block that omits `b*`), HOLDS at the planting for both `m ∈ {{7, 8}}` and FAILS at the uniform counterfactual for every bit; leg C's product form prefers full coverage at `r ≡ 1` with margin for every `m ∈ 2..=8`, flips at the leg-C planting on the equal-size comparison, and does NOT flip at its counterfactual even against the one-member-smaller block."
+    );
+    println!();
+
+    // --- Prepass: the corrected draws + the leg-C argmax --------------------
+    let mut prepass: Vec<P6Prepass> = Vec::new();
+    for seed in P6_SEED_START..P6_SEED_END {
+        let (inst, rejections) = draw_routing_instance_corrected(seed);
+        let cfg = PopulationConfig::default().with_seed(seed);
+        let r_leg_c = plant(inst.b_star, P6C_WEAK_R, P6C_OTHERS_R);
+        let p_best = search(
+            &inst.agents,
+            &TaskCoverageV2P::new(inst.required, r_leg_c),
+            &cfg,
+        )
+        .best;
+        prepass.push(P6Prepass {
+            seed,
+            inst,
+            rejections,
+            r_leg_c,
+            p_best,
+        });
+    }
+    let n_seeds = prepass.len();
+
+    // --- Leg C degeneracy gate (runs FIRST, per the registration) ----------
+    println!("## Leg C degeneracy gate (runs FIRST, run-and-label-context)");
+    println!();
+    println!(
+        "_the registered gate: on the {n_seeds} leg-C-planted instances, compare the argmax `P` under `TaskCoverageV2P` against the all-singletons structure under the same calculator. All-singletons tying-or-beating `P` on ≥ {P6C_DEGEN_MIN}/{n_seeds} labels leg C `DEGENERATE (context only)` — its rows then carry no reading beyond the degeneracy mechanism. Either way every leg-C row below is measured and printed._"
+    );
+    println!();
+
+    let mut singleton_ge_search = 0usize;
+    let mut singleton_argmax = 0usize;
+    let mut grand_ge_search = 0usize;
+    for pre in &prepass {
+        let n = pre.inst.agents.len();
+        let calc = TaskCoverageV2P::new(pre.inst.required, pre.r_leg_c);
+        let singletons: Vec<Vec<usize>> = (0..n).map(|i| vec![i]).collect();
+        let one_block: Vec<Vec<usize>> = vec![(0..n).collect()];
+        let f_singletons = blocks_fitness(&singletons, &pre.inst.agents, &calc);
+        let f_one = blocks_fitness(&one_block, &pre.inst.agents, &calc);
+        let f_best = blocks_fitness(&pre.p_best.blocks(), &pre.inst.agents, &calc);
+        if f_singletons >= f_best - 1e-9 {
+            singleton_ge_search += 1;
+        }
+        if pre.p_best.blocks().len() == n {
+            singleton_argmax += 1;
+        }
+        if f_one >= f_best - 1e-9 {
+            grand_ge_search += 1;
+        }
+    }
+    let leg_c_degenerate = singleton_ge_search >= P6C_DEGEN_MIN;
+    let leg_c_label = if leg_c_degenerate {
+        "DEGENERATE (context only)"
+    } else {
+        "not degenerate by the registered gate"
+    };
+    println!(
+        "**Gate result:** all-singletons matches or beats the `P` argmax on **{singleton_ge_search}/{n_seeds}** seeds (bar {P6C_DEGEN_MIN}) → leg C is **{leg_c_label}**."
+    );
+    println!();
+    println!(
+        "_Two boundary counts alongside it (item 3's pair, context): the `search()` argmax IS all-singletons on **{singleton_argmax}/{n_seeds}** seeds — the gap between this and the {singleton_ge_search} above is PSO shortfall rather than model degeneracy — and the single grand-coalition block ties or beats the argmax on **{grand_ge_search}/{n_seeds}**._"
+    );
+    println!();
+
+    // --- Main loop ---------------------------------------------------------
+    let mut a_rows: Vec<LegARow> = Vec::new();
+    let mut diag_rows: Vec<LegADiagRow> = Vec::new();
+    let mut c_rows: Vec<LegCRow> = Vec::new();
+    let mut l_rows: Vec<LegLRow> = Vec::new();
+
+    let mut sanity_ok = 0usize;
+    let mut c1_count = 0usize;
+    let mut c2_count = 0usize;
+    let mut c3_count = 0usize;
+    let mut fired_count = 0usize;
+    let mut control_failed = 0usize;
+    let mut partition_differs = 0usize;
+    let mut counterfactual_partition_differs = 0usize;
+    let mut ordering_ok = 0usize;
+    let mut total_rejections = 0usize;
+
+    let mut reals_w: Vec<f64> = Vec::new();
+    let mut reals_u_a: Vec<f64> = Vec::new();
+    let mut reals_p: Vec<f64> = Vec::new();
+    let mut reals_u_c: Vec<f64> = Vec::new();
+    let mut reals_l: Vec<f64> = Vec::new();
+    let mut spreads: Vec<f64> = Vec::new();
+
+    for pre in &prepass {
+        let inst = &pre.inst;
+        let cfg = PopulationConfig::default().with_seed(pre.seed);
+        let b_star_bit = 1u32 << inst.b_star;
+        total_rejections += pre.rejections;
+
+        // The four plantings + the learned twin. `inst.reliability` IS the leg-A
+        // planting (the corrected draw returns it); the counterfactuals re-plant
+        // `b*` strong on the same draw, which is the attribution control.
+        let r_a = inst.reliability;
+        let r_a_bar = plant(inst.b_star, P6A_OTHERS_R, P6A_OTHERS_R);
+        let r_c_bar = plant(inst.b_star, P6C_OTHERS_R, P6C_OTHERS_R);
+        let r_hat = learned_reliability(inst, pre.seed, P6_TWIN_SEED_SALT, P5C_TWIN_TASKS);
+
+        let u_calc = TaskCoverageV2::unweighted(inst.required);
+        let w_calc = TaskCoverageV2::weighted(inst.required, r_a);
+        let w_bar_calc = TaskCoverageV2::weighted(inst.required, r_a_bar);
+        let p_calc = TaskCoverageV2P::new(inst.required, pre.r_leg_c);
+        let p_bar_calc = TaskCoverageV2P::new(inst.required, r_c_bar);
+        let l_calc = TaskCoverageV2::weighted(inst.required, r_hat);
+
+        let u_best = search(&inst.agents, &u_calc, &cfg).best;
+        let w_best = search(&inst.agents, &w_calc, &cfg).best;
+        let w_bar_best = search(&inst.agents, &w_bar_calc, &cfg).best;
+        let p_bar_best = search(&inst.agents, &p_bar_calc, &cfg).best;
+        let l_best = search(&inst.agents, &l_calc, &cfg).best;
+
+        // Every top block is scored under its OWN argmax's calculator.
+        let u_top = top_block_mask(&u_best, &inst.agents, &u_calc);
+        let w_top = top_block_mask(&w_best, &inst.agents, &w_calc);
+        let w_bar_top = top_block_mask(&w_bar_best, &inst.agents, &w_bar_calc);
+        let p_top = top_block_mask(&pre.p_best, &inst.agents, &p_calc);
+        let p_bar_top = top_block_mask(&p_bar_best, &inst.agents, &p_bar_calc);
+        let l_top = top_block_mask(&l_best, &inst.agents, &l_calc);
+
+        // Leg A — the confirmatory conjuncts.
+        let sanity = u_top & inst.required == inst.required;
+        if sanity {
+            sanity_ok += 1;
+        }
+        let c1 = w_top & b_star_bit == 0;
+        let c2 = u_top & b_star_bit != 0;
+        let c3 = w_bar_top & b_star_bit != 0;
+        c1_count += usize::from(c1);
+        c2_count += usize::from(c2);
+        c3_count += usize::from(c3);
+        let fired = c1 && c2 && c3;
+        if fired {
+            fired_count += 1;
+        }
+        if c1 && c2 && !c3 {
+            control_failed += 1;
+        }
+        if w_best.assignment != u_best.assignment {
+            partition_differs += 1;
+        }
+        // Attribution-validity diagnostic. At a UNIFORM reliability the weighted
+        // total is an increasing affine map of the unweighted total, so W̄'s and
+        // U's argmax partitions should coincide up to float ties — expected 0.
+        // Counted, never asserted: a float tie must not panic the registered run.
+        if w_bar_best.assignment != u_best.assignment {
+            counterfactual_partition_differs += 1;
+        }
+
+        let real_w = real_payoff(&w_best, &inst.agents, inst.required, &r_a);
+        let real_u_a = real_payoff(&u_best, &inst.agents, inst.required, &r_a);
+        let real_p = real_payoff(&pre.p_best, &inst.agents, inst.required, &pre.r_leg_c);
+        let real_u_c = real_payoff(&u_best, &inst.agents, inst.required, &pre.r_leg_c);
+        let real_l = real_payoff(&l_best, &inst.agents, inst.required, &r_a);
+        reals_w.push(real_w);
+        reals_u_a.push(real_u_a);
+        reals_p.push(real_p);
+        reals_u_c.push(real_u_c);
+        reals_l.push(real_l);
+
+        // Leg L — the gotcha-24 ordering check, against the lowest-indexed
+        // required bit other than `b*` (the item-4 reference).
+        let strong = (0..UNIVERSE)
+            .find(|&b| inst.required & (1u32 << b) != 0 && b != inst.b_star)
+            .expect("m >= 7 ⇒ a required bit other than b* always exists");
+        let ordered = r_hat[inst.b_star] < r_hat[strong];
+        if ordered {
+            ordering_ok += 1;
+        }
+        let (lo, hi) = (0..UNIVERSE)
+            .filter(|b| inst.required & (1u32 << b) != 0)
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), b| {
+                (lo.min(r_hat[b]), hi.max(r_hat[b]))
+            });
+        let spread = hi - lo;
+        spreads.push(spread);
+
+        // --- Mechanism diagnostics (context only) --------------------------
+        // The b* window: the same block (U's top) valued under the leg-A planting
+        // and under the counterfactual. A competing block can only flip the
+        // ranking if its value lands strictly between these two edges.
+        let u_top_block = top_block(&u_best, &inst.agents, &u_calc);
+        let u_top_view = coalition_view(&inst.agents, &u_top_block);
+        let win_lo = w_calc.calculate_value(&u_top_view);
+        let win_hi = w_bar_calc.calculate_value(&u_top_view);
+        let left = inst
+            .agents
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| !u_top_block.contains(i))
+            .map(|(i, a)| {
+                (
+                    w_calc.calculate_value(&coalition_view(&inst.agents, &[i])),
+                    (a.caps & inst.required).count_ones(),
+                )
+            })
+            .max_by(|x, y| x.0.partial_cmp(&y.0).unwrap_or(std::cmp::Ordering::Equal));
+        let w_has_full = w_best.blocks().iter().any(|blk| {
+            blk.iter().fold(0u32, |acc, &i| acc | inst.agents[i].caps) & inst.required
+                == inst.required
+        });
+        diag_rows.push(LegADiagRow {
+            seed: pre.seed,
+            m: inst.required.count_ones(),
+            s: u_top_block.len(),
+            win_lo,
+            win_hi,
+            left,
+            min_mult: min_cover_multiplicity(&inst.agents, inst.required),
+            w_has_full,
+        });
+
+        a_rows.push(LegARow {
+            seed: pre.seed,
+            m: inst.required.count_ones(),
+            b_star: inst.b_star,
+            rejections: pre.rejections,
+            c1_weighted_omits: c1,
+            c2_unweighted_covers: c2,
+            c3_counterfactual_covers: c3,
+            fired,
+            real_w,
+            real_u: real_u_a,
+        });
+        c_rows.push(LegCRow {
+            seed: pre.seed,
+            p_omits: p_top & b_star_bit == 0,
+            p_bar_covers: p_bar_top & b_star_bit != 0,
+            u_covers: c2,
+            real_p,
+            real_u: real_u_c,
+        });
+        l_rows.push(LegLRow {
+            seed: pre.seed,
+            b_star: inst.b_star,
+            strong,
+            r_hat_weak: r_hat[inst.b_star],
+            r_hat_strong: r_hat[strong],
+            ordered,
+            l_omits: l_top & b_star_bit == 0,
+            u_covers: c2,
+            spread,
+            real_l,
+            real_u: real_u_a,
+        });
+    }
+
+    // --- Leg A table -------------------------------------------------------
+    println!("## Leg A — confirmatory block-level routing (seeds {P6_SEED_START}..{P6_SEED_END})");
+    println!();
+    println!(
+        "| seed | m | b* | rejects | C1 W-top omits b* | C2 U-top covers b* | C3 W̄-top covers b* | fired | REAL_w | REAL_u | ΔREAL |"
+    );
+    println!(
+        "|-----:|--:|---:|--------:|:-----------------:|:------------------:|:-------------------:|:-----:|-------:|-------:|------:|"
+    );
+    for r in &a_rows {
+        println!(
+            "| {} | {} | {} | {} | {} | {} | {} | {} | {:.4} | {:.4} | {:+.4} |",
+            r.seed,
+            r.m,
+            r.b_star,
+            r.rejections,
+            if r.c1_weighted_omits { "yes" } else { "no" },
+            if r.c2_unweighted_covers { "yes" } else { "no" },
+            if r.c3_counterfactual_covers { "yes" } else { "no" },
+            if r.fired { "yes" } else { "no" },
+            r.real_w,
+            r.real_u,
+            r.real_w - r.real_u
+        );
+    }
+    println!();
+    let med_w = median(reals_w);
+    let med_u_a = median(reals_u_a.clone());
+    println!(
+        "**Medians ({P6_SEED_START}..{P6_SEED_END}, leg-A planting):** REAL_w {med_w:.4} · REAL_u {med_u_a:.4}. Structure-level `REAL` is CONTEXT (registration structural note 1) — never gated. Note also that `W` is not a `REAL`-maximizer: `TaskCoverageV2::weighted` credits a full-coverage block `(20/m)·Σ_required r` on top of the partial term where `REAL` credits `20·Π r` — 6.06 vs 0.0007 at this planting (m = 7), so the two disagree about how much full coverage is worth. At this planting `REAL` itself prefers full coverage over the `b*`-skip by only ~0.23 per block at equal size."
+    );
+    println!();
+
+    // --- Leg A mechanism diagnostics (context only) ------------------------
+    println!("## Leg A mechanism diagnostics (context)");
+    println!();
+    println!(
+        "| seed | m | s | win_lo | win_hi | v_left | j | min_mult | 1.25·m | W full? |"
+    );
+    println!(
+        "|-----:|--:|--:|-------:|-------:|-------:|--:|---------:|-------:|:-------:|"
+    );
+    for r in &diag_rows {
+        let (v_left, j) = match r.left {
+            Some((v, j)) => (format!("{v:.4}"), j.to_string()),
+            None => ("—".to_string(), "—".to_string()),
+        };
+        let min_mult = r
+            .min_mult
+            .map_or_else(|| "—".to_string(), |x| x.to_string());
+        println!(
+            "| {} | {} | {} | {:.4} | {:.4} | {} | {} | {} | {:.2} | {} |",
+            r.seed,
+            r.m,
+            r.s,
+            r.win_lo,
+            r.win_hi,
+            v_left,
+            j,
+            min_mult,
+            1.25 * f64::from(r.m),
+            if r.w_has_full { "yes" } else { "no" }
+        );
+    }
+    println!();
+    println!(
+        "_Mechanism scope: firing requires the best competing block's value to fall inside a window of width `100·(0.35 − 0.02)/m` (4.71 at m = 7, 4.13 at m = 8) that the b* planting opens between the weighted and counterfactual valuations of the full-coverage block. Competing blocks are singletons whose values sit on a lattice of spacing `w(m)·0.35` (4.00 / 3.50), so at most one leftover capability count can land inside for a given cover size. A low fired count is therefore consistent with \"the b*-window is narrower than the resolution of the competing block values\" as well as with \"no routing\"; the per-seed (s, j) columns above are what distinguishes them._"
+    );
+    println!();
+
+    // --- Leg C table -------------------------------------------------------
+    println!("## Leg C — product-form full bonus (EXPLORATORY, {leg_c_label})");
+    println!();
+    println!("| seed | P-top omits b* | P̄-top covers b* | U-top covers b* | REAL_p | REAL_u |");
+    println!("|-----:|:--------------:|:----------------:|:---------------:|-------:|-------:|");
+    for r in &c_rows {
+        println!(
+            "| {} | {} | {} | {} | {:.4} | {:.4} |",
+            r.seed,
+            if r.p_omits { "yes" } else { "no" },
+            if r.p_bar_covers { "yes" } else { "no" },
+            if r.u_covers { "yes" } else { "no" },
+            r.real_p,
+            r.real_u
+        );
+    }
+    println!();
+    let c_fired = c_rows
+        .iter()
+        .filter(|r| r.p_omits && r.u_covers && r.p_bar_covers)
+        .count();
+    let med_p = median(reals_p);
+    let med_u_c = median(reals_u_c);
+    println!(
+        "**Medians ({P6_SEED_START}..{P6_SEED_END}, leg-C planting):** REAL_p {med_p:.4} · REAL_u {med_u_c:.4}. The three-conjunct skip predicate fires on **{c_fired}/{n_seeds}** seeds. No bar and no verdict — leg C is exploratory in either degeneracy state. `REAL` is the expected payoff at the ORIGINAL v2 coefficients (partial credit per covered bit); `TaskCoverageV2P` maximizes an all-or-nothing success probability instead, and at this planting the two disagree in direction (per block at equal size, REAL prefers full coverage 71.57 vs 67.20 while the product form prefers the skip 67.20 vs 13.29). `REAL_p` below `REAL_u` is therefore expected by construction and carries no reading about routing."
+    );
+    println!();
+
+    // --- Leg L table -------------------------------------------------------
+    println!("## Leg L — learned-posterior twin of leg A (EXPLORATORY)");
+    println!();
+    println!(
+        "_the same leg-A comparison with `r̂` LEARNED instead of read off the planted vector: a fresh `aif-e1` `PersistentAifArm` observes {P5C_TWIN_TASKS} tasks of independent per-bit Bernoulli(`r_b`) outcomes at the leg-A planting (own `SplitMix64` stream, salted off the seed with a Part 6 salt so item 4's stream is untouched), then `r̂[b] = beliefs[b][0]`. The leg-A planting is a harder ordering problem than item 4's for a reason specific to the recency-dominated read (gotcha 24): the absolute gap narrows (0.33 vs 0.75) while the ratio widens (17.5× vs 6.0×), and — the operative change — the reference strong bit is itself only Bernoulli({P6A_OTHERS_R}), so it fails on most recent tasks and reads low too. Whether that degrades the ordering is what this leg measures. REAL still uses the PLANTED `r` (ground truth). No bar, no verdict._"
+    );
+    println!();
+    println!(
+        "| seed | b* | strong bit | r̂[b*] | r̂[strong] | r̂ spread | ordered | L-top omits b* | U-top covers b* | REAL_l | REAL_u |"
+    );
+    println!(
+        "|-----:|---:|-----------:|------:|----------:|---------:|:-------:|:--------------:|:---------------:|-------:|-------:|"
+    );
+    for r in &l_rows {
+        println!(
+            "| {} | {} | {} | {:.4} | {:.4} | {:.4} | {} | {} | {} | {:.4} | {:.4} |",
+            r.seed,
+            r.b_star,
+            r.strong,
+            r.r_hat_weak,
+            r.r_hat_strong,
+            r.spread,
+            if r.ordered { "yes" } else { "no" },
+            if r.l_omits { "yes" } else { "no" },
+            if r.u_covers { "yes" } else { "no" },
+            r.real_l,
+            r.real_u
+        );
+    }
+    println!();
+    let l_omits_count = l_rows.iter().filter(|r| r.l_omits).count();
+    let l_joint_count = l_rows.iter().filter(|r| r.l_omits && r.u_covers).count();
+    let med_l = median(reals_l);
+    let med_spread = median(spreads);
+    println!(
+        "**Medians ({P6_SEED_START}..{P6_SEED_END}):** REAL_l {med_l:.4} · REAL_u {med_u_a:.4} · `r̂` spread {med_spread:.4}. The posterior ranks `b*` below the reference strong bit on **{ordering_ok}/{n_seeds}** seeds (the gotcha-24 ordering check) — that ORDERING is the claim this leg supports. The learned-weighted argmax's top block omits `b*` on {l_omits_count}/{n_seeds}, and omits it while `U`'s covers it on {l_joint_count}/{n_seeds}; the skip column is readable only where the spread is material, since a near-uniform `r̂` collapses `L`'s partition ranking onto `U`'s and leaves only the member-cost-driven top-block shift."
+    );
+    println!();
+
+    // --- H-BR evaluation (leg A only) --------------------------------------
+    let sanity_leg = sanity_ok >= HR_SANITY_MIN;
+    let skip_leg = fired_count >= HR_CONSISTENCY_MIN;
+
+    println!("## H-BR evaluation — block-level routing (leg A only)");
+    println!();
+    println!(
+        "- **Sanity leg (run-invalidating):** the top block of `U` achieves full required coverage on {sanity_ok}/{n_seeds} ≥ {HR_SANITY_MIN} → {}",
+        pass(sanity_leg)
+    );
+    println!(
+        "- **Skip leg:** all three conjuncts hold on {fired_count}/{n_seeds} ≥ {HR_CONSISTENCY_MIN} → {}",
+        pass(skip_leg)
+    );
+    println!();
+
+    if sanity_leg {
+        let verdict = if skip_leg {
+            "VALIDATED (block-routing)"
+        } else {
+            "FALSIFIED (block-routing)"
+        };
+        println!("**VERDICT (corrected routing — #63): {verdict}**");
+    } else {
+        println!("**VERDICT (corrected routing — #63): RUN-INVALID (sanity leg)**");
+    }
+    println!();
+    println!(
+        "_VALIDATED (block-routing) = sanity ∧ skip; FALSIFIED (block-routing) = sanity ∧ ¬skip; a sanity-leg failure invalidates the run rather than producing a verdict. Bars ({HR_SANITY_MIN}/{n_seeds} sanity, {HR_CONSISTENCY_MIN}/{n_seeds} consistency) inherit the family's conventions and were locked in the prereg before implementation. The headline is BLOCK-level only — no structure-level routing claim is available from this design._"
+    );
+    println!();
+    println!(
+        "_Read this verdict against the mechanism-scope paragraph under the leg-A diagnostics table: a low fired count is consistent with the b*-window being narrower than the spacing of the competing block values, not only with the absence of routing._"
+    );
+    println!();
+
+    // --- Context (never gated) ---------------------------------------------
+    println!("## Context (recorded, never gated)");
+    println!();
+    println!(
+        "- Per-conjunct raw counts: C1 (weighted top block omits `b*`) {c1_count}/{n_seeds} · C2 (unweighted top block covers `b*`) {c2_count}/{n_seeds} · C3 (counterfactual top block covers `b*`) {c3_count}/{n_seeds}; all three together {fired_count}/{n_seeds}."
+    );
+    println!(
+        "- C2 is entailed by the sanity leg (`b*` is a required bit, so a top block covering ALL of `required` covers `b*`), so on a valid run the skip leg is effectively C1 ∧ C3."
+    );
+    println!(
+        "- A skip-leg shortfall decomposes into \"no flip\" (¬C1) and \"control failed\" (C1 ∧ C3 missing, i.e. C1 ∧ C2 ∧ ¬C3), the latter measured on {control_failed}/{n_seeds} seeds. A control failure is a SIZE effect of the uniform counterfactual — scaling every reliability to {P6A_OTHERS_R} scales the coverage terms but not the `8`-per-member cost — and is not evidence about routing."
+    );
+    println!(
+        "- **Attribution validity:** `W̄`'s and `U`'s argmax partitions differ on {counterfactual_partition_differs}/{n_seeds} seeds. Expected 0 — at a uniform reliability the weighted total is an increasing affine map of the unweighted total, so the two argmaxes coincide up to float ties. Any nonzero count means C1-vs-C3 was an intent-to-treat contrast across DIFFERENT partitions on those seeds. Counted, never asserted, so a float tie cannot panic the registered run."
+    );
+    println!(
+        "- The weighted and unweighted argmax **partitions** differ at all on {partition_differs}/{n_seeds} seeds. Member costs sum to the partition-constant −8·N under every calculator here, so member savings can never motivate a partition change; any difference counted here comes from the coverage terms alone."
+    );
+    println!(
+        "- Coverage-guaranteed draw: {total_rejections} instance re-draws across the {n_seeds} seeds (the #61 draw had no guarantee and missed coverage on 5/30)."
+    );
+    println!(
+        "- Leg C degeneracy: all-singletons ties or beats the argmax on {singleton_ge_search}/{n_seeds} (bar {P6C_DEGEN_MIN}) → **{leg_c_label}**; the argmax IS all-singletons on {singleton_argmax}/{n_seeds} and the grand coalition ties-or-beats it on {grand_ge_search}/{n_seeds}."
+    );
+    println!();
 }
 
 #[cfg(test)]
@@ -5210,6 +6103,157 @@ mod part4c_tests {
             for (x, y) in before.agents.iter().zip(&after.agents) {
                 assert_eq!((x.id, x.caps, x.trust), (y.id, y.caps, y.trust));
             }
+        }
+    }
+
+    /// Part 6 (#63) run-validity gate X-B (also asserted in the run path).
+    #[test]
+    fn p6_coefficient_gates_hold() {
+        assert_p6_coefficient_gates();
+    }
+
+    /// Part 6 (#63): the product-form model coincides with the unweighted
+    /// `TaskCoverageV2` at `r ≡ 1` — the registration's "leg C reuses argmax `U`"
+    /// basis. Checked on all three branches (full coverage, partial, empty).
+    #[test]
+    fn p6_product_form_matches_unweighted_at_r1() {
+        let required = 0b0111_1111u32; // m = 7
+        let specialists: Vec<Worker> = (0..7)
+            .map(|b| Worker {
+                id: b,
+                caps: 1u32 << b,
+                trust: 50,
+            })
+            .collect();
+        let unweighted = TaskCoverageV2::unweighted(required);
+        let product = TaskCoverageV2P::new(required, [1.0; UNIVERSE]);
+
+        let full: Vec<usize> = (0..7).collect();
+        let partial: Vec<usize> = vec![0, 2, 5];
+        for members in [full, partial, Vec::new()] {
+            let view = coalition_view(&specialists, &members);
+            let a = unweighted.calculate_value(&view);
+            let b = product.calculate_value(&view);
+            assert!(
+                (a - b).abs() < 1e-9,
+                "r = 1 must coincide on {members:?}: {a} vs {b}"
+            );
+        }
+    }
+
+    /// Part 6 (#63): the corrected draw honours its coverage guarantee, and it is
+    /// a pure function of the seed (instance AND rejection count). Run over the
+    /// WHOLE registered seed range — the draw carries no `search()`, so this is
+    /// cheap, and it is what pins the rejection loop as terminating on every seed
+    /// the battery will actually use.
+    #[test]
+    fn p6_corrected_draw_covers_required() {
+        for seed in P6_SEED_START..P6_SEED_END {
+            let (inst, rejections) = draw_routing_instance_corrected(seed);
+            let pool_union = inst.agents.iter().fold(0u32, |acc, a| acc | a.caps);
+            assert_eq!(
+                pool_union & inst.required,
+                inst.required,
+                "seed {seed}: the pool union must cover every required bit"
+            );
+            let m = inst.required.count_ones();
+            assert!(m == 7 || m == 8, "m must be 7 or 8, got {m}");
+            assert!(
+                inst.required & (1u32 << inst.b_star) != 0,
+                "b* must be a required bit"
+            );
+            assert!((inst.reliability[inst.b_star] - P6A_WEAK_R).abs() < 1e-12);
+            for b in (0..UNIVERSE).filter(|&b| b != inst.b_star) {
+                assert!((inst.reliability[b] - P6A_OTHERS_R).abs() < 1e-12);
+            }
+
+            let (again, rejections_again) = draw_routing_instance_corrected(seed);
+            assert_eq!(rejections, rejections_again);
+            assert_eq!((again.required, again.b_star), (inst.required, inst.b_star));
+            assert_eq!(again.agents.len(), inst.agents.len());
+            for (x, y) in inst.agents.iter().zip(&again.agents) {
+                assert_eq!((x.id, x.caps, x.trust), (y.id, y.caps, y.trust));
+            }
+        }
+    }
+
+    /// Part 6 (#63), 2-seed smoke: the per-seed leg-A machinery (corrected draw →
+    /// three argmaxes → block-level conjuncts → diagnostics) runs end-to-end.
+    ///
+    /// The value here is EXECUTION, not logic: the conjuncts are one-line
+    /// restatements of their own definitions, so asserting them back would test
+    /// nothing. What can actually break is the pipeline — a panicking search, an
+    /// out-of-range index, a non-finite payoff — and that is what this covers.
+    /// Does NOT run the 30-seed battery.
+    #[test]
+    fn p6_two_seed_smoke() {
+        for seed in P6_SEED_START..P6_SEED_START + 2 {
+            let (inst, _) = draw_routing_instance_corrected(seed);
+            let cfg = PopulationConfig::default().with_seed(seed);
+            let b_star_bit = 1u32 << inst.b_star;
+
+            let u_calc = TaskCoverageV2::unweighted(inst.required);
+            let w_calc = TaskCoverageV2::weighted(inst.required, inst.reliability);
+            let w_bar_calc = TaskCoverageV2::weighted(
+                inst.required,
+                plant(inst.b_star, P6A_OTHERS_R, P6A_OTHERS_R),
+            );
+
+            let u_best = search(&inst.agents, &u_calc, &cfg).best;
+            let w_best = search(&inst.agents, &w_calc, &cfg).best;
+            let w_bar_best = search(&inst.agents, &w_bar_calc, &cfg).best;
+
+            let u_top = top_block_mask(&u_best, &inst.agents, &u_calc);
+            let w_top = top_block_mask(&w_best, &inst.agents, &w_calc);
+            let w_bar_top = top_block_mask(&w_bar_best, &inst.agents, &w_bar_calc);
+
+            let _conjuncts = (
+                w_top & b_star_bit == 0,
+                u_top & b_star_bit != 0,
+                w_bar_top & b_star_bit != 0,
+            );
+
+            // The diagnostics half of the per-seed work, exercised for the same
+            // reason: these are the paths that can panic or index out of range.
+            let u_top_block = top_block(&u_best, &inst.agents, &u_calc);
+            let u_top_view = coalition_view(&inst.agents, &u_top_block);
+            assert!(w_calc.calculate_value(&u_top_view).is_finite());
+            assert!(w_bar_calc.calculate_value(&u_top_view).is_finite());
+            assert_eq!(
+                u_top_block
+                    .iter()
+                    .fold(0u32, |acc, &i| acc | inst.agents[i].caps),
+                u_top,
+                "top_block and top_block_mask must agree"
+            );
+
+            let min_mult = min_cover_multiplicity(&inst.agents, inst.required)
+                .expect("the corrected draw guarantees pool coverage");
+            assert!(
+                min_mult >= inst.required.count_ones(),
+                "a cover must carry at least one unit of multiplicity per required bit"
+            );
+
+            let real = real_payoff(&w_best, &inst.agents, inst.required, &inst.reliability);
+            assert!(real.is_finite(), "REAL must be finite");
+        }
+    }
+
+    /// Part 6 (#63): the [`p5c_learned_reliability`] wrapper is behaviour-identical
+    /// to the parameterized [`learned_reliability`] at the P5C salt and task count —
+    /// the refactor that let leg L reuse the pipeline on its own salt.
+    #[test]
+    fn p6_learned_wrapper_unchanged() {
+        for seed in 120..122 {
+            let inst = draw_routing_instance(seed);
+            let via_wrapper = p5c_learned_reliability(&inst, seed);
+            let via_inner = learned_reliability(&inst, seed, P5C_TWIN_SEED_SALT, P5C_TWIN_TASKS);
+            assert_eq!(via_wrapper, via_inner, "seed {seed}");
+            let salted = learned_reliability(&inst, seed, P6_TWIN_SEED_SALT, P5C_TWIN_TASKS);
+            assert!(
+                salted.iter().all(|r| r.is_finite() && (0.0..=1.0).contains(r)),
+                "the Part 6 salt must still yield probabilities"
+            );
         }
     }
 }
