@@ -21,6 +21,51 @@ Planned work — issue-tracked (details in [`CLAUDE.md`](./CLAUDE.md)
 - **[#25]** metrics example, reframed onto the `CoalitionService` decision
   path / topology events.
 
+## [0.19.0] — 2026-07-31
+
+The EQ1 ([#61]) Part 5c close-out: the four exploratory items deferred from
+the v0.18.0 battery-v2 run, delivered as an appended addendum to the
+immutable report (`docs/ab-report-K4-battery-v2.md`) — nothing registered
+was edited. Headlines (all context, non-gating): the join rail is
+margin-proof at 12 bits too and the v2-regime quality inversion widens
+there (mag 0.0607 < scalar 0.1062 < e1-degraded 0.1657); leave-side
+hysteresis is the first score-space lever measured to move churn on the E1
+lineage (0.85× at h = 0.30, 29/30 paired) but pays −24% quality; the
+expected-outcome value model is gotcha-21 degenerate by a third mechanism
+(per-block double-counting); learned reliability posteriors rank the
+planted weak bit correctly on 30/30 seeds.
+
+### Added
+- **`PersistentAifConfig::n_bits: usize`** (feature `decision`): the
+  world-model bit-width, identity default **8** — at the default the arm
+  is bit-for-bit the registered arm (asserted in-code + by the X-A/X-C
+  gates). Out-of-range values clamp to `1..=16` with a warning. +5 unit
+  tests (identity, 12-bit construction/decisions, snapshot width, mismatch
+  skip, clamp).
+- **`examples/strategy_comparison.rs` Part 5c** (`part5c_addendum()`,
+  additive; every pre-existing printed line byte-identical — X-C
+  re-verified against a fresh pre-change baseline): the four deferred
+  registered-exploratory items — 12-bit `w12-draw` slice (`Regime::W12`,
+  `|required|` 2..=12, caps 1..=6), leave-side hysteresis sweep with an
+  asserted in-line baseline, expected-outcome value model with its
+  degeneracy analysis, learned-posterior routing twins on a salted
+  side-stream. +9 example tests (one `#[ignore]`d release-only battery
+  smoke).
+- **Report addendum** appended to `docs/ab-report-K4-battery-v2.md` with a
+  7-entry implementation & deviation ledger (clamp-not-error, hook
+  widening, the latent out-of-universe-mask fix, test-cost concessions,
+  both item-2 cell-selection interpretations, the item-3 gating reading,
+  the item-4 stream discipline).
+
+### Changed
+- **`PersistentAifArm::observe_outcome`** takes `&[bool]` (was
+  `&[bool; 8]`; **breaking**) — `&[bool; 8]` coerces, so existing call
+  sites compile unchanged; a length mismatch warns and skips the update.
+  The shared example outcome hook widened the same way (output-neutral,
+  proven by X-C).
+- `decide()` masks `required` to the low `n_bits` bits — a no-op for every
+  previously-reachable input, load-bearing once `n_bits` is configurable.
+
 ## [0.18.0] — 2026-07-31
 
 The EQ1 ([#61]) battery-v2 release: the registered de-saturated-regime run.
