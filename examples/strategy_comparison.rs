@@ -109,6 +109,10 @@ const SEEDS: u64 = 30;
 const TASKS: usize = 20;
 /// Capability-universe width (bits `0..UNIVERSE_BITS`).
 const UNIVERSE_BITS: u64 = 8;
+/// Capability-universe width of the Part 5c widened slice (koalisi #61, #61
+/// Part 5c — exploratory). Everything registered before Part 5c runs at
+/// [`UNIVERSE_BITS`].
+const W12_UNIVERSE_BITS: u64 = 12;
 /// Instances with `n <= ORACLE_MAX_N` are oracle-eligible (brute force ≤ 255
 /// non-empty subsets).
 const ORACLE_MAX_N: usize = 8;
@@ -222,6 +226,10 @@ fn main() {
     println!("{}", "=".repeat(72));
     println!();
     part5b_reliability_routing();
+    println!();
+    println!("{}", "=".repeat(72));
+    println!();
+    part5c_addendum();
 }
 
 // ===========================================================================
@@ -338,10 +346,18 @@ impl SplitMix64 {
 /// Rejection-sample `k` distinct bits from the low `UNIVERSE_BITS` bits (see the
 /// module doc's "Protocol decisions").
 fn draw_distinct_bits(rng: &mut SplitMix64, k: u64) -> u32 {
+    draw_distinct_bits_in(rng, k, UNIVERSE_BITS)
+}
+
+/// [`draw_distinct_bits`] over an arbitrary universe width (koalisi #61 Part 5c,
+/// the 12-bit widened slice). The draw schedule is the frozen one — one
+/// `next_u64` per rejection round, `% universe` — so at `universe =
+/// UNIVERSE_BITS` this IS the frozen helper, byte-for-byte.
+fn draw_distinct_bits_in(rng: &mut SplitMix64, k: u64, universe: u64) -> u32 {
     let mut mask = 0u32;
     let mut count = 0u64;
     while count < k {
-        let bit = (rng.next_u64() % UNIVERSE_BITS) as u32;
+        let bit = (rng.next_u64() % universe) as u32;
         let b = 1u32 << bit;
         if mask & b == 0 {
             mask |= b;
@@ -408,6 +424,19 @@ enum Regime {
     /// The battery-v2 draw: `|required| ∈ 2..=8` — the de-saturated regime the
     /// `docs/prereg-K4-battery-v2.md` registration fixes.
     V2,
+    /// The Part 5c widened draw (EXPLORATORY): a **12-bit** universe,
+    /// `|required| ∈ 2..=12`, worker caps `1..=6`. Requires an arm at
+    /// `n_bits = 12`; the 8-bit regimes are untouched.
+    W12,
+}
+
+/// Capability-universe width of a regime, in bits. Also the outcome-slice width
+/// a `PersistentAifArm` must be configured for to run that regime.
+fn regime_universe(regime: Regime) -> usize {
+    match regime {
+        Regime::V1 | Regime::V2 => UNIVERSE_BITS as usize,
+        Regime::W12 => W12_UNIVERSE_BITS as usize,
+    }
 }
 
 /// The battery-v2 instance prefix (koalisi #61, EQ1): identical to
@@ -434,6 +463,33 @@ fn draw_prefix_v2(rng: &mut SplitMix64) -> (Vec<Worker>, Vec<Task>) {
         .map(|_| {
             let r = 2 + rng.next_u64() % 7;
             let required = draw_distinct_bits(rng, r);
+            let order = fisher_yates(rng, n);
+            Task { required, order }
+        })
+        .collect();
+
+    (agents, tasks)
+}
+
+/// The Part 5c widened instance prefix (koalisi #61, EXPLORATORY): the v2 shape
+/// lifted onto a **12-bit** universe — pool `n ∈ 4..=16` unchanged, worker caps
+/// `k ∈ 1..=6` distinct bits, `|required| ∈ 2..=12`. A separate function for the
+/// same reason [`draw_prefix_v2`] is one: the registered draws are frozen.
+fn draw_prefix_w12(rng: &mut SplitMix64) -> (Vec<Worker>, Vec<Task>) {
+    let n = (4 + rng.next_u64() % 13) as usize;
+    let agents: Vec<Worker> = (0..n)
+        .map(|id| {
+            let k = 1 + rng.next_u64() % 6;
+            let caps = draw_distinct_bits_in(rng, k, W12_UNIVERSE_BITS);
+            let trust = (20 + rng.next_u64() % 80) as u32;
+            Worker { id, caps, trust }
+        })
+        .collect();
+
+    let tasks: Vec<Task> = (0..TASKS)
+        .map(|_| {
+            let r = 2 + rng.next_u64() % 11;
+            let required = draw_distinct_bits_in(rng, r, W12_UNIVERSE_BITS);
             let order = fisher_yates(rng, n);
             Task { required, order }
         })
@@ -483,6 +539,7 @@ fn generate_instance_b_regime(
     let (agents, tasks) = match regime {
         Regime::V1 => draw_prefix(&mut rng),
         Regime::V2 => draw_prefix_v2(&mut rng),
+        Regime::W12 => draw_prefix_w12(&mut rng),
     };
     let n = agents.len();
 
@@ -1826,7 +1883,7 @@ fn run_seed_b(
     policy: &dyn CoalitionDecisionPolicy,
     seed: u64,
     lat: &mut Vec<f64>,
-    on_task_outcome: impl FnMut(u32, &[bool; 8], bool, &[usize]),
+    on_task_outcome: impl FnMut(u32, &[bool], bool, &[usize]),
 ) -> SeedResultB {
     run_seed_b_regime(policy, seed, Regime::V1, lat, on_task_outcome)
 }
@@ -1835,14 +1892,20 @@ fn run_seed_b(
 /// draw is the ONLY difference; the metric path, the decision stream, and the
 /// outcome hook are shared verbatim, so `Regime::V1` reproduces the frozen
 /// batteries exactly.
+///
+/// The per-bit outcome slice handed to `on_task_outcome` is
+/// [`regime_universe`]-wide (koalisi #61 Part 5c) — 8 entries in both registered
+/// regimes, so the frozen values are unchanged; only its Rust type widened from
+/// `&[bool; 8]` to `&[bool]`.
 fn run_seed_b_regime(
     policy: &dyn CoalitionDecisionPolicy,
     seed: u64,
     regime: Regime,
     lat: &mut Vec<f64>,
-    mut on_task_outcome: impl FnMut(u32, &[bool; 8], bool, &[usize]),
+    mut on_task_outcome: impl FnMut(u32, &[bool], bool, &[usize]),
 ) -> SeedResultB {
     let (agents, tasks, _rho, perf) = generate_instance_b_regime(seed, regime);
+    let universe = regime_universe(regime);
 
     let mut success_count = 0usize;
     let mut cov_eff_sum = 0.0f64;
@@ -1899,7 +1962,7 @@ fn run_seed_b_regime(
 
         // Per-bit outcome success (harness-computed; the arm stays decoupled from
         // `perf`): bit b succeeds iff any final member providing b performed.
-        let mut per_bit = [false; 8];
+        let mut per_bit = vec![false; universe];
         for (b, slot) in per_bit.iter_mut().enumerate() {
             *slot = members
                 .iter()
@@ -1967,12 +2030,16 @@ fn persistent_battery_mode(
     end: u64,
 ) -> (Vec<SeedResultB>, Vec<f64>) {
     let degraded = mode.degraded;
+    // The degraded smear is one entry per universe bit — `[success; 8]` in both
+    // registered regimes, so the frozen batteries are unchanged (koalisi #61
+    // Part 5c widened this from a fixed-8 array).
+    let width = regime_universe(mode.regime);
     {
         let arm = PersistentAifArm::new(start, config).expect("persistent arm construction");
         let mut warm = Vec::new();
         let _ = run_seed_b_regime(&arm, start, mode.regime, &mut warm, |req, bits, success, _| {
             if degraded {
-                arm.observe_outcome(req, &[success; 8]);
+                arm.observe_outcome(req, &vec![success; width]);
             } else {
                 arm.observe_outcome(req, bits);
             }
@@ -1984,7 +2051,7 @@ fn persistent_battery_mode(
             let arm = PersistentAifArm::new(s, config).expect("persistent arm construction");
             run_seed_b_regime(&arm, s, mode.regime, &mut lat, |req, bits, success, _| {
                 if degraded {
-                    arm.observe_outcome(req, &[success; 8]);
+                    arm.observe_outcome(req, &vec![success; width]);
                 } else {
                     arm.observe_outcome(req, bits);
                 }
@@ -2583,6 +2650,8 @@ fn margin_battery_mode(
     tap: Option<&std::sync::Mutex<ScoreTap>>,
 ) -> (Vec<SeedResultB>, Vec<f64>) {
     let degraded = mode.degraded;
+    // See `persistent_battery_mode`: 8 entries in both registered regimes.
+    let width = regime_universe(mode.regime);
     {
         let arm = PersistentAifArm::new(start, config).expect("persistent arm construction");
         let wrapper = MarginE1 {
@@ -2599,7 +2668,7 @@ fn margin_battery_mode(
             &mut warm,
             |req, bits, success, _| {
                 if degraded {
-                    arm.observe_outcome(req, &[success; 8]);
+                    arm.observe_outcome(req, &vec![success; width]);
                 } else {
                     arm.observe_outcome(req, bits);
                 }
@@ -2618,7 +2687,7 @@ fn margin_battery_mode(
             };
             run_seed_b_regime(&wrapper, s, mode.regime, &mut lat, |req, bits, success, _| {
                 if degraded {
-                    arm.observe_outcome(req, &[success; 8]);
+                    arm.observe_outcome(req, &vec![success; width]);
                 } else {
                     arm.observe_outcome(req, bits);
                 }
@@ -3308,6 +3377,7 @@ fn regime_label(regime: Regime) -> &'static str {
     match regime {
         Regime::V1 => "v1-draw",
         Regime::V2 => "v2-draw",
+        Regime::W12 => "w12-draw",
     }
 }
 
@@ -4059,6 +4129,607 @@ fn part5b_reliability_routing() {
     println!();
 }
 
+// ===========================================================================
+// Part 5c — registered exploratory addendum (koalisi #61, EQ1). Registered in
+// `docs/prereg-K4-battery-v2.md` §"Part 5c — exploratory only", which fixes the
+// SCOPE of these four items and nothing about their outcome: everything printed
+// below is EXPLORATORY and NON-GATING — no verdict is derived here, no
+// confirmatory threshold is evaluated, and no registered section is edited.
+// Additive: every Part 1–5b printed line is unchanged.
+//
+//   Item 1 — the 12-bit widened slice (`w12-draw`), on the koalisi-side
+//            `PersistentAifConfig::n_bits` parameterization.
+//   Item 2 — leave-side hysteresis h ∈ {0.15, 0.30}.
+//   Item 3 — the expected-outcome value model, gated on its own gotcha-21
+//            degeneracy analysis.
+//   Item 4 — learned-posterior twins of the Part 5b routing comparison.
+//
+// (Lever 3, oracle-vs-degraded pricing, is the fifth registered Part 5c item and
+// already ran with Part 5a — see `print_v2_oracle_twins`.)
+// ===========================================================================
+
+/// Item 1: γ of the registered widened cell (`arm-E1g4`, δ = 0, degraded).
+const P5C_W12_GAMMA: f64 = 4.0;
+/// Item 2: the registered leave-side hysteresis grid.
+const P5C_H_GRID: [f64; 2] = [0.15, 0.30];
+/// Item 2: γ of the cell the hysteresis sweep runs at — see the printed
+/// cell-selection rationale (the most de-saturated LEAVE stream, which is the
+/// stream this lever acts on).
+const P5C_HYSTERESIS_GAMMA: f64 = 1.0;
+/// Item 4: tasks of synthetic outcome stream fed to each twin arm before its
+/// posterior is read. Matches the batteries' own [`TASKS`] stream length.
+const P5C_TWIN_TASKS: usize = TASKS;
+/// Item 4: salt for the twin outcome stream's seed. The stream is a SEPARATE
+/// `SplitMix64` (`SplitMix64::new(seed ^ salt)`), so `draw_routing_instance`'s
+/// own draw schedule is untouched and Part 5b stays byte-identical.
+const P5C_TWIN_SEED_SALT: u64 = 0x5C17_0000_0000_0000;
+
+/// The Part 5c item-1 arm config: the frozen `aif-e1` shape at the EQ1 γ lever,
+/// widened to the 12-bit world model the `w12-draw` regime needs. `n_bits` is the
+/// only field beyond `e1_gamma_config`'s, and at its identity default (8) that
+/// function is unchanged — so every Part 5a cell is untouched.
+fn e1_w12_config(gamma: f64) -> PersistentAifConfig {
+    PersistentAifConfig {
+        n_bits: W12_UNIVERSE_BITS as usize,
+        ..e1_gamma_config(gamma)
+    }
+}
+
+/// Linear-interpolated (p25, p50, p75) of a raw score sample.
+fn score_quartiles(raw: &[f64]) -> (f64, f64, f64) {
+    let mut s = raw.to_vec();
+    s.sort_by(f64::total_cmp);
+    (
+        percentile(&s, 0.25),
+        percentile(&s, 0.5),
+        percentile(&s, 0.75),
+    )
+}
+
+/// Item 1 — the 12-bit widened slice.
+fn part5c_item1_w12_slice() {
+    println!("## Item 1 — 12-bit widened slice (`w12-draw`)");
+    println!();
+    println!(
+        "_registered cell: `arm-E1g4` (γ = {P5C_W12_GAMMA:.0}), δ = 0, **degraded** signal, seeds {V2_SEED_START}..{V2_SEED_END}, on a **12-bit** universe — `|required|` uniform 2..=12, worker caps 1..=6, pool `n ∈ 4..=16` as in the v2 draw. The arm runs at `PersistentAifConfig::n_bits = 12` (persistent joint space 4096); at the identity default 8 the same code path is the registered arm bit-for-bit. `mag` / `scalar` context rows run on the SAME 12-bit instances. Exploratory: no bar, no verdict._"
+    );
+    println!();
+
+    let cfg = e1_w12_config(P5C_W12_GAMMA);
+    let mode = RunMode {
+        regime: Regime::W12,
+        degraded: true,
+    };
+    let tap = std::sync::Mutex::new(ScoreTap::default());
+    let (e1, e1_lat) = margin_battery_mode(
+        cfg,
+        0.0,
+        0.0,
+        mode,
+        V2_SEED_START,
+        V2_SEED_END,
+        Some(&tap),
+    );
+
+    let (scalar, _) = stateless_battery_mode(
+        || Box::new(AifDecisionPolicy::default()) as Box<dyn CoalitionDecisionPolicy>,
+        Regime::W12,
+        V2_SEED_START,
+        V2_SEED_END,
+    );
+    let mag_policy = MagnitudePolicy::default();
+    let (mag, _) = stateless_battery_mode(
+        || Box::new(mag_policy.clone()) as Box<dyn CoalitionDecisionPolicy>,
+        Regime::W12,
+        V2_SEED_START,
+        V2_SEED_END,
+    );
+
+    println!("| regime | arm | δ | median PRIMARY_B | churn median |");
+    println!("|--------|-----|--:|-----------------:|-------------:|");
+    for (label, delta, rs) in [
+        (arm_label(P5C_W12_GAMMA), "0.00", &e1),
+        ("mag".to_owned(), "—", &mag),
+        ("scalar".to_owned(), "—", &scalar),
+    ] {
+        println!(
+            "| {} | {} | {} | {:.4} | {:.2} |",
+            regime_label(Regime::W12),
+            label,
+            delta,
+            median(primaries_b(rs)),
+            median(churns_b(rs))
+        );
+    }
+    println!();
+    println!(
+        "Latency `arm-E1g4` on the 12-bit slice: {:.3} µs/decision median (record-only — the query joint space is `2^(|required|+1)`, up to 8192 here vs 512 at the v2 draw).",
+        median(e1_lat)
+    );
+    println!();
+
+    let (join, leave) = {
+        let g = tap.lock().expect("score tap poisoned");
+        (g.join_scores.clone(), g.leave_scores.clone())
+    };
+    println!("### Decision-score quantiles on the same cell (mechanism observable)");
+    println!();
+    println!("| stream | n | p25 | p50 | p75 |");
+    println!("|--------|--:|----:|----:|----:|");
+    for (stream, raw) in [("join", &join), ("leave", &leave)] {
+        let (q25, q50, q75) = score_quartiles(raw);
+        println!(
+            "| {} | {} | {:.4} | {:.4} | {:.4} |",
+            stream,
+            raw.len(),
+            q25,
+            q50,
+            q75
+        );
+    }
+    println!();
+    println!(
+        "_same `score = p(control 1) − 0.5` tap as Part 5a's δ = 0 rows. Gotcha 25 records the 8-bit finding — the JOIN rail sits at exactly +0.5 (p = 1.0) in every measured (γ, regime) cell while γ de-saturates only the LEAVE stream — so these rows say whether a wider universe changes that, which no 8-bit cell could answer._"
+    );
+    println!();
+}
+
+/// Item 2 — leave-side hysteresis at the most de-saturated cell.
+fn part5c_item2_hysteresis() {
+    println!("## Item 2 — leave-side hysteresis h ∈ {{0.15, 0.30}}");
+    println!();
+    println!(
+        "_**Cell selection** (stated because it lands in the report — BOTH restrictions are interpretations of the registered \"at the best-performing (γ, δ) cell\"): first, the search is restricted to the **v2-draw** regime — v1-draw cells score higher in absolute `PRIMARY_B` (≈ 0.386), but lever 2 (which this lever follows on) was registered and judged on v2-draw, and the v1-draw leave streams barely de-saturate at any γ — and second, at δ = 0 all three γ tie on v2-draw `PRIMARY_B` in the Part 5a table, so the tie is broken by the mechanism this lever acts on: hysteresis raises the bar a LEAVE score must clear, and the most de-saturated LEAVE stream is **γ = {P5C_HYSTERESIS_GAMMA:.0}** (leave p25 well inside ±0.5 while γ = 16 sits on the rail). Cell: `MarginE1(δ = 0, h)` over `arm-E1g1`, v2-draw, degraded, seeds {V2_SEED_START}..{V2_SEED_END}. The h = 0 row is re-run in-line as this sweep's own paired baseline; it is asserted in-code to reproduce the unwrapped arm, which gate X-B(b) pinned equal to the Part 5a γ = 1, δ = 0 cell. Exploratory: no bar, no verdict._"
+    );
+    println!();
+
+    let cfg = e1_gamma_config(P5C_HYSTERESIS_GAMMA);
+    let mode = RunMode {
+        regime: Regime::V2,
+        degraded: true,
+    };
+    let (base, _) = margin_battery_mode(cfg, 0.0, 0.0, mode, V2_SEED_START, V2_SEED_END, None);
+    // The baseline-reproduction claim in the rationale above, made a fact: the
+    // h = 0 wrapper equals the unwrapped arm per seed (X-B(b) pinned that arm
+    // equal to the Part 5a γ = 1, δ = 0 cell, so equality is transitive).
+    let (bare, _) = persistent_battery_mode(cfg, mode, V2_SEED_START, V2_SEED_END);
+    assert_battery_identical(
+        &base,
+        &bare,
+        "item 2 h = 0 baseline must reproduce the unwrapped arm",
+    );
+    let base_churns = churns_b(&base);
+    let base_churn_med = median(base_churns.clone());
+    let base_primary_med = median(primaries_b(&base));
+
+    println!("| arm | h | median PRIMARY_B | churn median | vs base churn | paired churn↓ |");
+    println!("|-----|--:|-----------------:|-------------:|--------------:|--------------:|");
+    println!(
+        "| {} | 0.00 | {:.4} | {:.2} | 1.00× | — |",
+        arm_label(P5C_HYSTERESIS_GAMMA),
+        base_primary_med,
+        base_churn_med
+    );
+    for &h in &P5C_H_GRID {
+        let (rs, _) = margin_battery_mode(cfg, 0.0, h, mode, V2_SEED_START, V2_SEED_END, None);
+        let churns = churns_b(&rs);
+        let churn_med = median(churns.clone());
+        let ratio = if base_churn_med > 0.0 {
+            churn_med / base_churn_med
+        } else {
+            f64::NAN
+        };
+        println!(
+            "| {} | {:.2} | {:.4} | {:.2} | {:.2}× | {}/{} |",
+            arm_label(P5C_HYSTERESIS_GAMMA),
+            h,
+            median(primaries_b(&rs)),
+            churn_med,
+            ratio,
+            paired_churn_reduced(&churns, &base_churns),
+            base_churns.len()
+        );
+    }
+    println!();
+    println!(
+        "_`MarginE1` evicts iff the arm evicts AND `score ≥ h`, so h tightens the leave rail at each individual consult — but churn is NOT monotone in h across the run: a suppressed eviction changes membership, which changes every later decision and the outcome the arm learns from. What the rows measure is the net effect and its PRICE in `PRIMARY_B`. The H-S bars (0.5× churn at ≥ 0.9× quality on ≥ 18/30 paired seeds) are NOT applied here: h was registered as exploratory, and lever 2's verdict is already closed on the join-margin grid._"
+    );
+    println!();
+}
+
+/// The Part 5c item-3 value model (EXPLORATORY): a block's fitness IS its
+/// closed-form expected realized payoff — literally the per-block term of
+/// [`real_payoff`] at the `TaskCoverageV2` coefficients:
+///
+/// ```text
+/// E[block] = w(m)·Σ_{b∈C} r_b − 8·|S| + (C == required ? (100 − 80)·Π_{b∈required} r_b : 0)
+/// ```
+///
+/// So `search()` under this calculator optimizes the REAL yardstick directly,
+/// where `TaskCoverageV2::weighted` optimizes a nominal proxy for it. The
+/// identity `Σ over blocks of calculate_value == real_payoff` is asserted before
+/// the run (`assert_p5c_expected_outcome_identity`).
+///
+/// `required == 0` is out of contract (shared by the whole `TaskCoverageV2` /
+/// [`real_payoff`] family): an empty requirement makes every block vacuously
+/// full-covered, so each block earns the flat residual and the "value" grows
+/// with the block COUNT. Unreachable here — `draw_routing_instance` draws
+/// `m ∈ {7, 8}` — but a future caller must guard it.
+struct ExpectedOutcomeV2 {
+    required: u32,
+    reliability: [f64; UNIVERSE],
+    /// `Π_{b∈required} r_b`, precomputed (constant per instance).
+    p_full: f64,
+}
+
+impl ExpectedOutcomeV2 {
+    fn new(required: u32, reliability: [f64; UNIVERSE]) -> Self {
+        let p_full: f64 = (0..UNIVERSE)
+            .filter(|b| required & (1u32 << b) != 0)
+            .map(|b| reliability[b])
+            .product();
+        Self {
+            required,
+            reliability,
+            p_full,
+        }
+    }
+}
+
+impl ValueCalculator for ExpectedOutcomeV2 {
+    fn calculate_value(&self, agents: &[&dyn AgentCapabilities]) -> f64 {
+        if agents.is_empty() {
+            return 0.0;
+        }
+        let union = agents.iter().fold(0u32, |acc, a| acc | a.capabilities());
+        let covered = union & self.required;
+        let w = V2B_PARTIAL_BUDGET / f64::from(self.required.count_ones().max(1));
+        let full_term = if covered == self.required {
+            (V2B_FULL_BONUS - V2B_PARTIAL_BUDGET) * self.p_full
+        } else {
+            0.0
+        };
+        w * sum_reliability_of(covered, &self.reliability) - agents.len() as f64 * V2B_MEMBER_COST
+            + full_term
+    }
+}
+
+/// Σ of `calc` over a partition given as explicit blocks.
+fn blocks_fitness<C: ValueCalculator>(blocks: &[Vec<usize>], agents: &[Worker], calc: &C) -> f64 {
+    blocks
+        .iter()
+        .map(|blk| calc.calculate_value(&coalition_view(agents, blk)))
+        .sum()
+}
+
+/// [`ExpectedOutcomeV2`] summed over a structure's blocks must equal
+/// [`real_payoff`] on that structure exactly — the two are the same closed form,
+/// and this is what makes "the search optimizes REAL directly" a fact rather than
+/// a claim. Asserted on the confirmatory seeds before item 3 runs.
+fn assert_p5c_expected_outcome_identity() {
+    for seed in V2_SEED_START..V2_SEED_END {
+        let inst = draw_routing_instance(seed);
+        let cfg = PopulationConfig::default().with_seed(seed);
+        let calc = ExpectedOutcomeV2::new(inst.required, inst.reliability);
+        let best = search(&inst.agents, &calc, &cfg).best;
+        let via_blocks = blocks_fitness(&best.blocks(), &inst.agents, &calc);
+        let via_real = real_payoff(&best, &inst.agents, inst.required, &inst.reliability);
+        assert!(
+            (via_blocks - via_real).abs() < 1e-9,
+            "ExpectedOutcomeV2 must sum to real_payoff (seed {seed}): {via_blocks} vs {via_real}"
+        );
+    }
+}
+
+/// Item 3 — expected-outcome value model: degeneracy analysis, then the Part 5b
+/// re-run gated on it.
+#[allow(clippy::too_many_lines)]
+fn part5c_item3_expected_outcome() {
+    println!("## Item 3 — expected-outcome value model (degeneracy analysis, then re-run)");
+    println!();
+    println!(
+        "_the registered item: re-run the Part 5b comparison with success-probability semantics — a block's fitness IS its expected realized payoff (`w(m)·Σ_{{b∈C}} r_b − 8|S| + [C = required]·20·Π_{{b∈required}} r_b`, the closed form the L2 `TaskOutcome` event's success probability induces), so `search()` optimizes REAL directly. **Gated on its own gotcha-21 degeneracy analysis**, which runs first. Same `draw_routing_instance` seeds {V2_SEED_START}..{V2_SEED_END} as the registered Part 5b — the pool-coverage gap is deliberately NOT fixed here (that belongs to #63); this is a like-for-like calculator swap._"
+    );
+    println!();
+
+    assert_p5c_expected_outcome_identity();
+    println!(
+        "**Identity gate:** `Σ over blocks of ExpectedOutcomeV2 == real_payoff(structure)` on all 30 argmaxes (asserted in-code) — the search really is maximizing the REAL yardstick, not a proxy for it."
+    );
+    println!();
+
+    // --- Degeneracy analysis (gotcha 21) ----------------------------------
+    println!("### Degeneracy analysis (gotcha 21, runs BEFORE the comparison)");
+    println!();
+    println!(
+        "Structure of the model over a partition of a fixed pool: the member term sums to the partition-constant `−8·N`; the partial term `w(m)·Σ_{{b∈C}} r_b` is earned **per block**, so merging two blocks with covered sets `C₁, C₂` LOSES `w(m)·Σ_{{b∈C₁∩C₂}} r_b`; the only counterweight is the full-coverage residual `20·Π_{{b∈required}} r_b`, earned per full-coverage block. Splitting is therefore weakly optimal unless a merge creates full coverage worth more than the overlap it destroys. At the planted reliabilities `Π r` is tiny, so the prediction is **all-singletons**."
+    );
+    println!();
+
+    let mut singleton_argmax = 0usize;
+    let mut singleton_ge_search = 0usize;
+    let mut deg_rows: Vec<(u64, usize, usize, f64, f64, f64)> = Vec::new();
+    for seed in V2_SEED_START..V2_SEED_END {
+        let inst = draw_routing_instance(seed);
+        let n = inst.agents.len();
+        let cfg = PopulationConfig::default().with_seed(seed);
+        let calc = ExpectedOutcomeV2::new(inst.required, inst.reliability);
+        let best = search(&inst.agents, &calc, &cfg).best;
+
+        let singletons: Vec<Vec<usize>> = (0..n).map(|i| vec![i]).collect();
+        let one_block: Vec<Vec<usize>> = vec![(0..n).collect()];
+        let f_singletons = blocks_fitness(&singletons, &inst.agents, &calc);
+        let f_one = blocks_fitness(&one_block, &inst.agents, &calc);
+        let f_best = blocks_fitness(&best.blocks(), &inst.agents, &calc);
+
+        if best.blocks().len() == n {
+            singleton_argmax += 1;
+        }
+        if f_singletons >= f_best - 1e-9 {
+            singleton_ge_search += 1;
+        }
+        deg_rows.push((seed, n, best.blocks().len(), f_singletons, f_one, f_best));
+    }
+
+    println!("| seed | n | argmax blocks | fitness(all-singletons) | fitness(one block) | fitness(argmax) |");
+    println!("|-----:|--:|--------------:|------------------------:|-------------------:|----------------:|");
+    for (seed, n, blocks, f_s, f_1, f_b) in &deg_rows {
+        println!("| {seed} | {n} | {blocks} | {f_s:.4} | {f_1:.4} | {f_b:.4} |");
+    }
+    println!();
+    let n_seeds = deg_rows.len();
+    let analysis = if singleton_ge_search == n_seeds {
+        "DEGENERATE — all-singletons is optimal on every seed, so the model has no interior optimum over set-partitions of a fixed pool"
+    } else if 2 * singleton_ge_search > n_seeds {
+        "MOSTLY DEGENERATE — all-singletons is optimal on a strict majority of seeds; the exceptions are the merges whose full-coverage residual outweighs the overlap they destroy"
+    } else {
+        "NON-degenerate on most seeds — an interior optimum exists here"
+    };
+    println!(
+        "**Analysis result:** the `search()` argmax is all-singletons on **{singleton_argmax}/{n_seeds}** seeds, and all-singletons matches or beats the argmax on **{singleton_ge_search}/{n_seeds}**. Verdict of the analysis: **{analysis}**."
+    );
+    println!();
+    if 2 * singleton_ge_search > n_seeds {
+        println!(
+            "_Per the registered gating (\"gated on its own gotcha-21 degeneracy analysis\"), the comparison below is therefore reported as **degenerate-by-analysis**: the numbers are CONTEXT, not evidence about routing. This model joins `Additive` (constant across partitions) and `Synergistic`/`Multiplicative` (split-favouring) on the gotcha-21 list, by a third mechanism — the per-block partial term double-counts a bit that two blocks both cover, so splitting pays, and the full-coverage residual `20·Π r` is far too small at the planted reliabilities to buy the overlap back. The productive response is a value model with an interior optimum, not a re-run of this one._"
+        );
+        println!();
+    }
+
+    // --- Part 5b re-run under the expected-outcome model -------------------
+    println!("### Re-run of the Part 5b comparison (context only)");
+    println!();
+
+    let mut rows: Vec<(u64, u32, usize, bool, f64, f64)> = Vec::new();
+    let mut skipped = 0usize;
+    let mut real_superior = 0usize;
+    let mut reals_e: Vec<f64> = Vec::new();
+    let mut reals_u: Vec<f64> = Vec::new();
+    for seed in V2_SEED_START..V2_SEED_END {
+        let inst = draw_routing_instance(seed);
+        let cfg = PopulationConfig::default().with_seed(seed);
+
+        let unweighted = search(
+            &inst.agents,
+            &TaskCoverageV2::unweighted(inst.required),
+            &cfg,
+        )
+        .best;
+        let expected = search(
+            &inst.agents,
+            &ExpectedOutcomeV2::new(inst.required, inst.reliability),
+            &cfg,
+        )
+        .best;
+
+        let e_cov = structure_required_coverage(&expected, &inst.agents, inst.required);
+        let b_star_bit = 1u32 << inst.b_star;
+        let skips = e_cov & b_star_bit == 0;
+        if skips {
+            skipped += 1;
+        }
+
+        let real_e = real_payoff(&expected, &inst.agents, inst.required, &inst.reliability);
+        let real_u = real_payoff(&unweighted, &inst.agents, inst.required, &inst.reliability);
+        if real_e > real_u {
+            real_superior += 1;
+        }
+        reals_e.push(real_e);
+        reals_u.push(real_u);
+        rows.push((
+            seed,
+            inst.required.count_ones(),
+            inst.b_star,
+            skips,
+            real_e,
+            real_u,
+        ));
+    }
+
+    println!("| seed | m | b* | expected-outcome skips b* | REAL_e | REAL_u |");
+    println!("|-----:|--:|---:|:-------------------------:|-------:|-------:|");
+    for (seed, m, b_star, skips, real_e, real_u) in &rows {
+        println!(
+            "| {} | {} | {} | {} | {:.4} | {:.4} |",
+            seed,
+            m,
+            b_star,
+            if *skips { "yes" } else { "no" },
+            real_e,
+            real_u
+        );
+    }
+    println!();
+    let med_e = median(reals_e);
+    let med_u = median(reals_u);
+    println!(
+        "**Medians ({V2_SEED_START}..{V2_SEED_END}):** REAL_e {med_e:.4} · REAL_u {med_u:.4}. Skips `b*` on {skipped}/30; REAL strictly greater than the unweighted argmax on {real_superior}/30."
+    );
+    println!();
+    println!(
+        "_the skip column is the same structurally-vacuous quantity Part 5b's structural note describes (`search()` partitions the WHOLE pool, so \"no block covers `b*`\" ⟺ \"no pool agent provides `b*`\"), reproduced here only so the two tables read alike. Non-gating; the corrected block-level formulation is #63's._"
+    );
+    println!();
+}
+
+/// Item 4 — the learned per-bit reliability posterior for one routing instance.
+///
+/// Feeds a fresh 8-bit `PersistentAifArm` (the registered `aif-e1` config —
+/// query settings are inert here, the arm is only ever observed into, never
+/// consulted) a deterministic outcome stream of [`P5C_TWIN_TASKS`] tasks: for
+/// each required bit `b`, an independent Bernoulli(`r_b`) draw at the PLANTED
+/// reliability. Bits outside `required` observe `no_obs` and keep the 0.5 prior.
+///
+/// **Stream discipline:** the draws come from a fresh `SplitMix64` seeded
+/// `seed ^ P5C_TWIN_SEED_SALT`, never from the instance's own stream, so
+/// `draw_routing_instance` is bit-for-bit the Part 5b draw.
+///
+/// Returns `r̂[b] = beliefs[b][0]` (state 0 = reliable — the same read as
+/// `ReliabilityCoverage::from_state`). Gotcha 24 applies: this posterior is
+/// recency-dominated, so cross-bit ORDERING is the signal, not the level.
+fn p5c_learned_reliability(inst: &RoutingInstance, seed: u64) -> [f64; UNIVERSE] {
+    let arm = PersistentAifArm::new(seed, e1_config()).expect("persistent arm construction");
+    let mut rng = SplitMix64::new(seed ^ P5C_TWIN_SEED_SALT);
+    for _ in 0..P5C_TWIN_TASKS {
+        let mut per_bit = [false; UNIVERSE];
+        for (b, slot) in per_bit.iter_mut().enumerate() {
+            if inst.required & (1u32 << b) != 0 {
+                *slot = next_unit(&mut rng) < inst.reliability[b];
+            }
+        }
+        arm.observe_outcome(inst.required, &per_bit);
+    }
+    let snapshot = arm.state_snapshot();
+    let mut r_hat = [0.5f64; UNIVERSE];
+    for (b, slot) in r_hat.iter_mut().enumerate() {
+        if let Some(belief) = snapshot.beliefs.get(b) {
+            *slot = belief[0];
+        }
+    }
+    r_hat
+}
+
+/// One printed row of the item-4 twin table.
+struct TwinRow {
+    seed: u64,
+    b_star: usize,
+    /// The reference strong bit: the lowest-indexed required bit other than `b*`.
+    strong: usize,
+    r_hat_weak: f64,
+    r_hat_strong: f64,
+    skips_b_star: bool,
+    real_learned: f64,
+    real_unweighted: f64,
+}
+
+/// Item 4 — learned-posterior routing twins of Part 5b.
+#[allow(clippy::too_many_lines)]
+fn part5c_item4_learned_twins() {
+    println!("## Item 4 — learned-posterior routing twins");
+    println!();
+    println!(
+        "_the registered item: Part 5b's reliability-weighted argmax, but with `r̂` LEARNED from an outcome stream (the #57 `from_state` path) instead of read off the planted vector — a pipeline test of \"could a runtime actually get these weights?\", not a second routing test. Per seed: a fresh `aif-e1` `PersistentAifArm` observes {P5C_TWIN_TASKS} tasks of independent per-bit Bernoulli(`r_b`) outcomes at the PLANTED reliabilities (own `SplitMix64` stream, salted off the instance seed, so Part 5b's draw is untouched), then `r̂[b] = beliefs[b][0]`. The weighted twin is `TaskCoverageV2::weighted(required, r̂)` — the example-side v2-coefficient model; the library `ReliabilityCoverage` keeps its registered v1 constants and is not used. The REAL yardstick still uses the PLANTED `r` (ground truth). Exploratory: no bar, no verdict._"
+    );
+    println!();
+
+    let mut rows: Vec<TwinRow> = Vec::new();
+    let mut ordering_ok = 0usize;
+    let mut skipped = 0usize;
+    let mut real_superior = 0usize;
+    let mut reals_l: Vec<f64> = Vec::new();
+    let mut reals_u: Vec<f64> = Vec::new();
+
+    for seed in V2_SEED_START..V2_SEED_END {
+        let inst = draw_routing_instance(seed);
+        let cfg = PopulationConfig::default().with_seed(seed);
+        let r_hat = p5c_learned_reliability(&inst, seed);
+
+        // Ordering check (gotcha 24): does the weak bit read below a strong one?
+        // The reference strong bit is the lowest-indexed required bit != b*.
+        let strong = (0..UNIVERSE)
+            .find(|&b| inst.required & (1u32 << b) != 0 && b != inst.b_star)
+            .expect("m >= 7 ⇒ a required bit other than b* always exists");
+        if r_hat[inst.b_star] < r_hat[strong] {
+            ordering_ok += 1;
+        }
+
+        let unweighted = search(
+            &inst.agents,
+            &TaskCoverageV2::unweighted(inst.required),
+            &cfg,
+        )
+        .best;
+        let learned = search(
+            &inst.agents,
+            &TaskCoverageV2::weighted(inst.required, r_hat),
+            &cfg,
+        )
+        .best;
+
+        let l_cov = structure_required_coverage(&learned, &inst.agents, inst.required);
+        let skips = l_cov & (1u32 << inst.b_star) == 0;
+        if skips {
+            skipped += 1;
+        }
+
+        let real_l = real_payoff(&learned, &inst.agents, inst.required, &inst.reliability);
+        let real_u = real_payoff(&unweighted, &inst.agents, inst.required, &inst.reliability);
+        if real_l > real_u {
+            real_superior += 1;
+        }
+        reals_l.push(real_l);
+        reals_u.push(real_u);
+
+        rows.push(TwinRow {
+            seed,
+            b_star: inst.b_star,
+            strong,
+            r_hat_weak: r_hat[inst.b_star],
+            r_hat_strong: r_hat[strong],
+            skips_b_star: skips,
+            real_learned: real_l,
+            real_unweighted: real_u,
+        });
+    }
+
+    println!("| seed | b* | strong bit | r̂[b*] | r̂[strong] | ordered | learned skips b* | REAL_l | REAL_u |");
+    println!("|-----:|---:|-----------:|------:|----------:|:-------:|:----------------:|-------:|-------:|");
+    for r in &rows {
+        println!(
+            "| {} | {} | {} | {:.4} | {:.4} | {} | {} | {:.4} | {:.4} |",
+            r.seed,
+            r.b_star,
+            r.strong,
+            r.r_hat_weak,
+            r.r_hat_strong,
+            if r.r_hat_weak < r.r_hat_strong { "yes" } else { "no" },
+            if r.skips_b_star { "yes" } else { "no" },
+            r.real_learned,
+            r.real_unweighted
+        );
+    }
+    println!();
+    let med_l = median(reals_l);
+    let med_u = median(reals_u);
+    println!(
+        "**Medians ({V2_SEED_START}..{V2_SEED_END}):** REAL_l {med_l:.4} · REAL_u {med_u:.4}. Planted `r[b*] = {V2B_WEAK_R}` vs every other required bit `{V2B_STRONG_R}`; the posterior ranks `b*` below the reference strong bit on **{ordering_ok}/30** seeds — the gotcha-24 ordering check, which is the claim the recency-dominated posterior can actually support. Learned-weighted argmax skips `b*` on {skipped}/30 (structurally vacuous, see Item 3); REAL strictly greater on {real_superior}/30."
+    );
+    println!();
+}
+
+fn part5c_addendum() {
+    println!("# koalisi #61 — Part 5c: registered exploratory addendum");
+    println!();
+    println!(
+        "_registered in `docs/prereg-K4-battery-v2.md` §\"Part 5c — exploratory only\", which fixes the SCOPE of these items and nothing about their outcome. **Everything below is exploratory and non-gating**: no confirmatory criterion is evaluated, no verdict is derived, and the registered Parts 5a/5b above are untouched (their printed lines are byte-identical to the committed run). Lever 3 — oracle-vs-degraded pricing — is the fifth registered Part 5c item and already ran with Part 5a._"
+    );
+    println!();
+    part5c_item1_w12_slice();
+    part5c_item2_hysteresis();
+    part5c_item3_expected_outcome();
+    part5c_item4_learned_twins();
+}
+
 #[cfg(test)]
 mod part4c_tests {
     use super::*;
@@ -4304,5 +4975,241 @@ mod part4c_tests {
         let (g16, _) = persistent_battery_range(e1_gamma_config(16.0), 30, 32);
         let (g_none, _) = persistent_battery_range(e1_config(), 30, 32);
         assert_battery_identical(&g16, &g_none, "Some(16.0) must reproduce None");
+    }
+
+    /// Part 5c (#61) item 1: the widened draw has the registered shape — a 12-bit
+    /// universe, `|required| ∈ 2..=12`, worker caps `1..=6`, pool draw unchanged.
+    #[test]
+    fn w12_draw_shape() {
+        for seed in 120..126 {
+            let mut rng = SplitMix64::new(seed);
+            let (agents, tasks) = draw_prefix_w12(&mut rng);
+            assert!((4..=16).contains(&agents.len()), "pool draw unchanged");
+            for a in &agents {
+                assert!((1..=6).contains(&a.caps.count_ones()), "w12 caps are 1..=6 bits");
+                assert_eq!(
+                    a.caps >> W12_UNIVERSE_BITS,
+                    0,
+                    "caps stay inside the 12-bit universe"
+                );
+            }
+            assert_eq!(tasks.len(), TASKS);
+            for t in &tasks {
+                let r = t.required.count_ones();
+                assert!((2..=12).contains(&r), "w12 draw is |required| in 2..=12, got {r}");
+                assert_eq!(t.required >> W12_UNIVERSE_BITS, 0, "required stays in 12 bits");
+                assert_eq!(t.order.len(), agents.len());
+            }
+        }
+    }
+
+    /// Part 5c (#61) item 1, 2-seed smoke: the `w12-draw` regime threads through
+    /// the shared runner end-to-end — instances draw, the decision stream runs,
+    /// and the per-task outcome slice handed to the hook is 12 wide (the widening
+    /// that lets a 12-bit arm learn at all). Driven by the STATELESS arms, which
+    /// are universe-agnostic and cheap; the 12-bit persistent arm itself is
+    /// exercised by `part5c_item1_w12_arm_decides` (a bounded number of decisions)
+    /// and, at full battery scale, by the `#[ignore]`d smoke below.
+    #[test]
+    fn part5c_item1_two_seed_smoke() {
+        let mut widths: Vec<usize> = Vec::new();
+        let mut lat = Vec::new();
+        let r = run_seed_b_regime(
+            &AifDecisionPolicy::default(),
+            120,
+            Regime::W12,
+            &mut lat,
+            |_req, bits, _success, _members| widths.push(bits.len()),
+        );
+        assert!(r.primary.is_finite() && (0.0..=1.0).contains(&r.primary));
+        assert!(!r.acts.is_empty(), "some join/leave decisions must have run");
+        assert_eq!(widths.len(), TASKS, "one outcome per task");
+        assert!(
+            widths.iter().all(|&w| w == W12_UNIVERSE_BITS as usize),
+            "the w12 outcome slice must be 12 wide, got {widths:?}"
+        );
+
+        let mag = MagnitudePolicy::default();
+        let (mag_rs, _) = stateless_battery_mode(
+            || Box::new(mag.clone()) as Box<dyn CoalitionDecisionPolicy>,
+            Regime::W12,
+            120,
+            122,
+        );
+        assert_eq!(mag_rs.len(), 2);
+        for x in &mag_rs {
+            assert!(x.primary.is_finite() && (0.0..=1.0).contains(&x.primary));
+        }
+    }
+
+    /// Part 5c (#61) item 1: the 12-bit arm decides on REAL `w12-draw` masks (up
+    /// to 12 required bits — a query joint of `2^13`, unreachable at the 8-bit
+    /// default) and learns from a 12-wide outcome. Bounded to one task's worth of
+    /// decisions so the suite stays fast; the arm's own construction/observation
+    /// contract is pinned library-side by
+    /// `decision::aif_persistent_policy::tests::twelve_bit_arm_observes_and_decides`.
+    #[test]
+    fn part5c_item1_w12_arm_decides() {
+        let (agents, tasks, _rho, _perf) = generate_instance_b_regime(120, Regime::W12);
+        let task = &tasks[0];
+        let arm = PersistentAifArm::new(120, e1_w12_config(P5C_W12_GAMMA))
+            .expect("12-bit persistent arm construction");
+        let ctx = DecisionContext { required_capabilities: task.required };
+
+        let mut members: Vec<usize> = vec![task.order[0]];
+        for &idx in task.order[1..].iter().take(3) {
+            let candidate: &dyn AgentCapabilities = &agents[idx];
+            let coalition = coalition_view(&agents, &members);
+            let d = arm.should_join(candidate, &coalition, &ctx);
+            assert!(d.score.is_finite() && (-0.5..=0.5).contains(&d.score));
+            if d.act {
+                members.push(idx);
+            }
+        }
+        let coalition = coalition_view(&agents, &members);
+        let member: &dyn AgentCapabilities = &agents[members[0]];
+        let d = arm.should_leave(member, &coalition, &ctx);
+        assert!(d.score.is_finite() && (-0.5..=0.5).contains(&d.score));
+
+        arm.observe_outcome(task.required, &vec![true; W12_UNIVERSE_BITS as usize]);
+        assert_eq!(
+            arm.state_snapshot().beliefs.len(),
+            W12_UNIVERSE_BITS as usize
+        );
+    }
+
+    /// Part 5c (#61) item 1, full 2-seed battery smoke — `#[ignore]`d because the
+    /// 12-bit slice is prohibitively slow in a DEBUG build (`|required|` reaches
+    /// 12, so a query carries 12 modalities over a `2^13` joint, and unoptimized
+    /// `nalgebra` turns a 2-seed run into many minutes). The printed slice itself
+    /// runs `--release`, per the example's own header. Run it with
+    /// `cargo test --release ... -- --ignored`.
+    #[test]
+    #[ignore = "12-bit battery is debug-prohibitive; run --release with --ignored"]
+    fn part5c_item1_w12_battery_smoke() {
+        let cfg = e1_w12_config(P5C_W12_GAMMA);
+        let mode = RunMode { regime: Regime::W12, degraded: true };
+        let (wrapped, lat) = margin_battery_mode(cfg, 0.0, 0.0, mode, 120, 122, None);
+        let (bare, _) = persistent_battery_mode(cfg, mode, 120, 122);
+        assert_battery_identical(
+            &wrapped,
+            &bare,
+            "MarginE1(0,0) must reproduce the bare arm on the 12-bit slice",
+        );
+        assert_eq!(wrapped.len(), 2);
+        for r in &wrapped {
+            assert!(r.primary.is_finite() && (0.0..=1.0).contains(&r.primary));
+        }
+        assert!(!lat.is_empty(), "latencies recorded");
+    }
+
+    /// Part 5c (#61) item 2 smoke: each registered hysteresis cell runs end-to-end
+    /// with finite in-range metrics on the sweep's own (γ = 1, v2-draw, degraded)
+    /// cell. The `h = 0` baseline's identity with the unwrapped arm is already
+    /// pinned by `part5a_two_seed_smoke` (same config, same regime), so it is not
+    /// re-run here — this cell is expensive in a debug build. Churn is deliberately
+    /// NOT asserted monotone in `h`: a suppressed eviction changes membership and
+    /// every later decision, so the run-level effect is measured, not guaranteed.
+    #[test]
+    fn part5c_item2_smoke() {
+        let cfg = e1_gamma_config(P5C_HYSTERESIS_GAMMA);
+        let mode = RunMode { regime: Regime::V2, degraded: true };
+        for &h in &P5C_H_GRID {
+            let (rs, lat) = margin_battery_mode(cfg, 0.0, h, mode, 120, 121, None);
+            assert_eq!(rs.len(), 1);
+            for r in &rs {
+                assert!(r.primary.is_finite() && (0.0..=1.0).contains(&r.primary));
+                assert!(!r.acts.is_empty(), "some join/leave decisions must have run");
+            }
+            assert!(!lat.is_empty(), "latencies recorded");
+        }
+    }
+
+    /// Part 5c (#61) item 3: the expected-outcome model is exactly the per-block
+    /// decomposition of [`real_payoff`], on a 2-seed slice of the identity gate.
+    #[test]
+    fn part5c_item3_model_matches_real_payoff() {
+        for seed in 120..122 {
+            let inst = draw_routing_instance(seed);
+            let cfg = PopulationConfig::default().with_seed(seed);
+            let calc = ExpectedOutcomeV2::new(inst.required, inst.reliability);
+            let best = search(&inst.agents, &calc, &cfg).best;
+            let via_blocks = blocks_fitness(&best.blocks(), &inst.agents, &calc);
+            let via_real = real_payoff(&best, &inst.agents, inst.required, &inst.reliability);
+            assert!(
+                (via_blocks - via_real).abs() < 1e-9,
+                "seed {seed}: {via_blocks} vs {via_real}"
+            );
+
+            // The member term is partition-constant, which is the algebraic half of
+            // the degeneracy argument the printed analysis rests on: two partitions
+            // of the same pool differ only in their coverage terms. (Whether
+            // all-singletons actually wins is MEASURED in the run, not asserted —
+            // a merge that creates full coverage can pay for the overlap it
+            // destroys, so the direction is data, not a theorem.)
+            let n = inst.agents.len();
+            let singletons: Vec<Vec<usize>> = (0..n).map(|i| vec![i]).collect();
+            let member_cost_of = |blocks: &[Vec<usize>]| -> f64 {
+                blocks.iter().map(|b| b.len() as f64 * V2B_MEMBER_COST).sum()
+            };
+            assert!(
+                (member_cost_of(&singletons) - member_cost_of(&best.blocks())).abs() < 1e-9,
+                "seed {seed}: the member term must be constant across partitions"
+            );
+        }
+    }
+
+    /// Part 5c (#61) item 4, 2-seed smoke: the learned-posterior pipeline runs and
+    /// yields probabilities; the unobserved (non-required) bits stay at the 0.5
+    /// prior, which is the gotcha-24 caveat the printed table rests on.
+    #[test]
+    fn part5c_item4_two_seed_smoke() {
+        for seed in 120..122 {
+            let inst = draw_routing_instance(seed);
+            let r_hat = p5c_learned_reliability(&inst, seed);
+            for (b, &r) in r_hat.iter().enumerate() {
+                assert!(r.is_finite() && (0.0..=1.0).contains(&r), "r̂[{b}] = {r}");
+                if inst.required & (1u32 << b) == 0 {
+                    assert!(
+                        (r - 0.5).abs() < 1e-9,
+                        "an unobserved bit must keep the 0.5 prior, got r̂[{b}] = {r}"
+                    );
+                }
+            }
+            // The twin is a plain calculator swap — the search runs end-to-end.
+            let cfg = PopulationConfig::default().with_seed(seed);
+            let learned =
+                search(&inst.agents, &TaskCoverageV2::weighted(inst.required, r_hat), &cfg).best;
+            assert_eq!(learned.assignment.len(), inst.agents.len());
+        }
+    }
+
+    /// Part 5c (#61): items 3 and 4 are search-only (no persistent battery), so
+    /// their PRINTED sections are cheap enough to execute end-to-end here — which
+    /// is what pins the `assert_p5c_expected_outcome_identity` gate over the whole
+    /// confirmatory seed range and every median/format path in between. Items 1
+    /// and 2 run batteries and are covered by their own smokes instead.
+    #[test]
+    fn part5c_items3_and_4_print_paths() {
+        part5c_item3_expected_outcome();
+        part5c_item4_learned_twins();
+    }
+
+    /// Part 5c (#61): the twin outcome stream must not perturb the Part 5b draw —
+    /// `draw_routing_instance` uses its own `SplitMix64`, so running the learned
+    /// pipeline leaves a re-drawn instance bit-identical.
+    #[test]
+    fn part5c_twin_stream_does_not_perturb_5b() {
+        for seed in 120..123 {
+            let before = draw_routing_instance(seed);
+            let _ = p5c_learned_reliability(&before, seed);
+            let after = draw_routing_instance(seed);
+            assert_eq!(before.required, after.required);
+            assert_eq!(before.b_star, after.b_star);
+            assert_eq!(before.agents.len(), after.agents.len());
+            for (x, y) in before.agents.iter().zip(&after.agents) {
+                assert_eq!((x.id, x.caps, x.trust), (y.id, y.caps, y.trust));
+            }
+        }
     }
 }

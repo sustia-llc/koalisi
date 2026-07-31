@@ -1,6 +1,6 @@
 [package]
 name = "koalisi"
-version = "0.18.0"
+version = "0.19.0"
 edition = "2024"
 # 1.93 floor forced by catgraph v0.5.0's deep_causality_num 0.4.1 (re-pin PR).
 rust-version = "1.93.0"

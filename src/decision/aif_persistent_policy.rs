@@ -14,8 +14,10 @@
 //!
 //! # Architecture (D1: persistent model + fresh queries)
 //!
-//! - **Persistent agent** (one per seed, [`PersistentAifArm::new`]): 8 two-state
-//!   factors (one per capability bit: providers reliable=0 / unreliable=1), 8
+//! - **Persistent agent** (one per seed, [`PersistentAifArm::new`]): `n_bits`
+//!   two-state factors (one per capability bit: providers reliable=0 /
+//!   unreliable=1) — 8 at the registered default width, see
+//!   [`PersistentAifConfig::n_bits`] — `n_bits`
 //!   three-outcome modalities `{success=0, failure=1, no_obs=2}`; per-factor
 //!   single-control sticky B `[[0.9,0.1],[0.1,0.9]]`; uniform D; MMP window;
 //!   `learn_a`/`learn_b`/`learn_d` + both novelty flags. It **observes once per
@@ -62,10 +64,17 @@ use super::{CoalitionDecisionPolicy, Decision, DecisionContext};
 
 // --- Fixed model constants -------------------------------------------------
 
-/// Number of capability bits the persistent world model tracks (8-bit universe).
+/// Default number of capability bits the persistent world model tracks — the
+/// registered 8-bit universe. Overridable per arm via
+/// [`PersistentAifConfig::n_bits`] (koalisi #61 Part 5c).
 const N_BITS: usize = 8;
-/// Persistent joint-state count: `2^N_BITS`.
-const N_JOINT_PERSISTENT: usize = 1 << N_BITS;
+/// Smallest supported [`PersistentAifConfig::n_bits`].
+const MIN_N_BITS: usize = 1;
+/// Largest supported [`PersistentAifConfig::n_bits`]. The persistent joint space
+/// is `2^n_bits` columns per modality (16 ⇒ 65 536 columns × `n_bits` modalities),
+/// and `u32` capability masks bound the universe at 32 regardless; 16 is the
+/// practical ceiling and out-of-range values are clamped at construction.
+const MAX_N_BITS: usize = 16;
 /// Outcomes per modality: `{success, failure, no_obs}`.
 const N_OUTCOMES: usize = 3;
 const SUCCESS: usize = 0;
@@ -165,6 +174,43 @@ pub struct PersistentAifConfig {
     /// battery-v2 arm-config labels are `arm-E1g1` / `arm-E1g4` / `arm-E1g16`;
     /// arm-E1 itself stays `None`.
     pub query_gamma: Option<f64>,
+    /// Capability-bit width of the persistent world model (koalisi #61, Part 5c).
+    /// **Identity default [`N_BITS`] = 8** — the registered universe every K4
+    /// battery through v2 runs on; at `8` the arm is bit-for-bit the #53 arm.
+    ///
+    /// The width sets the number of persistent factors/modalities, the persistent
+    /// joint space (`2^n_bits` columns), the expected
+    /// [`observe_outcome`](PersistentAifArm::observe_outcome) slice length, and the
+    /// bit range `required` masks are read over (higher bits are ignored). Values
+    /// outside `1..=16` are clamped at construction with a warning.
+    pub n_bits: usize,
+}
+
+impl PersistentAifConfig {
+    /// `self` with [`n_bits`](Self::n_bits) clamped into `MIN_N_BITS..=MAX_N_BITS`,
+    /// warning when the value actually moved. Applied once, in
+    /// [`PersistentAifArm::new`], so every downstream read (construction, queries,
+    /// `observe_outcome`) sees the same effective width.
+    fn clamped(mut self) -> Self {
+        let clamped = self.n_bits.clamp(MIN_N_BITS, MAX_N_BITS);
+        if clamped != self.n_bits {
+            tracing::warn!(
+                requested = self.n_bits,
+                clamped,
+                "persistent arm n_bits out of range, clamping"
+            );
+            self.n_bits = clamped;
+        }
+        self
+    }
+}
+
+/// Mask of the low `n_bits` bits — the capability universe an arm reads. Every
+/// arm clamps `n_bits` to [`MAX_N_BITS`] (< 32) before storing it, so the shift
+/// cannot overflow.
+fn low_mask(n_bits: usize) -> u32 {
+    debug_assert!(n_bits <= MAX_N_BITS, "n_bits is clamped at construction");
+    (1u32 << n_bits) - 1
 }
 
 impl Default for PersistentAifConfig {
@@ -179,6 +225,7 @@ impl Default for PersistentAifConfig {
             eviction_cap: None,
             rejoin_lockout_tasks: 0,
             query_gamma: None,
+            n_bits: N_BITS,
         }
     }
 }
@@ -209,9 +256,9 @@ pub struct PersistentAifState {
 
 /// Mutable persistent state, guarded by the arm's mutex.
 struct Inner {
-    /// The persistent 8-factor / 8-modality world model.
+    /// The persistent `n_bits`-factor / `n_bits`-modality world model.
     agent: aif::POMDPAgent,
-    /// The last `REPLAY_CAP` task-outcome observation vectors (full 8-length,
+    /// The last `REPLAY_CAP` task-outcome observation vectors (full `n_bits`-length,
     /// oldest first), replayed into each query (A1.4).
     replay: VecDeque<Vec<usize>>,
     /// Number of task outcomes observed so far this seed.
@@ -246,11 +293,16 @@ pub struct PersistentAifArm {
 impl PersistentAifArm {
     /// Build a fresh persistent arm for `battery_seed` under `config`.
     ///
+    /// `config.n_bits` is clamped into the supported range here (see
+    /// [`PersistentAifConfig::n_bits`]); the clamped value is what every later
+    /// query, observation, and snapshot uses.
+    ///
     /// # Errors
     ///
     /// Returns [`aif::AifError`] if the persistent generative model or params are
     /// rejected by the engine.
     pub fn new(battery_seed: u64, config: PersistentAifConfig) -> Result<Self, aif::AifError> {
+        let config = config.clamped();
         let agent = build_persistent_agent(config, battery_seed)?;
         Ok(Self {
             inner: Arc::new(Mutex::new(Inner {
@@ -275,10 +327,23 @@ impl PersistentAifArm {
     /// `∉ required` observe `no_obs` (likelihood-neutral padding). Under
     /// [`TrialBoundary::PerTask`] the window is reset afterwards.
     ///
-    /// The 8-length observation is also pushed into the replay deque (cap
+    /// The `n_bits`-length observation is also pushed into the replay deque (cap
     /// [`REPLAY_CAP`], oldest evicted) for the query replay (A1.4).
-    pub fn observe_outcome(&self, required: u32, per_bit_success: &[bool; N_BITS]) {
-        let obs: Vec<usize> = (0..N_BITS)
+    ///
+    /// `per_bit_success` must have exactly [`PersistentAifConfig::n_bits`] entries
+    /// (a `&[bool; 8]` coerces at the default width). A mismatched length is warned
+    /// and the update is SKIPPED — the arm never panics inside a battery.
+    pub fn observe_outcome(&self, required: u32, per_bit_success: &[bool]) {
+        let n_bits = self.config.n_bits;
+        if per_bit_success.len() != n_bits {
+            tracing::warn!(
+                got = per_bit_success.len(),
+                expected = n_bits,
+                "persistent observe_outcome width mismatch, skipping the update"
+            );
+            return;
+        }
+        let obs: Vec<usize> = (0..n_bits)
             .map(|b| {
                 if required & (1u32 << b) == 0 {
                     NO_OBS
@@ -331,6 +396,11 @@ impl PersistentAifArm {
     /// `(required, cfg0, cfg1)`, replay the recent outcome window, and read the
     /// marginal action posterior. `leave` selects the tie rule (`≥` vs `>`).
     fn decide(&self, required: u32, cfg0: u32, cfg1: u32, leave: bool) -> Decision {
+        // Bits above the world model's universe carry no factor, so they cannot
+        // enter a query — restrict up front so `r` below agrees with the query's
+        // own bit count. A no-op at every registered width (all masks are already
+        // inside the universe).
+        let required = required & low_mask(self.config.n_bits);
         // required == 0 ⇒ nothing to cover ⇒ no-op (mirrors the mm/scalar arms).
         if required == 0 {
             return Decision { act: false, score: 0.0 };
@@ -438,21 +508,25 @@ impl CoalitionDecisionPolicy for PersistentAifArm {
 
 // --- Persistent-agent construction -----------------------------------------
 
-/// Build the persistent 8-factor / 8-modality world model (design note §3.1,
-/// Amendment A1.2).
+/// Build the persistent `n_bits`-factor / `n_bits`-modality world model (design
+/// note §3.1, Amendment A1.2). At the default width this is the registered
+/// 8-factor / 8-modality model.
 fn build_persistent_agent(
     config: PersistentAifConfig,
     seed: u64,
 ) -> Result<aif::POMDPAgent, aif::AifError> {
+    let n_bits = config.n_bits;
+    let n_joint = 1usize << n_bits;
     // pA counts (A1.2 anchors): one modality per bit; A_m depends only on factor m,
-    // replicated across the 256-column joint (little-endian, factor 0 fastest ⇒
+    // replicated across the `2^n_bits`-column joint (256 at the default width;
+    // little-endian, factor 0 fastest ⇒
     // state = (j >> m) & 1). Injected as `initial_pa` so the asymmetric anchors
     // survive `learn_a` (aif 0.11.0 count injection — Amendment 2): under the old
     // `initial_precision` scale path the first write-back `A = normalize(pA)`
     // flattened them, defeating A1.2's "a symmetric A never learns to discriminate".
-    let pa_counts: Vec<DMatrix<f64>> = (0..N_BITS)
+    let pa_counts: Vec<DMatrix<f64>> = (0..n_bits)
         .map(|m| {
-            DMatrix::from_fn(N_OUTCOMES, N_JOINT_PERSISTENT, |row, j| {
+            DMatrix::from_fn(N_OUTCOMES, n_joint, |row, j| {
                 if (j >> m) & 1 == 0 {
                     RELIABLE_COL[row]
                 } else {
@@ -470,14 +544,14 @@ fn build_persistent_agent(
     // (`initial_precision_b`) seeds pB = s_b·B, which is structure-preserving, so B
     // does NOT need count injection.
     let sticky = DMatrix::from_row_slice(2, 2, &[STICKY, 1.0 - STICKY, 1.0 - STICKY, STICKY]);
-    let b: Vec<Vec<DMatrix<f64>>> = (0..N_BITS).map(|_| vec![sticky.clone()]).collect();
+    let b: Vec<Vec<DMatrix<f64>>> = (0..n_bits).map(|_| vec![sticky.clone()]).collect();
 
     // C: neutral (uniform) — the persistent agent never drives a decision, so C is
     // inert for its belief/learning path.
-    let c: Vec<Vec<f64>> = (0..N_BITS).map(|_| vec![0.5, 0.5, 0.5]).collect();
+    let c: Vec<Vec<f64>> = (0..n_bits).map(|_| vec![0.5, 0.5, 0.5]).collect();
 
     // D: uniform per factor.
-    let d: Vec<Vec<f64>> = (0..N_BITS).map(|_| vec![0.5, 0.5]).collect();
+    let d: Vec<Vec<f64>> = (0..n_bits).map(|_| vec![0.5, 0.5]).collect();
 
     let learn = config.persistent_learning;
     let params = aif::AgentParams {
@@ -516,7 +590,7 @@ fn build_query(
     cfg0: u32,
     cfg1: u32,
 ) -> Result<(aif::POMDPAgent, Vec<Vec<usize>>), aif::AifError> {
-    let required_bits = set_bits(required);
+    let required_bits = set_bits(required, config.n_bits);
     let r = required_bits.len();
     let n_joint = 1usize << (r + 1); // 2^r bit-factor states × 2 membership states.
 
@@ -723,9 +797,9 @@ fn union_caps(agents: &[&dyn AgentCapabilities]) -> u32 {
     agents.iter().fold(0u32, |acc, a| acc | a.capabilities())
 }
 
-/// Ascending indices of the set bits of `mask` (within the 8-bit universe).
-fn set_bits(mask: u32) -> Vec<usize> {
-    (0..N_BITS).filter(|&b| mask & (1u32 << b) != 0).collect()
+/// Ascending indices of the set bits of `mask` within the low `n_bits` universe.
+fn set_bits(mask: u32, n_bits: usize) -> Vec<usize> {
+    (0..n_bits).filter(|&b| mask & (1u32 << b) != 0).collect()
 }
 
 /// L1-normalize a slice into a probability vector (defensive against a zero sum).
@@ -1141,6 +1215,127 @@ mod tests {
         let flat = e1_stream(Some(1.0));
         let base = e1_stream(None);
         assert_ne!(flat, base, "γ = 1 must de-saturate at least one decision");
+    }
+
+    /// #61 Part 5c: an explicit `n_bits: 8` restates the identity default, so it
+    /// must decide bit-identically to `..Default::default()` — the library-side
+    /// half of the X-A/X-C "8 bits is bit-for-bit today" constraint.
+    #[test]
+    fn n_bits_eight_is_identity() {
+        let ctx = DecisionContext { required_capabilities: 0b0111 };
+        let a0 = TestAgent { id: 0, caps: 0b0001, trust: 50 };
+        let a1 = TestAgent { id: 1, caps: 0b0010, trust: 50 };
+        let a2 = TestAgent { id: 2, caps: 0b0100, trust: 50 };
+        let coalition: [&dyn AgentCapabilities; 2] = [&a1, &a2];
+        let full: [&dyn AgentCapabilities; 3] = [&a0, &a1, &a2];
+
+        let run = |cfg| {
+            let arm = PersistentAifArm::new(42, cfg).unwrap();
+            let mut out = Vec::new();
+            for _ in 0..3 {
+                let j = arm.should_join(&a0, &coalition, &ctx);
+                out.push((j.act, j.score.to_bits()));
+                let l = arm.should_leave(&a0, &full, &ctx);
+                out.push((l.act, l.score.to_bits()));
+                arm.observe_outcome(0b0111, &[false, true, true, false, false, false, false, false]);
+            }
+            out
+        };
+
+        assert_eq!(
+            run(PersistentAifConfig { n_bits: 8, ..Default::default() }),
+            run(PersistentAifConfig::default()),
+            "an explicit n_bits = 8 must decide identically to the default"
+        );
+    }
+
+    /// #61 Part 5c: a 12-bit arm constructs, learns from a 12-wide outcome, and
+    /// produces finite in-range decisions over 12-bit requirement masks.
+    #[test]
+    fn twelve_bit_arm_observes_and_decides() {
+        let cfg = PersistentAifConfig { n_bits: 12, ..Default::default() };
+        let arm = PersistentAifArm::new(7, cfg).unwrap();
+
+        let before = arm.state_snapshot().pa.unwrap();
+        let mut succ = [false; 12];
+        succ[0] = true;
+        succ[9] = true;
+        arm.observe_outcome(0b1011_0000_0011, &succ);
+        let after = arm.state_snapshot().pa.unwrap();
+        assert!(
+            before.iter().zip(&after).any(|(x, y)| (x - y).iter().any(|d| d.abs() > 1e-9)),
+            "a 12-wide outcome must update the 12-modality pA"
+        );
+
+        // Bits 9 and 11 are above the 8-bit universe — reachable only because the
+        // arm is 12 bits wide.
+        let ctx = DecisionContext { required_capabilities: 0b1010_0000_0001 };
+        let a0 = TestAgent { id: 0, caps: 0b0000_0000_0001, trust: 50 };
+        let a1 = TestAgent { id: 1, caps: 0b0010_0000_0000, trust: 50 };
+        let a2 = TestAgent { id: 2, caps: 0b1000_0000_0000, trust: 50 };
+        let coalition: [&dyn AgentCapabilities; 2] = [&a1, &a2];
+        let full: [&dyn AgentCapabilities; 3] = [&a0, &a1, &a2];
+
+        let j = arm.should_join(&a0, &coalition, &ctx);
+        let l = arm.should_leave(&a0, &full, &ctx);
+        for d in [j, l] {
+            assert!(d.score.is_finite(), "score must be finite, got {}", d.score);
+            assert!(
+                (-0.5..=0.5).contains(&d.score),
+                "score = p(control 1) − 0.5 must stay in [-0.5, 0.5], got {}",
+                d.score
+            );
+        }
+    }
+
+    /// #61 Part 5c: the snapshot's belief vector is exactly `n_bits` long at every
+    /// supported width — the `ReliabilityCoverage::from_state` read contract.
+    #[test]
+    fn snapshot_beliefs_track_n_bits() {
+        for n in [1usize, 4, 8, 12] {
+            let arm = PersistentAifArm::new(
+                1,
+                PersistentAifConfig { n_bits: n, ..Default::default() },
+            )
+            .unwrap();
+            assert_eq!(arm.state_snapshot().beliefs.len(), n, "beliefs.len() == n_bits (n = {n})");
+        }
+    }
+
+    /// #61 Part 5c: a wrong-width outcome slice is warned and SKIPPED, never a
+    /// panic — the battery contract. pA is left untouched.
+    #[test]
+    fn observe_outcome_width_mismatch_is_skipped() {
+        let arm = PersistentAifArm::new(3, PersistentAifConfig::default()).unwrap();
+        let before = arm.state_snapshot().pa.unwrap();
+        arm.observe_outcome(0b0001, &[true; 12]); // 12 entries into an 8-bit arm
+        let after = arm.state_snapshot().pa.unwrap();
+        for (x, y) in before.iter().zip(&after) {
+            assert!(
+                (x - y).iter().all(|d| d.abs() < 1e-12),
+                "a width-mismatched outcome must not touch pA"
+            );
+        }
+    }
+
+    /// #61 Part 5c: out-of-range widths clamp into `MIN_N_BITS..=MAX_N_BITS`
+    /// rather than allocating an impossible joint space or an empty model. The
+    /// clamp is asserted on the config (constructing a 16-bit model just to read
+    /// its width would allocate a 65 536-column joint for nothing); the
+    /// low-end clamp is additionally carried through a real construction.
+    #[test]
+    fn n_bits_out_of_range_is_clamped() {
+        let low = PersistentAifConfig { n_bits: 0, ..Default::default() }.clamped();
+        assert_eq!(low.n_bits, MIN_N_BITS);
+        let high = PersistentAifConfig { n_bits: 40, ..Default::default() }.clamped();
+        assert_eq!(high.n_bits, MAX_N_BITS);
+        let in_range = PersistentAifConfig { n_bits: 12, ..Default::default() }.clamped();
+        assert_eq!(in_range.n_bits, 12, "an in-range width is left alone");
+
+        let arm =
+            PersistentAifArm::new(0, PersistentAifConfig { n_bits: 0, ..Default::default() })
+                .unwrap();
+        assert_eq!(arm.state_snapshot().beliefs.len(), MIN_N_BITS);
     }
 
     /// Object-safety: the arm is usable behind the decision trait object.

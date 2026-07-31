@@ -55,6 +55,32 @@ forex domain since removed).
 
 ### Done
 
+- **EQ1 Part 5c addendum — v0.19.0 (2026-07-31, #61)**: the four deferred
+  registered-exploratory items, appended to the immutable report
+  (`docs/ab-report-K4-battery-v2.md` §Appended addendum — 7-entry
+  implementation/deviation ledger; registered sections untouched; X-C
+  re-verified against a fresh pre-change baseline, latency-only diffs).
+  Library: `PersistentAifConfig::n_bits` (identity default 8, clamp
+  1..=16 + warn; `observe_outcome` now takes `&[bool]` — breaking but
+  coercion-compatible; `decide()` masks `required` to the universe). All
+  context, non-gating: **(1) 12-bit slice** — the join rail is
+  margin-proof at 12 bits too (all join quantiles exactly +0.5) and the
+  v2-regime inversion WIDENS (mag 0.0607 < scalar 0.1062 < e1-degraded
+  0.1657, ≈2.7× mag; latency ~2 ms/decision at query joint ≤8192);
+  **(2) hysteresis** — FIRST score-space lever to move churn on the E1
+  lineage (h=0.30: 0.85× churn, 29/30 paired) but pays −24% quality ⇒
+  live-but-expensive, the #56 state-lever conclusion stands; **(3)
+  expected-outcome model `MOSTLY DEGENERATE`** (third gotcha-21 mechanism:
+  per-block partial-term double-counting; re-run context only); **(4)
+  learned-posterior twins** — gotcha-24 ordering check 30/30 (r̂ ranks the
+  planted weak bit below strong on every seed; REAL median unchanged) ⇒
+  the #63 corrected test's learned input is feasible. 3-lens review
+  (correctness / registration-conformance / modeling-semantics): 0
+  blocking; all findings applied incl. the two cell-selection disclosure
+  items. Seeds: 120..150 re-used per the addendum's registration; 90..120
+  + 150..180 still reserved. Suites: **159** decision / **181**
+  decision,magnitude (+5 lib tests; +9 example-binary tests, one
+  release-only `#[ignore]`). See gotcha 25 (extended).
 - **EQ1 battery v2 RUN — v0.18.0 (2026-07-31, #61)**: the registered
   de-saturated-regime run; BOTH confirmatory levers negative, everything
   measured and reported (`docs/prereg-K4-battery-v2.md` d9881e1 pre-impl +
@@ -492,9 +518,9 @@ forex domain since removed).
   | Suite | Tests | Command |
   |---|---|---|
   | Default | 103 | `cargo test` |
-  | `--features decision` | 154 | `cargo test --features decision` |
+  | `--features decision` | 159 | `cargo test --features decision` |
   | `--features magnitude` | 125 | `cargo test --features magnitude` |
-  | `--features decision,magnitude` | 176 | `cargo test --features decision,magnitude` |
+  | `--features decision,magnitude` | 181 | `cargo test --features decision,magnitude` |
   | `--features persistence` | 123 | `cargo test --features persistence` |
   | `--features persistence,magnitude` | 146 (incl. the #18/#30 replay parity gate) | `cargo test --features persistence,magnitude` |
   | `--features durable` | +1 container-backed restart test; needs Docker | `cargo test --features durable` |
@@ -587,8 +613,8 @@ koalisi/
 │   ├── k4-arm-choice-memo.md               #54 Step 4 decision memo — DECIDED B+D 2026-07-18; postscript: #56 FALSIFIED ⇒ B's park final
 │   ├── prereg-K4-v6-never-evict.md         #56 pre-registration (never-evict, dual-signal, 60..90; result appended)
 │   ├── ab-report-K4-v6-never-evict.md      #56 run — FALSIFIED (never-evict); cap-series monotonicity = churn is the mechanism
-│   ├── prereg-K4-battery-v2.md             #61 EQ1 pre-registration (de-saturated regime; Part 5c scope still pending)
-│   └── ab-report-K4-battery-v2.md          #61 run — lever 2 FALSIFIED (de-saturation), lever 1 RUN-INVALID (sanity leg → #63); v2-regime context inversion
+│   ├── prereg-K4-battery-v2.md             #61 EQ1 pre-registration (de-saturated regime; Part 5c scope DONE v0.19.0)
+│   └── ab-report-K4-battery-v2.md          #61 run — lever 2 FALSIFIED (de-saturation), lever 1 RUN-INVALID (sanity leg → #63); v2-regime context inversion; + Part 5c addendum (v0.19.0)
 └── tests/
     ├── topology_test.rs                    12 tests
     ├── algorithms_test.rs                  18 tests (incl. 3 feedback-loop/seeding tests, #41)
@@ -951,6 +977,24 @@ These cost time during the build; future-me should not relearn them.
     - `query_gamma` is inert under `query_dynamics: true` (PrecisionDynamics
       owns γ); `Some(16.0)` ≡ `None` is asserted — don't "simplify" the
       Option away.
+    - **Part 5c extensions (v0.19.0, all exploratory/context).** The join
+      rail is margin-proof at 12 bits too (`n_bits = 12`, γ = 4: every join
+      quantile exactly +0.5) — universe width doesn't free it. Leave-side
+      hysteresis h IS live (the one stream γ frees) but expensive: h = 0.30
+      cut churn to 0.85× at −24% `PRIMARY_B` — don't re-try it as a cheap
+      fix; state levers remain the churn axis. The expected-outcome value
+      model (per-block REAL as fitness) is gotcha-21 degenerate by a THIRD
+      mechanism — the per-block partial term double-counts a bit covered by
+      two blocks, so splitting weakly dominates; don't use per-block
+      expected-payoff fitness for structure search without an
+      interior-optimum term. Learned reliability posteriors rank a planted
+      weak bit correctly 30/30 (levels wildly uncalibrated per gotcha 24) —
+      the #63 corrected routing test can use the learned input.
+    - `PersistentAifConfig::n_bits` (v0.19.0): identity default 8 is the
+      registered arm bit-for-bit (asserted); values clamp to 1..=16 with a
+      warn, `observe_outcome` takes `&[bool]` and skips on width mismatch.
+      The 12-bit query joint is `2^(|required|+1)` ≤ 8192 ⇒ ~2 ms/decision
+      — budget batteries accordingly.
 
 ## Reproducers
 
