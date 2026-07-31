@@ -4279,7 +4279,7 @@ fn part5c_item2_hysteresis() {
     println!("## Item 2 — leave-side hysteresis h ∈ {{0.15, 0.30}}");
     println!();
     println!(
-        "_**Cell selection** (stated because it lands in the report): the registration says \"at the best-performing (γ, δ) cell\", and at δ = 0 all three γ tie on v2-draw `PRIMARY_B` in the Part 5a table. The tie is broken by the mechanism this lever acts on — hysteresis raises the bar a LEAVE score must clear, so the informative cell is the most de-saturated LEAVE stream, which Part 5a measured at **γ = {P5C_HYSTERESIS_GAMMA:.0}** (leave p25 well inside ±0.5 while γ = 16 sits on the rail). Cell: `MarginE1(δ = 0, h)` over `arm-E1g1`, v2-draw, degraded, seeds {V2_SEED_START}..{V2_SEED_END}. The h = 0 row is re-run in-line as this sweep's own paired baseline (it reproduces the Part 5a γ = 1, δ = 0 cell). Exploratory: no bar, no verdict._"
+        "_**Cell selection** (stated because it lands in the report — BOTH restrictions are interpretations of the registered \"at the best-performing (γ, δ) cell\"): first, the search is restricted to the **v2-draw** regime — v1-draw cells score higher in absolute `PRIMARY_B` (≈ 0.386), but lever 2 (which this lever follows on) was registered and judged on v2-draw, and the v1-draw leave streams barely de-saturate at any γ — and second, at δ = 0 all three γ tie on v2-draw `PRIMARY_B` in the Part 5a table, so the tie is broken by the mechanism this lever acts on: hysteresis raises the bar a LEAVE score must clear, and the most de-saturated LEAVE stream is **γ = {P5C_HYSTERESIS_GAMMA:.0}** (leave p25 well inside ±0.5 while γ = 16 sits on the rail). Cell: `MarginE1(δ = 0, h)` over `arm-E1g1`, v2-draw, degraded, seeds {V2_SEED_START}..{V2_SEED_END}. The h = 0 row is re-run in-line as this sweep's own paired baseline; it is asserted in-code to reproduce the unwrapped arm, which gate X-B(b) pinned equal to the Part 5a γ = 1, δ = 0 cell. Exploratory: no bar, no verdict._"
     );
     println!();
 
@@ -4289,6 +4289,15 @@ fn part5c_item2_hysteresis() {
         degraded: true,
     };
     let (base, _) = margin_battery_mode(cfg, 0.0, 0.0, mode, V2_SEED_START, V2_SEED_END, None);
+    // The baseline-reproduction claim in the rationale above, made a fact: the
+    // h = 0 wrapper equals the unwrapped arm per seed (X-B(b) pinned that arm
+    // equal to the Part 5a γ = 1, δ = 0 cell, so equality is transitive).
+    let (bare, _) = persistent_battery_mode(cfg, mode, V2_SEED_START, V2_SEED_END);
+    assert_battery_identical(
+        &base,
+        &bare,
+        "item 2 h = 0 baseline must reproduce the unwrapped arm",
+    );
     let base_churns = churns_b(&base);
     let base_churn_med = median(base_churns.clone());
     let base_primary_med = median(primaries_b(&base));
@@ -4340,6 +4349,12 @@ fn part5c_item2_hysteresis() {
 /// where `TaskCoverageV2::weighted` optimizes a nominal proxy for it. The
 /// identity `Σ over blocks of calculate_value == real_payoff` is asserted before
 /// the run (`assert_p5c_expected_outcome_identity`).
+///
+/// `required == 0` is out of contract (shared by the whole `TaskCoverageV2` /
+/// [`real_payoff`] family): an empty requirement makes every block vacuously
+/// full-covered, so each block earns the flat residual and the "value" grows
+/// with the block COUNT. Unreachable here — `draw_routing_instance` draws
+/// `m ∈ {7, 8}` — but a future caller must guard it.
 struct ExpectedOutcomeV2 {
     required: u32,
     reliability: [f64; UNIVERSE],
@@ -4465,8 +4480,8 @@ fn part5c_item3_expected_outcome() {
     let n_seeds = deg_rows.len();
     let analysis = if singleton_ge_search == n_seeds {
         "DEGENERATE — all-singletons is optimal on every seed, so the model has no interior optimum over set-partitions of a fixed pool"
-    } else if 2 * singleton_ge_search >= n_seeds {
-        "MOSTLY DEGENERATE — all-singletons is optimal on a majority of seeds; the exceptions are the merges whose full-coverage residual outweighs the overlap they destroy"
+    } else if 2 * singleton_ge_search > n_seeds {
+        "MOSTLY DEGENERATE — all-singletons is optimal on a strict majority of seeds; the exceptions are the merges whose full-coverage residual outweighs the overlap they destroy"
     } else {
         "NON-degenerate on most seeds — an interior optimum exists here"
     };
@@ -4474,7 +4489,7 @@ fn part5c_item3_expected_outcome() {
         "**Analysis result:** the `search()` argmax is all-singletons on **{singleton_argmax}/{n_seeds}** seeds, and all-singletons matches or beats the argmax on **{singleton_ge_search}/{n_seeds}**. Verdict of the analysis: **{analysis}**."
     );
     println!();
-    if 2 * singleton_ge_search >= n_seeds {
+    if 2 * singleton_ge_search > n_seeds {
         println!(
             "_Per the registered gating (\"gated on its own gotcha-21 degeneracy analysis\"), the comparison below is therefore reported as **degenerate-by-analysis**: the numbers are CONTEXT, not evidence about routing. This model joins `Additive` (constant across partitions) and `Synergistic`/`Multiplicative` (split-favouring) on the gotcha-21 list, by a third mechanism — the per-block partial term double-counts a bit that two blocks both cover, so splitting pays, and the full-coverage residual `20·Π r` is far too small at the planted reliabilities to buy the overlap back. The productive response is a value model with an interior optimum, not a re-run of this one._"
         );
