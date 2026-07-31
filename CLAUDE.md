@@ -55,6 +55,26 @@ forex domain since removed).
 
 ### Done
 
+- **#63 corrected block-level routing test — 2026-07-31 (example+docs, no
+  bump)**: the EQ1 tail, full discipline (owner design-lock D1–D6 on #63
+  BEFORE prereg; prereg `docs/prereg-K4-routing-corrected.md` committed
+  BEFORE implementation; 3-lens review — 1 blocking + 11 important + 12
+  minor, ALL applied/adjudicated — BEFORE the official run; report
+  `docs/ab-report-K4-routing-corrected.md`). New Part 6 in
+  `strategy_comparison`: coverage-guaranteed rejection re-draw, block-level
+  highest-value-block skip predicate + b*-strong attribution counterfactual,
+  seeds 180..210. **H-BR `FALSIFIED (block-routing)`** — sanity 28/30 PASS,
+  skip 4/30 vs bar 18; mechanism-scoped: the b*-window (4.71/4.13) barely
+  exceeds the competing singleton-value lattice (4.00/3.50), and the 4
+  firing seeds are exactly the window hits (an exact-optimum replica
+  predicted 3/30 pre-run). W forms the full block 29/30 ⇒ ranking channel.
+  **Leg C (product-form full bonus) `DEGENERATE (context only)` 30/30** —
+  the FOURTH gotcha-21 mechanism. **Leg L: learned-posterior ordering
+  30/30** even at 0.02-vs-0.35 — the feasibility fact survives; the routing
+  blocker is value-model geometry, not the signal. Gotcha 24 strengthened,
+  scoped to the window-vs-lattice geometry. See **gotcha 26**. Suites
+  unchanged (181 decision,magnitude; example binary 26). Seeds consumed:
+  180..210; 90..120 + 150..180 still reserved.
 - **EQ1 Part 5c addendum — v0.19.0 (2026-07-31, #61)**: the four deferred
   registered-exploratory items, appended to the immutable report
   (`docs/ab-report-K4-battery-v2.md` §Appended addendum — 7-entry
@@ -614,7 +634,9 @@ koalisi/
 │   ├── prereg-K4-v6-never-evict.md         #56 pre-registration (never-evict, dual-signal, 60..90; result appended)
 │   ├── ab-report-K4-v6-never-evict.md      #56 run — FALSIFIED (never-evict); cap-series monotonicity = churn is the mechanism
 │   ├── prereg-K4-battery-v2.md             #61 EQ1 pre-registration (de-saturated regime; Part 5c scope DONE v0.19.0)
-│   └── ab-report-K4-battery-v2.md          #61 run — lever 2 FALSIFIED (de-saturation), lever 1 RUN-INVALID (sanity leg → #63); v2-regime context inversion; + Part 5c addendum (v0.19.0)
+│   ├── ab-report-K4-battery-v2.md          #61 run — lever 2 FALSIFIED (de-saturation), lever 1 RUN-INVALID (sanity leg → #63); v2-regime context inversion; + Part 5c addendum (v0.19.0)
+│   ├── prereg-K4-routing-corrected.md      #63 pre-registration (block-level routing; legs A/C/L; + pre-impl tie-break amendment)
+│   └── ab-report-K4-routing-corrected.md   #63 run — FALSIFIED (block-routing), mechanism-scoped (window vs lattice); leg C DEGENERATE (4th gotcha-21 mechanism); leg L ordering 30/30 (gotcha 26)
 └── tests/
     ├── topology_test.rs                    12 tests
     ├── algorithms_test.rs                  18 tests (incl. 3 feedback-loop/seeding tests, #41)
@@ -995,6 +1017,41 @@ These cost time during the build; future-me should not relearn them.
       warn, `observe_outcome` takes `&[bool]` and skips on width mismatch.
       The 12-bit query joint is `2^(|required|+1)` ≤ 8192 ⇒ ~2 ms/decision
       — budget batteries accordingly.
+
+26. **Corrected routing test (#63, Part 6) — rely on these.**
+    - **Block-level routing needs window > lattice.** The b\* planting opens
+      a value window of width `100·Δr/m` at the full-coverage block; the
+      competing blocks are leftover singletons on a value lattice of spacing
+      `w(m)·r_others`. At the registered planting (0.02/0.35) the window
+      (4.71/4.13) barely exceeds the spacing (4.00/3.50) ⇒ at most one
+      leftover capability count can fire per cover size, and the skip leg
+      cannot reach a 60% bar on any draw distribution like this one. Any
+      future routing design must widen the window-to-lattice ratio BY
+      DESIGN — new registration required.
+    - **Per-block multiplicative (success-probability) full bonuses are
+      gotcha-21 degenerate for structure search** — the FOURTH mechanism:
+      `100·Π r` collapses at any materially-sub-1 planting and stops paying
+      for the per-block partial-term overlap a merge destroys
+      (all-singletons ties-or-beats 30/30 at 0.15/0.98). Do NOT describe
+      `TaskCoverageV2P` as "reliability-INsensitive" (the prereg's leg-C
+      interpretation clause mischaracterizes it — report ledger item 6); its
+      bonus is maximally reliability-sensitive and routes by collapse.
+    - **Uniform-rescale counterfactuals do not hold the partition fixed.**
+      Exact arithmetic says a uniform reliability is an increasing affine
+      map of the unweighted total (same argmax), but the fitness landscape
+      is saturated with exact ties and independently-rounded scaled sums
+      split them at ±1 ulp — PSO trajectories diverged on 27/30 seeds.
+      Treat same-seed counterfactual contrasts as intent-to-treat, and
+      never assert partition coincidence (count it).
+    - The min-multiplicity-cover bound `Σ|caps∩required| < 1.25·m` is the
+      feasibility condition for a full-coverage TOP block (strictly stronger
+      than pool coverage, which the corrected draw guarantees); print it
+      per-seed so sanity failures attribute to draw-vs-search immediately
+      (seed 196 = draw-infeasible, seed 188 = search miss).
+    - Learned posteriors stay ordering-robust at near-floor reliabilities
+      (30/30 at 0.02-vs-0.35, both bits failing most tasks) with levels as
+      uncalibrated as ever (spread median 0.12) — gotcha 24's split holds at
+      its second measured point.
 
 ## Reproducers
 
