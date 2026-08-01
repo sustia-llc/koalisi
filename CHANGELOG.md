@@ -21,6 +21,30 @@ Planned work — issue-tracked (details in [`CLAUDE.md`](./CLAUDE.md)
 - **[#25]** metrics example, reframed onto the `CoalitionService` decision
   path / topology events.
 
+## [0.20.0] — 2026-08-01
+
+The pre-EQ4 adoption release: `aif` re-pinned one minor ahead with a clean
+drift check, clearing the AIF-side substrate (generic agent slots +
+nesting) the EQ4 typed-roles registration will build on.
+
+### Changed
+- **`aif` dep re-pinned `aif-v0.11.0` → `aif-v0.12.0`** (tira Phase 3:
+  #39 generic blanket slots, #41 `GroupAgent` nesting, #11 hardening; the
+  one breaking rider — #9 serde feature-gating on
+  `Message`/`MessageContent`/`InfoRequestType` — is a no-op for koalisi,
+  which never touches those types). Drift check CLEAN: all six feature suites at baseline
+  counts (103/159/125/181/123/146, incl. the #18/#30 replay parity gate),
+  default clippy `--all-targets` clean, and the frozen K4 battery
+  (`strategy_comparison` Parts 1–6, `--release`) reproduced with every
+  quality median, churn column, seed table, and verdict byte-identical to
+  the `aif-v0.11.0` baseline — the only diff lines are latency
+  measurements, the column the K4 protocol has always excluded from
+  determinism. Expected per the stack file: 0.12.0's additive surface
+  (generic slots + nesting) never touches the `POMDPAgent` path koalisi's
+  scalar/mm/persistent arms consume.
+- Lockfile: `aif 0.11.0 → 0.12.0` — the only package moved; MSRV
+  unchanged at 1.93.
+
 ## [0.19.0] — 2026-07-31
 
 The EQ1 ([#61]) Part 5c close-out: the four exploratory items deferred from

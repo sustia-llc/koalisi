@@ -69,14 +69,13 @@ dependencies = [
 
 [[package]]
 name = "aif"
-version = "0.11.0"
-source = "git+https://github.com/sustia-llc/tira?tag=aif-v0.11.0#79da34f29653811c6d3fc41dbce4c89608b124c9"
+version = "0.12.0"
+source = "git+https://github.com/sustia-llc/tira?tag=aif-v0.12.0#3db8e54bae39080b330feb72d57e6d80f68ca8b1"
 dependencies = [
  "flume",
  "nalgebra",
  "rand 0.10.2",
  "rand_distr 0.6.0",
- "serde",
  "thiserror",
 ]
 
@@ -4762,7 +4761,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
