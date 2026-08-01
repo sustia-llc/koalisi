@@ -51,10 +51,28 @@ forex domain since removed).
   `surrealdb:surrealql-language` — for K3 (#6) surrealdb-live-message work,
   per the user CLAUDE.md routing rules.
 
-## Current state — 2026-07-30
+## Current state — 2026-08-01
 
 ### Done
 
+- **aif re-pin `aif-v0.11.0` → `aif-v0.12.0` — v0.20.0 (2026-08-01)**: the
+  pre-EQ4 adoption slice, run under the standing re-pin protocol (own PR,
+  no code changes mixed in). **Drift check CLEAN**: six suites at baseline
+  counts (103/159/125/181/123/146 incl. the replay parity gate), default
+  clippy `--all-targets` clean, frozen K4 battery (Parts 1–6, `--release`)
+  reproduced with all quality/churn/verdict content byte-identical —
+  latency-only diff lines, per the protocol's standing exclusion. Lockfile
+  moved exactly one package (`aif 0.12.0`); MSRV unchanged (1.93). The one
+  breaking rider (tira#9 serde feature-gating on
+  `Message`/`MessageContent`/`InfoRequestType`) is grep-verified unused in
+  koalisi. What the hop buys: tira#39 generic blanket slots
+  (`InternalAgent`/`Aggregator`) + tira#41 `GroupAgent` nesting — the
+  aif-side substrate EQ4 (typed roles) registers against; the EQ4 prereg
+  gate "aif 0.12.0 adopted first" is now DISCHARGED. Sources of the
+  release-anchored "aif 0.11.0 count injection" wording
+  (`aif_persistent_policy.rs` docs, the Part 3 battery label) deliberately
+  unchanged — they date the mechanism, not the pin, and the battery label
+  is frozen report text.
 - **#63 corrected block-level routing test — 2026-07-31 (example+docs, no
   bump)**: the EQ1 tail, full discipline (owner design-lock D1–D6 on #63
   BEFORE prereg; prereg `docs/prereg-K4-routing-corrected.md` committed
@@ -1213,9 +1231,10 @@ learning, ad-hoc RNG). Instead koalisi depends on the code-reviewed `aif` refere
 engine from the `tira` repo and bridges to it.
 
 - **Dependency:** `aif = { git = "https://github.com/sustia-llc/tira", tag =
-  "aif-v0.11.0", optional = true }` (shipped at `aif-v0.4.0`; → `v0.5.0` by follow-up #2;
+  "aif-v0.12.0", optional = true }` (shipped at `aif-v0.4.0`; → `v0.5.0` by follow-up #2;
   → `v0.9.0` by #43 Part 1, 2026-07-16 — decision suite passed unchanged;
-  → `v0.11.0` by the #44 K4-v4 cycle), behind `[features] decision = ["dep:aif"]`.
+  → `v0.11.0` by the #44 K4-v4 cycle; → `v0.12.0` by the 2026-08-01 pre-EQ4
+  adoption slice, v0.20.0 — drift-free), behind `[features] decision = ["dep:aif"]`.
   Originally an SSH URL (tira was private; cargo's libgit2 HTTPS fetch can't
   authenticate) — re-pinned to HTTPS in the 2026-07-27 release sweep after
   tira went public. Feature-off builds compile **no `aif` and no

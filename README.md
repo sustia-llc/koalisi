@@ -167,7 +167,7 @@ cargo test --features durable              # + container-backed restart-durabili
 - tokio + tokio-util — async runtime + lifecycle primitives
 - rayon + tokio-rayon — CPU-bound graph operations bridge
 - [surrealdb-live-message](https://github.com/sustia-llc/surrealdb-live-message) (tag `v0.2.1`, **optional**, feature `durable`) — two-tier restart-durable message bus for the coalition decision log
-- [aif](https://github.com/sustia-llc/tira) (tag `aif-v0.11.0`, **optional**, feature `decision`) — active-inference engine for the AIF decision strategies (scalar, multimodal, persistent); `nalgebra` is only compiled when the feature is enabled
+- [aif](https://github.com/sustia-llc/tira) (tag `aif-v0.12.0`, **optional**, feature `decision`) — active-inference engine for the AIF decision strategies (scalar, multimodal, persistent); `nalgebra` is only compiled when the feature is enabled
 - [catgraph-magnitude](https://github.com/sustia-llc/catgraph) (tag `v0.2.0`, **optional**, feature `magnitude`) — enriched-category coalition magnitude for the categorical decision strategy
 
 ## References
