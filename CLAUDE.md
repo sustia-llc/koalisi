@@ -51,10 +51,40 @@ forex domain since removed).
   `surrealdb:surrealql-language` — for K3 (#6) surrealdb-live-message work,
   per the user CLAUDE.md routing rules.
 
-## Current state — 2026-08-01
+## Current state — 2026-08-02
 
 ### Done
 
+- **catgraph re-pin `v0.5.0` ×2 → `v0.6.0` — v0.21.0 (2026-08-02)**: the
+  EQ3 pin-first step — the latency-re-match registration
+  ([#69](https://github.com/sustia-llc/koalisi/issues/69)) must be born
+  on the final pins. Both catgraph deps bumped in lockstep (K6 rule).
+  **Drift check CLEAN**: six suites at baseline counts
+  (103/159/125/181/123/146 incl. the replay parity gate), default clippy
+  `--all-targets` clean, frozen K4 battery (Parts 1–6, `--release`)
+  reproduced byte-identical on every quality/churn/verdict line vs a
+  fresh v0.5.0 baseline — latency-only diffs, per the protocol's standing
+  exclusion. Lockfile moved exactly the three catgraph workspace packages
+  (+ rider: refreshed the lock's stale `koalisi 0.19.0` version line);
+  v0.6.0's breaking set is applied-side (cg#202/cg#185) and untouched by
+  koalisi's consumption; MSRV stays 1.93. Downstream catch: README's
+  catgraph tag citations were still `v0.2.0` (missed in the v0.5.0
+  re-pin) — fixed to `v0.6.0`. **EQ3 itself is IN FLIGHT**: #69 carries
+  the owner design-lock (posted BEFORE prereg, 2026-08-02): D2 strict
+  Path-A analogue; D3 all three levers registered (cg#33
+  `value_with_scratch` + cg#153 `value_with_report` proof-branch + cg#165
+  `f64-fast` via the public `HomMap` → `Coalition::from_enriched` →
+  `as_weighted_cospan().clone().into_metric_space()` → `magnitude_f64`
+  route — no coalition-level f64 entry exists upstream, verified at the
+  tag); D4 fresh seeds 210..240 (90..120 + 150..180 stay reserved);
+  placement = library, frozen-battery X-gated (feature-off AND
+  feature-on-flag-off); `KNIFE_EDGE_REL_BAND` narrowing is
+  measurement-only this arc (the cg#153 [1e-13, 1e-6) empty-band check
+  on koalisi traffic). Next: prereg doc → 3-lens review → official run.
+  Kickoff: `.claude/plans/2026-08-02-eq3-latency-rematch-kickoff.md`.
+  ⚠ checkout hygiene: `${BASE_PATH}/tsondru/catgraph` carries a STALE
+  `v0.6.0` tag (old pre-workspace lineage, different commit) — the
+  checkout of record is `${BASE_PATH}/sustia-llc/catgraph`.
 - **aif re-pin `aif-v0.11.0` → `aif-v0.12.0` — v0.20.0 (2026-08-01)**: the
   pre-EQ4 adoption slice, run under the standing re-pin protocol (own PR,
   no code changes mixed in). **Drift check CLEAN**: six suites at baseline
@@ -568,7 +598,7 @@ forex domain since removed).
 
 ```
 koalisi/
-├── Cargo.toml                              git tag deps: catgraph-applied + catgraph-magnitude v0.5.0 in lockstep (one checkout — K6); aif, surrealdb-live-message (optional); no path deps since K3; MSRV 1.93
+├── Cargo.toml                              git tag deps: catgraph-applied + catgraph-magnitude v0.6.0 in lockstep (one checkout — K6); aif, surrealdb-live-message (optional); no path deps since K3; MSRV 1.93
 ├── README.md                               user-facing
 ├── CLAUDE.md                               THIS FILE
 ├── config/{default,development,test}.toml  coalition threshold, history capacity; [sdb]+[docker] for the durable feature's upstream SETTINGS (cwd-resolved)
@@ -1395,7 +1425,8 @@ The categorical A/B mirror of the AIF arm, behind feature `magnitude`
 - Dep: `catgraph-magnitude` by git tag (shipped at `v0.1.0`; bumped to
   `v0.1.1` for the catgraph#29 triangle-tolerance fix; **K6 (#14) bumped
   again to `v0.2.0`** for the catgraph#31 `CoalitionEvaluator`; re-pinned
-  `v0.5.0` 2026-07-30, EQ1 pin-first, drift-free — see Current state). Originally
+  `v0.5.0` 2026-07-30, EQ1 pin-first; re-pinned `v0.6.0` 2026-08-02, EQ3
+  pin-first, both drift-free — see Current state). Originally
   an SSH URL (catgraph was private then; cargo's libgit2 can't authenticate
   HTTPS) — re-pinned to HTTPS in the 2026-07-27 release sweep after catgraph
   went public. `coalition_value` = magnitude at pinned `t = 1`;
