@@ -987,6 +987,13 @@ fn part2_ab_harness() {
     let (mag_seeds, mag_lat) = run_battery(&mag);
     let (mm_seeds, mm_lat) = run_battery(&mm);
 
+    // Part 7 (koalisi #69) reads Part 2's own `mag` latency median back, so its
+    // before/after context row cites THIS binary's frozen-battery number rather
+    // than a remembered one. Capture only — the value is the same
+    // `median_iqr(mag_lat).0` the report prints below, and no printed line of
+    // Part 2 changes.
+    PART2_MAG_LATENCY_US.set(median_iqr(mag_lat.clone()).0).ok();
+
     // Oracle (n <= 8 seeds only).
     let oracle: Vec<Option<f64>> = (0..SEEDS)
         .map(|s| {
@@ -5667,8 +5674,22 @@ const P7_SEED_END: u64 = 240;
 const P7_NONINFERIORITY: f64 = 0.98;
 /// H-par′ (i): at a first divergence, `mag`'s own margin must be float noise
 /// around the certified exact zero. Same order as the library's corpus gate.
+///
+/// **Absolute, and registered for THIS run** — deliberately not scale-relative.
+/// The bound is comfortable at the magnitudes this battery reaches, but it is
+/// not a universal constant: one ulp at a magnitude of ~16 is already 1.78e-15,
+/// so on a larger coalition a genuinely certified flip could carry a margin
+/// above the bound and be scored `FALSIFIED (parity)`. That error direction is
+/// conservative — the bound can only reject a certified divergence, never admit
+/// an uncertified one — so the registered value stands as-is here, and the run
+/// prints its observed headroom. Any future reuse should re-register a
+/// scale-relative form.
 #[cfg(feature = "magnitude-fast")]
 const P7_SHAPE_NOISE: f64 = 1e-15;
+/// How many shape-PASSing first divergences the table prints before eliding.
+/// Rows that FAIL the shape are never elided — they are the gating evidence.
+#[cfg(feature = "magnitude-fast")]
+const P7_FIRSTDIV_DISPLAY_CAP: usize = 40;
 /// The K6 reference latencies (`docs/ab-report-K4-catgraph-evaluator.md`) — v1
 /// regime, so every comparison against them is labelled cross-regime.
 #[cfg(feature = "magnitude-fast")]
@@ -5677,6 +5698,12 @@ const P7_K6_MAG_US: f64 = 3.552;
 const P7_K6_AIF_US: f64 = 1.435;
 /// Report date for the Part 7 battery, stamped per committed run.
 const P7_REPORT_DATE: &str = "2026-08-02";
+
+/// Part 2's measured `mag` latency median (µs) from THIS binary's run, captured
+/// so Part 7's before/after context row can cite it next to the pre-change
+/// session baselines instead of asking the reader to scroll. Write-once; Part 2
+/// runs before Part 7 in [`main`].
+static PART2_MAG_LATENCY_US: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
 
 /// One task's FIRST `mag` vs `mag-eq3` act divergence — the object H-par′ (i)
 /// tests. Recorded on the decision where both arms still hold identical
@@ -5840,14 +5867,22 @@ fn p7_paired_seed(seed: u64, out: &mut P7Paired) {
 /// Log-decade histogram of the incremental increment `|with − base|` plus the
 /// certificate / knife-edge tallies — the registered instrumentation block.
 ///
-/// Bucket `i` holds `[1e(i-16), 1e(i-15))`; bucket 16 is the `>= 1e0` overflow.
-/// Exact zeros are counted separately (they have no decade).
+/// Classes are disjoint and exhaustive: `non_finite` (NaN or ±∞ — never reaches
+/// the index arithmetic), `exact_zero` (no decade exists), `underflow`
+/// (`0 < x < 1e-16`, below the registered histogram floor — its OWN row, not
+/// folded into the first decade), then `decades[i]` = `[1e(i-16), 1e(i-15))`
+/// for `i` in `0..16`, and `decades[16]` = the `>= 1e0` overflow.
 #[cfg(feature = "magnitude-fast")]
 #[derive(Default)]
 struct P7Increments {
     /// Join decisions that reached the incremental branch.
     probed: usize,
+    /// NaN / ±∞ increments — impossible on a healthy stream, counted rather
+    /// than silently bucketed so a numeric regression is visible in the report.
+    non_finite: usize,
     exact_zero: usize,
+    /// `0 < |with − base| < 1e-16` — below the registered floor.
+    underflow: usize,
     decades: [usize; 17],
     knife: usize,
     knife_certified: usize,
@@ -5860,12 +5895,27 @@ impl P7Increments {
     fn record(&mut self, probe: &JoinProbe) {
         self.probed += 1;
         let x = (probe.with - probe.base).abs();
-        if x == 0.0 {
-            self.exact_zero += 1;
+        if x.is_finite() {
+            if x == 0.0 {
+                self.exact_zero += 1;
+            } else {
+                // `log10().floor()` is only meaningful for a positive finite
+                // `x`; the guard above is what makes the index arithmetic safe.
+                let e = x.log10().floor();
+                let idx = e as i64 + 16;
+                if idx < 0 {
+                    self.underflow += 1;
+                } else {
+                    self.decades[idx.min(16) as usize] += 1;
+                }
+            }
         } else {
-            let e = x.log10().floor();
-            let idx = (e as i64 + 16).clamp(0, 16) as usize;
-            self.decades[idx] += 1;
+            self.non_finite += 1;
+            tracing::warn!(
+                base = probe.base,
+                with = probe.with,
+                "Part 7 increment histogram: non-finite |with − base|"
+            );
         }
         if probe.knife_edge {
             self.knife += 1;
@@ -5890,14 +5940,26 @@ impl P7Increments {
 /// probe can decide without reading cache internals (see the deviation note in
 /// the printed report).
 #[cfg(feature = "magnitude-fast")]
-const P7_BUCKETS: [&str; 6] = [
+const P7_BUCKETS: [&str; 7] = [
     "join/empty",
     "join/excluded",
     "join/clear",
     "join/band",
     "join/proof",
+    "join/probe-err",
     "leave/fresh",
 ];
+
+/// Index of the `leave/fresh` bucket in [`P7_BUCKETS`].
+#[cfg(feature = "magnitude-fast")]
+const P7_BUCKET_LEAVE: usize = 6;
+/// Index of the `join/probe-err` bucket: the candidate DID reach the
+/// incremental branch (non-empty base, candidate not excluded) but the probe
+/// returned `None`, i.e. the evaluator build or the incremental query errored.
+/// Its own class — folding it into `join/clear` would attribute an error path's
+/// latency to the cheapest decisive one.
+#[cfg(feature = "magnitude-fast")]
+const P7_BUCKET_PROBE_ERR: usize = 5;
 
 /// One untimed-classification + timed-decision instrumentation pass over the
 /// battery for one arm. NOT the pooled latency measurement (that is a clean
@@ -5906,10 +5968,13 @@ const P7_BUCKETS: [&str; 6] = [
 /// cache disturbance and are only read as a decomposition.
 ///
 /// Returns per-bucket latency samples, the increment tally, and the
-/// `FactorizationPath` counts of the `f64` fresh evaluations the EQ3 arm
-/// performs (Cholesky / LBLT / Gauss–Jordan).
+/// `FactorizationPath` tally of the `f64` fresh evaluations the EQ3 arm
+/// performs: `[Cholesky, LBLT, Gauss–Jordan, of-which-errored]`. The route is
+/// decided before any solve, so an errored evaluation still contributes its
+/// path — dropping those would undercount Gauss–Jordan, the route an exact
+/// singularity surfaces on.
 #[cfg(feature = "magnitude-fast")]
-fn p7_instrumentation_pass(eq3_arm: bool) -> (Vec<Vec<f64>>, P7Increments, [usize; 3]) {
+fn p7_instrumentation_pass(eq3_arm: bool) -> (Vec<Vec<f64>>, P7Increments, [usize; 4]) {
     let policy = if eq3_arm {
         MagnitudePolicy::default().with_eq3_levers(true)
     } else {
@@ -5917,7 +5982,7 @@ fn p7_instrumentation_pass(eq3_arm: bool) -> (Vec<Vec<f64>>, P7Increments, [usiz
     };
     let mut buckets: Vec<Vec<f64>> = vec![Vec::new(); P7_BUCKETS.len()];
     let mut inc = P7Increments::default();
-    let mut paths = [0usize; 3];
+    let mut paths = [0usize; 4];
 
     for seed in P7_SEED_START..P7_SEED_END {
         let (agents, tasks, _rho, _perf) = generate_instance_b_regime(seed, Regime::V2);
@@ -5942,10 +6007,10 @@ fn p7_instrumentation_pass(eq3_arm: bool) -> (Vec<Vec<f64>>, P7Increments, [usiz
                     if eq3_arm && p.knife_edge && p.zero_proof.is_none() {
                         // The one join site that still evaluates fresh on the
                         // EQ3 arm.
-                        if let Some((path, _)) =
+                        if let Some((path, mag)) =
                             probe_fresh_factorization(&with_view, task.required)
                         {
-                            p7_count_path(&mut paths, path);
+                            p7_count_path(&mut paths, path, &mag);
                         }
                     }
                 }
@@ -5957,7 +6022,10 @@ fn p7_instrumentation_pass(eq3_arm: bool) -> (Vec<Vec<f64>>, P7Increments, [usiz
                     match &probe {
                         Some(p) if p.zero_proof.is_some() && eq3_arm => 4,
                         Some(p) if p.knife_edge => 3,
-                        _ => 2,
+                        Some(_) => 2,
+                        // Reached the incremental branch but the probe could not
+                        // answer — an upstream error, not a decisive margin.
+                        None => P7_BUCKET_PROBE_ERR,
                     }
                 };
 
@@ -5984,15 +6052,15 @@ fn p7_instrumentation_pass(eq3_arm: bool) -> (Vec<Vec<f64>>, P7Increments, [usiz
                         .copied()
                         .collect();
                     for v in [&view, &without] {
-                        if let Some((path, _)) = probe_fresh_factorization(v, task.required) {
-                            p7_count_path(&mut paths, path);
+                        if let Some((path, mag)) = probe_fresh_factorization(v, task.required) {
+                            p7_count_path(&mut paths, path, &mag);
                         }
                     }
                 }
 
                 let t0 = Instant::now();
                 let d = policy.should_leave(agent, &view, &ctx);
-                buckets[5].push(seconds_to_us(t0.elapsed()));
+                buckets[P7_BUCKET_LEAVE].push(seconds_to_us(t0.elapsed()));
                 if d.act {
                     members.remove(pos);
                 }
@@ -6003,8 +6071,17 @@ fn p7_instrumentation_pass(eq3_arm: bool) -> (Vec<Vec<f64>>, P7Increments, [usiz
     (buckets, inc, paths)
 }
 
+/// Tally one probed factorization: its route, plus whether the magnitude the
+/// same handle produced was an `Err` (slot 3, a subset of the route counts).
 #[cfg(feature = "magnitude-fast")]
-fn p7_count_path(paths: &mut [usize; 3], path: FactorizationPath) {
+fn p7_count_path(
+    paths: &mut [usize; 4],
+    path: FactorizationPath,
+    mag: &Result<f64, CatgraphError>,
+) {
+    if mag.is_err() {
+        paths[3] += 1;
+    }
     match path {
         FactorizationPath::Cholesky => paths[0] += 1,
         FactorizationPath::Lblt => paths[1] += 1,
@@ -6066,6 +6143,11 @@ fn part7_run() {
 
     println!("## Arms (pooled over {} seeds)", mag.len());
     println!();
+    println!(
+        "_Instance convention: ONE policy instance per arm, reused across all {} seeds (`stateless_battery_mode`) — the v1 Part 2 code shape, kept because comparability requires every arm to face the same cache-warmth history. The prereg's \"(per-seed fresh arms)\" parenthetical describes the LEARNING arms' factory pattern (#44/#53), which does not apply to these three stateless policies; a per-seed rebuild would reset the magnitude evaluator cache 30 times and measure a different thing._",
+        mag.len()
+    );
+    println!();
     println!("| arm | median PRIMARY_B | median churn | median µs/decision | IQR µs | decisions |");
     println!("|-----|-----------------:|-------------:|-------------------:|-------:|----------:|");
     for (name, rs, q, med, iqr, lat) in [
@@ -6108,9 +6190,20 @@ fn part7_run() {
     if paired.firsts.is_empty() {
         println!("No divergence anywhere — the shape conjunct holds vacuously.");
     } else {
+        // Display cap applies to PASSing rows only: every !shape_ok row is a
+        // gating failure and is printed unconditionally.
         println!("| seed | task | kind | certificate | mag margin | shape |");
         println!("|-----:|-----:|------|-------------|-----------:|-------|");
-        for d in paired.firsts.iter().take(40) {
+        let mut shown_ok = 0usize;
+        let mut elided = 0usize;
+        for d in &paired.firsts {
+            if d.shape_ok {
+                if shown_ok >= P7_FIRSTDIV_DISPLAY_CAP {
+                    elided += 1;
+                    continue;
+                }
+                shown_ok += 1;
+            }
             println!(
                 "| {} | {} | {} | {} | {:.3e} | {} |",
                 d.seed,
@@ -6126,14 +6219,36 @@ fn part7_run() {
                 pass(d.shape_ok)
             );
         }
-        if paired.firsts.len() > 40 {
-            println!("| … | | | | | _{} more_ |", paired.firsts.len() - 40);
+        if elided > 0 {
+            println!("| … | | | | | _{elided} more PASS rows elided_ |");
         }
     }
     println!();
+
+    // Shape-bound headroom (sem-F2): how close the certified margins ran to the
+    // registered absolute bound.
+    let max_certified = paired
+        .firsts
+        .iter()
+        .filter(|d| d.shape_ok)
+        .map(|d| d.mag_margin.abs())
+        .fold(0.0f64, f64::max);
+    println!(
+        "- **Shape-bound headroom:** the largest certified margin observed is {max_certified:.3e}, i.e. {:.0}% of the registered bound {P7_SHAPE_NOISE:.0e}. The bound is ABSOLUTE and fixed for this run; one ulp at a magnitude of ~16 is already 1.78e-15, so a legitimate certified flip on a larger coalition could exceed it and would be scored `FALSIFIED (parity)`. That direction is conservative (it can only reject, never wave through), so this run stands as scored; a scale-relative bound is a matter for a future registration, not an edit here.",
+        100.0 * max_certified / P7_SHAPE_NOISE
+    );
     println!(
         "- Cascaded divergent decisions after a task's first (exempt by A1.2, context only): **{}**.",
         paired.cascade
+    );
+    // Cascade residual (sem-F4): what the exemption actually leaves unchecked.
+    let total_tasks = (P7_SEED_END - P7_SEED_START) as usize * TASKS;
+    let divergent_tasks = paired.firsts.len();
+    println!(
+        "- **Cascade residual:** {}/{} tasks ({:.1}%) diverge nowhere and are therefore fully verified decision-for-decision by the walk. The A1.2 exemption leaves exactly one stream unverified: the post-divergence tail of the {divergent_tasks} divergent tasks, where the two arms are no longer scoring the same coalition. Those tails are counted above, never shape-checked. (The library's L3-isolation corpus test covers uncertified agreement decision-by-decision, but on the v1 regime — it is not a substitute for this v2 measurement.)",
+        total_tasks - divergent_tasks,
+        total_tasks,
+        100.0 * (total_tasks - divergent_tasks) as f64 / total_tasks as f64
     );
     println!(
         "- Leave-sweep note: the default leave variant is the FRESH two-evaluation path, which never consults the evaluator — so L2 cannot fire on a leave and any leave first-divergence is L3 arithmetic, failing the shape by construction."
@@ -6210,7 +6325,7 @@ fn part7_run() {
         mag_med / scalar_med
     );
     println!(
-        "- **Gap-shrink vs the K6 reference** (mag {P7_K6_MAG_US:.3} µs vs aif {P7_K6_AIF_US:.3} µs = {:.2}×) — **cross-regime**: K6 is the v1 draw and this battery is v2, so the ratio, not the absolute µs, is the comparable quantity. This run: {:.2}× (`mag`) and {:.2}× (`mag-eq3`).",
+        "- **Gap-shrink vs the K6 reference** (mag {P7_K6_MAG_US:.3} µs vs aif {P7_K6_AIF_US:.3} µs = {:.2}×) — **cross-regime**: K6 is the v1 draw and this battery is v2, so the ratio is the *more* comparable quantity than the absolute µs — not an invariant one, since the ratio itself moves with coalition size and therefore with the regime. This run: {:.2}× (`mag`) and {:.2}× (`mag-eq3`).",
         P7_K6_MAG_US / P7_K6_AIF_US,
         mag_med / scalar_med,
         eq3_med / scalar_med
@@ -6219,7 +6334,11 @@ fn part7_run() {
         "- **Quality medians** (v2 regime; #61 Part 5a context rows were mag 0.1286 / scalar 0.1332): `scalar` {scalar_q:.4} · `mag` {mag_q:.4} · `mag-eq3` {eq3_q:.4}."
     );
     println!(
-        "- The frozen Part 2 `mag` latency line in THIS run is printed above in Part 2 (v1 regime, L1 adopted); the pre-change session baselines were 3.566 / 3.793 µs. Latency-only by construction — every Part 2 quality column is byte-identical (the X-A/X-B gate)."
+        "- **Frozen-battery before/after** (all v1 regime, all `mag`, latency-only by construction — every Part 2 quality column is byte-identical, the X-A/X-B gate): this binary's Part 2 line **{}**, this session's pre-change baselines 3.566 / 3.793 µs, the K6 report-of-record {P7_K6_MAG_US:.3} µs. L1 (scratch adoption) is the only lever active on that battery.",
+        PART2_MAG_LATENCY_US.get().map_or_else(
+            || "n/a (Part 2 did not run)".to_owned(),
+            |v| format!("{v:.3} µs")
+        )
     );
     println!();
 
@@ -6236,7 +6355,9 @@ fn part7_run() {
     println!();
     println!("| decade | count |");
     println!("|--------|------:|");
+    println!("| non-finite (NaN / ±∞) | {} |", mag_inc.non_finite);
     println!("| exact 0 | {} |", mag_inc.exact_zero);
+    println!("| < 1e-16 (underflow) | {} |", mag_inc.underflow);
     for (i, c) in mag_inc.decades.iter().enumerate() {
         if *c > 0 {
             let lo = i as i32 - 16;
@@ -6251,6 +6372,10 @@ fn part7_run() {
     println!(
         "- The cg#153 hypothesis is an EMPTY `[1e-13, 1e-6)` band: measured here at **{}** decisions in that range. Non-gating; no band change ships in EQ3 (prereg non-goal).",
         mag_inc.decades[3..10].iter().sum::<usize>()
+    );
+    println!(
+        "- The three rows above the decades are disjoint classes, not decade members: non-finite increments never reach the index arithmetic ({} seen — any nonzero count is a numeric regression, also logged via `tracing::warn`), and sub-1e-16 increments get their OWN row rather than being folded into `[1e-16, 1e-15)`.",
+        mag_inc.non_finite
     );
     println!(
         "- Knife-edge population on the same stream: **{}** of {} probed joins ({:.1}%).",
@@ -6282,7 +6407,13 @@ fn part7_run() {
     );
     println!();
     println!(
-        "- **Former knife-edge recomputes retired:** {} of {} band decisions now carry a certificate and skip the fresh `O(m³)` recompute (**{:.1}%**).",
+        "- **Former knife-edge recomputes retired:** the quantity that matters is measured on the **frozen `mag` arm's** stream — those are the recomputes that actually used to be paid. {} of its {} band decisions carry a certificate and are skipped by `mag-eq3` (**{:.1}%**).",
+        mag_inc.knife_certified,
+        mag_inc.knife,
+        100.0 * mag_inc.knife_certified as f64 / mag_inc.knife.max(1) as f64
+    );
+    println!(
+        "- For completeness, the same ratio on `mag-eq3`'s own stream (whose membership has already drifted under L2, so it is a different decision population): {} of {} ({:.1}%).",
         eq3_inc.knife_certified,
         eq3_inc.knife,
         100.0 * eq3_inc.knife_certified as f64 / eq3_inc.knife.max(1) as f64
@@ -6316,14 +6447,14 @@ fn part7_run() {
     }
     println!();
     println!(
-        "- **Deviation from the registered bucket list:** the K6 table splits every join bucket by `rebuild` vs `hit` (evaluator reconstructed vs cached). That split is only visible from inside the policy's cache, and the only cheap way to expose it is a counter on the decision path — which would instrument the very code the H-lat measurement times. Protecting the registered measurement won; the rebuild/hit split is NOT reproduced here, and the `band`/`clear`/`excluded`/`empty`/`leave` classes are, via the read-only `probe_join` surface. The prereg's \"where cheaply available\" wording covers this; recorded as a deviation either way."
+        "- **DEVIATION from the registered bucket list (ledgered):** the K6 table splits every join bucket by `rebuild` vs `hit` (evaluator reconstructed vs cached). That split is only visible from inside the policy's cache, and the only cheap way to expose it is a counter on the decision path — which would instrument the very code the H-lat measurement times. Protecting the registered measurement won: the rebuild/hit split is NOT reproduced here, while the `empty`/`excluded`/`clear`/`band`/`proof`/`probe-err`/`leave` classes are, via the read-only `probe_join` surface. This deviation stands on that rationale alone — the prereg's \"where cheaply available\" latitude attaches to the `FactorizationPath` row, not to this table."
     );
     println!(
         "- This pass probes before each timed decision, so its absolute µs carry probe-induced cache disturbance. Read the SHAPE (which bucket costs what), not the level; the pooled table at the top is the clean measurement."
     );
     println!();
 
-    let path_total: usize = eq3_paths.iter().sum();
+    let path_total: usize = eq3_paths[..3].iter().sum();
     println!("### `FactorizationPath` counts — `mag-eq3` fresh evaluations");
     println!();
     println!(
@@ -6337,7 +6468,14 @@ fn part7_run() {
     );
     println!();
     println!(
-        "- Counted over the sites the EQ3 arm actually evaluates fresh: both magnitudes of every variant-A leave decision, plus the `with` side of every unprovable-knife-edge join. One factorization per count — the handle that reports the path is the handle that answers the magnitude (`t = 1` makes the scaling a no-op), so no extra factorization is paid to report this."
+        "- **Sites counted** (not a totality claim): both magnitudes of every variant-A leave decision, plus the `with` side of every unprovable-knife-edge join. NOT counted: empty-coalition bootstrap joins, whose fresh evaluation is a trivial 1×1 ζ, and the excluded-candidate branch, which answers from `base_value` without a fresh evaluation at all. One factorization per count — the handle that reports the path is the handle that answers the magnitude (`t = 1` makes the scaling a no-op), so no extra factorization is paid to report this."
+    );
+    println!(
+        "- **{}** of those {path_total} factorizations produced an `Err` magnitude (a singular ζ). Their route is still counted above: the route is chosen before any solve, so dropping errored evaluations would silently undercount Gauss–Jordan — the route an exact singularity surfaces on.",
+        eq3_paths[3]
+    );
+    println!(
+        "- **Read the H-lat result against this split.** The `f64` handle only takes Cholesky/LBLT when ζ is *exactly* symmetric; the substitutability coupling is asymmetric whenever two members have different relevant widths, so most of this traffic falls back to Gauss–Jordan — which re-enters the rig-generic computation AFTER paying the dense-matrix build and the symmetry scan. On the fallback share, L3 is net overhead rather than acceleration, and `mag-eq3`'s latency movement comes chiefly from L2."
     );
     println!();
 }
@@ -7033,10 +7171,12 @@ mod part4c_tests {
     }
 
     /// Part 7 (#69): the increment histogram's bucketing — exact zeros are their
-    /// own class (they have no decade), every other magnitude lands in the
-    /// half-open decade `[1e(i-16), 1e(i-15))`, and anything `≥ 1e0` saturates
-    /// the overflow bucket. Driven through synthetic probes so the arithmetic is
-    /// checked independently of any battery.
+    /// own class (they have no decade), sub-`1e-16` magnitudes get their own
+    /// underflow row rather than being folded into the first decade, non-finite
+    /// increments are counted without ever reaching the index arithmetic, every
+    /// other magnitude lands in the half-open decade `[1e(i-16), 1e(i-15))`, and
+    /// anything `≥ 1e0` saturates the overflow bucket. Driven through synthetic
+    /// probes so the arithmetic is checked independently of any battery.
     #[cfg(feature = "magnitude-fast")]
     #[test]
     fn p7_increment_histogram_bucketing() {
@@ -7059,22 +7199,33 @@ mod part4c_tests {
         inc.record(&probe(1e-15, false, None)); // bucket 1
         inc.record(&probe(1e-1, false, None)); // bucket 15
         inc.record(&probe(1.0, false, None)); // overflow
-        inc.record(&probe(12.0, false, None)); // overflow (clamped)
-        inc.record(&probe(1e-30, false, None)); // clamped into bucket 0
+        inc.record(&probe(12.0, false, None)); // overflow (saturates)
+        inc.record(&probe(1e-30, false, None)); // BELOW the floor ⇒ underflow row
+        inc.record(&probe(f64::INFINITY, false, None)); // non-finite
+        inc.record(&probe(f64::NEG_INFINITY, false, None)); // non-finite
+        inc.record(&probe(f64::NAN, false, None)); // non-finite
 
-        assert_eq!(inc.probed, 9);
+        assert_eq!(inc.probed, 12);
         assert_eq!(inc.exact_zero, 2, "±0.0 are the exact-zero class");
         assert_eq!(
-            inc.decades[0], 3,
-            "[1e-16,1e-15) plus the clamped underflow"
+            inc.non_finite, 3,
+            "NaN and ±∞ are their own class and never index a decade"
         );
+        assert_eq!(
+            inc.underflow, 1,
+            "sub-1e-16 gets its own row, not the first decade"
+        );
+        assert_eq!(inc.decades[0], 2, "[1e-16, 1e-15) only");
         assert_eq!(inc.decades[1], 1);
         assert_eq!(inc.decades[15], 1);
         assert_eq!(inc.decades[16], 2, "≥ 1e0 saturates the overflow bucket");
         assert_eq!(
-            inc.decades.iter().sum::<usize>() + inc.exact_zero,
+            inc.decades.iter().sum::<usize>()
+                + inc.exact_zero
+                + inc.underflow
+                + inc.non_finite,
             inc.probed,
-            "every probe lands in exactly one class"
+            "the classes are disjoint and exhaustive"
         );
 
         // Knife-edge and certificate tallies are independent of the decade.

@@ -73,10 +73,15 @@ default = []
 decision = ["dep:aif", "dep:nalgebra"]
 # Categorical-magnitude coalition-decision strategy (pluggable, off by default).
 magnitude = ["dep:catgraph-magnitude"]
-# EQ3 lever L3 (#69): compile the upstream `f64-fast` factorization and expose
-# the `MagnitudePolicy::with_fast_fresh` toggle that routes FRESH full-coalition
-# magnitudes through it. Implies `magnitude`; the toggle defaults OFF, so merely
-# enabling this feature changes no decision (the registered X-B identity gate).
+# EQ3 levers L2 + L3 (#69, prereg Amendment 1): compile the upstream `f64-fast`
+# factorization and expose `MagnitudePolicy::with_eq3_levers`, the opt-in toggle
+# carrying BOTH levers. L3 routes FRESH full-coalition magnitudes through the
+# `f64` factorization handle; L2 is the exact zero-diversity proof branch, which
+# is **deliberately decision-changing** — it declines certified exact-zero joins
+# that the frozen arm takes on positive float roundoff (~0.8% of certified
+# candidates measured). Implies `magnitude`. The toggle defaults OFF, so merely
+# enabling this feature changes no decision (the registered X-B identity gate);
+# turning it ON selects the `mag-eq3` arm, not a faster `mag`.
 magnitude-fast = ["magnitude", "catgraph-magnitude/f64-fast"]
 # Durable coalition decision-event bus on surrealdb-live-message (off by default).
 durable = ["dep:surrealdb-live-message", "dep:surrealdb-types"]

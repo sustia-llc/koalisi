@@ -171,13 +171,30 @@
 //!
 //! The same toggle routes the policy's **fresh** full-coalition evaluations —
 //! the unprovable-knife-edge recompute, the leave-side fresh pair, and the
-//! empty / sole-member guards — through the upstream `f64` factorization
-//! instead of the rig-generic [`catgraph_magnitude::coalition_value`] (see
-//! `magnitude_of_masks_f64`). Both routes read the same ζ entries built the
-//! same way, but the factorization differs (Cholesky → LBLT → Gauss–Jordan
-//! fallback), so agreement is *tolerance*, not bit-identity — measured, not
-//! assumed. The evaluator-cached values (`base_value` / `value_with_scratch`)
-//! are never routed: only fresh evaluations are.
+//! empty / sole-member guards — through upstream's `f64` factorization handle
+//! (see `magnitude_of_masks_f64`) rather than calling
+//! [`catgraph_magnitude::coalition_value`] directly. What that handle does is
+//! **conditional**, and the condition matters here: it factors ζ with Cholesky
+//! (or LBLT when symmetric-indefinite) only if ζ is *exactly* symmetric, and
+//! otherwise falls back to the rig-generic Gauss–Jordan route.
+//!
+//! On koalisi traffic ζ is usually **not** symmetric. The substitutability
+//! coupling `A(i → j) = |rel_i ∩ rel_j| / |rel_i|` is asymmetric whenever
+//! `|rel_i| ≠ |rel_j|`, so any coalition mixing agents of different relevant
+//! widths lands on the fallback — which re-enters the generic path *after*
+//! paying the dense-matrix build and the symmetry scan, i.e. as net overhead.
+//! Measured on v2-shaped draws (8753 evaluations): Cholesky 29.1 % (about 45 %
+//! of those the trivial `k = 1` case), LBLT 0.0 %, Gauss–Jordan 70.9 %, with
+//! the fast-route share decaying monotonically as coalitions grow. Any latency
+//! claim about L3 must therefore be read against the per-run
+//! `FactorizationPath` instrumentation row, which discloses that split for the
+//! run being reported.
+//!
+//! Where the fast route *is* taken, agreement with the generic path is
+//! *tolerance*, not bit-identity (upstream's ULP-identity contract covers the ζ
+//! entries, not the inversion) — measured, not assumed. The evaluator-cached
+//! values (`base_value` / `value_with_scratch`) are never routed: only fresh
+//! evaluations are.
 //!
 //! `t = 1` stays pinned (never exposed). Removal is an upstream non-goal
 //! (max-product closures do not downdate), so `should_leave` defaults to the
@@ -464,7 +481,8 @@ fn ensure_cached_candidate(
     candidate_caps: u32,
 ) -> Result<usize, CatgraphError> {
     // Rebuild the base evaluator on a membership / requirement miss, retaining
-    // the accumulated candidate registry (capped — see `take_registry`) and
+    // the accumulated candidate registry (capped — see
+    // `take_registry_and_scratch`) and
     // ensuring this candidate is in it.
     if !guard
         .as_ref()
@@ -755,19 +773,30 @@ pub(crate) fn magnitude_or_zero(masks: &[u32], required: u32) -> Result<f64, Cat
 /// identical rows and is singular at every `t` (a clone candidate would error
 /// instead of scoring the base magnitude). Taking one representative per
 /// [`Coalition::member_classes`] class is exactly the quotient the generic path
-/// applies, so both routes invert the same matrix.
+/// applies, so both routes invert the same **skeletal** matrix up to the
+/// documented ζ construction — upstream's ULP-identity contract covers the ζ
+/// *entries*, not the inversion that follows.
 ///
 /// Agreement with [`magnitude_of_masks`] is by *tolerance*, not bit-identity —
-/// the factorization path differs (Cholesky → LBLT → Gauss–Jordan) — which is
-/// why the toggle is measured (koalisi #69) and defaults off.
+/// the factorization route differs (Cholesky / LBLT when ζ is exactly
+/// symmetric, Gauss–Jordan otherwise) — which is why the toggle is measured
+/// (koalisi #69) and defaults off. See the module docs for how rarely the
+/// symmetric route is actually taken on this traffic.
 ///
 /// `masks` must be non-empty (same contract as [`magnitude_of_masks`]).
 ///
 /// # Errors
 ///
 /// Propagates any [`CatgraphError`] from category construction, coalition
-/// formation, or a singular `t`-scaled zeta — the same failure surface as
-/// [`magnitude_of_masks`], reported by the `f64` path's own message wording.
+/// formation, or a singular `t`-scaled zeta.
+///
+/// **Failure-surface scope.** `Err`-parity with [`magnitude_of_masks`] is
+/// upstream-guaranteed only on the Gauss–Jordan route, which *is* the generic
+/// computation. On the Cholesky/LBLT route the two can in principle disagree:
+/// a near-singular ζ that Cholesky accepts would return a finite value where
+/// the generic path errors (or vice versa). That would surface as an act
+/// divergence with no certificate behind it — exactly what the registered
+/// H-par′ (i) gate is designed to catch — rather than as a silent wrong answer.
 #[cfg(feature = "magnitude-fast")]
 fn magnitude_of_masks_f64(masks: &[u32], required: u32) -> Result<f64, CatgraphError> {
     let space = skeletal_space_of_masks(masks, required)?;
@@ -865,22 +894,31 @@ pub struct JoinProbe {
 /// the unscaled space is factoring the scaled one. The returned magnitude is
 /// asserted equal to [`magnitude_of_masks_f64`]'s in the module tests.)
 ///
-/// Returns `None` when nothing task-relevant survives [`relevant_masks`] (an
-/// empty coalition has no ζ to factor) or on an upstream error.
+/// The path is reported **independently of whether the magnitude succeeds** —
+/// the route is decided at construction, before any solve — so a singular ζ
+/// still tells you which route it was singular on. Counting only the `Ok`
+/// cases would silently undercount the Gauss–Jordan share, since that is the
+/// route an exact singularity surfaces on.
+///
+/// Returns `None` only when nothing task-relevant survives [`relevant_masks`]
+/// (an empty coalition has no ζ to factor) or when the coalition itself cannot
+/// be built.
 #[cfg(feature = "magnitude-fast")]
 #[must_use]
 pub fn probe_fresh_factorization(
     agents: &[&dyn AgentCapabilities],
     required: u32,
-) -> Option<(catgraph_magnitude::magnitude_f64::FactorizationPath, f64)> {
+) -> Option<(
+    catgraph_magnitude::magnitude_f64::FactorizationPath,
+    Result<f64, CatgraphError>,
+)> {
     let masks = relevant_masks(agents, required);
     if masks.is_empty() {
         return None;
     }
     let space = skeletal_space_of_masks(&masks, required).ok()?;
     let factorization = catgraph_magnitude::magnitude_f64::ZetaFactorization::new(&space);
-    let path = factorization.path();
-    factorization.magnitude().ok().map(|mag| (path, mag))
+    Some((factorization.path(), factorization.magnitude()))
 }
 
 /// The EQ3 arm selector: one flag driving **both** opt-in levers — L2 (the
@@ -1084,8 +1122,15 @@ impl MagnitudePolicy {
     /// **No behaviour change, no state change.** The probe answers from a
     /// PRIVATE, throw-away evaluator cache: `self`'s cache is neither read nor
     /// written, so probing cannot perturb a measured run's rebuild pattern or
-    /// its latency. It is not on any decision path — the registered battery
-    /// calls it only in untimed instrumentation passes.
+    /// its latency. It is not on any decision path.
+    ///
+    /// That purity is **load-bearing, not merely tidy**: besides the non-gating
+    /// instrumentation rows, this probe is consumed by the registered
+    /// **H-par′ (i)** paired walk, which is a GATING leg. The walk reads the
+    /// certificate at a decision the two arms disagree on, so a probe that
+    /// mutated cache state could change the very decisions it is adjudicating.
+    /// The walk is untimed, so the private cache's rebuild cost is irrelevant
+    /// there; keep it private regardless.
     ///
     /// Returns `None` when the decision does not reach the incremental branch
     /// (empty coalition, or a candidate excluded as task-irrelevant / duplicate
@@ -3209,12 +3254,66 @@ mod tests {
             probe_fresh_factorization(&listed, 0b111).expect("two relevant members remain");
         let direct = magnitude_of_masks_f64(&[0b001, 0b010], 0b111).unwrap();
         assert_eq!(
-            mag.to_bits(),
+            mag.unwrap().to_bits(),
             direct.to_bits(),
             "the t = 1 single-factorization shortcut must equal the fresh f64 route"
         );
         let none: [&dyn AgentCapabilities; 1] = [&bystander];
         assert!(probe_fresh_factorization(&none, 0b111).is_none());
+    }
+
+    /// The Gauss–Jordan class — the route MOST koalisi traffic actually takes.
+    ///
+    /// `A(i → j) = |rel_i ∩ rel_j| / |rel_i|` is asymmetric as soon as the two
+    /// agents have different relevant widths, so ζ is not exactly symmetric and
+    /// upstream's `ZetaFactorization` falls back to the rig-generic route. This
+    /// pins (a) that the probe reports that fallback rather than a symmetric
+    /// route, and (b) that the magnitude it reports is bit-identical to what the
+    /// arm's own fresh evaluation computes — so the instrumentation describes
+    /// the arm, not a parallel computation.
+    #[cfg(feature = "magnitude-fast")]
+    #[test]
+    fn gauss_jordan_fixture_probe_matches_the_arms_fresh_eval() {
+        use catgraph_magnitude::magnitude_f64::FactorizationPath;
+
+        // |rel| 1 vs 2 ⇒ A(0→1) = 1.0 but A(1→0) = 0.5 ⇒ ζ asymmetric.
+        let narrow = TestAgent {
+            id: 0,
+            caps: 0b001,
+            trust: 50,
+        };
+        let wide = TestAgent {
+            id: 1,
+            caps: 0b011,
+            trust: 50,
+        };
+        let listed: [&dyn AgentCapabilities; 2] = [&narrow, &wide];
+        let required = 0b111u32;
+
+        let (path, mag) =
+            probe_fresh_factorization(&listed, required).expect("both members are relevant");
+        assert_eq!(
+            path,
+            FactorizationPath::GaussJordan,
+            "an asymmetric ζ must take the generic fallback route"
+        );
+
+        let masks = relevant_masks(&listed, required);
+        assert_eq!(masks, vec![0b001, 0b011]);
+        let arm_fresh = magnitude_of_masks_f64(&masks, required).unwrap();
+        assert_eq!(
+            mag.unwrap().to_bits(),
+            arm_fresh.to_bits(),
+            "the probe must report the magnitude the arm's own fresh eval produces"
+        );
+
+        // And on this class the generic route IS the computation, so it also
+        // matches the rig-generic path exactly.
+        let generic = magnitude_of_masks(&masks, required).unwrap();
+        assert!(
+            rel_close(arm_fresh, generic),
+            "Gauss–Jordan route: f64 {arm_fresh} vs generic {generic}"
+        );
     }
 
     /// (c) Toggle identity: with the EQ3 levers explicitly OFF the policy is
