@@ -180,6 +180,63 @@ finding.
   convenience `coalition_value_f64` upstream is suggested, non-blocking).
 - Seeds 90..120 / 150..180 stay reserved.
 
+## Amendment 1 (pre-run, 2026-08-02 — owner-locked; posted to #69 before any Part 7 code)
+
+Implementation surfaced two registered-text defects BEFORE the official
+run (the #44/#63 pre-run amendment precedent; nothing below alters the
+D2/D4 locks or the seeds):
+
+**A1.1 — L2 is decision-changing; it moves behind the toggle (owner
+lock).** Measured on a 60-seed corpus: the three-class proof branch
+flips 0.77 % of certified decisions vs the frozen arm — every flip a
+certified exact-zero increment that the old fresh recompute scored as
+`+2e-16…+7e-16` noise and joined (one such seed sits inside frozen
+Part 2). The registered premise "L1+L2 identity is pinned by X-A" is
+therefore FALSE for the in/out profile-duplicate classes (SkeletalMerge
+measured 0/465 flips). Owner adjudication: the library default stays
+FROZEN — **L2 joins L3 behind the `magnitude-fast` toggle**. Arm
+mapping becomes: `mag` = L1 only (default path, `value_with_scratch`,
+knife-edge logic byte-identical to pre-EQ3); `mag-eq3` = toggle ON =
+L2 (all three proof classes) + L3. X-A/X-B gate the L1-only default;
+the K6 knife-edge regression fixture keeps its original assertions.
+
+**A1.2 — H-par is replaced by H-par′ (owner lock: characterized
+divergence + non-inferiority).** With L2 intentionally divergent on
+certified exact-zeros, bit-exact stream parity would falsify by design.
+H-par′, two conjuncts, both confirmatory:
+
+- (i) **Shape**: within each task, at the FIRST decision where
+  `mag-eq3`'s act differs from `mag`'s, the certified shape must hold:
+  a `ZeroDiversityProof` fired for `mag-eq3` at that decision AND
+  `mag`'s own margin there is ≤ 1e-15 in magnitude. Any first-divergence
+  without that shape ⇒ **FALSIFIED (parity)**. Subsequent divergences
+  within the same task are membership-cascade effects (task state resets
+  per task in the harness), exempt from the shape check and counted
+  separately as context.
+- (ii) **Quality non-inferiority**: median `PRIMARY_B(mag-eq3)` ≥
+  **0.98×** median `PRIMARY_B(mag)`; per-seed deltas printed.
+
+Verdict grammar update: `VALIDATED (latency re-match)` = H-par′ ∧
+H-lat; `FALSIFIED (latency re-match)` = H-par′ ∧ ¬H-lat;
+`FALSIFIED (parity)` = ¬H-par′ (either conjunct), regardless of H-lat.
+
+**A1.3 — L3 route correction (factual).** The registered route
+(`as_weighted_cospan().clone().into_metric_space()`, the FULL member
+space) is singular on any mutual-1.0 clone pair — `coalition_value`
+inverts the SKELETAL space. Corrected route (implemented + fixture-
+gated): rebuild the skeletal space from the public surface — one
+representative per `Coalition::member_classes()` class,
+`d(a,b) = −ln(cospan.weight(rep_a, rep_b))`, `+∞` at weight 0 — then
+`magnitude_f64(&space, 1.0)`. Reproduces upstream's internal
+construction exactly on the K2/gotcha fixtures.
+
+**Interpretation updates.** "L1+L2 ship (identity-gated)" reads as:
+**L1 ships identity-gated; L2+L3 ship opt-in** behind
+`magnitude-fast` + toggle. Proof-class fire-rate instrumentation is
+measured on the `mag-eq3` arm (the default arm no longer pays the
+report-scan cost). A future default-adoption of L2 (any class beyond
+this arc) is a NEW registration — it would unfreeze pinned decisions.
+
 ## Process
 
 Implementation next (3-lens review — correctness /
