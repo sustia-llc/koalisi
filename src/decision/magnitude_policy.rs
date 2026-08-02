@@ -139,7 +139,7 @@
 //!
 //! # The opt-in EQ3 arm (koalisi #69, feature `magnitude-fast`)
 //!
-//! [`MagnitudePolicy::with_fast_fresh`] turns on two levers together. It
+//! [`MagnitudePolicy::with_eq3_levers`] turns on two levers together. It
 //! defaults **off**, and off is the frozen decision surface above.
 //!
 //! ## L2 — the exact zero-diversity proof branch (upstream #153)
@@ -770,6 +770,29 @@ pub(crate) fn magnitude_or_zero(masks: &[u32], required: u32) -> Result<f64, Cat
 /// [`magnitude_of_masks`], reported by the `f64` path's own message wording.
 #[cfg(feature = "magnitude-fast")]
 fn magnitude_of_masks_f64(masks: &[u32], required: u32) -> Result<f64, CatgraphError> {
+    let space = skeletal_space_of_masks(masks, required)?;
+    catgraph_magnitude::magnitude_f64::magnitude_f64(&space, 1.0)
+}
+
+/// The **skeletal** Lawvere metric space of `masks` under the substitutability
+/// coupling — the matrix both `f64` entry points invert (the fresh route in
+/// [`magnitude_of_masks_f64`], the instrumentation route in
+/// [`probe_fresh_factorization`]).
+///
+/// See [`magnitude_of_masks_f64`] for why the skeleton, not the full member
+/// cospan, is the right space.
+///
+/// `masks` must be non-empty.
+///
+/// # Errors
+///
+/// Propagates any [`CatgraphError`] from category construction or coalition
+/// formation.
+#[cfg(feature = "magnitude-fast")]
+fn skeletal_space_of_masks(
+    masks: &[u32],
+    required: u32,
+) -> Result<LawvereMetricSpace<usize>, CatgraphError> {
     let agents: Vec<usize> = (0..masks.len()).collect();
 
     let mut cat = HomMap::<usize, UnitInterval>::new(agents.clone());
@@ -802,12 +825,62 @@ fn magnitude_of_masks_f64(masks: &[u32], required: u32) -> Result<f64, CatgraphE
     }
 
     let cospan = coalition.as_weighted_cospan();
-    let space = LawvereMetricSpace::from_distance_fn(k, |a, b| {
+    Ok(LawvereMetricSpace::from_distance_fn(k, |a, b| {
         let p = cospan.weight(reps[a], reps[b]).value();
         if p > 0.0 { -p.ln() } else { f64::INFINITY }
-    });
+    }))
+}
 
-    catgraph_magnitude::magnitude_f64::magnitude_f64(&space, 1.0)
+/// **EQ3 instrumentation** (koalisi #69, feature `magnitude-fast`): what
+/// [`MagnitudePolicy::probe_join`] observed about one join decision.
+///
+/// A read-only view of the evaluator layer, produced off a private cache — see
+/// that method for the no-behaviour-change contract.
+#[cfg(feature = "magnitude-fast")]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct JoinProbe {
+    /// `Mag(S)` — bit-identical to a fresh evaluation of the coalition.
+    pub base: f64,
+    /// `Mag(S ∪ {x})` from the **incremental** path, before any knife-edge
+    /// substitution.
+    pub with: f64,
+    /// The exact zero-diversity certificate, when one of the three decidable
+    /// classes fired: `Some(_)` ⇒ the real increment is exactly `0`.
+    pub zero_proof: Option<ZeroDiversityProof>,
+    /// Whether `with − base` lands inside [`KNIFE_EDGE_REL_BAND`] of the
+    /// policy's `join_margin` — i.e. whether the frozen arm pays a fresh
+    /// recompute here.
+    pub knife_edge: bool,
+}
+
+/// **EQ3 instrumentation** (koalisi #69, feature `magnitude-fast`): the
+/// factorization route the `f64` fresh path takes on `agents`, together with the
+/// magnitude that route produces, at the pinned `t = 1`.
+///
+/// One factorization total — the handle that reports
+/// [`catgraph_magnitude::magnitude_f64::FactorizationPath`] is the same handle
+/// that answers the magnitude, so nothing extra is computed. (`t = 1` is what
+/// makes this exact: upstream's `t`-scaling multiplies every distance by `t`,
+/// and `d * 1.0 == d` bitwise for finite and infinite `d` alike, so factoring
+/// the unscaled space is factoring the scaled one. The returned magnitude is
+/// asserted equal to [`magnitude_of_masks_f64`]'s in the module tests.)
+///
+/// Returns `None` when nothing task-relevant survives [`relevant_masks`] (an
+/// empty coalition has no ζ to factor) or on an upstream error.
+#[cfg(feature = "magnitude-fast")]
+#[must_use]
+pub fn probe_fresh_factorization(
+    agents: &[&dyn AgentCapabilities],
+    required: u32,
+) -> Option<(catgraph_magnitude::magnitude_f64::FactorizationPath, f64)> {
+    let masks = relevant_masks(agents, required);
+    if masks.is_empty() {
+        return None;
+    }
+    let space = skeletal_space_of_masks(&masks, required).ok()?;
+    let factorization = catgraph_magnitude::magnitude_f64::ZetaFactorization::new(&space);
+    let path = factorization.path();
+    factorization.magnitude().ok().map(|mag| (path, mag))
 }
 
 /// The EQ3 arm selector: one flag driving **both** opt-in levers — L2 (the
@@ -998,9 +1071,55 @@ impl MagnitudePolicy {
     /// the toggle-identity and default-path unit gates).
     #[cfg(feature = "magnitude-fast")]
     #[must_use]
-    pub fn with_fast_fresh(mut self, fast_fresh: bool) -> Self {
-        self.fresh_route = FreshRoute { fast: fast_fresh };
+    pub fn with_eq3_levers(mut self, enabled: bool) -> Self {
+        self.fresh_route = FreshRoute { fast: enabled };
         self
+    }
+
+    /// **EQ3 instrumentation** (koalisi #69, feature `magnitude-fast`): the
+    /// evaluator-level facts behind one join decision — the cached
+    /// `(Mag(S), Mag(S ∪ {x}))` pair, the exact zero-diversity certificate, and
+    /// whether the incremental margin lands in the knife-edge band.
+    ///
+    /// **No behaviour change, no state change.** The probe answers from a
+    /// PRIVATE, throw-away evaluator cache: `self`'s cache is neither read nor
+    /// written, so probing cannot perturb a measured run's rebuild pattern or
+    /// its latency. It is not on any decision path — the registered battery
+    /// calls it only in untimed instrumentation passes.
+    ///
+    /// Returns `None` when the decision does not reach the incremental branch
+    /// (empty coalition, or a candidate excluded as task-irrelevant / duplicate
+    /// `agent_id`), and on an upstream evaluator-construction error.
+    ///
+    /// The reported [`JoinProbe::with`] is the **incremental** value, before any
+    /// knife-edge substitution — i.e. what `Mag(S ∪ {x})` costs on the fast
+    /// path, which is the quantity the cg#153 empty-band hypothesis is about.
+    /// [`Decision::score`] on the shipped path is the *post*-substitution
+    /// margin; the two differ exactly on `knife_edge` decisions.
+    #[cfg(feature = "magnitude-fast")]
+    #[must_use]
+    pub fn probe_join(
+        &self,
+        agent: &dyn AgentCapabilities,
+        coalition: &[&dyn AgentCapabilities],
+        ctx: &DecisionContext,
+    ) -> Option<JoinProbe> {
+        let required = ctx.required_capabilities;
+        let (masks_with, masks_without) = Self::join_masks(agent, coalition, required);
+        if masks_without.is_empty() || masks_with.len() == masks_without.len() {
+            return None;
+        }
+        let private = Mutex::new(None);
+        let eval =
+            cached_base_and_with_report(&private, required, &masks_without, agent.capabilities())
+                .ok()?;
+        let with = eval.with.ok()?;
+        Some(JoinProbe {
+            base: eval.base,
+            with,
+            zero_proof: eval.zero_proof,
+            knife_edge: is_knife_edge(with, eval.base, self.join_margin),
+        })
     }
 
     /// A policy that scores leaves through the reduced-set incremental evaluator
@@ -2237,7 +2356,7 @@ mod tests {
             "the fixture must be certified as an incoming profile duplicate"
         );
 
-        let eq3 = MagnitudePolicy::default().with_fast_fresh(true);
+        let eq3 = MagnitudePolicy::default().with_eq3_levers(true);
         let got = eq3.should_join(&candidate, &coalition, &ctx);
         assert!(
             !got.act && got.score.abs() < f64::EPSILON,
@@ -2469,7 +2588,7 @@ mod tests {
         let ctx = DecisionContext {
             required_capabilities: required,
         };
-        let policy = MagnitudePolicy::default().with_fast_fresh(true);
+        let policy = MagnitudePolicy::default().with_eq3_levers(true);
 
         // SkeletalMerge: the candidate is a mutual-1.0 clone of member 1 and
         // opens no interior shortcut (member 0 is disjoint from both).
@@ -2598,7 +2717,7 @@ mod tests {
             // The two registered arms, scored on identical coalition states:
             // `mag` (frozen, L1 only) and `mag-eq3` (toggle ON = L2 + L3).
             let frozen = MagnitudePolicy::default();
-            let eq3 = MagnitudePolicy::default().with_fast_fresh(true);
+            let eq3 = MagnitudePolicy::default().with_eq3_levers(true);
             for task in &tasks {
                 let required = task.required;
                 let ctx = DecisionContext {
@@ -2972,7 +3091,7 @@ mod tests {
     #[test]
     fn f64_route_alone_preserves_uncertified_decisions() {
         let frozen = MagnitudePolicy::default();
-        let eq3 = MagnitudePolicy::default().with_fast_fresh(true);
+        let eq3 = MagnitudePolicy::default().with_eq3_levers(true);
 
         for seed in 0..20u64 {
             let (agents, tasks) = generate_instance(seed);
@@ -3016,22 +3135,104 @@ mod tests {
         }
     }
 
-    /// (c) Toggle identity: with `fast_fresh` explicitly OFF the policy is
+    /// The EQ3 instrumentation surface: `probe_join` reports the incremental
+    /// pair and certificate for exactly the decisions that reach the evaluator
+    /// (and `None` for the empty / excluded branches), without touching the
+    /// policy's own cache; `probe_fresh_factorization`'s single-factorization
+    /// shortcut at `t = 1` returns the same magnitude as the fresh `f64` route.
+    #[cfg(feature = "magnitude-fast")]
+    #[test]
+    fn instrumentation_probes_report_without_changing_state() {
+        let ctx = DecisionContext {
+            required_capabilities: 0b111,
+        };
+        let a0 = TestAgent {
+            id: 0,
+            caps: 0b001,
+            trust: 50,
+        };
+        let a1 = TestAgent {
+            id: 1,
+            caps: 0b010,
+            trust: 50,
+        };
+        let cand = TestAgent {
+            id: 2,
+            caps: 0b100,
+            trust: 50,
+        };
+        let bystander = TestAgent {
+            id: 3,
+            caps: 0b1000,
+            trust: 50,
+        };
+        let policy = MagnitudePolicy::default().with_eq3_levers(true);
+        let coalition: [&dyn AgentCapabilities; 2] = [&a0, &a1];
+
+        // Empty coalition and excluded candidate: no incremental branch.
+        assert!(policy.probe_join(&cand, &[], &ctx).is_none());
+        assert!(policy.probe_join(&bystander, &coalition, &ctx).is_none());
+
+        // A disjoint specialist: increment 1.0, no certificate, not knife-edge.
+        let probe = policy
+            .probe_join(&cand, &coalition, &ctx)
+            .expect("the normal branch reports");
+        assert!(rel_close(probe.base, 2.0) && rel_close(probe.with, 3.0));
+        assert!(probe.zero_proof.is_none() && !probe.knife_edge);
+
+        // A clone of a member: certified zero, and the band would have fired.
+        let clone_of_a1 = TestAgent {
+            id: 4,
+            caps: 0b010,
+            trust: 50,
+        };
+        let probe = policy
+            .probe_join(&clone_of_a1, &coalition, &ctx)
+            .expect("the normal branch reports");
+        assert!(
+            matches!(
+                probe.zero_proof,
+                Some(ZeroDiversityProof::SkeletalMerge { .. })
+            ) && probe.knife_edge
+        );
+
+        // Probing leaves the policy's own decisions untouched (it answers off a
+        // private cache), so a decision taken after probing still matches the
+        // fresh reference.
+        let after = policy.should_join(&cand, &coalition, &ctx);
+        assert!(decisions_match(after, ref_join(&cand, &coalition, 0b111, 0.0)));
+
+        // The factorization shortcut agrees with the fresh f64 route, and skips
+        // task-irrelevant agents through `relevant_masks`.
+        let listed: [&dyn AgentCapabilities; 3] = [&a0, &a1, &bystander];
+        let (_path, mag) =
+            probe_fresh_factorization(&listed, 0b111).expect("two relevant members remain");
+        let direct = magnitude_of_masks_f64(&[0b001, 0b010], 0b111).unwrap();
+        assert_eq!(
+            mag.to_bits(),
+            direct.to_bits(),
+            "the t = 1 single-factorization shortcut must equal the fresh f64 route"
+        );
+        let none: [&dyn AgentCapabilities; 1] = [&bystander];
+        assert!(probe_fresh_factorization(&none, 0b111).is_none());
+    }
+
+    /// (c) Toggle identity: with the EQ3 levers explicitly OFF the policy is
     /// bit-identical to the plain default (which is what a `magnitude`-only
     /// build compiles), for both leave variants. This is the unit-level
     /// counterpart of the registered X-B gate.
     #[cfg(feature = "magnitude-fast")]
     #[test]
-    fn fast_fresh_toggle_off_is_bit_identical_to_default() {
+    fn eq3_levers_toggle_off_is_bit_identical_to_default() {
         let pairs = [
             (
                 MagnitudePolicy::default(),
-                MagnitudePolicy::default().with_fast_fresh(false),
+                MagnitudePolicy::default().with_eq3_levers(false),
                 "variant A",
             ),
             (
                 MagnitudePolicy::with_evaluator_leave(0.0),
-                MagnitudePolicy::with_evaluator_leave(0.0).with_fast_fresh(false),
+                MagnitudePolicy::with_evaluator_leave(0.0).with_eq3_levers(false),
                 "variant B",
             ),
         ];
