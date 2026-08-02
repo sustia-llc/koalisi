@@ -1,6 +1,6 @@
 [package]
 name = "koalisi"
-version = "0.21.0"
+version = "0.22.0"
 edition = "2024"
 # 1.93 floor forced by catgraph's deep_causality_num 0.4.1 pin (unchanged at
 # the v0.6.0 re-pin — catgraph holds num =0.4.1).
@@ -73,6 +73,16 @@ default = []
 decision = ["dep:aif", "dep:nalgebra"]
 # Categorical-magnitude coalition-decision strategy (pluggable, off by default).
 magnitude = ["dep:catgraph-magnitude"]
+# EQ3 levers L2 + L3 (#69, prereg Amendment 1): compile the upstream `f64-fast`
+# factorization and expose `MagnitudePolicy::with_eq3_levers`, the opt-in toggle
+# carrying BOTH levers. L3 routes FRESH full-coalition magnitudes through the
+# `f64` factorization handle; L2 is the exact zero-diversity proof branch, which
+# is **deliberately decision-changing** — it declines certified exact-zero joins
+# that the frozen arm takes on positive float roundoff (~0.8% of certified
+# candidates measured). Implies `magnitude`. The toggle defaults OFF, so merely
+# enabling this feature changes no decision (the registered X-B identity gate);
+# turning it ON selects the `mag-eq3` arm, not a faster `mag`.
+magnitude-fast = ["magnitude", "catgraph-magnitude/f64-fast"]
 # Durable coalition decision-event bus on surrealdb-live-message (off by default).
 durable = ["dep:surrealdb-live-message", "dep:surrealdb-types"]
 # Phase 7 persistence core: portable hash-chained event log (off by default).

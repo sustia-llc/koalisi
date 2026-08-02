@@ -98,7 +98,12 @@
 //! Both [`MagnitudePolicy`] and [`MagnitudeValueCalculator`] hold a
 //! membership-keyed evaluator cache behind interior mutability (the
 //! [`CoalitionDecisionPolicy`] / [`ValueCalculator`] seams take `&self`). The
-//! cache keys on `(required, member_masks)`:
+//! cache entry also carries one [`catgraph_magnitude::EvalScratch`] (EQ3 lever
+//! L1, upstream #33): the seven per-query border/Schur `Vec`s are drawn from it
+//! instead of being heap-allocated per candidate. The scratch holds **no
+//! cross-call state** (upstream reuse contract) — results are bit-identical to a
+//! fresh scratch — so it is retained across evaluator rebuilds exactly like the
+//! candidate registry. The cache keys on `(required, member_masks)`:
 //!
 //! - [`CoalitionEvaluator::base_value`] is **bit-identical** (`==`) to a fresh
 //!   [`catgraph_magnitude::coalition_value`] on the same members, so every
@@ -129,6 +134,68 @@
 //! error cannot span a `1e-6`-wide gap), so they keep the fast incremental
 //! value.
 //!
+//! This band logic is **frozen**: it is exactly what the default policy does,
+//! before and after EQ3.
+//!
+//! # The opt-in EQ3 arm (koalisi #69, feature `magnitude-fast`)
+//!
+//! [`MagnitudePolicy::with_eq3_levers`] turns on two levers together. It
+//! defaults **off**, and off is the frozen decision surface above.
+//!
+//! ## L2 — the exact zero-diversity proof branch (upstream #153)
+//!
+//! Part of the knife-edge population is *structurally* decidable, so it does
+//! not need the fresh recompute at all. On this arm the candidate query is
+//! [`CoalitionEvaluator::value_with_report_scratch`], and when the returned
+//! [`catgraph_magnitude::JoinReport`] carries a
+//! [`catgraph_magnitude::ZeroDiversityProof`] the candidate's **real**
+//! increment is exactly `0` (a mutual-`1.0` skeletal merge without interior
+//! improvement, or an incoming/outgoing closed-profile duplicate — each decided
+//! by exact `f64` comparison, no tolerance anywhere). Those candidates take
+//! `with := base`, so the margin is exactly `0.0` and the fresh recompute is
+//! skipped. Per the upstream contract the branch is on the **proof**, never on
+//! `increment() == 0.0` — a proven-zero candidate can still return a computed
+//! increment of order `1e-14`; and a proof of `None` means *not proven*, never
+//! "nonzero", so those candidates keep the band logic.
+//!
+//! **This lever changes decisions, deliberately** — which is why it is opt-in
+//! (prereg Amendment 1 / A1.1). Where a certified-zero candidate's *fresh*
+//! magnitude lands on positive roundoff (`+2e-16 … +7e-16` measured), the
+//! frozen path joined on that noise and this arm declines on the exact zero:
+//! 0.77 % of certified candidates on the module's 60-seed corpus, all in the
+//! two profile-duplicate classes (skeletal merge measured 0/465 — it is
+//! bit-identical to fresh). The default path is therefore left untouched, and
+//! the K6 knife-edge regression fixture keeps its original assertions.
+//!
+//! ## L3 — `f64` routing of fresh evaluations (upstream #165)
+//!
+//! The same toggle routes the policy's **fresh** full-coalition evaluations —
+//! the unprovable-knife-edge recompute, the leave-side fresh pair, and the
+//! empty / sole-member guards — through upstream's `f64` factorization handle
+//! (see `magnitude_of_masks_f64`) rather than calling
+//! [`catgraph_magnitude::coalition_value`] directly. What that handle does is
+//! **conditional**, and the condition matters here: it factors ζ with Cholesky
+//! (or LBLT when symmetric-indefinite) only if ζ is *exactly* symmetric, and
+//! otherwise falls back to the rig-generic Gauss–Jordan route.
+//!
+//! On koalisi traffic ζ is usually **not** symmetric. The substitutability
+//! coupling `A(i → j) = |rel_i ∩ rel_j| / |rel_i|` is asymmetric whenever
+//! `|rel_i| ≠ |rel_j|`, so any coalition mixing agents of different relevant
+//! widths lands on the fallback — which re-enters the generic path *after*
+//! paying the dense-matrix build and the symmetry scan, i.e. as net overhead.
+//! Measured on v2-shaped draws (8753 evaluations): Cholesky 29.1 % (about 45 %
+//! of those the trivial `k = 1` case), LBLT 0.0 %, Gauss–Jordan 70.9 %, with
+//! the fast-route share decaying monotonically as coalitions grow. Any latency
+//! claim about L3 must therefore be read against the per-run
+//! `FactorizationPath` instrumentation row, which discloses that split for the
+//! run being reported.
+//!
+//! Where the fast route *is* taken, agreement with the generic path is
+//! *tolerance*, not bit-identity (upstream's ULP-identity contract covers the ζ
+//! entries, not the inversion) — measured, not assumed. The evaluator-cached
+//! values (`base_value` / `value_with_scratch`) are never routed: only fresh
+//! evaluations are.
+//!
 //! `t = 1` stays pinned (never exposed). Removal is an upstream non-goal
 //! (max-product closures do not downdate), so `should_leave` defaults to the
 //! fresh two-evaluation path; an opt-in reduced-set-evaluator leave variant
@@ -142,7 +209,9 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
-use catgraph_magnitude::{CatgraphError, CoalitionEvaluator};
+use catgraph_magnitude::{CatgraphError, CoalitionEvaluator, EvalScratch};
+#[cfg(feature = "magnitude-fast")]
+use catgraph_magnitude::{Coalition, HomMap, LawvereMetricSpace, UnitInterval, ZeroDiversityProof};
 
 use crate::algorithms::{AgentCapabilities, ValueCalculator};
 
@@ -206,6 +275,13 @@ struct EvaluatorCache {
     /// The upstream incremental evaluator over agents
     /// `0..(member_masks.len() + candidate_masks.len())`, members `0..m`.
     evaluator: CoalitionEvaluator,
+    /// Reusable border/Schur working buffers for
+    /// [`CoalitionEvaluator::value_with_report_scratch`] (EQ3 L1, upstream #33).
+    /// Carries **no** cross-call state — it is an allocation pool, not cache
+    /// state — so it is kept across evaluator rebuilds (where the whole point of
+    /// the pool would otherwise be lost on rebuild-heavy streams) and yields
+    /// results bit-identical to a fresh scratch.
+    scratch: EvalScratch,
 }
 
 /// Build a [`CoalitionEvaluator`] whose members are `member_masks` (agent slots
@@ -290,19 +366,29 @@ fn build_evaluator(
 /// of any realistic pool (the K4 battery's whole 30-seed stream sees < 162).
 const REGISTRY_CAP: usize = 256;
 
-/// Take the candidate-mask registry out of `guard` for a rebuild, enforcing
-/// [`REGISTRY_CAP`]: an over-cap registry is dropped and re-registration starts
-/// empty. The registry is retained across `required` changes (couplings are
-/// recomputed from raw masks at each build), which is what keeps post-warm-up
-/// joins on the O(m²) hit path (see [`EvaluatorCache`]).
-fn take_registry(guard: &mut Option<EvaluatorCache>) -> Vec<u32> {
-    let registry = guard.take().map_or_else(Vec::new, |c| c.candidate_masks);
+/// Take the candidate-mask registry and the [`EvalScratch`] pool out of `guard`
+/// for a rebuild, enforcing [`REGISTRY_CAP`] on the registry: an over-cap
+/// registry is dropped and re-registration starts empty. The registry is
+/// retained across `required` changes (couplings are recomputed from raw masks
+/// at each build), which is what keeps post-warm-up joins on the O(m²) hit path
+/// (see [`EvaluatorCache`]).
+///
+/// The scratch is retained **unconditionally** — including when the registry
+/// resets and when the coalition changes shape. It is stateless by upstream
+/// contract (reusable across evaluators and across coalitions of different
+/// sizes), so carrying it over is pure allocation reuse and cannot affect a
+/// value.
+fn take_registry_and_scratch(guard: &mut Option<EvaluatorCache>) -> (Vec<u32>, EvalScratch) {
+    let (registry, scratch) = guard.take().map_or_else(
+        || (Vec::new(), EvalScratch::new()),
+        |c| (c.candidate_masks, c.scratch),
+    );
     // `>=` so a full-cap registry resets BEFORE the caller's potential push —
     // the cap is a hard bound, never exceeded even by one.
     if registry.len() >= REGISTRY_CAP {
-        Vec::new()
+        (Vec::new(), scratch)
     } else {
-        registry
+        (registry, scratch)
     }
 }
 
@@ -328,13 +414,14 @@ fn cached_base(
         .as_ref()
         .is_some_and(|c| c.required == required && c.member_masks == *member_masks)
     {
-        let registry = take_registry(&mut guard);
+        let (registry, scratch) = take_registry_and_scratch(&mut guard);
         let evaluator = build_evaluator(required, member_masks, &registry)?;
         *guard = Some(EvaluatorCache {
             required,
             member_masks: member_masks.to_vec(),
             candidate_masks: registry,
             evaluator,
+            scratch,
         });
     }
     Ok(guard
@@ -344,16 +431,39 @@ fn cached_base(
         .base_value())
 }
 
-/// The `(Mag(S), Mag(S ∪ {candidate}))` pair for `S = member_masks`, using the
-/// membership-keyed evaluator in `cache`.
+/// One candidate query against the cached base coalition: the `(Mag(S),
+/// Mag(S ∪ {candidate}))` pair, plus — on the EQ3 arm only — the exact
+/// zero-diversity certificate the upstream report carries (L2).
+///
+/// `base` is bit-identical to fresh `Mag(S)`; `with` is the incremental
+/// `Mag(S ∪ {x})` (tolerance-equal to fresh, `Err` exactly when fresh would
+/// err). The certificate field exists only under `magnitude-fast`, so the
+/// default build has no proof surface at all.
+#[derive(Debug)]
+struct CandidateEval {
+    /// `Mag(S)` — [`CoalitionEvaluator::base_value`], bit-identical to fresh.
+    base: f64,
+    /// `Mag(S ∪ {candidate})` from the incremental path, or the upstream error.
+    with: Result<f64, CatgraphError>,
+    /// The exact certificate, when one of upstream's three decidable classes
+    /// fired: `Some(_)` **iff** the REAL increment is exactly `0`. `None` means
+    /// *not proven*, never "nonzero" — so it is a decision input while
+    /// `with - base` on a proven candidate may still be roundoff-nonzero.
+    /// Always `None` on the `Err` arm, and always `None` on the toggle-OFF
+    /// query (which never asks for a report).
+    #[cfg(feature = "magnitude-fast")]
+    zero_proof: Option<ZeroDiversityProof>,
+}
+
+/// Ensure `guard` holds an evaluator keyed on `(required, member_masks)` whose
+/// candidate pool contains `candidate_caps`, and return that candidate's
+/// registry slot (its evaluator agent index is `member_masks.len() + slot`).
 ///
 /// Rebuilds the base evaluator when `(required, member_masks)` changed (retaining
-/// the candidate registry, up to [`REGISTRY_CAP`]), registers
-/// `candidate_caps` if unseen (a rebuild that extends the pool), and otherwise
-/// answers from the cached evaluator in `O(m²)`. The
-/// base component is bit-identical to fresh; the `with` component is within
-/// [`catgraph_magnitude::INCREMENTAL_REL_TOL`] of fresh (and its `Ok`/`Err`
-/// tracks fresh — see [`CoalitionEvaluator::value_with`]).
+/// the candidate registry, up to [`REGISTRY_CAP`], and the [`EvalScratch`] pool),
+/// registers `candidate_caps` if unseen (a rebuild that extends the pool), and
+/// otherwise leaves the cached evaluator untouched so the caller's query is a
+/// pure `O(m²)` hit.
 ///
 /// `member_masks` must be non-empty and must NOT contain `candidate_caps` as a
 /// genuinely-merged member for the `with` side to be a real join — callers
@@ -363,26 +473,22 @@ fn cached_base(
 ///
 /// # Errors
 ///
-/// Propagates a [`build_evaluator`] failure (base or pool-extension rebuild). A
-/// [`CoalitionEvaluator::value_with`] failure is returned in the inner `Result`,
-/// not this outer one, so callers can decline on it exactly as the fresh path
-/// declines on a failed `Mag(S ∪ {x})`.
-fn cached_base_and_with(
-    cache: &Mutex<Option<EvaluatorCache>>,
+/// Propagates a [`build_evaluator`] failure (base or pool-extension rebuild).
+fn ensure_cached_candidate(
+    guard: &mut Option<EvaluatorCache>,
     required: u32,
     member_masks: &[u32],
     candidate_caps: u32,
-) -> Result<(f64, Result<f64, CatgraphError>), CatgraphError> {
-    let mut guard = cache.lock().expect("invariant: no panic while holding the magnitude cache lock (guarded section only builds/queries the evaluator)");
-
+) -> Result<usize, CatgraphError> {
     // Rebuild the base evaluator on a membership / requirement miss, retaining
-    // the accumulated candidate registry (capped — see `take_registry`) and
+    // the accumulated candidate registry (capped — see
+    // `take_registry_and_scratch`) and
     // ensuring this candidate is in it.
     if !guard
         .as_ref()
         .is_some_and(|c| c.required == required && c.member_masks == *member_masks)
     {
-        let mut registry = take_registry(&mut guard);
+        let (mut registry, scratch) = take_registry_and_scratch(guard);
         if !registry.contains(&candidate_caps) {
             registry.push(candidate_caps);
         }
@@ -392,6 +498,7 @@ fn cached_base_and_with(
             member_masks: member_masks.to_vec(),
             candidate_masks: registry,
             evaluator,
+            scratch,
         });
     }
 
@@ -410,8 +517,8 @@ fn cached_base_and_with(
     // that no longer matches the evaluator's actual pool — a desync would make
     // the next hit index the wrong slot (wrong value, or an out-of-bounds panic
     // that poisons the shared lock).
-    let pos = if let Some(p) = existing_pos {
-        p
+    if let Some(p) = existing_pos {
+        Ok(p)
     } else {
         let mut entry = guard.take().expect("cache populated above");
         if entry.candidate_masks.len() >= REGISTRY_CAP {
@@ -423,14 +530,121 @@ fn cached_base_and_with(
         entry.evaluator = build_evaluator(required, &entry.member_masks, &entry.candidate_masks)?;
         let p = entry.candidate_masks.len() - 1;
         *guard = Some(entry);
-        p
-    };
+        Ok(p)
+    }
+}
 
-    let cache_ref = guard.as_ref().expect("cache populated above");
-    let m = cache_ref.member_masks.len();
-    let base = cache_ref.evaluator.base_value();
-    let with = cache_ref.evaluator.value_with(m + pos);
-    Ok((base, with))
+/// The `(Mag(S), Mag(S ∪ {candidate}))` pair for `S = member_masks` — **the
+/// default (frozen) query**.
+///
+/// The `with` component comes from [`CoalitionEvaluator::value_with_scratch`]:
+/// same arithmetic, same branch selection and **bit-identical** result to the
+/// pre-EQ3 [`CoalitionEvaluator::value_with`] (upstream #33 contract), the only
+/// change being that the seven per-query border/Schur `Vec`s are drawn from the
+/// cache entry's reusable [`EvalScratch`] (EQ3 lever L1). No report is
+/// requested, so upstream's proof scan is not even compiled into this path.
+/// `base` is bit-identical to fresh; `with` is within
+/// [`catgraph_magnitude::INCREMENTAL_REL_TOL`] of fresh and its `Ok`/`Err`
+/// tracks fresh.
+///
+/// # Errors
+///
+/// Propagates a [`ensure_cached_candidate`] failure (base or pool-extension
+/// rebuild). A [`CoalitionEvaluator::value_with_scratch`] failure is returned in
+/// the inner `Result` ([`CandidateEval::with`]), not this outer one, so callers
+/// can decline on it exactly as the fresh path declines on a failed
+/// `Mag(S ∪ {x})`.
+fn cached_base_and_with(
+    cache: &Mutex<Option<EvaluatorCache>>,
+    required: u32,
+    member_masks: &[u32],
+    candidate_caps: u32,
+) -> Result<CandidateEval, CatgraphError> {
+    let mut guard = cache.lock().expect("invariant: no panic while holding the magnitude cache lock (guarded section only builds/queries the evaluator)");
+    let pos = ensure_cached_candidate(&mut guard, required, member_masks, candidate_caps)?;
+
+    // `as_mut` (not `as_ref`): the scratch pool is borrowed mutably while the
+    // evaluator is borrowed shared — disjoint fields of the same entry, so the
+    // two borrows split. Nothing else in the entry is touched, so the
+    // take/reinsert desync discipline in `ensure_cached_candidate` is
+    // unaffected.
+    let entry = guard.as_mut().expect("cache populated above");
+    let m = entry.member_masks.len();
+    let base = entry.evaluator.base_value();
+    let with = entry
+        .evaluator
+        .value_with_scratch(m + pos, &mut entry.scratch);
+    Ok(CandidateEval {
+        base,
+        with,
+        #[cfg(feature = "magnitude-fast")]
+        zero_proof: None,
+    })
+}
+
+/// [`cached_base_and_with`] through the **reporting** query — the EQ3 arm's
+/// candidate evaluation (levers L1 × L2, feature `magnitude-fast` + toggle ON).
+///
+/// [`CoalitionEvaluator::value_with_report_scratch`] returns a value
+/// bit-identical to [`CoalitionEvaluator::value_with_scratch`] on the same
+/// candidate (upstream contract: same arithmetic, same accumulation order, same
+/// branch selection) and additionally carries the [`ZeroDiversityProof`] when
+/// one of the three exactly-decidable classes fires. It is a separate function
+/// — not a flag on the default one — so the frozen path is textually free of
+/// any report/proof call.
+///
+/// # Errors
+///
+/// Identical to [`cached_base_and_with`].
+#[cfg(feature = "magnitude-fast")]
+fn cached_base_and_with_report(
+    cache: &Mutex<Option<EvaluatorCache>>,
+    required: u32,
+    member_masks: &[u32],
+    candidate_caps: u32,
+) -> Result<CandidateEval, CatgraphError> {
+    let mut guard = cache.lock().expect("invariant: no panic while holding the magnitude cache lock (guarded section only builds/queries the evaluator)");
+    let pos = ensure_cached_candidate(&mut guard, required, member_masks, candidate_caps)?;
+
+    let entry = guard.as_mut().expect("cache populated above");
+    let m = entry.member_masks.len();
+    let base = entry.evaluator.base_value();
+    let report = entry
+        .evaluator
+        .value_with_report_scratch(m + pos, &mut entry.scratch);
+    let (with, zero_proof) = match report {
+        Ok(r) => (Ok(r.value()), r.zero_proof()),
+        Err(e) => (Err(e), None),
+    };
+    Ok(CandidateEval {
+        base,
+        with,
+        zero_proof,
+    })
+}
+
+/// The candidate query the policy dispatch uses, selected by `route`:
+/// [`cached_base_and_with`] (the frozen default — no report, no proof scan) or,
+/// with the EQ3 toggle ON, [`cached_base_and_with_report`].
+///
+/// # Errors
+///
+/// Whatever the selected query propagates.
+fn cached_candidate_eval(
+    cache: &Mutex<Option<EvaluatorCache>>,
+    required: u32,
+    member_masks: &[u32],
+    candidate_caps: u32,
+    route: FreshRoute,
+) -> Result<CandidateEval, CatgraphError> {
+    // [`FreshRoute::proofs`] is a compile-time `false` without `magnitude-fast`
+    // (the flag has no representation there), so the frozen build reduces to the
+    // plain query below and never mentions the reporting one.
+    if route.proofs() {
+        #[cfg(feature = "magnitude-fast")]
+        return cached_base_and_with_report(cache, required, member_masks, candidate_caps);
+    }
+    cached_base_and_with(cache, required, member_masks, candidate_caps)
 }
 
 /// The capability→coupling map. Public so the mapping can be tested directly
@@ -541,6 +755,222 @@ pub(crate) fn magnitude_or_zero(masks: &[u32], required: u32) -> Result<f64, Cat
     magnitude_of_masks(masks, required)
 }
 
+/// [`magnitude_of_masks`] over the upstream `f64` factorization (EQ3 lever L3,
+/// feature `magnitude-fast`, upstream #165).
+///
+/// Reproduces [`magnitude_of_masks`]'s semantics step for step — same
+/// [`CouplingModel::coupling`] map, same `i`-outer / `j`-inner emission order,
+/// same `p > 0.0` filter, no self-couplings — and hands the couplings to the
+/// same [`Coalition::from_enriched`] pipeline
+/// [`catgraph_magnitude::coalition_value`] uses (restrict-then-close +
+/// skeletalize). Only the final Möbius inversion differs: the coalition's
+/// **skeletal** metric space is re-derived from the public surface
+/// (closed cospan weights indexed by class representatives) and inverted by
+/// [`catgraph_magnitude::magnitude_f64::magnitude_f64`] at the pinned `t = 1`.
+///
+/// Skeletalization is load-bearing, not incidental: the coalition's *full*
+/// cospan-derived space keeps perfectly-coupled members apart, whose ζ has
+/// identical rows and is singular at every `t` (a clone candidate would error
+/// instead of scoring the base magnitude). Taking one representative per
+/// [`Coalition::member_classes`] class is exactly the quotient the generic path
+/// applies, so both routes invert the same **skeletal** matrix up to the
+/// documented ζ construction — upstream's ULP-identity contract covers the ζ
+/// *entries*, not the inversion that follows.
+///
+/// Agreement with [`magnitude_of_masks`] is by *tolerance*, not bit-identity —
+/// the factorization route differs (Cholesky / LBLT when ζ is exactly
+/// symmetric, Gauss–Jordan otherwise) — which is why the toggle is measured
+/// (koalisi #69) and defaults off. See the module docs for how rarely the
+/// symmetric route is actually taken on this traffic.
+///
+/// `masks` must be non-empty (same contract as [`magnitude_of_masks`]).
+///
+/// # Errors
+///
+/// Propagates any [`CatgraphError`] from category construction, coalition
+/// formation, or a singular `t`-scaled zeta.
+///
+/// **Failure-surface scope.** `Err`-parity with [`magnitude_of_masks`] is
+/// upstream-guaranteed only on the Gauss–Jordan route, which *is* the generic
+/// computation. On the Cholesky/LBLT route the two can in principle disagree:
+/// a near-singular ζ that Cholesky accepts would return a finite value where
+/// the generic path errors (or vice versa). That would surface as an act
+/// divergence with no certificate behind it — exactly what the registered
+/// H-par′ (i) gate is designed to catch — rather than as a silent wrong answer.
+#[cfg(feature = "magnitude-fast")]
+fn magnitude_of_masks_f64(masks: &[u32], required: u32) -> Result<f64, CatgraphError> {
+    let space = skeletal_space_of_masks(masks, required)?;
+    catgraph_magnitude::magnitude_f64::magnitude_f64(&space, 1.0)
+}
+
+/// The **skeletal** Lawvere metric space of `masks` under the substitutability
+/// coupling — the matrix both `f64` entry points invert (the fresh route in
+/// [`magnitude_of_masks_f64`], the instrumentation route in
+/// [`probe_fresh_factorization`]).
+///
+/// See [`magnitude_of_masks_f64`] for why the skeleton, not the full member
+/// cospan, is the right space.
+///
+/// `masks` must be non-empty.
+///
+/// # Errors
+///
+/// Propagates any [`CatgraphError`] from category construction or coalition
+/// formation.
+#[cfg(feature = "magnitude-fast")]
+fn skeletal_space_of_masks(
+    masks: &[u32],
+    required: u32,
+) -> Result<LawvereMetricSpace<usize>, CatgraphError> {
+    let agents: Vec<usize> = (0..masks.len()).collect();
+
+    let mut cat = HomMap::<usize, UnitInterval>::new(agents.clone());
+    for (i, &from) in masks.iter().enumerate() {
+        for (j, &to) in masks.iter().enumerate() {
+            if i == j {
+                continue;
+            }
+            let p = CouplingModel::coupling(from, to, required);
+            if p > 0.0 {
+                cat.set_hom(i, j, UnitInterval::new(p)?);
+            }
+        }
+    }
+
+    let coalition = Coalition::from_enriched(&cat, &agents)?;
+
+    // Skeleton: one representative (the first member of the class) per
+    // equivalence class, mirroring upstream's `build_skeletal_space`. Indexing
+    // `reps` by class id rather than by first-seen order makes this independent
+    // of upstream's class numbering (any permutation leaves the magnitude
+    // unchanged).
+    let classes = coalition.member_classes();
+    let k = classes.iter().copied().max().map_or(0, |c| c + 1);
+    let mut reps = vec![usize::MAX; k];
+    for (member, &c) in classes.iter().enumerate() {
+        if reps[c] == usize::MAX {
+            reps[c] = member;
+        }
+    }
+
+    let cospan = coalition.as_weighted_cospan();
+    Ok(LawvereMetricSpace::from_distance_fn(k, |a, b| {
+        let p = cospan.weight(reps[a], reps[b]).value();
+        if p > 0.0 { -p.ln() } else { f64::INFINITY }
+    }))
+}
+
+/// **EQ3 instrumentation** (koalisi #69, feature `magnitude-fast`): what
+/// [`MagnitudePolicy::probe_join`] observed about one join decision.
+///
+/// A read-only view of the evaluator layer, produced off a private cache — see
+/// that method for the no-behaviour-change contract.
+#[cfg(feature = "magnitude-fast")]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct JoinProbe {
+    /// `Mag(S)` — bit-identical to a fresh evaluation of the coalition.
+    pub base: f64,
+    /// `Mag(S ∪ {x})` from the **incremental** path, before any knife-edge
+    /// substitution.
+    pub with: f64,
+    /// The exact zero-diversity certificate, when one of the three decidable
+    /// classes fired: `Some(_)` ⇒ the real increment is exactly `0`.
+    pub zero_proof: Option<ZeroDiversityProof>,
+    /// Whether `with − base` lands inside [`KNIFE_EDGE_REL_BAND`] of the
+    /// policy's `join_margin` — i.e. whether the frozen arm pays a fresh
+    /// recompute here.
+    pub knife_edge: bool,
+}
+
+/// **EQ3 instrumentation** (koalisi #69, feature `magnitude-fast`): the
+/// factorization route the `f64` fresh path takes on `agents`, together with the
+/// magnitude that route produces, at the pinned `t = 1`.
+///
+/// One factorization total — the handle that reports
+/// [`catgraph_magnitude::magnitude_f64::FactorizationPath`] is the same handle
+/// that answers the magnitude, so nothing extra is computed. (`t = 1` is what
+/// makes this exact: upstream's `t`-scaling multiplies every distance by `t`,
+/// and `d * 1.0 == d` bitwise for finite and infinite `d` alike, so factoring
+/// the unscaled space is factoring the scaled one. The returned magnitude is
+/// asserted equal to [`magnitude_of_masks_f64`]'s in the module tests.)
+///
+/// The path is reported **independently of whether the magnitude succeeds** —
+/// the route is decided at construction, before any solve — so a singular ζ
+/// still tells you which route it was singular on. Counting only the `Ok`
+/// cases would silently undercount the Gauss–Jordan share, since that is the
+/// route an exact singularity surfaces on.
+///
+/// Returns `None` only when nothing task-relevant survives [`relevant_masks`]
+/// (an empty coalition has no ζ to factor) or when the coalition itself cannot
+/// be built.
+#[cfg(feature = "magnitude-fast")]
+#[must_use]
+pub fn probe_fresh_factorization(
+    agents: &[&dyn AgentCapabilities],
+    required: u32,
+) -> Option<(
+    catgraph_magnitude::magnitude_f64::FactorizationPath,
+    Result<f64, CatgraphError>,
+)> {
+    let masks = relevant_masks(agents, required);
+    if masks.is_empty() {
+        return None;
+    }
+    let space = skeletal_space_of_masks(&masks, required).ok()?;
+    let factorization = catgraph_magnitude::magnitude_f64::ZetaFactorization::new(&space);
+    Some((factorization.path(), factorization.magnitude()))
+}
+
+/// The EQ3 arm selector: one flag driving **both** opt-in levers — L2 (the
+/// exact zero-diversity proof branch on the cached candidate query) and L3 (the
+/// `f64` factorization for fresh full-coalition evaluations).
+///
+/// Amendment 1 (A1.1) parks L2 here alongside L3 because the proof branch is
+/// decision-changing on the profile-duplicate classes: OFF is the frozen
+/// pre-EQ3 decision surface (plus L1, which is invisible), ON is the `mag-eq3`
+/// arm.
+///
+/// Zero-sized when `magnitude-fast` is not compiled in — the flag then has no
+/// representation, no branch, and no cost, so the feature-off build is the
+/// pre-EQ3 code path exactly.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct FreshRoute {
+    /// `true` ⇒ the EQ3 arm: proof branch on, fresh evaluations through
+    /// [`magnitude_of_masks_f64`]. `false` (the default) ⇒ no proof scan and
+    /// the generic [`magnitude_of_masks`].
+    #[cfg(feature = "magnitude-fast")]
+    fast: bool,
+}
+
+impl FreshRoute {
+    /// Whether the EQ3 L2 proof branch is active. A compile-time `false`
+    /// without `magnitude-fast`.
+    fn proofs(self) -> bool {
+        #[cfg(feature = "magnitude-fast")]
+        return self.fast;
+        #[cfg(not(feature = "magnitude-fast"))]
+        return false;
+    }
+
+    /// Fresh `Mag(masks)` through the selected route. `masks` must be non-empty.
+    fn magnitude(self, masks: &[u32], required: u32) -> Result<f64, CatgraphError> {
+        #[cfg(feature = "magnitude-fast")]
+        if self.fast {
+            return magnitude_of_masks_f64(masks, required);
+        }
+        magnitude_of_masks(masks, required)
+    }
+
+    /// Fresh `Mag(masks)` through the selected route, or `Ok(0.0)` when empty
+    /// (the [`magnitude_or_zero`] guard — `Mag(∅) = 0`).
+    fn magnitude_or_zero(self, masks: &[u32], required: u32) -> Result<f64, CatgraphError> {
+        if masks.is_empty() {
+            return Ok(0.0);
+        }
+        self.magnitude(masks, required)
+    }
+}
+
 /// A [`ValueCalculator`] that scores a coalition by its magnitude (effective-
 /// member diversity) under the capability-substitutability coupling.
 ///
@@ -641,6 +1071,9 @@ pub(crate) enum LeaveVariant {
 pub struct MagnitudePolicy {
     pub join_margin: f64,
     leave_variant: LeaveVariant,
+    /// Which route the policy's *fresh* full-coalition evaluations take (EQ3
+    /// L3). Zero-sized — and the toggle absent — without `magnitude-fast`.
+    fresh_route: FreshRoute,
     cache: Arc<Mutex<Option<EvaluatorCache>>>,
 }
 
@@ -652,8 +1085,86 @@ impl MagnitudePolicy {
         Self {
             join_margin,
             leave_variant: LeaveVariant::Fresh,
+            fresh_route: FreshRoute::default(),
             cache: Arc::default(),
         }
+    }
+
+    /// Switch the policy to the **EQ3 arm** (koalisi #69, feature
+    /// `magnitude-fast`): both opt-in levers at once — see the
+    /// [module docs](self#the-opt-in-eq3-arm-koalisi-69-feature-magnitude-fast).
+    ///
+    /// - **L2**, the exact zero-diversity proof branch on the cached candidate
+    ///   query. **Decision-changing by design** on the profile-duplicate
+    ///   classes, where the frozen path joined on positive roundoff and this arm
+    ///   declines on the certified exact zero.
+    /// - **L3**, the `f64` factorization for the fresh evaluation sites (the
+    ///   unprovable-knife-edge recompute, the leave-side fresh pair, the empty /
+    ///   sole-member guards). Tolerance-equal to the generic route, not
+    ///   bit-identical.
+    ///
+    /// `false` is the identity and the default: the policy then behaves exactly
+    /// as a `magnitude`-only build — no report is requested, no proof scan runs,
+    /// and the knife-edge band logic is the frozen one (asserted bit-exactly by
+    /// the toggle-identity and default-path unit gates).
+    #[cfg(feature = "magnitude-fast")]
+    #[must_use]
+    pub fn with_eq3_levers(mut self, enabled: bool) -> Self {
+        self.fresh_route = FreshRoute { fast: enabled };
+        self
+    }
+
+    /// **EQ3 instrumentation** (koalisi #69, feature `magnitude-fast`): the
+    /// evaluator-level facts behind one join decision — the cached
+    /// `(Mag(S), Mag(S ∪ {x}))` pair, the exact zero-diversity certificate, and
+    /// whether the incremental margin lands in the knife-edge band.
+    ///
+    /// **No behaviour change, no state change.** The probe answers from a
+    /// PRIVATE, throw-away evaluator cache: `self`'s cache is neither read nor
+    /// written, so probing cannot perturb a measured run's rebuild pattern or
+    /// its latency. It is not on any decision path.
+    ///
+    /// That purity is **load-bearing, not merely tidy**: besides the non-gating
+    /// instrumentation rows, this probe is consumed by the registered
+    /// **H-par′ (i)** paired walk, which is a GATING leg. The walk reads the
+    /// certificate at a decision the two arms disagree on, so a probe that
+    /// mutated cache state could change the very decisions it is adjudicating.
+    /// The walk is untimed, so the private cache's rebuild cost is irrelevant
+    /// there; keep it private regardless.
+    ///
+    /// Returns `None` when the decision does not reach the incremental branch
+    /// (empty coalition, or a candidate excluded as task-irrelevant / duplicate
+    /// `agent_id`), and on an upstream evaluator-construction error.
+    ///
+    /// The reported [`JoinProbe::with`] is the **incremental** value, before any
+    /// knife-edge substitution — i.e. what `Mag(S ∪ {x})` costs on the fast
+    /// path, which is the quantity the cg#153 empty-band hypothesis is about.
+    /// [`Decision::score`] on the shipped path is the *post*-substitution
+    /// margin; the two differ exactly on `knife_edge` decisions.
+    #[cfg(feature = "magnitude-fast")]
+    #[must_use]
+    pub fn probe_join(
+        &self,
+        agent: &dyn AgentCapabilities,
+        coalition: &[&dyn AgentCapabilities],
+        ctx: &DecisionContext,
+    ) -> Option<JoinProbe> {
+        let required = ctx.required_capabilities;
+        let (masks_with, masks_without) = Self::join_masks(agent, coalition, required);
+        if masks_without.is_empty() || masks_with.len() == masks_without.len() {
+            return None;
+        }
+        let private = Mutex::new(None);
+        let eval =
+            cached_base_and_with_report(&private, required, &masks_without, agent.capabilities())
+                .ok()?;
+        let with = eval.with.ok()?;
+        Some(JoinProbe {
+            base: eval.base,
+            with,
+            zero_proof: eval.zero_proof,
+            knife_edge: is_knife_edge(with, eval.base, self.join_margin),
+        })
     }
 
     /// A policy that scores leaves through the reduced-set incremental evaluator
@@ -670,6 +1181,7 @@ impl MagnitudePolicy {
         Self {
             join_margin,
             leave_variant: LeaveVariant::Evaluator,
+            fresh_route: FreshRoute::default(),
             cache: Arc::default(),
         }
     }
@@ -796,6 +1308,9 @@ impl MagnitudePolicy {
     ///   `Mag(S) − Mag(S)` from a single [`cached_base`], preserving error parity
     ///   (the evaluator build errs iff the fresh evaluation would);
     /// - **normal**: `Mag(S ∪ {x}) − Mag(S)` via [`cached_base_and_with`].
+    ///
+    /// `route` selects the arithmetic used by the *fresh* evaluations only (the
+    /// empty-coalition branch and the knife-edge recompute) — EQ3 lever L3.
     fn join_dispatch(
         cache: &Mutex<Option<EvaluatorCache>>,
         required: u32,
@@ -803,10 +1318,11 @@ impl MagnitudePolicy {
         masks_without: &[u32],
         candidate_caps: u32,
         join_margin: f64,
+        route: FreshRoute,
     ) -> Decision {
         if masks_without.is_empty() {
-            let mag_with = magnitude_or_zero(masks_with, required);
-            let mag_without = magnitude_or_zero(masks_without, required);
+            let mag_with = route.magnitude_or_zero(masks_with, required);
+            let mag_without = route.magnitude_or_zero(masks_without, required);
             return Self::join_decision_from_values(mag_with, mag_without, join_margin);
         }
         if masks_with.len() == masks_without.len() {
@@ -823,17 +1339,29 @@ impl MagnitudePolicy {
                 }
             };
         }
-        match cached_base_and_with(cache, required, masks_without, candidate_caps) {
-            Ok((base, with)) => {
-                // Knife-edge: when the incremental margin is within the band of
-                // the decision threshold (`join_margin` — caller-settable, not
-                // necessarily 0), the margin-vs-threshold comparison is
+        match cached_candidate_eval(cache, required, masks_without, candidate_caps, route) {
+            Ok(eval) => {
+                let base = eval.base;
+                #[cfg(feature = "magnitude-fast")]
+                let zero_proof = eval.zero_proof;
+                // Proof branch (EQ3 L2, toggle ON only — the arm the certificate
+                // was even requested on): a certificate means the REAL increment
+                // is exactly 0, so `Mag(S ∪ {x}) = Mag(S)` — take `base` and
+                // skip the recompute. Branch on the proof, never on the computed
+                // increment (which can be roundoff-nonzero).
+                //
+                // Otherwise (and always on the frozen default path) knife-edge:
+                // when the incremental margin is within the band of the decision
+                // threshold (`join_margin` — caller-settable, not necessarily
+                // 0), the margin-vs-threshold comparison is
                 // float-noise-dominated. Recompute `Mag(S ∪ {x})` fresh so it
                 // reproduces the pre-evaluator behaviour bit-exactly (`base` is
                 // already bit-identical to fresh `Mag(S)`).
-                let with = match with {
+                let with = match eval.with {
+                    #[cfg(feature = "magnitude-fast")]
+                    Ok(_) if zero_proof.is_some() => Ok(base),
                     Ok(w) if is_knife_edge(w, base, join_margin) => {
-                        magnitude_of_masks(masks_with, required)
+                        route.magnitude(masks_with, required)
                     }
                     other => other,
                 };
@@ -863,10 +1391,11 @@ impl MagnitudePolicy {
         masks_in: &[u32],
         masks_out: &[u32],
         leaver_caps: u32,
+        route: FreshRoute,
     ) -> Decision {
         if masks_out.is_empty() {
-            let mag_in = magnitude_or_zero(masks_in, required);
-            let mag_out = magnitude_or_zero(masks_out, required);
+            let mag_in = route.magnitude_or_zero(masks_in, required);
+            let mag_out = route.magnitude_or_zero(masks_out, required);
             return Self::leave_decision_from_values(mag_in, mag_out);
         }
         if masks_in.len() == masks_out.len() {
@@ -883,14 +1412,25 @@ impl MagnitudePolicy {
             };
         }
         // `with` = Mag(S ∖ {x} ∪ {x}) = Mag(S) = mag_in; `base` = Mag(S ∖ {x}) = mag_out.
-        match cached_base_and_with(cache, required, masks_out, leaver_caps) {
-            Ok((base, with)) => {
-                // Knife-edge: recompute `Mag(S)` fresh when the incremental delta
-                // is band-close to zero (the leave threshold is hardcoded
+        match cached_candidate_eval(cache, required, masks_out, leaver_caps, route) {
+            Ok(eval) => {
+                let base = eval.base;
+                #[cfg(feature = "magnitude-fast")]
+                let zero_proof = eval.zero_proof;
+                // Proof branch (EQ3 L2, toggle ON only): a certificate means the
+                // leaver's real diversity contribution is exactly 0, i.e.
+                // `Mag(S) = Mag(S ∖ {x})` — take `base`, skip the recompute, and
+                // let the `delta <= 0` rule fire on an exact zero.
+                //
+                // Otherwise (and always on the frozen default path) knife-edge:
+                // recompute `Mag(S)` fresh when the incremental delta is
+                // band-close to zero (the leave threshold is hardcoded
                 // `<= 0.0`), so the sign-vs-zero leave decision reproduces the
                 // pre-evaluator behaviour bit-exactly.
-                let with = match with {
-                    Ok(w) if is_knife_edge(w, base, 0.0) => magnitude_of_masks(masks_in, required),
+                let with = match eval.with {
+                    #[cfg(feature = "magnitude-fast")]
+                    Ok(_) if zero_proof.is_some() => Ok(base),
+                    Ok(w) if is_knife_edge(w, base, 0.0) => route.magnitude(masks_in, required),
                     other => other,
                 };
                 Self::leave_decision_from_values(with, Ok(base))
@@ -929,6 +1469,7 @@ impl CoalitionDecisionPolicy for MagnitudePolicy {
             &masks_without,
             agent.capabilities(),
             self.join_margin,
+            self.fresh_route,
         )
     }
 
@@ -949,8 +1490,8 @@ impl CoalitionDecisionPolicy for MagnitudePolicy {
         let (masks_in, masks_out) = Self::leave_masks(agent, coalition, required);
         match self.leave_variant {
             LeaveVariant::Fresh => {
-                let mag_in = magnitude_or_zero(&masks_in, required);
-                let mag_out = magnitude_or_zero(&masks_out, required);
+                let mag_in = self.fresh_route.magnitude_or_zero(&masks_in, required);
+                let mag_out = self.fresh_route.magnitude_or_zero(&masks_out, required);
                 Self::leave_decision_from_values(mag_in, mag_out)
             }
             LeaveVariant::Evaluator => Self::leave_dispatch_evaluator(
@@ -959,6 +1500,7 @@ impl CoalitionDecisionPolicy for MagnitudePolicy {
                 &masks_in,
                 &masks_out,
                 agent.capabilities(),
+                self.fresh_route,
             ),
         }
     }
@@ -982,6 +1524,7 @@ impl CoalitionDecisionPolicy for MagnitudePolicy {
         let (masks_with, masks_without) = Self::join_masks(agent, coalition, required);
         let candidate_caps = agent.capabilities();
         let join_margin = self.join_margin;
+        let route = self.fresh_route;
         let cache = Arc::clone(&self.cache);
 
         Box::pin(async move {
@@ -993,6 +1536,7 @@ impl CoalitionDecisionPolicy for MagnitudePolicy {
                     &masks_without,
                     candidate_caps,
                     join_margin,
+                    route,
                 )
             })
             .await
@@ -1017,13 +1561,14 @@ impl CoalitionDecisionPolicy for MagnitudePolicy {
         let (masks_in, masks_out) = Self::leave_masks(agent, coalition, required);
         let leaver_caps = agent.capabilities();
         let variant = self.leave_variant;
+        let route = self.fresh_route;
         let cache = Arc::clone(&self.cache);
 
         Box::pin(async move {
             tokio_rayon::spawn(move || match variant {
                 LeaveVariant::Fresh => {
-                    let mag_in = magnitude_or_zero(&masks_in, required);
-                    let mag_out = magnitude_or_zero(&masks_out, required);
+                    let mag_in = route.magnitude_or_zero(&masks_in, required);
+                    let mag_out = route.magnitude_or_zero(&masks_out, required);
                     Self::leave_decision_from_values(mag_in, mag_out)
                 }
                 LeaveVariant::Evaluator => Self::leave_dispatch_evaluator(
@@ -1032,6 +1577,7 @@ impl CoalitionDecisionPolicy for MagnitudePolicy {
                     &masks_in,
                     &masks_out,
                     leaver_caps,
+                    route,
                 ),
             })
             .await
@@ -1721,7 +2267,8 @@ mod tests {
         // clean pool query is Ok and, symmetrically, that a synthetic Err on the
         // `with` side declines (mirrors upstream_error_declines_without_panic).
         let cache = Mutex::new(None);
-        let (base, with) = cached_base_and_with(&cache, 0b111, &[0b001, 0b010], 0b100).unwrap();
+        let CandidateEval { base, with, .. } =
+            cached_base_and_with(&cache, 0b111, &[0b001, 0b010], 0b100).unwrap();
         assert!(with.is_ok(), "clean candidate query is Ok");
         let ok = MagnitudePolicy::join_decision_from_values(with, Ok(base), 0.0);
         assert!(ok.act, "disjoint specialist joins");
@@ -1771,6 +2318,11 @@ mod tests {
     /// `should_join` must agree in `act` with the freshly-computed reference
     /// (assert equality with the reference, not a hardcoded outcome, so the test
     /// survives any future upstream numeric shift).
+    ///
+    /// EQ3 keeps this frozen: the default arm carries L1 only, so the band logic
+    /// and the decision are unchanged. (The EQ3 arm decides this fixture the
+    /// other way, on the exact certificate — see
+    /// `knife_edge_flip_fixture_declines_on_the_eq3_arm`, prereg Amendment 1.)
     #[test]
     fn knife_edge_flip_fixture_matches_fresh() {
         let required = 0b1110_0100u32; // 228
@@ -1804,6 +2356,62 @@ mod tests {
         assert!(
             decisions_match(got, want),
             "and score within 1e-9 relative (got {got:?}, want {want:?})"
+        );
+    }
+
+    /// The same K6 fixture on the **EQ3 arm** (prereg Amendment 1 / A1.1): the
+    /// candidate is certified an `IncomingProfileDuplicate`, so the real
+    /// increment is exactly `0`, the policy takes `with := base` and declines —
+    /// while the fresh reference still joins on `+2.22e-16` of roundoff. This is
+    /// the registered, deliberate divergence; it is confined to this arm, which
+    /// is exactly why `knife_edge_flip_fixture_matches_fresh` above still holds
+    /// for the default policy.
+    #[cfg(feature = "magnitude-fast")]
+    #[test]
+    fn knife_edge_flip_fixture_declines_on_the_eq3_arm() {
+        let required = 0b1110_0100u32; // 228
+        let m0 = TestAgent {
+            id: 0,
+            caps: 0b0110_0001,
+            trust: 50,
+        }; // 97
+        let m1 = TestAgent {
+            id: 1,
+            caps: 0b0101_0101,
+            trust: 50,
+        }; // 85
+        let candidate = TestAgent {
+            id: 2,
+            caps: 0b1100_0110,
+            trust: 50,
+        }; // 198
+        let coalition: [&dyn AgentCapabilities; 2] = [&m0, &m1];
+        let ctx = DecisionContext {
+            required_capabilities: required,
+        };
+
+        let (masks_with, masks_without) =
+            MagnitudePolicy::join_masks(&candidate, &coalition, required);
+        assert_eq!(masks_with.len(), masks_without.len() + 1);
+        assert!(
+            matches!(
+                probe_proof(required, &masks_without, candidate.capabilities()),
+                Some(ZeroDiversityProof::IncomingProfileDuplicate { .. })
+            ),
+            "the fixture must be certified as an incoming profile duplicate"
+        );
+
+        let eq3 = MagnitudePolicy::default().with_eq3_levers(true);
+        let got = eq3.should_join(&candidate, &coalition, &ctx);
+        assert!(
+            !got.act && got.score.abs() < f64::EPSILON,
+            "the EQ3 arm must decline at an exact-zero margin (got {got:?})"
+        );
+
+        let want = ref_join(&candidate, &coalition, required, 0.0);
+        assert!(
+            want.act && want.score > 0.0 && want.score < 1e-15,
+            "and the fresh reference must differ by float noise only (want {want:?})"
         );
     }
 
@@ -1979,6 +2587,776 @@ mod tests {
         let policy = MagnitudePolicy::with_evaluator_leave(0.0); // Variant B leave.
         for seed in 0..5u64 {
             assert_stream_matches_reference(&policy, seed);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // 10. EQ3 unit gates (koalisi #69, prereg Amendment 1): (a) proof-branch
+    // equivalence + divergence shape on the EQ3 arm, (b) f64 fresh-route
+    // anchor, (c) toggle identity, (d) default-path identity (L1 is invisible).
+    // -----------------------------------------------------------------------
+
+    /// The exact zero-diversity certificate for one candidate query, read off a
+    /// FRESH cache through the EQ3 arm's reporting query. The proof is a pure
+    /// function of `(required, member_masks, candidate)` — cache state selects
+    /// only which evaluator answers — so probing on a private cache observes
+    /// exactly what a toggle-ON dispatch sees.
+    #[cfg(feature = "magnitude-fast")]
+    fn probe_proof(
+        required: u32,
+        member_masks: &[u32],
+        candidate: u32,
+    ) -> Option<ZeroDiversityProof> {
+        let cache = Mutex::new(None);
+        cached_base_and_with_report(&cache, required, member_masks, candidate)
+            .unwrap()
+            .zero_proof
+    }
+
+    /// (a, fixture half) Proof-branch equivalence on the **EQ3 arm**. Each of
+    /// upstream's three exactly-decidable classes is hit by a hand-built
+    /// fixture (assert the class actually fires, so the gate cannot silently go
+    /// vacuous), and the toggle-ON decision on that fixture must equal the
+    /// pre-change fresh-recompute reference — `act` strictly, `score` within
+    /// 1e-9 relative.
+    ///
+    /// On these fixtures the fresh route also lands on an exact `0.0`, so the
+    /// two agree. That is **not** universal: where fresh lands on a
+    /// noise-positive margin instead, the proof branch decides differently by
+    /// construction — the rate and shape of that divergence is the separate
+    /// [`proof_branch_divergence_from_fresh_is_float_noise_only`] gate, which
+    /// pins H-par′ conjunct (i).
+    #[cfg(feature = "magnitude-fast")]
+    #[test]
+    fn proof_branch_decisions_equal_fresh_reference() {
+        let required = 0b111u32;
+        let ctx = DecisionContext {
+            required_capabilities: required,
+        };
+        let policy = MagnitudePolicy::default().with_eq3_levers(true);
+
+        // SkeletalMerge: the candidate is a mutual-1.0 clone of member 1 and
+        // opens no interior shortcut (member 0 is disjoint from both).
+        let m0 = TestAgent {
+            id: 0,
+            caps: 0b001,
+            trust: 50,
+        };
+        let m1 = TestAgent {
+            id: 1,
+            caps: 0b010,
+            trust: 50,
+        };
+        let clone_of_m1 = TestAgent {
+            id: 2,
+            caps: 0b010,
+            trust: 50,
+        };
+        assert!(
+            matches!(
+                probe_proof(required, &[0b001, 0b010], 0b010),
+                Some(ZeroDiversityProof::SkeletalMerge { .. })
+            ),
+            "clone candidate must carry the skeletal-merge certificate"
+        );
+
+        // IncomingProfileDuplicate: the candidate subsumes the sole member
+        // (A(member → candidate) = 1.0, A(candidate → member) = 0.5), so its
+        // incoming closed profile replicates that member's column.
+        let sole = TestAgent {
+            id: 0,
+            caps: 0b001,
+            trust: 50,
+        };
+        let superset = TestAgent {
+            id: 1,
+            caps: 0b011,
+            trust: 50,
+        };
+        assert!(
+            matches!(
+                probe_proof(required, &[0b001], 0b011),
+                Some(ZeroDiversityProof::IncomingProfileDuplicate { .. })
+            ),
+            "subsuming candidate must carry the incoming-duplicate certificate"
+        );
+
+        // OutgoingProfileDuplicate: the transpose — the candidate is subsumed
+        // BY the sole member, so its outgoing profile replicates that row.
+        let subsumed = TestAgent {
+            id: 1,
+            caps: 0b001,
+            trust: 50,
+        };
+        assert!(
+            matches!(
+                probe_proof(required, &[0b011], 0b001),
+                Some(ZeroDiversityProof::OutgoingProfileDuplicate { .. })
+            ),
+            "subsumed candidate must carry the outgoing-duplicate certificate"
+        );
+
+        let merge_coalition: [&dyn AgentCapabilities; 2] = [&m0, &m1];
+        let incoming_coalition: [&dyn AgentCapabilities; 1] = [&sole];
+        let outgoing_coalition: [&dyn AgentCapabilities; 1] = [&superset];
+        let cases: [(&dyn AgentCapabilities, &[&dyn AgentCapabilities]); 3] = [
+            (&clone_of_m1, &merge_coalition),
+            (&superset, &incoming_coalition),
+            (&subsumed, &outgoing_coalition),
+        ];
+
+        for (candidate, coalition) in cases {
+            let got = policy.should_join(candidate, coalition, &ctx);
+            let want = ref_join(candidate, coalition, required, 0.0);
+            assert_eq!(
+                got.act, want.act,
+                "proof-fired join must match fresh act (got {got:?}, want {want:?})"
+            );
+            assert!(
+                decisions_match(got, want),
+                "proof-fired join must match fresh score (got {got:?}, want {want:?})"
+            );
+            assert!(
+                !got.act && got.score.abs() < EPS,
+                "a proven-zero increment is a decline at margin 0 (got {got:?})"
+            );
+        }
+    }
+
+    /// (a, corpus half) The measured relationship between the **EQ3 arm's**
+    /// proof branch and the frozen arm's fresh-recompute decision, over a
+    /// 60-seed stream. This is the unit-level statement of **H-par′ conjunct
+    /// (i)** (prereg Amendment 1 / A1.2): a divergence is admissible only with
+    /// the certified shape.
+    ///
+    /// **The gate records a DECISION CHANGE, not an identity** — which is why
+    /// A1.1 parks L2 behind the toggle. Measured on this corpus: 2832
+    /// evaluator-branch join queries, **911 proof-certified** (32.2%; 465
+    /// skeletal-merge / 147 incoming-dup / 299 outgoing-dup), of which **7
+    /// (0.77%) decide differently from the frozen arm**. Every divergence has
+    /// the same shape: the real increment is exactly `0` (certified), the frozen
+    /// path's margin there is a strictly-positive float-noise value
+    /// (2.2e-16 … 6.7e-16) that cleared the strict `margin > 0` test. All 7 are
+    /// duplicate-profile proofs; the skeletal-merge class never diverges
+    /// (0/465 — matching upstream #153's "merge-only candidates are
+    /// bit-identical to fresh").
+    ///
+    /// What is asserted (and stays true if upstream numerics shift): the proof
+    /// is arithmetically sound — every certified candidate's *frozen-arm* margin
+    /// is zero to within float noise — the skeletal-merge class never flips, and
+    /// every flip is a noise-positive frozen margin, never a genuine one.
+    #[cfg(feature = "magnitude-fast")]
+    #[test]
+    fn proof_branch_divergence_from_fresh_is_float_noise_only() {
+        /// Margins this small are float noise around an exact zero, not
+        /// diversity: the smallest genuine magnitude margin on the discrete
+        /// capability-mask domain is many orders above it (same reasoning as
+        /// [`KNIFE_EDGE_REL_BAND`], which is `1e-6`).
+        const NOISE: f64 = 1e-15;
+
+        let mut proofs = 0usize;
+        let mut flips = 0usize;
+
+        for seed in 0..60u64 {
+            let (agents, tasks) = generate_instance(seed);
+            // The two registered arms, scored on identical coalition states:
+            // `mag` (frozen, L1 only) and `mag-eq3` (toggle ON = L2 + L3).
+            let frozen = MagnitudePolicy::default();
+            let eq3 = MagnitudePolicy::default().with_eq3_levers(true);
+            for task in &tasks {
+                let required = task.required;
+                let ctx = DecisionContext {
+                    required_capabilities: required,
+                };
+                let mut members: Vec<usize> = vec![task.order[0]];
+                for &idx in &task.order[1..] {
+                    let candidate: &dyn AgentCapabilities = &agents[idx];
+                    let coalition = view(&agents, &members);
+                    let (mw, mo) = MagnitudePolicy::join_masks(candidate, &coalition, required);
+                    let want = frozen.should_join(candidate, &coalition, &ctx);
+                    let got = eq3.should_join(candidate, &coalition, &ctx);
+
+                    if !mo.is_empty()
+                        && mw.len() != mo.len()
+                        && let Some(proof) = probe_proof(required, &mo, candidate.capabilities())
+                    {
+                        proofs += 1;
+                        assert!(
+                            want.score.abs() <= NOISE,
+                            "seed {seed} idx {idx}: {proof:?} certifies a zero increment, but \
+                             the frozen arm's margin is {} — the certificate would be unsound",
+                            want.score
+                        );
+                        assert!(
+                            got.score.abs() < f64::EPSILON,
+                            "seed {seed} idx {idx}: a certified candidate must score an \
+                             exact-zero margin, got {got:?}"
+                        );
+                        if got.act != want.act {
+                            flips += 1;
+                            assert!(
+                                !matches!(proof, ZeroDiversityProof::SkeletalMerge { .. }),
+                                "seed {seed} idx {idx}: the skeletal-merge class is supposed to \
+                                 be bit-identical to fresh, but it flipped ({want:?})"
+                            );
+                            assert!(
+                                want.act && want.score > 0.0,
+                                "seed {seed} idx {idx}: the only admissible divergence is a \
+                                 noise-positive frozen margin, got {want:?}"
+                            );
+                        }
+                    } else {
+                        // H-par′ (i): outside the certified population the two
+                        // arms must agree — a bare L3 act change would be a
+                        // parity failure, not a characterized divergence.
+                        assert_eq!(
+                            got.act, want.act,
+                            "seed {seed} idx {idx}: uncertified act divergence \
+                             (got {got:?}, want {want:?})"
+                        );
+                    }
+
+                    // Advance on the FROZEN arm so both are always scored on the
+                    // same coalition state (membership cascade is out of scope
+                    // for the shape check — A1.2 counts it separately).
+                    if want.act {
+                        members.push(idx);
+                    }
+                }
+            }
+        }
+
+        assert!(proofs > 0, "the corpus must exercise the proof branch");
+        // The count itself is the finding, not a threshold — the per-flip
+        // asserts above are what constrain its shape (noise-positive fresh
+        // margin, never the skeletal-merge class).
+        assert!(
+            flips <= proofs,
+            "sanity: {flips} flips out of {proofs} certified candidates"
+        );
+    }
+
+    /// The **pre-EQ3** join dispatch, transcribed: the same three branches
+    /// [`MagnitudePolicy::join_dispatch`] has, but querying
+    /// [`CoalitionEvaluator::value_with`] — no scratch, no report — on an
+    /// evaluator built for this one candidate, and recomputing knife-edges with
+    /// [`magnitude_of_masks`]. The reference for gate (d).
+    fn pre_eq3_join(
+        agent: &dyn AgentCapabilities,
+        coalition: &[&dyn AgentCapabilities],
+        required: u32,
+        join_margin: f64,
+    ) -> Decision {
+        let (masks_with, masks_without) = MagnitudePolicy::join_masks(agent, coalition, required);
+        if masks_without.is_empty() {
+            return MagnitudePolicy::join_decision_from_values(
+                magnitude_or_zero(&masks_with, required),
+                magnitude_or_zero(&masks_without, required),
+                join_margin,
+            );
+        }
+        if masks_with.len() == masks_without.len() {
+            return match build_evaluator(required, &masks_without, &[]) {
+                Ok(ev) => {
+                    let base = ev.base_value();
+                    MagnitudePolicy::join_decision_from_values(Ok(base), Ok(base), join_margin)
+                }
+                Err(_) => Decision {
+                    act: false,
+                    score: 0.0,
+                },
+            };
+        }
+        match build_evaluator(required, &masks_without, &[agent.capabilities()]) {
+            Ok(ev) => {
+                let base = ev.base_value();
+                let with = match ev.value_with(masks_without.len()) {
+                    Ok(w) if is_knife_edge(w, base, join_margin) => {
+                        magnitude_of_masks(&masks_with, required)
+                    }
+                    other => other,
+                };
+                MagnitudePolicy::join_decision_from_values(with, Ok(base), join_margin)
+            }
+            Err(_) => Decision {
+                act: false,
+                score: 0.0,
+            },
+        }
+    }
+
+    /// The **pre-EQ3** evaluator-backed leave dispatch (variant B), transcribed
+    /// from [`MagnitudePolicy::leave_dispatch_evaluator`] the same way.
+    fn pre_eq3_leave_evaluator(
+        agent: &dyn AgentCapabilities,
+        coalition: &[&dyn AgentCapabilities],
+        required: u32,
+    ) -> Decision {
+        let (masks_in, masks_out) = MagnitudePolicy::leave_masks(agent, coalition, required);
+        if masks_out.is_empty() {
+            return MagnitudePolicy::leave_decision_from_values(
+                magnitude_or_zero(&masks_in, required),
+                magnitude_or_zero(&masks_out, required),
+            );
+        }
+        if masks_in.len() == masks_out.len() {
+            return match build_evaluator(required, &masks_out, &[]) {
+                Ok(ev) => {
+                    let base = ev.base_value();
+                    MagnitudePolicy::leave_decision_from_values(Ok(base), Ok(base))
+                }
+                Err(_) => Decision {
+                    act: false,
+                    score: 0.0,
+                },
+            };
+        }
+        match build_evaluator(required, &masks_out, &[agent.capabilities()]) {
+            Ok(ev) => {
+                let base = ev.base_value();
+                let with = match ev.value_with(masks_out.len()) {
+                    Ok(w) if is_knife_edge(w, base, 0.0) => magnitude_of_masks(&masks_in, required),
+                    other => other,
+                };
+                MagnitudePolicy::leave_decision_from_values(with, Ok(base))
+            }
+            Err(_) => Decision {
+                act: false,
+                score: 0.0,
+            },
+        }
+    }
+
+    /// (d) Default-path identity: **L1 is invisible**. The shipped default
+    /// policy must reproduce the pre-EQ3 decision stream **bit-exactly** — acts
+    /// and raw score bits — over the 60-seed corpus, for both leave variants.
+    ///
+    /// The reference ([`pre_eq3_join`] / [`pre_eq3_leave_evaluator`]) queries
+    /// `value_with`, i.e. the arithmetic route the policy used before the
+    /// scratch adoption; the policy under test queries `value_with_scratch`.
+    /// Upstream #33 promises those are bit-identical, and this is koalisi's own
+    /// check of that promise at the decision surface, which is what X-A rests
+    /// on.
+    #[test]
+    fn default_path_reproduces_pre_eq3_stream_bit_exactly() {
+        for seed in 0..60u64 {
+            let (agents, tasks) = generate_instance(seed);
+            let variant_a = MagnitudePolicy::default();
+            let variant_b = MagnitudePolicy::with_evaluator_leave(0.0);
+
+            for task in &tasks {
+                let required = task.required;
+                let ctx = DecisionContext {
+                    required_capabilities: required,
+                };
+
+                for (policy, eval_leave, label) in [
+                    (&variant_a, false, "variant A"),
+                    (&variant_b, true, "variant B"),
+                ] {
+                    let mut members: Vec<usize> = vec![task.order[0]];
+
+                    for &idx in &task.order[1..] {
+                        let candidate: &dyn AgentCapabilities = &agents[idx];
+                        let coalition = view(&agents, &members);
+                        let got = policy.should_join(candidate, &coalition, &ctx);
+                        let want = pre_eq3_join(candidate, &coalition, required, 0.0);
+                        assert_eq!(
+                            got.act, want.act,
+                            "{label} seed {seed} join {idx}: act differs ({got:?} vs {want:?})"
+                        );
+                        assert_eq!(
+                            got.score.to_bits(),
+                            want.score.to_bits(),
+                            "{label} seed {seed} join {idx}: score not bit-identical \
+                             ({got:?} vs {want:?})"
+                        );
+                        if got.act {
+                            members.push(idx);
+                        }
+                    }
+
+                    for &idx in &task.order {
+                        let Some(pos) = members.iter().position(|&m| m == idx) else {
+                            continue;
+                        };
+                        let coalition = view(&agents, &members);
+                        let agent: &dyn AgentCapabilities = &agents[idx];
+                        let got = policy.should_leave(agent, &coalition, &ctx);
+                        let want = if eval_leave {
+                            pre_eq3_leave_evaluator(agent, &coalition, required)
+                        } else {
+                            ref_leave(agent, &coalition, required)
+                        };
+                        assert_eq!(
+                            got.act, want.act,
+                            "{label} seed {seed} leave {idx}: act differs ({got:?} vs {want:?})"
+                        );
+                        assert_eq!(
+                            got.score.to_bits(),
+                            want.score.to_bits(),
+                            "{label} seed {seed} leave {idx}: score not bit-identical \
+                             ({got:?} vs {want:?})"
+                        );
+                        if got.act {
+                            members.remove(pos);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// (b) f64 fresh-route anchor: `magnitude_of_masks_f64` must reproduce
+    /// `magnitude_of_masks` within 1e-9 relative on the K2 / gotcha fixtures —
+    /// including the dedup, irrelevant-agent-exclusion and clone-skeletalization
+    /// shapes — and on the seeded instance pools.
+    #[cfg(feature = "magnitude-fast")]
+    #[test]
+    fn f64_fresh_route_matches_generic_within_tolerance() {
+        fn assert_agrees(masks: &[u32], required: u32, label: &str) {
+            let generic = magnitude_of_masks(masks, required);
+            let fast = magnitude_of_masks_f64(masks, required);
+            match (generic, fast) {
+                (Ok(g), Ok(f)) => assert!(
+                    rel_close(g, f),
+                    "{label}: f64 route {f} vs generic {g} (masks {masks:?}, required {required:#b})"
+                ),
+                (Err(_), Err(_)) => {}
+                (g, f) => panic!("{label}: Ok/Err disagreement — generic {g:?}, f64 {f:?}"),
+            }
+        }
+
+        // Hand-checked K2 fixtures (the values pinned elsewhere in this module).
+        assert_agrees(&[0b001], 0b111, "singleton");
+        assert_agrees(&[0b001, 0b010, 0b100], 0b111, "disjoint specialists");
+        assert_agrees(&[0b001, 0b001], 0b111, "clone pair (skeletalization)");
+        assert_agrees(
+            &[0b010, 0b010, 0b010, 0b001],
+            0b111,
+            "three clones + specialist",
+        );
+        assert_agrees(&[0b011, 0b110], 0b111, "half overlap");
+        assert_agrees(&[0b001, 0b011], 0b111, "subsumption");
+        assert_agrees(&[0b0011, 0b0110, 0b1100], 0b1111, "chain couplings");
+        assert_agrees(&[97, 85, 198], 0b1110_0100, "knife-edge fixture");
+
+        // Dedup + irrelevant exclusion happen in `relevant_masks`, so drive the
+        // fixture through it and score whatever survives (gotcha 12 / point 4).
+        let a0 = TestAgent {
+            id: 0,
+            caps: 0b001,
+            trust: 50,
+        };
+        let a1 = TestAgent {
+            id: 1,
+            caps: 0b010,
+            trust: 50,
+        };
+        let bystander = TestAgent {
+            id: 3,
+            caps: 0b1000,
+            trust: 50,
+        };
+        let listed: [&dyn AgentCapabilities; 4] = [&a0, &a0, &a1, &bystander];
+        let masks = relevant_masks(&listed, 0b111);
+        assert_eq!(masks, vec![0b001, 0b010], "dedup + exclusion precondition");
+        assert_agrees(&masks, 0b111, "deduped, bystander-excluded");
+
+        // Seeded pools: whole-pool magnitudes per task requirement.
+        for seed in 0..5u64 {
+            let (agents, tasks) = generate_instance(seed);
+            for task in &tasks {
+                let pool: Vec<&dyn AgentCapabilities> =
+                    agents.iter().map(|a| a as &dyn AgentCapabilities).collect();
+                let masks = relevant_masks(&pool, task.required);
+                if masks.is_empty() {
+                    continue;
+                }
+                assert_agrees(&masks, task.required, "seeded pool");
+            }
+        }
+    }
+
+    /// Every decision one seeded instance produces under `policy`, in order
+    /// (joins in arrival order, then one leave sweep) — the fixture battery the
+    /// toggle-identity gate compares bit-for-bit.
+    #[cfg(feature = "magnitude-fast")]
+    fn decision_stream(policy: &MagnitudePolicy, seed: u64) -> Vec<Decision> {
+        let (agents, tasks) = generate_instance(seed);
+        let mut out = Vec::new();
+
+        for task in &tasks {
+            let required = task.required;
+            let ctx = DecisionContext {
+                required_capabilities: required,
+            };
+            let mut members: Vec<usize> = vec![task.order[0]];
+
+            for &idx in &task.order[1..] {
+                let candidate: &dyn AgentCapabilities = &agents[idx];
+                let coalition = view(&agents, &members);
+                let d = policy.should_join(candidate, &coalition, &ctx);
+                out.push(d);
+                if d.act {
+                    members.push(idx);
+                }
+            }
+
+            for &idx in &task.order {
+                let Some(pos) = members.iter().position(|&m| m == idx) else {
+                    continue;
+                };
+                let coalition = view(&agents, &members);
+                let agent: &dyn AgentCapabilities = &agents[idx];
+                let d = policy.should_leave(agent, &coalition, &ctx);
+                out.push(d);
+                if d.act {
+                    members.remove(pos);
+                }
+            }
+        }
+
+        out
+    }
+
+    /// L3 in isolation, at the decision surface: on every **uncertified**
+    /// candidate — where L2 cannot act, so any difference is the `f64`
+    /// factorization alone — the EQ3 arm must agree with the frozen arm on
+    /// `act` and to within 1e-9 relative on `score` (the K6 parity tolerance).
+    ///
+    /// Context measured while building this: before A1.1 moved L2 behind the
+    /// toggle, an L3-only arm produced **0 act differences over 3970 decisions**
+    /// on the 60-seed corpus, with 109 decisions differing in the last `f64`
+    /// ulps of their score (max 6.7e-16 relative). So the factorization change
+    /// is visible in the score column and, on this corpus, in no act. This is
+    /// *not* the registered H-par′ gate — that one runs the Part 7 battery on
+    /// seeds 210..240.
+    #[cfg(feature = "magnitude-fast")]
+    #[test]
+    fn f64_route_alone_preserves_uncertified_decisions() {
+        let frozen = MagnitudePolicy::default();
+        let eq3 = MagnitudePolicy::default().with_eq3_levers(true);
+
+        for seed in 0..20u64 {
+            let (agents, tasks) = generate_instance(seed);
+            for task in &tasks {
+                let required = task.required;
+                let ctx = DecisionContext {
+                    required_capabilities: required,
+                };
+                let mut members: Vec<usize> = vec![task.order[0]];
+
+                for &idx in &task.order[1..] {
+                    let candidate: &dyn AgentCapabilities = &agents[idx];
+                    let coalition = view(&agents, &members);
+                    let (mw, mo) = MagnitudePolicy::join_masks(candidate, &coalition, required);
+                    let certified = !mo.is_empty()
+                        && mw.len() != mo.len()
+                        && probe_proof(required, &mo, candidate.capabilities()).is_some();
+
+                    let want = frozen.should_join(candidate, &coalition, &ctx);
+                    let got = eq3.should_join(candidate, &coalition, &ctx);
+                    if !certified {
+                        assert_eq!(
+                            got.act, want.act,
+                            "seed {seed} idx {idx}: the f64 route changed an uncertified act \
+                             ({got:?} vs {want:?})"
+                        );
+                        assert!(
+                            rel_close(got.score, want.score),
+                            "seed {seed} idx {idx}: uncertified score drift beyond 1e-9 relative \
+                             ({got:?} vs {want:?})"
+                        );
+                    }
+
+                    // Both arms advance on the frozen decision so they keep
+                    // scoring identical states.
+                    if want.act {
+                        members.push(idx);
+                    }
+                }
+            }
+        }
+    }
+
+    /// The EQ3 instrumentation surface: `probe_join` reports the incremental
+    /// pair and certificate for exactly the decisions that reach the evaluator
+    /// (and `None` for the empty / excluded branches), without touching the
+    /// policy's own cache; `probe_fresh_factorization`'s single-factorization
+    /// shortcut at `t = 1` returns the same magnitude as the fresh `f64` route.
+    #[cfg(feature = "magnitude-fast")]
+    #[test]
+    fn instrumentation_probes_report_without_changing_state() {
+        let ctx = DecisionContext {
+            required_capabilities: 0b111,
+        };
+        let a0 = TestAgent {
+            id: 0,
+            caps: 0b001,
+            trust: 50,
+        };
+        let a1 = TestAgent {
+            id: 1,
+            caps: 0b010,
+            trust: 50,
+        };
+        let cand = TestAgent {
+            id: 2,
+            caps: 0b100,
+            trust: 50,
+        };
+        let bystander = TestAgent {
+            id: 3,
+            caps: 0b1000,
+            trust: 50,
+        };
+        let policy = MagnitudePolicy::default().with_eq3_levers(true);
+        let coalition: [&dyn AgentCapabilities; 2] = [&a0, &a1];
+
+        // Empty coalition and excluded candidate: no incremental branch.
+        assert!(policy.probe_join(&cand, &[], &ctx).is_none());
+        assert!(policy.probe_join(&bystander, &coalition, &ctx).is_none());
+
+        // A disjoint specialist: increment 1.0, no certificate, not knife-edge.
+        let probe = policy
+            .probe_join(&cand, &coalition, &ctx)
+            .expect("the normal branch reports");
+        assert!(rel_close(probe.base, 2.0) && rel_close(probe.with, 3.0));
+        assert!(probe.zero_proof.is_none() && !probe.knife_edge);
+
+        // A clone of a member: certified zero, and the band would have fired.
+        let clone_of_a1 = TestAgent {
+            id: 4,
+            caps: 0b010,
+            trust: 50,
+        };
+        let probe = policy
+            .probe_join(&clone_of_a1, &coalition, &ctx)
+            .expect("the normal branch reports");
+        assert!(
+            matches!(
+                probe.zero_proof,
+                Some(ZeroDiversityProof::SkeletalMerge { .. })
+            ) && probe.knife_edge
+        );
+
+        // Probing leaves the policy's own decisions untouched (it answers off a
+        // private cache), so a decision taken after probing still matches the
+        // fresh reference.
+        let after = policy.should_join(&cand, &coalition, &ctx);
+        assert!(decisions_match(after, ref_join(&cand, &coalition, 0b111, 0.0)));
+
+        // The factorization shortcut agrees with the fresh f64 route, and skips
+        // task-irrelevant agents through `relevant_masks`.
+        let listed: [&dyn AgentCapabilities; 3] = [&a0, &a1, &bystander];
+        let (_path, mag) =
+            probe_fresh_factorization(&listed, 0b111).expect("two relevant members remain");
+        let direct = magnitude_of_masks_f64(&[0b001, 0b010], 0b111).unwrap();
+        assert_eq!(
+            mag.unwrap().to_bits(),
+            direct.to_bits(),
+            "the t = 1 single-factorization shortcut must equal the fresh f64 route"
+        );
+        let none: [&dyn AgentCapabilities; 1] = [&bystander];
+        assert!(probe_fresh_factorization(&none, 0b111).is_none());
+    }
+
+    /// The Gauss–Jordan class — the route MOST koalisi traffic actually takes.
+    ///
+    /// `A(i → j) = |rel_i ∩ rel_j| / |rel_i|` is asymmetric as soon as the two
+    /// agents have different relevant widths, so ζ is not exactly symmetric and
+    /// upstream's `ZetaFactorization` falls back to the rig-generic route. This
+    /// pins (a) that the probe reports that fallback rather than a symmetric
+    /// route, and (b) that the magnitude it reports is bit-identical to what the
+    /// arm's own fresh evaluation computes — so the instrumentation describes
+    /// the arm, not a parallel computation.
+    #[cfg(feature = "magnitude-fast")]
+    #[test]
+    fn gauss_jordan_fixture_probe_matches_the_arms_fresh_eval() {
+        use catgraph_magnitude::magnitude_f64::FactorizationPath;
+
+        // |rel| 1 vs 2 ⇒ A(0→1) = 1.0 but A(1→0) = 0.5 ⇒ ζ asymmetric.
+        let narrow = TestAgent {
+            id: 0,
+            caps: 0b001,
+            trust: 50,
+        };
+        let wide = TestAgent {
+            id: 1,
+            caps: 0b011,
+            trust: 50,
+        };
+        let listed: [&dyn AgentCapabilities; 2] = [&narrow, &wide];
+        let required = 0b111u32;
+
+        let (path, mag) =
+            probe_fresh_factorization(&listed, required).expect("both members are relevant");
+        assert_eq!(
+            path,
+            FactorizationPath::GaussJordan,
+            "an asymmetric ζ must take the generic fallback route"
+        );
+
+        let masks = relevant_masks(&listed, required);
+        assert_eq!(masks, vec![0b001, 0b011]);
+        let arm_fresh = magnitude_of_masks_f64(&masks, required).unwrap();
+        assert_eq!(
+            mag.unwrap().to_bits(),
+            arm_fresh.to_bits(),
+            "the probe must report the magnitude the arm's own fresh eval produces"
+        );
+
+        // And on this class the generic route IS the computation, so it also
+        // matches the rig-generic path exactly.
+        let generic = magnitude_of_masks(&masks, required).unwrap();
+        assert!(
+            rel_close(arm_fresh, generic),
+            "Gauss–Jordan route: f64 {arm_fresh} vs generic {generic}"
+        );
+    }
+
+    /// (c) Toggle identity: with the EQ3 levers explicitly OFF the policy is
+    /// bit-identical to the plain default (which is what a `magnitude`-only
+    /// build compiles), for both leave variants. This is the unit-level
+    /// counterpart of the registered X-B gate.
+    #[cfg(feature = "magnitude-fast")]
+    #[test]
+    fn eq3_levers_toggle_off_is_bit_identical_to_default() {
+        let pairs = [
+            (
+                MagnitudePolicy::default(),
+                MagnitudePolicy::default().with_eq3_levers(false),
+                "variant A",
+            ),
+            (
+                MagnitudePolicy::with_evaluator_leave(0.0),
+                MagnitudePolicy::with_evaluator_leave(0.0).with_eq3_levers(false),
+                "variant B",
+            ),
+        ];
+
+        for (base, toggled, label) in pairs {
+            for seed in 0..5u64 {
+                let want = decision_stream(&base, seed);
+                let got = decision_stream(&toggled, seed);
+                assert_eq!(
+                    want.len(),
+                    got.len(),
+                    "{label} seed {seed}: decision counts differ"
+                );
+                for (i, (w, g)) in want.iter().zip(got.iter()).enumerate() {
+                    assert_eq!(
+                        w.act, g.act,
+                        "{label} seed {seed} decision {i}: act differs"
+                    );
+                    assert_eq!(
+                        w.score.to_bits(),
+                        g.score.to_bits(),
+                        "{label} seed {seed} decision {i}: score not bit-identical ({w:?} vs {g:?})"
+                    );
+                }
+            }
         }
     }
 }

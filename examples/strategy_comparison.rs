@@ -95,6 +95,14 @@ use koalisi::decision::{
     DecisionContext, MagnitudePolicy, PersistentAifArm, PersistentAifConfig, ThresholdPolicy,
     TrialBoundary,
 };
+// Part 7 (koalisi #69) EQ3 instrumentation surface + the upstream certificate /
+// factorization enums it reports. Feature-gated exactly like the `mag-eq3` arm.
+#[cfg(feature = "magnitude-fast")]
+use catgraph_magnitude::ZeroDiversityProof;
+#[cfg(feature = "magnitude-fast")]
+use catgraph_magnitude::magnitude_f64::FactorizationPath;
+#[cfg(feature = "magnitude-fast")]
+use koalisi::decision::{JoinProbe, probe_fresh_factorization};
 
 /// Hardcoded report date — deterministic, never read from the clock. Bumped
 /// manually per committed run (2026-07-02 = K4 initial + K1 backend parity;
@@ -234,6 +242,10 @@ fn main() {
     println!("{}", "=".repeat(72));
     println!();
     part6_corrected_routing();
+    println!();
+    println!("{}", "=".repeat(72));
+    println!();
+    part7_eq3_latency_rematch();
 }
 
 // ===========================================================================
@@ -974,6 +986,13 @@ fn part2_ab_harness() {
     let (aif_seeds, aif_lat) = run_battery(&aif);
     let (mag_seeds, mag_lat) = run_battery(&mag);
     let (mm_seeds, mm_lat) = run_battery(&mm);
+
+    // Part 7 (koalisi #69) reads Part 2's own `mag` latency median back, so its
+    // before/after context row cites THIS binary's frozen-battery number rather
+    // than a remembered one. Capture only — the value is the same
+    // `median_iqr(mag_lat).0` the report prints below, and no printed line of
+    // Part 2 changes.
+    PART2_MAG_LATENCY_US.set(median_iqr(mag_lat.clone()).0).ok();
 
     // Oracle (n <= 8 seeds only).
     let oracle: Vec<Option<f64>> = (0..SEEDS)
@@ -5623,6 +5642,844 @@ fn part6_corrected_routing() {
     println!();
 }
 
+// ===========================================================================
+// Part 7 — EQ3 latency re-match (koalisi #69). REGISTERED.
+//
+// Governed by `docs/prereg-K4-eq3-latency-rematch.md` + its Amendment 1
+// (both committed before this code). The registration fixes: the v2-draw Scope-B
+// regime, seeds 210..240, the three arms, the v1 latency protocol, the H-par′ /
+// H-lat legs and their verdict grammar, the context rows, and the
+// instrumentation. Nothing here is tuned to flip an outcome.
+//
+// Arms (Amendment 1 / A1.1):
+//   scalar  — AifDecisionPolicy::default()          (the v1 latency comparator)
+//   mag     — MagnitudePolicy::default()            (L1 only — the frozen arm)
+//   mag-eq3 — MagnitudePolicy::default()
+//               .with_eq3_levers(true)              (L2 + L3 — the challenger)
+//
+// `mag-eq3` needs the off-by-default `magnitude-fast` feature, so the whole
+// battery is feature-gated and prints a labelled SKIPPED line when it is off.
+// The official run is
+//   cargo run --release --features decision,magnitude,magnitude-fast \
+//     --example strategy_comparison
+// ===========================================================================
+
+/// Part 7 seed range (registration §Part 7, owner D4) — fresh seeds; 90..120 and
+/// 150..180 stay reserved.
+const P7_SEED_START: u64 = 210;
+const P7_SEED_END: u64 = 240;
+/// H-par′ (ii): median `PRIMARY_B(mag-eq3)` must be at least this multiple of
+/// median `PRIMARY_B(mag)` (Amendment 1 / A1.2).
+#[cfg(feature = "magnitude-fast")]
+const P7_NONINFERIORITY: f64 = 0.98;
+/// H-par′ (i): at a first divergence, `mag`'s own margin must be float noise
+/// around the certified exact zero. Same order as the library's corpus gate.
+///
+/// **Absolute, and registered for THIS run** — deliberately not scale-relative.
+/// The bound is comfortable at the magnitudes this battery reaches, but it is
+/// not a universal constant: one ulp at a magnitude of ~16 is already 1.78e-15,
+/// so on a larger coalition a genuinely certified flip could carry a margin
+/// above the bound and be scored `FALSIFIED (parity)`. That error direction is
+/// conservative — the bound can only reject a certified divergence, never admit
+/// an uncertified one — so the registered value stands as-is here, and the run
+/// prints its observed headroom. Any future reuse should re-register a
+/// scale-relative form.
+#[cfg(feature = "magnitude-fast")]
+const P7_SHAPE_NOISE: f64 = 1e-15;
+/// How many shape-PASSing first divergences the table prints before eliding.
+/// Rows that FAIL the shape are never elided — they are the gating evidence.
+#[cfg(feature = "magnitude-fast")]
+const P7_FIRSTDIV_DISPLAY_CAP: usize = 40;
+/// The K6 reference latencies (`docs/ab-report-K4-catgraph-evaluator.md`) — v1
+/// regime, so every comparison against them is labelled cross-regime.
+#[cfg(feature = "magnitude-fast")]
+const P7_K6_MAG_US: f64 = 3.552;
+#[cfg(feature = "magnitude-fast")]
+const P7_K6_AIF_US: f64 = 1.435;
+/// Report date for the Part 7 battery, stamped per committed run.
+const P7_REPORT_DATE: &str = "2026-08-02";
+
+/// Part 2's measured `mag` latency median (µs) from THIS binary's run, captured
+/// so Part 7's before/after context row can cite it next to the pre-change
+/// session baselines instead of asking the reader to scroll. Write-once; Part 2
+/// runs before Part 7 in [`main`].
+static PART2_MAG_LATENCY_US: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
+
+/// One task's FIRST `mag` vs `mag-eq3` act divergence — the object H-par′ (i)
+/// tests. Recorded on the decision where both arms still hold identical
+/// coalition state (every earlier act in the task agreed), so the shape check is
+/// well posed.
+#[cfg(feature = "magnitude-fast")]
+#[derive(Debug, Clone, Copy)]
+struct P7FirstDiv {
+    seed: u64,
+    task: usize,
+    /// `true` = the divergence happened in the leave sweep.
+    leave: bool,
+    /// The certificate `mag-eq3` had at that decision, if any. Always `None` on
+    /// the leave sweep: the default leave variant is the FRESH two-evaluation
+    /// path, which never consults the evaluator, so L2 cannot act there and a
+    /// leave divergence can only be L3 arithmetic.
+    proof: Option<ZeroDiversityProof>,
+    /// `mag`'s own margin/delta at that decision (its `Decision::score`).
+    mag_margin: f64,
+    /// Conjunct (i): a proof fired AND `|mag_margin| <= P7_SHAPE_NOISE`.
+    shape_ok: bool,
+}
+
+/// The paired-walk tally for the whole battery.
+#[cfg(feature = "magnitude-fast")]
+#[derive(Default)]
+struct P7Paired {
+    /// Decisions where both arms were evaluated on the same index.
+    compared: usize,
+    /// Per-task first divergences (at most one per task).
+    firsts: Vec<P7FirstDiv>,
+    /// Divergent decisions AFTER a task's first one — membership cascade,
+    /// exempt from the shape check by A1.2 and counted as context.
+    cascade: usize,
+    /// Leave steps where only one arm still held the member (a structural
+    /// cascade — the two coalitions had already drifted apart).
+    structural: usize,
+}
+
+/// Walk `mag` and `mag-eq3` through one seed in lockstep — same instance, same
+/// arrival order, each arm carrying its OWN membership so a divergence is
+/// allowed to cascade exactly as it would in a solo run.
+///
+/// Both arms are scored on identical state up to and including a task's first
+/// divergence (all earlier acts agreed ⇒ identical membership), which is what
+/// makes the H-par′ (i) shape check meaningful. The certificate is read with the
+/// library's `probe_join` instrumentation surface on a private cache, so it
+/// cannot perturb either arm.
+#[cfg(feature = "magnitude-fast")]
+fn p7_paired_seed(seed: u64, out: &mut P7Paired) {
+    let (agents, tasks, _rho, _perf) = generate_instance_b_regime(seed, Regime::V2);
+    let mag = MagnitudePolicy::default();
+    let eq3 = MagnitudePolicy::default().with_eq3_levers(true);
+
+    for (t, task) in tasks.iter().enumerate() {
+        let ctx = DecisionContext {
+            required_capabilities: task.required,
+        };
+        let mut m_members: Vec<usize> = vec![task.order[0]];
+        let mut e_members: Vec<usize> = vec![task.order[0]];
+        let mut diverged = false;
+
+        for &idx in &task.order[1..] {
+            let candidate: &dyn AgentCapabilities = &agents[idx];
+            let m_view = coalition_view(&agents, &m_members);
+            let e_view = coalition_view(&agents, &e_members);
+            let dm = mag.should_join(candidate, &m_view, &ctx);
+            let de = eq3.should_join(candidate, &e_view, &ctx);
+            out.compared += 1;
+
+            if dm.act != de.act {
+                if diverged {
+                    out.cascade += 1;
+                } else {
+                    diverged = true;
+                    // Identical state here, so probing `m_view` observes exactly
+                    // what `mag-eq3` saw.
+                    let proof = eq3
+                        .probe_join(candidate, &m_view, &ctx)
+                        .and_then(|p| p.zero_proof);
+                    out.firsts.push(P7FirstDiv {
+                        seed,
+                        task: t,
+                        leave: false,
+                        proof,
+                        mag_margin: dm.score,
+                        shape_ok: proof.is_some() && dm.score.abs() <= P7_SHAPE_NOISE,
+                    });
+                }
+            }
+
+            if dm.act {
+                m_members.push(idx);
+            }
+            if de.act {
+                e_members.push(idx);
+            }
+        }
+
+        for &idx in &task.order {
+            let m_pos = m_members.iter().position(|&m| m == idx);
+            let e_pos = e_members.iter().position(|&m| m == idx);
+            let agent: &dyn AgentCapabilities = &agents[idx];
+
+            match (m_pos, e_pos) {
+                (Some(mp), Some(ep)) => {
+                    let m_view = coalition_view(&agents, &m_members);
+                    let e_view = coalition_view(&agents, &e_members);
+                    let dm = mag.should_leave(agent, &m_view, &ctx);
+                    let de = eq3.should_leave(agent, &e_view, &ctx);
+                    out.compared += 1;
+
+                    if dm.act != de.act {
+                        if diverged {
+                            out.cascade += 1;
+                        } else {
+                            diverged = true;
+                            out.firsts.push(P7FirstDiv {
+                                seed,
+                                task: t,
+                                leave: true,
+                                // Variant A leaves never reach the evaluator, so
+                                // no certificate exists to fire (see the field
+                                // docs) — the shape check fails by construction,
+                                // which is the registered meaning of an L3-caused
+                                // act change.
+                                proof: None,
+                                mag_margin: dm.score,
+                                shape_ok: false,
+                            });
+                        }
+                    }
+
+                    if dm.act {
+                        m_members.remove(mp);
+                    }
+                    if de.act {
+                        e_members.remove(ep);
+                    }
+                }
+                (Some(mp), None) => {
+                    out.structural += 1;
+                    let m_view = coalition_view(&agents, &m_members);
+                    if mag.should_leave(agent, &m_view, &ctx).act {
+                        m_members.remove(mp);
+                    }
+                }
+                (None, Some(ep)) => {
+                    out.structural += 1;
+                    let e_view = coalition_view(&agents, &e_members);
+                    if eq3.should_leave(agent, &e_view, &ctx).act {
+                        e_members.remove(ep);
+                    }
+                }
+                (None, None) => {}
+            }
+        }
+    }
+}
+
+/// Log-decade histogram of the incremental increment `|with − base|` plus the
+/// certificate / knife-edge tallies — the registered instrumentation block.
+///
+/// Classes are disjoint and exhaustive: `non_finite` (NaN or ±∞ — never reaches
+/// the index arithmetic), `exact_zero` (no decade exists), `underflow`
+/// (`0 < x < 1e-16`, below the registered histogram floor — its OWN row, not
+/// folded into the first decade), then `decades[i]` = `[1e(i-16), 1e(i-15))`
+/// for `i` in `0..16`, and `decades[16]` = the `>= 1e0` overflow.
+#[cfg(feature = "magnitude-fast")]
+#[derive(Default)]
+struct P7Increments {
+    /// Join decisions that reached the incremental branch.
+    probed: usize,
+    /// NaN / ±∞ increments — impossible on a healthy stream, counted rather
+    /// than silently bucketed so a numeric regression is visible in the report.
+    non_finite: usize,
+    exact_zero: usize,
+    /// `0 < |with − base| < 1e-16` — below the registered floor.
+    underflow: usize,
+    decades: [usize; 17],
+    knife: usize,
+    knife_certified: usize,
+    /// SkeletalMerge / incoming-dup / outgoing-dup.
+    by_class: [usize; 3],
+}
+
+#[cfg(feature = "magnitude-fast")]
+impl P7Increments {
+    fn record(&mut self, probe: &JoinProbe) {
+        self.probed += 1;
+        let x = (probe.with - probe.base).abs();
+        if x.is_finite() {
+            if x == 0.0 {
+                self.exact_zero += 1;
+            } else {
+                // `log10().floor()` is only meaningful for a positive finite
+                // `x`; the guard above is what makes the index arithmetic safe.
+                let e = x.log10().floor();
+                let idx = e as i64 + 16;
+                if idx < 0 {
+                    self.underflow += 1;
+                } else {
+                    self.decades[idx.min(16) as usize] += 1;
+                }
+            }
+        } else {
+            self.non_finite += 1;
+            tracing::warn!(
+                base = probe.base,
+                with = probe.with,
+                "Part 7 increment histogram: non-finite |with − base|"
+            );
+        }
+        if probe.knife_edge {
+            self.knife += 1;
+            if probe.zero_proof.is_some() {
+                self.knife_certified += 1;
+            }
+        }
+        match probe.zero_proof {
+            Some(ZeroDiversityProof::SkeletalMerge { .. }) => self.by_class[0] += 1,
+            Some(ZeroDiversityProof::IncomingProfileDuplicate { .. }) => self.by_class[1] += 1,
+            Some(ZeroDiversityProof::OutgoingProfileDuplicate { .. }) => self.by_class[2] += 1,
+            None => {}
+        }
+    }
+
+    fn proofs(&self) -> usize {
+        self.by_class.iter().sum()
+    }
+}
+
+/// Latency buckets mirroring the K6 profile table, restricted to the classes a
+/// probe can decide without reading cache internals (see the deviation note in
+/// the printed report).
+#[cfg(feature = "magnitude-fast")]
+const P7_BUCKETS: [&str; 7] = [
+    "join/empty",
+    "join/excluded",
+    "join/clear",
+    "join/band",
+    "join/proof",
+    "join/probe-err",
+    "leave/fresh",
+];
+
+/// Index of the `leave/fresh` bucket in [`P7_BUCKETS`].
+#[cfg(feature = "magnitude-fast")]
+const P7_BUCKET_LEAVE: usize = 6;
+/// Index of the `join/probe-err` bucket: the candidate DID reach the
+/// incremental branch (non-empty base, candidate not excluded) but the probe
+/// returned `None`, i.e. the evaluator build or the incremental query errored.
+/// Its own class — folding it into `join/clear` would attribute an error path's
+/// latency to the cheapest decisive one.
+#[cfg(feature = "magnitude-fast")]
+const P7_BUCKET_PROBE_ERR: usize = 5;
+
+/// One untimed-classification + timed-decision instrumentation pass over the
+/// battery for one arm. NOT the pooled latency measurement (that is a clean
+/// `stateless_battery_mode` run with no probing anywhere near it) — this pass
+/// probes before each decision, so its absolute numbers carry probe-induced
+/// cache disturbance and are only read as a decomposition.
+///
+/// Returns per-bucket latency samples, the increment tally, and the
+/// `FactorizationPath` tally of the `f64` fresh evaluations the EQ3 arm
+/// performs: `[Cholesky, LBLT, Gauss–Jordan, of-which-errored]`. The route is
+/// decided before any solve, so an errored evaluation still contributes its
+/// path — dropping those would undercount Gauss–Jordan, the route an exact
+/// singularity surfaces on.
+#[cfg(feature = "magnitude-fast")]
+fn p7_instrumentation_pass(eq3_arm: bool) -> (Vec<Vec<f64>>, P7Increments, [usize; 4]) {
+    let policy = if eq3_arm {
+        MagnitudePolicy::default().with_eq3_levers(true)
+    } else {
+        MagnitudePolicy::default()
+    };
+    let mut buckets: Vec<Vec<f64>> = vec![Vec::new(); P7_BUCKETS.len()];
+    let mut inc = P7Increments::default();
+    let mut paths = [0usize; 4];
+
+    for seed in P7_SEED_START..P7_SEED_END {
+        let (agents, tasks, _rho, _perf) = generate_instance_b_regime(seed, Regime::V2);
+        for task in &tasks {
+            let ctx = DecisionContext {
+                required_capabilities: task.required,
+            };
+            let mut members: Vec<usize> = vec![task.order[0]];
+
+            for &idx in &task.order[1..] {
+                let candidate: &dyn AgentCapabilities = &agents[idx];
+                let view = coalition_view(&agents, &members);
+
+                // Classification (untimed).
+                let masks_without = relevant_masks(&view, task.required);
+                let mut with_view = view.clone();
+                with_view.push(candidate);
+                let masks_with = relevant_masks(&with_view, task.required);
+                let probe = policy.probe_join(candidate, &view, &ctx);
+                if let Some(p) = &probe {
+                    inc.record(p);
+                    if eq3_arm && p.knife_edge && p.zero_proof.is_none() {
+                        // The one join site that still evaluates fresh on the
+                        // EQ3 arm.
+                        if let Some((path, mag)) =
+                            probe_fresh_factorization(&with_view, task.required)
+                        {
+                            p7_count_path(&mut paths, path, &mag);
+                        }
+                    }
+                }
+                let bucket = if masks_without.is_empty() {
+                    0
+                } else if masks_with.len() == masks_without.len() {
+                    1
+                } else {
+                    match &probe {
+                        Some(p) if p.zero_proof.is_some() && eq3_arm => 4,
+                        Some(p) if p.knife_edge => 3,
+                        Some(_) => 2,
+                        // Reached the incremental branch but the probe could not
+                        // answer — an upstream error, not a decisive margin.
+                        None => P7_BUCKET_PROBE_ERR,
+                    }
+                };
+
+                let t0 = Instant::now();
+                let d = policy.should_join(candidate, &view, &ctx);
+                buckets[bucket].push(seconds_to_us(t0.elapsed()));
+                if d.act {
+                    members.push(idx);
+                }
+            }
+
+            for &idx in &task.order {
+                let Some(pos) = members.iter().position(|&m| m == idx) else {
+                    continue;
+                };
+                let view = coalition_view(&agents, &members);
+                let agent: &dyn AgentCapabilities = &agents[idx];
+
+                if eq3_arm {
+                    // Variant-A leaves pay two fresh evaluations per decision.
+                    let without: Vec<&dyn AgentCapabilities> = view
+                        .iter()
+                        .filter(|a| a.agent_id() != agent.agent_id())
+                        .copied()
+                        .collect();
+                    for v in [&view, &without] {
+                        if let Some((path, mag)) = probe_fresh_factorization(v, task.required) {
+                            p7_count_path(&mut paths, path, &mag);
+                        }
+                    }
+                }
+
+                let t0 = Instant::now();
+                let d = policy.should_leave(agent, &view, &ctx);
+                buckets[P7_BUCKET_LEAVE].push(seconds_to_us(t0.elapsed()));
+                if d.act {
+                    members.remove(pos);
+                }
+            }
+        }
+    }
+
+    (buckets, inc, paths)
+}
+
+/// Tally one probed factorization: its route, plus whether the magnitude the
+/// same handle produced was an `Err` (slot 3, a subset of the route counts).
+#[cfg(feature = "magnitude-fast")]
+fn p7_count_path(
+    paths: &mut [usize; 4],
+    path: FactorizationPath,
+    mag: &Result<f64, CatgraphError>,
+) {
+    if mag.is_err() {
+        paths[3] += 1;
+    }
+    match path {
+        FactorizationPath::Cholesky => paths[0] += 1,
+        FactorizationPath::Lblt => paths[1] += 1,
+        FactorizationPath::GaussJordan => paths[2] += 1,
+    }
+}
+
+fn part7_eq3_latency_rematch() {
+    println!("# koalisi #69 — Part 7: EQ3 latency re-match (REGISTERED)");
+    println!();
+    println!(
+        "_governed by `docs/prereg-K4-eq3-latency-rematch.md` + its **Amendment 1** (both committed before this code). Report date {P7_REPORT_DATE}. Regime v2-draw · Scope B · seeds **{P7_SEED_START}..{P7_SEED_END}** (fresh; 90..120 and 150..180 stay reserved) · release build. Arms: `scalar` = `AifDecisionPolicy::default()` (the v1 latency comparator, quality context-only), `mag` = `MagnitudePolicy::default()` (**L1 only** — A1.1 parked L2 behind the toggle), `mag-eq3` = the same policy with `.with_eq3_levers(true)` (**L2 + L3**). Latency = the v1 protocol verbatim: `Instant` around every sync `should_join`/`should_leave`, pooled per arm across all seeds._"
+    );
+    println!();
+
+    #[cfg(feature = "magnitude-fast")]
+    part7_run();
+
+    #[cfg(not(feature = "magnitude-fast"))]
+    println!(
+        "**SKIPPED — cargo feature `magnitude-fast` is OFF.** The `mag-eq3` arm is the toggle-ON policy, which only exists under that feature, so no leg of this registered battery can run. Re-run with `--features decision,magnitude,magnitude-fast` (the official run's build) to produce the Part 7 rows. Parts 1–6 above are unaffected either way."
+    );
+    println!();
+}
+
+#[cfg(feature = "magnitude-fast")]
+#[allow(clippy::too_many_lines)]
+fn part7_run() {
+    // --- The three arms, identical per-seed instances ----------------------
+    let (scalar, scalar_lat) = stateless_battery_mode(
+        || Box::new(AifDecisionPolicy::default()) as Box<dyn CoalitionDecisionPolicy>,
+        Regime::V2,
+        P7_SEED_START,
+        P7_SEED_END,
+    );
+    let (mag, mag_lat) = stateless_battery_mode(
+        || Box::new(MagnitudePolicy::default()) as Box<dyn CoalitionDecisionPolicy>,
+        Regime::V2,
+        P7_SEED_START,
+        P7_SEED_END,
+    );
+    let (eq3, eq3_lat) = stateless_battery_mode(
+        || {
+            Box::new(MagnitudePolicy::default().with_eq3_levers(true))
+                as Box<dyn CoalitionDecisionPolicy>
+        },
+        Regime::V2,
+        P7_SEED_START,
+        P7_SEED_END,
+    );
+
+    let (scalar_med, scalar_iqr) = median_iqr(scalar_lat.clone());
+    let (mag_med, mag_iqr) = median_iqr(mag_lat.clone());
+    let (eq3_med, eq3_iqr) = median_iqr(eq3_lat.clone());
+
+    let scalar_q = median(primaries_b(&scalar));
+    let mag_q = median(primaries_b(&mag));
+    let eq3_q = median(primaries_b(&eq3));
+
+    println!("## Arms (pooled over {} seeds)", mag.len());
+    println!();
+    println!(
+        "_Instance convention: ONE policy instance per arm, reused across all {} seeds (`stateless_battery_mode`) — the v1 Part 2 code shape, kept because comparability requires every arm to face the same cache-warmth history. The prereg's \"(per-seed fresh arms)\" parenthetical describes the LEARNING arms' factory pattern (#44/#53), which does not apply to these three stateless policies; a per-seed rebuild would reset the magnitude evaluator cache 30 times and measure a different thing._",
+        mag.len()
+    );
+    println!();
+    println!("| arm | median PRIMARY_B | median churn | median µs/decision | IQR µs | decisions |");
+    println!("|-----|-----------------:|-------------:|-------------------:|-------:|----------:|");
+    for (name, rs, q, med, iqr, lat) in [
+        (
+            "scalar",
+            &scalar,
+            scalar_q,
+            scalar_med,
+            scalar_iqr,
+            &scalar_lat,
+        ),
+        ("mag", &mag, mag_q, mag_med, mag_iqr, &mag_lat),
+        ("mag-eq3", &eq3, eq3_q, eq3_med, eq3_iqr, &eq3_lat),
+    ] {
+        println!(
+            "| `{name}` | {q:.4} | {:.2} | {med:.3} | {iqr:.3} | {} |",
+            median(churns_b(rs)),
+            lat.len()
+        );
+    }
+    println!();
+
+    // --- H-par′ (i): first-divergence shape -------------------------------
+    let mut paired = P7Paired::default();
+    for seed in P7_SEED_START..P7_SEED_END {
+        p7_paired_seed(seed, &mut paired);
+    }
+    let bad_shape = paired.firsts.iter().filter(|d| !d.shape_ok).count();
+    let h_par_i = bad_shape == 0;
+
+    println!("## H-par′ (i) — first-divergence shape (Amendment 1 / A1.2)");
+    println!();
+    println!(
+        "Paired walk: `mag` and `mag-eq3` over identical instances and arrival orders, each carrying its own membership. **{} compared decisions** ({} leave steps skipped as structural cascade, where only one arm still held the member). **{} task-level first divergences**; each must carry a fired `ZeroDiversityProof` for `mag-eq3` AND `|mag margin| ≤ {P7_SHAPE_NOISE:.0e}`.",
+        paired.compared,
+        paired.structural,
+        paired.firsts.len()
+    );
+    println!();
+    if paired.firsts.is_empty() {
+        println!("No divergence anywhere — the shape conjunct holds vacuously.");
+    } else {
+        // Display cap applies to PASSing rows only: every !shape_ok row is a
+        // gating failure and is printed unconditionally.
+        println!("| seed | task | kind | certificate | mag margin | shape |");
+        println!("|-----:|-----:|------|-------------|-----------:|-------|");
+        let mut shown_ok = 0usize;
+        let mut elided = 0usize;
+        for d in &paired.firsts {
+            if d.shape_ok {
+                if shown_ok >= P7_FIRSTDIV_DISPLAY_CAP {
+                    elided += 1;
+                    continue;
+                }
+                shown_ok += 1;
+            }
+            println!(
+                "| {} | {} | {} | {} | {:.3e} | {} |",
+                d.seed,
+                d.task,
+                if d.leave { "leave" } else { "join" },
+                match d.proof {
+                    Some(ZeroDiversityProof::SkeletalMerge { .. }) => "SkeletalMerge",
+                    Some(ZeroDiversityProof::IncomingProfileDuplicate { .. }) => "incoming-dup",
+                    Some(ZeroDiversityProof::OutgoingProfileDuplicate { .. }) => "outgoing-dup",
+                    None => "— (none fired)",
+                },
+                d.mag_margin,
+                pass(d.shape_ok)
+            );
+        }
+        if elided > 0 {
+            println!("| … | | | | | _{elided} more PASS rows elided_ |");
+        }
+    }
+    println!();
+
+    // Shape-bound headroom (sem-F2): how close the certified margins ran to the
+    // registered absolute bound.
+    let max_certified = paired
+        .firsts
+        .iter()
+        .filter(|d| d.shape_ok)
+        .map(|d| d.mag_margin.abs())
+        .fold(0.0f64, f64::max);
+    println!(
+        "- **Shape-bound headroom:** the largest certified margin observed is {max_certified:.3e}, i.e. {:.0}% of the registered bound {P7_SHAPE_NOISE:.0e}. The bound is ABSOLUTE and fixed for this run; one ulp at a magnitude of ~16 is already 1.78e-15, so a legitimate certified flip on a larger coalition could exceed it and would be scored `FALSIFIED (parity)`. That direction is conservative (it can only reject, never wave through), so this run stands as scored; a scale-relative bound is a matter for a future registration, not an edit here.",
+        100.0 * max_certified / P7_SHAPE_NOISE
+    );
+    println!(
+        "- Cascaded divergent decisions after a task's first (exempt by A1.2, context only): **{}**.",
+        paired.cascade
+    );
+    // Cascade residual (sem-F4): what the exemption actually leaves unchecked.
+    let total_tasks = (P7_SEED_END - P7_SEED_START) as usize * TASKS;
+    let divergent_tasks = paired.firsts.len();
+    println!(
+        "- **Cascade residual:** {}/{} tasks ({:.1}%) diverge nowhere and are therefore fully verified decision-for-decision by the walk. The A1.2 exemption leaves exactly one stream unverified: the post-divergence tail of the {divergent_tasks} divergent tasks, where the two arms are no longer scoring the same coalition. Those tails are counted above, never shape-checked. (The library's L3-isolation corpus test covers uncertified agreement decision-by-decision, but on the v1 regime — it is not a substitute for this v2 measurement.)",
+        total_tasks - divergent_tasks,
+        total_tasks,
+        100.0 * (total_tasks - divergent_tasks) as f64 / total_tasks as f64
+    );
+    println!(
+        "- Leave-sweep note: the default leave variant is the FRESH two-evaluation path, which never consults the evaluator — so L2 cannot fire on a leave and any leave first-divergence is L3 arithmetic, failing the shape by construction."
+    );
+    println!(
+        "- **H-par′ (i): {}** ({} of {} first divergences carry the certified shape).",
+        pass(h_par_i),
+        paired.firsts.len() - bad_shape,
+        paired.firsts.len()
+    );
+    println!();
+
+    // --- H-par′ (ii): quality non-inferiority ------------------------------
+    let bar = P7_NONINFERIORITY * mag_q;
+    let h_par_ii = eq3_q >= bar;
+    println!("## H-par′ (ii) — quality non-inferiority");
+    println!();
+    println!(
+        "median PRIMARY_B: `mag-eq3` **{eq3_q:.4}** vs `mag` {mag_q:.4} · bar = {P7_NONINFERIORITY} × {mag_q:.4} = **{bar:.4}** ⇒ **{}**.",
+        pass(h_par_ii)
+    );
+    println!();
+    println!("| seed | mag | mag-eq3 | Δ |");
+    println!("|-----:|----:|--------:|--:|");
+    for (i, (m, e)) in mag.iter().zip(eq3.iter()).enumerate() {
+        println!(
+            "| {} | {:.4} | {:.4} | {:+.4} |",
+            P7_SEED_START + i as u64,
+            m.primary,
+            e.primary,
+            e.primary - m.primary
+        );
+    }
+    println!();
+
+    // --- H-lat --------------------------------------------------------------
+    let h_lat = eq3_med < scalar_med;
+    println!("## H-lat — strict Path-A analogue");
+    println!();
+    println!(
+        "pooled median per-decision latency: `mag-eq3` **{eq3_med:.3} µs** vs `scalar` {scalar_med:.3} µs ⇒ **{}** (strict `<`).",
+        pass(h_lat)
+    );
+    println!();
+
+    // --- Verdict ------------------------------------------------------------
+    let h_par = h_par_i && h_par_ii;
+    let verdict = if !h_par {
+        "FALSIFIED (parity)"
+    } else if h_lat {
+        "VALIDATED (latency re-match)"
+    } else {
+        "FALSIFIED (latency re-match)"
+    };
+    println!("## VERDICT: **{verdict}**");
+    println!();
+    println!(
+        "_Grammar (Amendment 1): `VALIDATED (latency re-match)` = H-par′ ∧ H-lat · `FALSIFIED (latency re-match)` = H-par′ ∧ ¬H-lat · `FALSIFIED (parity)` = ¬H-par′ (either conjunct), regardless of H-lat. This run: H-par′(i) {} · H-par′(ii) {} · H-lat {}._",
+        pass(h_par_i),
+        pass(h_par_ii),
+        pass(h_lat)
+    );
+    println!();
+
+    // --- Registered context rows (never gated) -----------------------------
+    println!("## Context (registered, never gated)");
+    println!();
+    println!(
+        "- **Lever decomposition:** `mag` (toggle OFF, L1 only) median {mag_med:.3} µs vs `mag-eq3` (L2+L3) {eq3_med:.3} µs — the difference is what L2+L3 buy on top of the scratch adoption."
+    );
+    println!(
+        "- **Ratios:** `mag-eq3`/`scalar` = {:.2}× · `mag`/`scalar` = {:.2}×.",
+        eq3_med / scalar_med,
+        mag_med / scalar_med
+    );
+    println!(
+        "- **Gap-shrink vs the K6 reference** (mag {P7_K6_MAG_US:.3} µs vs aif {P7_K6_AIF_US:.3} µs = {:.2}×) — **cross-regime**: K6 is the v1 draw and this battery is v2, so the ratio is the *more* comparable quantity than the absolute µs — not an invariant one, since the ratio itself moves with coalition size and therefore with the regime. This run: {:.2}× (`mag`) and {:.2}× (`mag-eq3`).",
+        P7_K6_MAG_US / P7_K6_AIF_US,
+        mag_med / scalar_med,
+        eq3_med / scalar_med
+    );
+    println!(
+        "- **Quality medians** (v2 regime; #61 Part 5a context rows were mag 0.1286 / scalar 0.1332): `scalar` {scalar_q:.4} · `mag` {mag_q:.4} · `mag-eq3` {eq3_q:.4}."
+    );
+    println!(
+        "- **Frozen-battery before/after** (all v1 regime, all `mag`, latency-only by construction — every Part 2 quality column is byte-identical, the X-A/X-B gate): this binary's Part 2 line **{}**, this session's pre-change baselines 3.566 / 3.793 µs, the K6 report-of-record {P7_K6_MAG_US:.3} µs. L1 (scratch adoption) is the only lever active on that battery.",
+        PART2_MAG_LATENCY_US.get().map_or_else(
+            || "n/a (Part 2 did not run)".to_owned(),
+            |v| format!("{v:.3} µs")
+        )
+    );
+    println!();
+
+    // --- Registered instrumentation (non-gating) ---------------------------
+    let (mag_buckets, mag_inc, _) = p7_instrumentation_pass(false);
+    let (eq3_buckets, eq3_inc, eq3_paths) = p7_instrumentation_pass(true);
+
+    println!("## Instrumentation (registered, non-gating)");
+    println!();
+    println!(
+        "### Increment distribution — `|with − base|` on `mag`'s join stream ({} probed decisions)",
+        mag_inc.probed
+    );
+    println!();
+    println!("| decade | count |");
+    println!("|--------|------:|");
+    println!("| non-finite (NaN / ±∞) | {} |", mag_inc.non_finite);
+    println!("| exact 0 | {} |", mag_inc.exact_zero);
+    println!("| < 1e-16 (underflow) | {} |", mag_inc.underflow);
+    for (i, c) in mag_inc.decades.iter().enumerate() {
+        if *c > 0 {
+            let lo = i as i32 - 16;
+            if i == 16 {
+                println!("| ≥ 1e0 | {c} |");
+            } else {
+                println!("| [1e{lo}, 1e{}) | {c} |", lo + 1);
+            }
+        }
+    }
+    println!();
+    println!(
+        "- The cg#153 hypothesis is an EMPTY `[1e-13, 1e-6)` band: measured here at **{}** decisions in that range. Non-gating; no band change ships in EQ3 (prereg non-goal).",
+        mag_inc.decades[3..10].iter().sum::<usize>()
+    );
+    println!(
+        "- The three rows above the decades are disjoint classes, not decade members: non-finite increments never reach the index arithmetic ({} seen — any nonzero count is a numeric regression, also logged via `tracing::warn`), and sub-1e-16 increments get their OWN row rather than being folded into `[1e-16, 1e-15)`.",
+        mag_inc.non_finite
+    );
+    println!(
+        "- Knife-edge population on the same stream: **{}** of {} probed joins ({:.1}%).",
+        mag_inc.knife,
+        mag_inc.probed,
+        100.0 * mag_inc.knife as f64 / mag_inc.probed.max(1) as f64
+    );
+    println!();
+
+    println!("### Proof fire-rate by class — `mag-eq3` arm");
+    println!();
+    println!(
+        "| class | count | share of probed joins |\n|-------|------:|----------------------:|"
+    );
+    for (label, n) in [
+        ("SkeletalMerge", eq3_inc.by_class[0]),
+        ("incoming-dup", eq3_inc.by_class[1]),
+        ("outgoing-dup", eq3_inc.by_class[2]),
+    ] {
+        println!(
+            "| {label} | {n} | {:.1}% |",
+            100.0 * n as f64 / eq3_inc.probed.max(1) as f64
+        );
+    }
+    println!(
+        "| **all** | **{}** | **{:.1}%** |",
+        eq3_inc.proofs(),
+        100.0 * eq3_inc.proofs() as f64 / eq3_inc.probed.max(1) as f64
+    );
+    println!();
+    println!(
+        "- **Former knife-edge recomputes retired:** the quantity that matters is measured on the **frozen `mag` arm's** stream — those are the recomputes that actually used to be paid. {} of its {} band decisions carry a certificate and are skipped by `mag-eq3` (**{:.1}%**).",
+        mag_inc.knife_certified,
+        mag_inc.knife,
+        100.0 * mag_inc.knife_certified as f64 / mag_inc.knife.max(1) as f64
+    );
+    println!(
+        "- For completeness, the same ratio on `mag-eq3`'s own stream (whose membership has already drifted under L2, so it is a different decision population): {} of {} ({:.1}%).",
+        eq3_inc.knife_certified,
+        eq3_inc.knife,
+        100.0 * eq3_inc.knife_certified as f64 / eq3_inc.knife.max(1) as f64
+    );
+    println!();
+
+    println!(
+        "### Latency decomposition by bucket (instrumentation pass — NOT the pooled measurement)"
+    );
+    println!();
+    println!("| bucket | mag count | mag median µs | eq3 count | eq3 median µs |");
+    println!("|--------|----------:|--------------:|----------:|--------------:|");
+    for (i, label) in P7_BUCKETS.iter().enumerate() {
+        let m = &mag_buckets[i];
+        let e = &eq3_buckets[i];
+        println!(
+            "| {label} | {} | {} | {} | {} |",
+            m.len(),
+            if m.is_empty() {
+                "—".to_owned()
+            } else {
+                format!("{:.3}", median(m.clone()))
+            },
+            e.len(),
+            if e.is_empty() {
+                "—".to_owned()
+            } else {
+                format!("{:.3}", median(e.clone()))
+            }
+        );
+    }
+    println!();
+    println!(
+        "- **DEVIATION from the registered bucket list (ledgered):** the K6 table splits every join bucket by `rebuild` vs `hit` (evaluator reconstructed vs cached). That split is only visible from inside the policy's cache, and the only cheap way to expose it is a counter on the decision path — which would instrument the very code the H-lat measurement times. Protecting the registered measurement won: the rebuild/hit split is NOT reproduced here, while the `empty`/`excluded`/`clear`/`band`/`proof`/`probe-err`/`leave` classes are, via the read-only `probe_join` surface. This deviation stands on that rationale alone — the prereg's \"where cheaply available\" latitude attaches to the `FactorizationPath` row, not to this table."
+    );
+    println!(
+        "- This pass probes before each timed decision, so its absolute µs carry probe-induced cache disturbance. Read the SHAPE (which bucket costs what), not the level; the pooled table at the top is the clean measurement."
+    );
+    println!();
+
+    let path_total: usize = eq3_paths[..3].iter().sum();
+    println!("### `FactorizationPath` counts — `mag-eq3` fresh evaluations");
+    println!();
+    println!(
+        "| path | count | share |\n|------|------:|------:|\n| Cholesky | {} | {:.1}% |\n| LBLT (Bunch–Kaufman) | {} | {:.1}% |\n| Gauss–Jordan fallback | {} | {:.1}% |",
+        eq3_paths[0],
+        100.0 * eq3_paths[0] as f64 / path_total.max(1) as f64,
+        eq3_paths[1],
+        100.0 * eq3_paths[1] as f64 / path_total.max(1) as f64,
+        eq3_paths[2],
+        100.0 * eq3_paths[2] as f64 / path_total.max(1) as f64
+    );
+    println!();
+    println!(
+        "- **Sites counted** (not a totality claim): both magnitudes of every variant-A leave decision, plus the `with` side of every unprovable-knife-edge join. NOT counted: empty-coalition bootstrap joins, whose fresh evaluation is a trivial 1×1 ζ, and the excluded-candidate branch, which answers from `base_value` without a fresh evaluation at all. One factorization per count — the handle that reports the path is the handle that answers the magnitude (`t = 1` makes the scaling a no-op), so no extra factorization is paid to report this."
+    );
+    println!(
+        "- **{}** of those {path_total} factorizations produced an `Err` magnitude (a singular ζ). Their route is still counted above: the route is chosen before any solve, so dropping errored evaluations would silently undercount Gauss–Jordan — the route an exact singularity surfaces on.",
+        eq3_paths[3]
+    );
+    println!(
+        "- **Read the H-lat result against this split.** The `f64` handle only takes Cholesky/LBLT when ζ is *exactly* symmetric; the substitutability coupling is asymmetric whenever two members have different relevant widths, so most of this traffic falls back to Gauss–Jordan — which re-enters the rig-generic computation AFTER paying the dense-matrix build and the symmetry scan. On the fallback share, L3 is net overhead rather than acceleration, and `mag-eq3`'s latency movement comes chiefly from L2."
+    );
+    println!();
+}
+
 #[cfg(test)]
 mod part4c_tests {
     use super::*;
@@ -6255,5 +7112,325 @@ mod part4c_tests {
                 "the Part 6 salt must still yield probabilities"
             );
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Part 7 (koalisi #69) — EQ3 latency re-match.
+    // -----------------------------------------------------------------------
+
+    /// Part 7 (#69): the v2 draw is pinned on the registered seed range. A
+    /// determinism pin, not a property test — if `draw_prefix_v2` or the Scope-B
+    /// suffix ever shifts, the registered instances shift with it and this
+    /// catches it before a re-run silently reports different numbers.
+    #[test]
+    fn p7_v2_draw_determinism_pin() {
+        for seed in P7_SEED_START..P7_SEED_START + 3 {
+            let (a1, t1, r1, p1) = generate_instance_b_regime(seed, Regime::V2);
+            let (a2, t2, r2, p2) = generate_instance_b_regime(seed, Regime::V2);
+
+            // Same seed ⇒ byte-identical instance.
+            assert_eq!(a1.len(), a2.len(), "seed {seed}: pool size");
+            for (x, y) in a1.iter().zip(a2.iter()) {
+                assert_eq!((x.id, x.caps, x.trust), (y.id, y.caps, y.trust));
+            }
+            for (x, y) in t1.iter().zip(t2.iter()) {
+                assert_eq!(x.required, y.required);
+                assert_eq!(x.order, y.order);
+            }
+            assert_eq!(r1, r2);
+            assert_eq!(p1, p2);
+
+            // The registered v2 envelope: pool 4..=16, caps 1..=4 distinct bits
+            // from the 8-bit universe, |required| ∈ 2..=8 distinct bits.
+            assert!(
+                (4..=16).contains(&a1.len()),
+                "seed {seed}: pool size envelope"
+            );
+            for w in &a1 {
+                let k = w.caps.count_ones();
+                assert!((1..=4).contains(&k), "seed {seed}: caps width {k}");
+                assert_eq!(
+                    w.caps >> UNIVERSE_BITS,
+                    0,
+                    "seed {seed}: caps outside universe"
+                );
+            }
+            assert_eq!(t1.len(), TASKS, "seed {seed}: task count");
+            for task in &t1 {
+                let r = task.required.count_ones();
+                assert!((2..=8).contains(&r), "seed {seed}: |required| = {r}");
+                assert_eq!(
+                    task.order.len(),
+                    a1.len(),
+                    "seed {seed}: arrival order length"
+                );
+            }
+            assert_eq!(p1.len(), TASKS);
+            assert_eq!(p1[0].len(), a1.len());
+        }
+    }
+
+    /// Part 7 (#69): the increment histogram's bucketing — exact zeros are their
+    /// own class (they have no decade), sub-`1e-16` magnitudes get their own
+    /// underflow row rather than being folded into the first decade, non-finite
+    /// increments are counted without ever reaching the index arithmetic, every
+    /// other magnitude lands in the half-open decade `[1e(i-16), 1e(i-15))`, and
+    /// anything `≥ 1e0` saturates the overflow bucket. Driven through synthetic
+    /// probes so the arithmetic is checked independently of any battery.
+    #[cfg(feature = "magnitude-fast")]
+    #[test]
+    fn p7_increment_histogram_bucketing() {
+        // `base = 0` so `with − base` is EXACTLY `delta` — anchoring at 1.0
+        // would silently round `1e-16` away (`1.0 + 1e-16 == 1.0`).
+        fn probe(delta: f64, knife: bool, proof: Option<ZeroDiversityProof>) -> JoinProbe {
+            JoinProbe {
+                base: 0.0,
+                with: delta,
+                zero_proof: proof,
+                knife_edge: knife,
+            }
+        }
+
+        let mut inc = P7Increments::default();
+        inc.record(&probe(0.0, true, None)); // exact zero
+        inc.record(&probe(-0.0, false, None)); // negative zero is still zero
+        inc.record(&probe(1e-16, false, None)); // bucket 0
+        inc.record(&probe(5e-16, false, None)); // bucket 0 (same decade)
+        inc.record(&probe(1e-15, false, None)); // bucket 1
+        inc.record(&probe(1e-1, false, None)); // bucket 15
+        inc.record(&probe(1.0, false, None)); // overflow
+        inc.record(&probe(12.0, false, None)); // overflow (saturates)
+        inc.record(&probe(1e-30, false, None)); // BELOW the floor ⇒ underflow row
+        inc.record(&probe(f64::INFINITY, false, None)); // non-finite
+        inc.record(&probe(f64::NEG_INFINITY, false, None)); // non-finite
+        inc.record(&probe(f64::NAN, false, None)); // non-finite
+
+        assert_eq!(inc.probed, 12);
+        assert_eq!(inc.exact_zero, 2, "±0.0 are the exact-zero class");
+        assert_eq!(
+            inc.non_finite, 3,
+            "NaN and ±∞ are their own class and never index a decade"
+        );
+        assert_eq!(
+            inc.underflow, 1,
+            "sub-1e-16 gets its own row, not the first decade"
+        );
+        assert_eq!(inc.decades[0], 2, "[1e-16, 1e-15) only");
+        assert_eq!(inc.decades[1], 1);
+        assert_eq!(inc.decades[15], 1);
+        assert_eq!(inc.decades[16], 2, "≥ 1e0 saturates the overflow bucket");
+        assert_eq!(
+            inc.decades.iter().sum::<usize>()
+                + inc.exact_zero
+                + inc.underflow
+                + inc.non_finite,
+            inc.probed,
+            "the classes are disjoint and exhaustive"
+        );
+
+        // Knife-edge and certificate tallies are independent of the decade.
+        let mut inc = P7Increments::default();
+        inc.record(&probe(
+            1e-16,
+            true,
+            Some(ZeroDiversityProof::SkeletalMerge { member: 0 }),
+        ));
+        inc.record(&probe(
+            1e-16,
+            true,
+            Some(ZeroDiversityProof::IncomingProfileDuplicate { member: 1 }),
+        ));
+        inc.record(&probe(
+            1e-16,
+            false,
+            Some(ZeroDiversityProof::OutgoingProfileDuplicate { member: 2 }),
+        ));
+        inc.record(&probe(0.5, true, None));
+        assert_eq!(inc.knife, 3);
+        assert_eq!(
+            inc.knife_certified, 2,
+            "only certified band decisions retire"
+        );
+        assert_eq!(inc.by_class, [1, 1, 1]);
+        assert_eq!(inc.proofs(), 3);
+    }
+
+    /// Part 7 (#69): the H-par′ (i) shape predicate. A first divergence passes
+    /// only when a certificate fired AND `mag`'s own margin there is float noise;
+    /// a leave-side divergence can never pass (variant-A leaves never consult the
+    /// evaluator, so no certificate exists to fire).
+    #[cfg(feature = "magnitude-fast")]
+    #[test]
+    fn p7_shape_predicate() {
+        let shape = |proof: Option<ZeroDiversityProof>, margin: f64| {
+            proof.is_some() && margin.abs() <= P7_SHAPE_NOISE
+        };
+        let merge = Some(ZeroDiversityProof::SkeletalMerge { member: 0 });
+
+        assert!(
+            shape(merge, 2.22e-16),
+            "certified + noise margin ⇒ admissible"
+        );
+        assert!(
+            shape(merge, 0.0),
+            "an exact-zero margin is inside the noise band"
+        );
+        assert!(
+            !shape(None, 2.22e-16),
+            "no certificate ⇒ FALSIFIED (parity)"
+        );
+        assert!(!shape(merge, 1e-9), "a genuine margin ⇒ FALSIFIED (parity)");
+        assert!(!shape(None, 0.5), "neither conjunct");
+        // The leave case as the walker builds it.
+        let leave = P7FirstDiv {
+            seed: P7_SEED_START,
+            task: 0,
+            leave: true,
+            proof: None,
+            mag_margin: 0.0,
+            shape_ok: false,
+        };
+        assert!(!leave.shape_ok && leave.proof.is_none());
+    }
+
+    /// Part 7 (#69): the paired walk's first-divergence bookkeeping, driven on
+    /// synthetic act streams so the control flow is checked without depending on
+    /// what the real arms happen to do.
+    ///
+    /// The invariants: at most ONE first divergence per task; every later
+    /// divergence in that task counts as cascade; and a task whose acts agree
+    /// throughout contributes nothing.
+    #[cfg(feature = "magnitude-fast")]
+    #[test]
+    fn p7_paired_first_divergence_bookkeeping() {
+        /// The walker's per-task rule, extracted verbatim.
+        fn walk(pairs: &[(bool, bool)]) -> (usize, usize) {
+            let (mut firsts, mut cascade, mut diverged) = (0usize, 0usize, false);
+            for &(a, b) in pairs {
+                if a != b {
+                    if diverged {
+                        cascade += 1;
+                    } else {
+                        diverged = true;
+                        firsts += 1;
+                    }
+                }
+            }
+            (firsts, cascade)
+        }
+
+        assert_eq!(
+            walk(&[(true, true), (false, false)]),
+            (0, 0),
+            "no divergence"
+        );
+        assert_eq!(walk(&[(true, false)]), (1, 0), "single divergence");
+        assert_eq!(
+            walk(&[(true, true), (true, false), (false, true), (true, false)]),
+            (1, 2),
+            "one first + two cascaded"
+        );
+        assert_eq!(walk(&[]), (0, 0), "empty task");
+    }
+
+    /// Part 7 (#69), 2-seed smoke: the paired walk and the instrumentation pass
+    /// execute end-to-end on the registered seed range and produce coherent
+    /// tallies. Does NOT run the 30-seed battery.
+    #[cfg(feature = "magnitude-fast")]
+    #[test]
+    fn p7_two_seed_smoke() {
+        let mut paired = P7Paired::default();
+        for seed in P7_SEED_START..P7_SEED_START + 2 {
+            p7_paired_seed(seed, &mut paired);
+        }
+        assert!(
+            paired.compared > 0,
+            "the paired walk must compare decisions"
+        );
+        assert!(
+            paired.firsts.len() <= paired.compared,
+            "at most one first divergence per task"
+        );
+        for d in &paired.firsts {
+            assert!(d.mag_margin.is_finite());
+            assert!(
+                d.shape_ok == (d.proof.is_some() && d.mag_margin.abs() <= P7_SHAPE_NOISE),
+                "shape_ok must be exactly the registered conjunction"
+            );
+        }
+
+        // Both arms run the registered battery machinery on the v2 regime.
+        let (mag, mag_lat) = stateless_battery_mode(
+            || Box::new(MagnitudePolicy::default()) as Box<dyn CoalitionDecisionPolicy>,
+            Regime::V2,
+            P7_SEED_START,
+            P7_SEED_START + 2,
+        );
+        let (eq3, eq3_lat) = stateless_battery_mode(
+            || {
+                Box::new(MagnitudePolicy::default().with_eq3_levers(true))
+                    as Box<dyn CoalitionDecisionPolicy>
+            },
+            Regime::V2,
+            P7_SEED_START,
+            P7_SEED_START + 2,
+        );
+        assert_eq!(mag.len(), 2);
+        assert_eq!(eq3.len(), 2);
+        assert!(
+            !mag_lat.is_empty() && !eq3_lat.is_empty(),
+            "latencies recorded"
+        );
+        for r in mag.iter().chain(eq3.iter()) {
+            assert!(r.primary.is_finite() && (0.0..=1.0).contains(&r.primary));
+        }
+    }
+
+    /// Part 7 (#69): the library's `probe_join` instrumentation agrees with the
+    /// arm it describes — a certified candidate is one the EQ3 arm declines at an
+    /// exact-zero margin, and probing never changes what either arm decides.
+    #[cfg(feature = "magnitude-fast")]
+    #[test]
+    fn p7_probe_agrees_with_the_arm() {
+        let mag = MagnitudePolicy::default();
+        let eq3 = MagnitudePolicy::default().with_eq3_levers(true);
+        let (agents, tasks, _rho, _perf) = generate_instance_b_regime(P7_SEED_START, Regime::V2);
+        let task = &tasks[0];
+        let ctx = DecisionContext {
+            required_capabilities: task.required,
+        };
+
+        let mut members: Vec<usize> = vec![task.order[0]];
+        let mut certified = 0usize;
+        for &idx in &task.order[1..] {
+            let candidate: &dyn AgentCapabilities = &agents[idx];
+            let view = coalition_view(&agents, &members);
+            let probe = eq3.probe_join(candidate, &view, &ctx);
+            let d_eq3 = eq3.should_join(candidate, &view, &ctx);
+            let d_mag = mag.should_join(candidate, &view, &ctx);
+            if let Some(p) = probe {
+                if p.zero_proof.is_some() {
+                    certified += 1;
+                    assert!(
+                        !d_eq3.act && d_eq3.score == 0.0,
+                        "a certified candidate is an exact-zero decline on the EQ3 arm"
+                    );
+                }
+                assert!(p.base.is_finite() && p.with.is_finite());
+            }
+            // Probing is state-free: the frozen arm still answers as it would.
+            assert_eq!(
+                d_mag.act,
+                mag.should_join(candidate, &view, &ctx).act,
+                "probing must not perturb the frozen arm"
+            );
+            if d_mag.act {
+                members.push(idx);
+            }
+        }
+        assert!(
+            certified > 0,
+            "the registered stream must exercise the certificate at least once"
+        );
     }
 }
