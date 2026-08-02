@@ -1,6 +1,6 @@
 [package]
 name = "koalisi"
-version = "0.21.0"
+version = "0.22.0"
 edition = "2024"
 # 1.93 floor forced by catgraph's deep_causality_num 0.4.1 pin (unchanged at
 # the v0.6.0 re-pin — catgraph holds num =0.4.1).

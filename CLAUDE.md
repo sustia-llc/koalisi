@@ -55,6 +55,35 @@ forex domain since removed).
 
 ### Done
 
+- **EQ3 latency re-match RUN — v0.22.0 (2026-08-02, #69): `FALSIFIED
+  (latency re-match)`**, full discipline (owner design-lock D2/D3/D4 +
+  placement on #69 BEFORE prereg; prereg 557af83 BEFORE implementation;
+  pre-run Amendment 1 d46b562 — A1.1 L2 parked behind the toggle after
+  it measured decision-changing, A1.2 H-par′ replaces bit-parity, A1.3
+  skeletal-space route correction; 3-lens review 0 blocking / 7
+  important / ~21 minor, ALL applied or ledgered, BEFORE the run).
+  Official run seeds 210..240, v2 regime: **H-par′ (i) PASS 49/49**
+  (every first divergence a certified exact-zero decline, margins
+  2.2e-16..8.9e-16, no SkeletalMerge flip), **(ii) PASS** (mag-eq3
+  0.1105 ≥ 0.98× mag 0.1078 — the certified declines are mildly
+  quality-POSITIVE), **H-lat FAIL** (mag-eq3 4.830 µs vs scalar 2.675;
+  ratio 2.48× → 1.81×, no crossing). **cg#153 empty-band hypothesis
+  CONFIRMED on koalisi traffic** (0 decisions in [1e-13, 1e-6);
+  knife-edge population 43.0 %; 99.6 % of the frozen arm's band
+  recomputes certificate-retired at ~1.8 vs ~8.3 µs). Mechanism scoping:
+  L2 is the working lever; **L3's fast route needs exactly-symmetric ζ**
+  (substitutability couplings mostly are not — GJ fallback re-enters the
+  generic path as net overhead); residual = leave/fresh (~7.7 µs × ~27 %)
+  + join/clear. Library: L1 (`value_with_scratch`, scratch retained
+  across rebuilds) is the DEFAULT, bit-identical (60-seed stream gate,
+  X-A/X-B held; frozen Part 2 mag 3.55 → 3.44 µs); L2+L3 opt-in behind
+  `magnitude-fast` + `with_eq3_levers(true)`; read-only probes
+  `probe_join`/`probe_fresh_factorization`. Report
+  `docs/ab-report-K4-eq3-latency-rematch.md` (10-item ledger); v1/v2
+  verdicts and the #54 arm question UNTOUCHED. See **gotcha 27**.
+  Suites: 126 magnitude / 182 decision,magnitude / **134
+  magnitude-fast** (new); example binary 26+1 / 31+1. Seeds consumed:
+  210..240; 90..120 + 150..180 still reserved.
 - **catgraph re-pin `v0.5.0` ×2 → `v0.6.0` — v0.21.0 (2026-08-02)**: the
   EQ3 pin-first step — the latency-re-match registration
   ([#69](https://github.com/sustia-llc/koalisi/issues/69)) must be born
@@ -484,7 +513,9 @@ forex domain since removed).
   retained across rebuilds). Decisions bit-frozen via the knife-edge fresh
   fallback (`KNIFE_EDGE_REL_BAND = 1e-6`); K4 re-run
   (`docs/ab-report-K4-catgraph-evaluator.md`) seed-for-seed identical on
-  quality columns, latency 3.915 → 3.658 µs — Path A missed, dual verdict
+  quality columns, latency 3.915 → 3.552 µs (report-of-record numbers;
+  this entry previously cited 3.658 — EQ3 review ledger item 9) — Path A
+  missed, dual verdict
   unchanged (`FALSIFIED (latency)` / `VALIDATED (B)`), per-decision profile
   committed as the catgraph#33 evidence. Both types lost `Copy` (use `new`).
   See §"Worth flagging" entry 15 and §K6 below.
@@ -587,8 +618,9 @@ forex domain since removed).
   |---|---|---|
   | Default | 103 | `cargo test` |
   | `--features decision` | 159 | `cargo test --features decision` |
-  | `--features magnitude` | 125 | `cargo test --features magnitude` |
-  | `--features decision,magnitude` | 181 | `cargo test --features decision,magnitude` |
+  | `--features magnitude` | 126 | `cargo test --features magnitude` |
+  | `--features decision,magnitude` | 182 | `cargo test --features decision,magnitude` |
+  | `--features magnitude-fast` | 134 | `cargo test --features magnitude-fast` (EQ3 L2+L3 + probes) |
   | `--features persistence` | 123 | `cargo test --features persistence` |
   | `--features persistence,magnitude` | 146 (incl. the #18/#30 replay parity gate) | `cargo test --features persistence,magnitude` |
   | `--features durable` | +1 container-backed restart test; needs Docker | `cargo test --features durable` |
@@ -684,7 +716,9 @@ koalisi/
 │   ├── prereg-K4-battery-v2.md             #61 EQ1 pre-registration (de-saturated regime; Part 5c scope DONE v0.19.0)
 │   ├── ab-report-K4-battery-v2.md          #61 run — lever 2 FALSIFIED (de-saturation), lever 1 RUN-INVALID (sanity leg → #63); v2-regime context inversion; + Part 5c addendum (v0.19.0)
 │   ├── prereg-K4-routing-corrected.md      #63 pre-registration (block-level routing; legs A/C/L; + pre-impl tie-break amendment)
-│   └── ab-report-K4-routing-corrected.md   #63 run — FALSIFIED (block-routing), mechanism-scoped (window vs lattice); leg C DEGENERATE (4th gotcha-21 mechanism); leg L ordering 30/30 (gotcha 26)
+│   ├── ab-report-K4-routing-corrected.md   #63 run — FALSIFIED (block-routing), mechanism-scoped (window vs lattice); leg C DEGENERATE (4th gotcha-21 mechanism); leg L ordering 30/30 (gotcha 26)
+│   ├── prereg-K4-eq3-latency-rematch.md    #69 EQ3 pre-registration (+ pre-run Amendment 1: L2 behind toggle, H-par′, skeletal route; result appended)
+│   └── ab-report-K4-eq3-latency-rematch.md #69 run — FALSIFIED (latency re-match); empty-band CONFIRMED; L3 ζ-asymmetry ceiling; 10-item ledger (gotcha 27)
 └── tests/
     ├── topology_test.rs                    12 tests
     ├── algorithms_test.rs                  18 tests (incl. 3 feedback-loop/seeding tests, #41)
@@ -1101,6 +1135,44 @@ These cost time during the build; future-me should not relearn them.
       uncalibrated as ever (spread median 0.12) — gotcha 24's split holds at
       its second measured point.
 
+27. **EQ3 lever contracts (#69, v0.22.0) — rely on these.**
+    - **The default mag arm is L1-only and bit-frozen.** `magnitude-fast`
+      OFF (or `with_eq3_levers(false)`) is bit-identical to pre-EQ3
+      (60-seed stream gate on acts + score bits). The proof branch (L2)
+      is DELIBERATELY decision-changing: it declines certified exact-zero
+      joins the frozen arm takes on +2e-16 fresh-recompute roundoff
+      (~0.8 % of certificates, in/out-dup classes only; SkeletalMerge
+      never flips). Never enable the toggle expecting a pure speedup —
+      it selects a different (slightly better-quality, measured) arm.
+      Default-adopting L2 would unfreeze pinned decisions = NEW
+      registration.
+    - **L3's fast factorization needs exactly-symmetric ζ.** The
+      substitutability coupling is asymmetric whenever |rel_i| ≠ |rel_j|,
+      so on most fresh-eval traffic `ZetaFactorization` falls back to
+      Gauss–Jordan and re-enters the generic path AFTER paying the dense
+      build + symmetry scan — net overhead there. Any latency claim about
+      L3 must cite the per-run FactorizationPath split (official run:
+      72.1 % Cholesky on the L3-routed population, 70.9 % GJ on the whole
+      join stream — different populations, both real). The upstream fix
+      (asymmetric-capable fast path / cheap symmetry pre-check) is
+      catgraph territory.
+    - **The cg#153 empty-band hypothesis is CONFIRMED on koalisi traffic**
+      (0 decisions in [1e-13, 1e-6); increments are bimodal exact-zero vs
+      ≥1e-3). The 1e-6 `KNIFE_EDGE_REL_BAND` is ~7 decades wider than the
+      traffic needs — but narrowing it is a REGISTERED change, not a
+      cleanup (gotcha 15 still governs).
+    - **H-par′'s 1e-15 shape bound is absolute** and the run observed 89 %
+      headroom; one ulp at magnitude ~16 is 1.78e-15. Future
+      parity-characterization legs need a scale-relative bound.
+    - The probes (`probe_join`, `probe_fresh_factorization`) answer off
+      throw-away caches — purity is load-bearing (the H-par′ walk gates on
+      them); `probe_fresh_factorization` reports the route even on `Err`
+      (dropping errored evals undercounts exactly the GJ route).
+    - Leave-side residual: ~7.7 µs × ~27 % of decisions (two fresh evals
+      per leave, no registered lever touches it; K6's variant-B says the
+      naive incremental form is SLOWER — engine-side design, own
+      registration).
+
 ## Reproducers
 
 All assume `cwd = koalisi/`.
@@ -1496,7 +1568,8 @@ Decisions bit-frozen: knife-edge fresh fallback (see gotcha 15 — the #31
 rank-order contract is insufficient at a zero threshold; found by the
 pre-registered parity gate, 16/8068 flips before the fix). Re-run
 `docs/ab-report-K4-catgraph-evaluator.md`: quality columns seed-for-seed
-identical to the K1 parity report; latency 3.915 → 3.658 µs vs AIF 1.387 —
+identical to the K1 parity report; latency 3.915 → 3.552 µs vs AIF 1.435
+(report-of-record numbers; previously cited 3.658/1.387 — EQ3 ledger 9) —
 **Path A missed** (dual verdict unchanged: v1 `FALSIFIED (latency)`, v2
 `VALIDATED (B)`), residual-cost profile committed as the pre-registered
 catgraph#33 evidence (construction ~30 µs ≈ 10–15× fresh; knife-edge tax

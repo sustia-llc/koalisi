@@ -1,7 +1,16 @@
 # Pre-registration: K4 EQ3 — cg latency re-match (koalisi #69 / stack EQ3)
 
-**Status: REGISTERED.** Committed BEFORE implementation (the #63/#61
-discipline). Owner design-lock posted to
+**Status: RUN — `FALSIFIED (latency re-match)` (2026-08-02, seeds
+210..240; report `docs/ab-report-K4-eq3-latency-rematch.md`).** H-par′
+(i) PASS 49/49 certified first divergences · (ii) PASS (0.1105 ≥ 0.98 ×
+0.1078) · H-lat FAIL (mag-eq3 4.830 µs vs scalar 2.675 µs; ratio 1.81×
+vs K6's 2.48×). The cg#153 [1e-13, 1e-6) empty-band hypothesis CONFIRMED
+on koalisi traffic (0 decisions). See the report's deviation ledger
+(10 items) and interpretation (L2 the working lever; L3
+engagement-limited by ζ asymmetry; leave/fresh the residual).
+
+**Status at registration: REGISTERED.** Committed BEFORE implementation
+(the #63/#61 discipline). Owner design-lock posted to
 [#69](https://github.com/sustia-llc/koalisi/issues/69) BEFORE this document
 (2026-08-02): D2 strict Path-A analogue · D3 all three levers registered ·
 D4 fresh seeds 210..240 · placement library, frozen-battery X-gated.

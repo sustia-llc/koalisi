@@ -21,6 +21,56 @@ Planned work — issue-tracked (details in [`CLAUDE.md`](./CLAUDE.md)
 - **[#25]** metrics example, reframed onto the `CoalitionService` decision
   path / topology events.
 
+## [0.22.0] — 2026-08-02
+
+The EQ3 run release ([#69]): the registered cg latency re-match, executed
+under full discipline (owner design-lock → prereg + pre-run Amendment 1 →
+3-lens review with every finding applied → official run on fresh seeds
+210..240). **Verdict: `FALSIFIED (latency re-match)`** — quality parity
+held (H-par′ both conjuncts PASS; the 49 first divergences are all
+certified exact-zero declines, mildly quality-positive), but the strict
+Path-A analogue failed (mag-eq3 4.830 µs vs scalar 2.675 µs; the ratio
+shrank 2.48× → 1.81×, no crossing). Headline instrumentation: **the
+cg#153 [1e-13, 1e-6) empty-band hypothesis is CONFIRMED on koalisi
+traffic** (0 decisions in the band; knife-edge population 43.0 % of
+probed joins, 99.6 % of the frozen arm's band recomputes
+certificate-retired). Report `docs/ab-report-K4-eq3-latency-rematch.md`
+(10-item deviation ledger); prereg + Amendment 1
+`docs/prereg-K4-eq3-latency-rematch.md`.
+
+### Added
+- **`magnitude-fast` cargo feature** (off-default; pass-through to
+  `catgraph-magnitude/f64-fast`) + `MagnitudePolicy::with_eq3_levers`
+  (identity default OFF). Toggle ON = the `mag-eq3` arm: **L2** the
+  cg#153 zero-diversity proof branch (all three classes; deliberately
+  decision-changing on certified exact-zeros — the frozen arm joins on
+  +2e-16 roundoff, the certificate declines) + **L3** `f64-fast` fresh
+  evaluation via the skeletal-space rebuild (A1.3). L3's fast route
+  engages only on exactly-symmetric ζ (substitutability couplings mostly
+  are not — see the report's FactorizationPath section).
+- Feature-gated read-only instrumentation: `MagnitudePolicy::probe_join`
+  (`JoinProbe`) + `probe_fresh_factorization` (answers off throw-away
+  caches; no decision-path change).
+- `examples/strategy_comparison.rs` **Part 7** — the registered EQ3
+  battery (paired H-par′ walk, H-lat, context rows, four instrumentation
+  blocks). Parts 1–6 byte-identical (X-A feature-off and X-B feature-on
+  gates both held against a fresh pre-change baseline).
+
+### Changed
+- **L1 ships as the library default**: `CoalitionEvaluator` calls go
+  through `value_with_scratch` with the scratch retained across evaluator
+  rebuilds — bit-identical to pre-EQ3 (pinned by a 60-seed stream gate on
+  acts AND score bits, both leave variants), and a mild win even on the
+  frozen v1 battery (Part 2 mag median 3.55 → 3.44 µs).
+- CLAUDE.md's K6 latency citations corrected to the report-of-record
+  numbers (3.552/1.435; previously 3.658/1.387 — review ledger item 9).
+
+### Tests
+- Suites: 103 default / **126** magnitude / **182** decision,magnitude /
+  **134** magnitude-fast (new suite) / 123 persistence / 146
+  persistence,magnitude; example binary 26 (+1 ignored) under
+  decision,magnitude and 31 (+1) with magnitude-fast.
+
 ## [0.21.0] — 2026-08-02
 
 The EQ3 pin-first release: both catgraph deps re-pinned one minor ahead
