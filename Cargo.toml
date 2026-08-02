@@ -73,6 +73,11 @@ default = []
 decision = ["dep:aif", "dep:nalgebra"]
 # Categorical-magnitude coalition-decision strategy (pluggable, off by default).
 magnitude = ["dep:catgraph-magnitude"]
+# EQ3 lever L3 (#69): compile the upstream `f64-fast` factorization and expose
+# the `MagnitudePolicy::with_fast_fresh` toggle that routes FRESH full-coalition
+# magnitudes through it. Implies `magnitude`; the toggle defaults OFF, so merely
+# enabling this feature changes no decision (the registered X-B identity gate).
+magnitude-fast = ["magnitude", "catgraph-magnitude/f64-fast"]
 # Durable coalition decision-event bus on surrealdb-live-message (off by default).
 durable = ["dep:surrealdb-live-message", "dep:surrealdb-types"]
 # Phase 7 persistence core: portable hash-chained event log (off by default).

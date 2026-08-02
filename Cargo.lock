@@ -645,6 +645,7 @@ dependencies = [
  "catgraph",
  "catgraph-applied",
  "deep_causality_num",
+ "nalgebra",
  "num",
 ]
 
