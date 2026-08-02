@@ -1,8 +1,9 @@
 [package]
 name = "koalisi"
-version = "0.20.0"
+version = "0.21.0"
 edition = "2024"
-# 1.93 floor forced by catgraph v0.5.0's deep_causality_num 0.4.1 (re-pin PR).
+# 1.93 floor forced by catgraph's deep_causality_num 0.4.1 pin (unchanged at
+# the v0.6.0 re-pin — catgraph holds num =0.4.1).
 rust-version = "1.93.0"
 description = "Reference implementation of agentic coalitions in Rust — tokio::sync task seams, temporal hypergraph topology, coalition algorithms, and optional Active Inference decision-making"
 license = "MIT OR Apache-2.0"
@@ -26,7 +27,7 @@ serde = { version = "1.0", features = ["derive"] }
 # private). Tag kept in lockstep with `catgraph-magnitude` (one repo, one
 # checkout — a tag split duplicates catgraph/catgraph-applied/itertools
 # compile units).
-catgraph-applied = { git = "https://github.com/sustia-llc/catgraph", tag = "v0.5.0" }
+catgraph-applied = { git = "https://github.com/sustia-llc/catgraph", tag = "v0.6.0" }
 rayon = "1.12"
 tokio-rayon = "2.1"
 
@@ -45,7 +46,7 @@ nalgebra = { version = "0.35", optional = true }
 # Optional: categorical magnitude decision strategy (coalition diversity via
 # catgraph's enriched-category magnitude). HTTPS since catgraph went public;
 # tag in lockstep with `catgraph-applied` above.
-catgraph-magnitude = { git = "https://github.com/sustia-llc/catgraph", tag = "v0.5.0", optional = true }
+catgraph-magnitude = { git = "https://github.com/sustia-llc/catgraph", tag = "v0.6.0", optional = true }
 
 # Optional: durable coalition decision messaging (two-tier SurrealDB bus:
 # CHANGEFEED log + LIVE wake-up + cursor catch-up; at-least-once,

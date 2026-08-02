@@ -21,6 +21,36 @@ Planned work — issue-tracked (details in [`CLAUDE.md`](./CLAUDE.md)
 - **[#25]** metrics example, reframed onto the `CoalitionService` decision
   path / topology events.
 
+## [0.21.0] — 2026-08-02
+
+The EQ3 pin-first release: both catgraph deps re-pinned one minor ahead
+with a clean drift check, so the EQ3 latency-re-match registration
+([#69]) is born on the final pins. The v0.6.0 surfaces koalisi will
+consume in EQ3: `value_with_scratch` (cg#33 allocation-free sweeps),
+`value_with_report` zero-diversity proofs (cg#153), and the off-default
+`f64-fast` factorization path (cg#165).
+
+### Changed
+- **`catgraph-applied` + `catgraph-magnitude` deps re-pinned `v0.5.0` →
+  `v0.6.0` in lockstep** (one checkout — the K6 rule). The v0.6.0
+  breaking set is applied-side (cg#202 CC-metric re-pin, cg#185
+  symmetric cuts) and does not touch koalisi's consumption (the
+  Hypergraph container + the magnitude evaluation path); magnitude's new
+  EQ3 surfaces are additive and `value_with` is byte-identical upstream.
+  Drift check CLEAN: all six feature suites at baseline counts
+  (103/159/125/181/123/146, incl. the #18/#30 replay parity gate),
+  default clippy `--all-targets` clean, and the frozen K4 battery
+  (`strategy_comparison` Parts 1–6, `--release`) reproduced with every
+  quality median, churn column, seed table, and verdict byte-identical
+  to a fresh `v0.5.0` baseline — the only diff lines are latency
+  measurements, the column the K4 protocol has always excluded from
+  determinism.
+- Lockfile: exactly the three catgraph workspace packages moved
+  (`catgraph`, `catgraph-applied`, `catgraph-magnitude` 0.5.0 → 0.6.0);
+  catgraph's `deep_causality_num =0.4.1` pin is unchanged, so MSRV stays
+  1.93. Rider: the lockfile's own `koalisi` version line was stale at
+  0.19.0 (the 0.20.0 bump never regenerated it) — refreshed here.
+
 ## [0.20.0] — 2026-08-01
 
 The pre-EQ4 adoption release: `aif` re-pinned one minor ahead with a clean
@@ -409,6 +439,7 @@ rematch) that landed on `main` after 0.11.0.
 [#44]: https://github.com/sustia-llc/koalisi/issues/44
 [#61]: https://github.com/sustia-llc/koalisi/issues/61
 [#63]: https://github.com/sustia-llc/koalisi/issues/63
+[#69]: https://github.com/sustia-llc/koalisi/issues/69
 
 ## [0.11.0] — 2026-07-14
 
