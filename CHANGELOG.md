@@ -21,6 +21,51 @@ Planned work — issue-tracked (details in [`CLAUDE.md`](./CLAUDE.md)
 - **[#25]** metrics example, reframed onto the `CoalitionService` decision
   path / topology events.
 
+## [0.24.0] — 2026-08-03
+
+The EQ4 run release ([#72]): the registered typed-roles battery, executed
+under full discipline (owner design-lock D1–D9 → prereg + pre-run
+Amendments 1–2 → 3-lens review with every finding applied → official run
+on fresh seeds 240..270). **Verdict: `VALIDATED (typed roles)`** — the
+first VALIDATED registration in the K4 lineage since v5, and the first
+typed-vs-untyped contrast: `mag-typed` (T2 ρ-modulation at the oracle
+identity table) posts median PRIMARY 0.1810 vs frozen `mag` 0.0501
+(3.61×, bar 1.25×), strictly superior 30/30 (bar 18/30), with every gate
+holding (X-identity ×2, S-fib ≤ 3.8e-16 vs 1e-9 tol, X-battery
+byte-identical). Mechanism: the arm never sees tags — its one lever is
+refusing to skeletalize cross-role members (role-diverse redundancy
+retained, not coverage routing); it converts 43.5 % of the tag-informed
+E-ceil reference margin. Report `docs/ab-report-K4-eq4-typed-roles.md`
+(15-item ledger); prereg + Amendments
+`docs/prereg-K4-eq4-typed-roles.md`.
+
+### Added
+- **`MagnitudePolicy::with_role_modulation` /
+  `MagnitudeValueCalculator::with_role_modulation`** (feature `magnitude`,
+  no new deps): opt-in typed arm — substitutability couplings modulated by
+  `ρ(role_i, role_j)` via catgraph `coalition_typed::modulate`, evaluated
+  FRESH both sides (no evaluator cache — the K6 key `(required,
+  member_masks)` would collide same-mask/different-role agents); identity
+  default routes structurally to the untyped path (bit-identical by
+  construction); irrelevant agents excluded BEFORE modulation; missing
+  role ⇒ decline-with-warn; `with_eq3_levers`/`with_evaluator_leave`
+  documented inert under a typed config. `RoleId`/`RoleModulation`
+  re-exported from `koalisi::decision`. 6 unit tests.
+- `examples/strategy_comparison.rs` **Part 8** — the registered EQ4
+  battery (v2t role-matched world + feasibility re-draw, four arms,
+  X-identity/S-fib gates in-code, E-deg/E-ceil/E-ρq(+inv)/E-T3
+  exploratory legs with measured caveat counters, T1 `role_shares`
+  instrumentation). Parts 1–7 byte-identical (X-battery gate held against
+  a fresh v0.23.0 baseline).
+
+### Notes
+- The typed arm is opt-in; the demonstrated default arm is unchanged (the
+  #54 decision stands — adopting a typed default would be a new
+  registration).
+- Suites: 103 default / 159 decision / **132** magnitude / **188**
+  decision,magnitude / **140** magnitude-fast / 123 persistence / **153**
+  persistence,magnitude; example binary **32 (+1 ignored)**.
+
 ## [0.23.0] — 2026-08-03
 
 The EQ4 pin-first release: both catgraph deps re-pinned one minor ahead

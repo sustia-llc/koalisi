@@ -55,6 +55,34 @@ forex domain since removed).
 
 ### Done
 
+- **EQ4 typed-roles RUN — v0.24.0 (2026-08-03, #72): `VALIDATED (typed
+  roles)`** — the FIRST validated registration in the K4 lineage since
+  v5, and the first typed-vs-untyped contrast. Full discipline (owner
+  design-lock D1–D9 on #72 BEFORE prereg; prereg e2221c8 BEFORE
+  implementation; pre-run Amendment 1 cd46c9d — typed Scope-A,
+  E-ρq anti-alignment note, disclosures — and Amendment 2 f53a60a — §2
+  gloss erratum, re-draw/cap pins, owner-approved E-ρq-inv cell, E-T3
+  counters, interpretation corrections; 3-lens review 1 blocking + 5
+  important + ~9 minor, ALL applied or ledgered, correctness lens 0,
+  BEFORE the run). Official run seeds 240..270: **H-T PASS both
+  conjuncts** (mag-typed 0.1810 vs mag 0.0501 = 3.61× over the 1.25×
+  bar; superior 30/30 vs bar 18); gates X-identity ×2 / S-fib
+  (≤3.8e-16 vs 1e-9 tol) / X-battery (Parts 1–7 byte-identical) all
+  held. Mechanism: the arm never sees tags — its ONE lever is refusing
+  to skeletalize cross-role members (ρ = δ zeroes cross-role coupling);
+  the win is role-diverse redundancy RETAINED, not coverage routing;
+  conversion fraction 43.5 % of the tag-informed E-ceil reference
+  margin. Exploratory: E-deg graceful (3.61×→3.34×→2.34×); E-ρq
+  anti-aligned 0.36×, inverse table recovers only to 0.79× (alignment
+  partially recoverable inside T2); E-T3 0.83× with the caveat MEASURED
+  — all-neutral collapse structurally impossible, every unit merge is
+  the upstream powf trap (5265 in one leg). Library:
+  `with_role_modulation` opt-in (identity default = untyped arm,
+  bit-identical by construction); #54 default-arm decision UNTOUCHED.
+  Report `docs/ab-report-K4-eq4-typed-roles.md` (15-item ledger). See
+  **gotcha 28**. Suites: 132 magnitude / 188 decision,magnitude / 140
+  magnitude-fast / 153 persistence,magnitude; example binary 32 (+1).
+  Seeds consumed: 240..270; 90..120 + 150..180 still reserved.
 - **catgraph re-pin `v0.6.0` ×2 → `v0.7.0` — v0.23.0 (2026-08-03)**: the
   EQ4 pin-first step — the typed-roles registration
   ([#72](https://github.com/sustia-llc/koalisi/issues/72)) must be born
@@ -645,11 +673,11 @@ forex domain since removed).
   |---|---|---|
   | Default | 103 | `cargo test` |
   | `--features decision` | 159 | `cargo test --features decision` |
-  | `--features magnitude` | 126 | `cargo test --features magnitude` |
-  | `--features decision,magnitude` | 182 | `cargo test --features decision,magnitude` |
-  | `--features magnitude-fast` | 134 | `cargo test --features magnitude-fast` (EQ3 L2+L3 + probes) |
+  | `--features magnitude` | 132 | `cargo test --features magnitude` |
+  | `--features decision,magnitude` | 188 | `cargo test --features decision,magnitude` |
+  | `--features magnitude-fast` | 140 | `cargo test --features magnitude-fast` (EQ3 L2+L3 + probes) |
   | `--features persistence` | 123 | `cargo test --features persistence` |
-  | `--features persistence,magnitude` | 147 (incl. the #18/#30 replay parity gate; was mis-recorded 146 at v0.22.0) | `cargo test --features persistence,magnitude` |
+  | `--features persistence,magnitude` | 153 (incl. the #18/#30 replay parity gate) | `cargo test --features persistence,magnitude` |
   | `--features durable` | +1 container-backed restart test; needs Docker | `cargo test --features durable` |
   | All examples | exit 0 | see Reproducers below |
 
@@ -745,7 +773,9 @@ koalisi/
 │   ├── prereg-K4-routing-corrected.md      #63 pre-registration (block-level routing; legs A/C/L; + pre-impl tie-break amendment)
 │   ├── ab-report-K4-routing-corrected.md   #63 run — FALSIFIED (block-routing), mechanism-scoped (window vs lattice); leg C DEGENERATE (4th gotcha-21 mechanism); leg L ordering 30/30 (gotcha 26)
 │   ├── prereg-K4-eq3-latency-rematch.md    #69 EQ3 pre-registration (+ pre-run Amendment 1: L2 behind toggle, H-par′, skeletal route; result appended)
-│   └── ab-report-K4-eq3-latency-rematch.md #69 run — FALSIFIED (latency re-match); empty-band CONFIRMED; L3 ζ-asymmetry ceiling; 10-item ledger (gotcha 27)
+│   ├── ab-report-K4-eq3-latency-rematch.md #69 run — FALSIFIED (latency re-match); empty-band CONFIRMED; L3 ζ-asymmetry ceiling; 10-item ledger (gotcha 27)
+│   ├── prereg-K4-eq4-typed-roles.md        #72 EQ4 pre-registration (+ pre-run Amendments 1–2: typed Scope-A, E-ρq-inv cell, E-T3 counters; result appended)
+│   └── ab-report-K4-eq4-typed-roles.md     #72 run — VALIDATED (typed roles), first since v5; 43.5% conversion; E-ρq anti-alignment + inverse cell; 15-item ledger (gotcha 28)
 └── tests/
     ├── topology_test.rs                    12 tests
     ├── algorithms_test.rs                  18 tests (incl. 3 feedback-loop/seeding tests, #41)
@@ -1199,6 +1229,40 @@ These cost time during the build; future-me should not relearn them.
       per leave, no registered lever touches it; K6's variant-B says the
       naive incremental form is SLOWER — engine-side design, own
       registration).
+
+28. **Typed-arm contracts (#72, v0.24.0) — rely on these.**
+    - **`with_role_modulation` is opt-in and the identity default is
+      structural.** No typed config ⇒ the pre-existing untyped code path
+      verbatim (bit-identity by construction, not by test). The typed
+      path evaluates FRESH both sides — no evaluator cache, no
+      knife-edge band — because the K6 cache key `(required,
+      member_masks)` would collide same-mask/different-role agents.
+      Don't "optimize" the cache back in without extending the key AND
+      a new registration; latency (~3× untyped) is the documented cost.
+    - **ρ-modulation is diversity accounting, not coverage routing.**
+      The arm never sees role tags; `ρ = δ` only prevents cross-role
+      members from skeletalizing. Never describe it as "routing
+      coverage to the right role" (the gotcha-24 discipline). Its win
+      is retained role-diverse redundancy — measured 43.5 % of the
+      tag-informed E-ceil reference margin, so most of the planted
+      signal needs tag knowledge the T2 lever cannot express.
+    - **T2 modulation is mismatched with cohesion-rewarding worlds.**
+      E-ρq: the "give the arm the true table" configuration is
+      structurally ANTI-aligned (0.36×) — ρ < 1 reads as diversity and
+      magnitude rewards it; the inverse table recovers only to 0.79×.
+      Don't reach for ρ-modulation when quality rewards role cohesion.
+    - **E-T3's exact-1.0 merges are the upstream `powf` trap, not the
+      neutral-element convention** — all-channels-neutral is
+      structurally impossible on relevance-filtered streams (measured:
+      0 vs 5 265). Any future channel-collapse arm must count both.
+    - `with_eq3_levers` / `with_evaluator_leave` are INERT while a typed
+      config is set (typed dispatch precedes both) — documented, not
+      type-enforced; a combined configuration compiles and silently
+      ignores them.
+    - Library missing-role handling is decline-with-warn: a
+      systematically incomplete role map FREEZES membership (join
+      declines AND leave declines). Harness-side, assert full-pool
+      role-map coverage (Part 8 does).
 
 ## Reproducers
 
