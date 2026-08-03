@@ -21,6 +21,40 @@ Planned work — issue-tracked (details in [`CLAUDE.md`](./CLAUDE.md)
 - **[#25]** metrics example, reframed onto the `CoalitionService` decision
   path / topology events.
 
+## [0.23.0] — 2026-08-03
+
+The EQ4 pin-first release: both catgraph deps re-pinned one minor ahead
+with a clean drift check, so the EQ4 typed-roles registration
+([#72](https://github.com/sustia-llc/koalisi/issues/72)) is born on the
+final pins. The v0.7.0 surface koalisi will consume in EQ4 is cg#211
+`coalition_typed` — T1 `role_shares` diagnostics, T2
+`RoleModulation`/`modulate` + `role_grid`/`RoleFibrationProof`, T3
+`ChannelCouplings::collapse(θ)` — the sole delta over v0.6.0, purely
+additive (magnitude-only; no existing signature changed).
+
+### Changed
+- **`catgraph-applied` + `catgraph-magnitude` deps re-pinned `v0.6.0` →
+  `v0.7.0` in lockstep** (one checkout — the K6 rule). Drift check
+  CLEAN: all seven feature suites at baseline counts
+  (103/159/126/182/134/123/147, incl. the #18/#30 replay parity gate),
+  default clippy `--all-targets` clean, and the frozen K4 battery
+  (`strategy_comparison` Parts 1–7, `--release`) reproduced with every
+  quality median, churn column, seed table, and verdict byte-identical
+  to a fresh `v0.6.0` baseline — the only diff lines are latency
+  measurements, the column the K4 protocol has always excluded from
+  determinism.
+- Lockfile: exactly the three catgraph workspace packages moved
+  (`catgraph`, `catgraph-applied`, `catgraph-magnitude` 0.6.0 → 0.7.0);
+  catgraph's `deep_causality_num =0.4.1` pin is unchanged, so MSRV stays
+  1.93.
+
+### Fixed
+- Suite-count record: `persistence,magnitude` is **147**, not the 146
+  carried since v0.21.0 — EQ3's +1 `magnitude`-feature lib test lands in
+  this suite too and the count was never re-measured at v0.22.0.
+  Verified identical on the pre-change tree (documentation correction,
+  not drift).
+
 ## [0.22.0] — 2026-08-02
 
 The EQ3 run release ([#69]): the registered cg latency re-match, executed
