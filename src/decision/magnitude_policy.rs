@@ -266,7 +266,13 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
-use catgraph_magnitude::{CatgraphError, CoalitionEvaluator, EvalScratch, RoleId, RoleModulation};
+use catgraph_magnitude::{CatgraphError, CoalitionEvaluator, EvalScratch};
+// The typed-arm configuration types (koalisi #72, EQ4). Re-exported so callers
+// reach them as `koalisi::decision::{RoleId, RoleModulation}` without depending
+// on `catgraph-magnitude` directly — the same courtesy the `decision` feature
+// extends to the `aif` belief structures (issue #2). Both are plain data:
+// `RoleId` is a `usize` alias, `RoleModulation` a validated `[0, 1]` table.
+pub use catgraph_magnitude::{RoleId, RoleModulation};
 #[cfg(feature = "magnitude-fast")]
 use catgraph_magnitude::{Coalition, HomMap, LawvereMetricSpace, UnitInterval, ZeroDiversityProof};
 

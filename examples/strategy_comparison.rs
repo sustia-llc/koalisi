@@ -83,19 +83,19 @@
 )]
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use catgraph_magnitude::{
-    CatgraphError, ChannelCouplings, CoalitionEvaluator, RoleId, RoleModulation, role_grid,
-};
+use catgraph_magnitude::{CatgraphError, ChannelCouplings, CoalitionEvaluator, role_grid};
 use koalisi::algorithms::{
     AgentCapabilities, CoalitionStructure, FeedbackCalculator, FeedbackStore, PopulationConfig,
     SynergisticCalculator, ValueCalculator, search,
 };
 use koalisi::decision::{
     AifDecisionPolicy, AifMmDecisionPolicy, CoalitionDecisionPolicy, CouplingModel, Decision,
-    DecisionContext, MagnitudePolicy, PersistentAifArm, PersistentAifConfig, ThresholdPolicy,
-    TrialBoundary,
+    DecisionContext, MagnitudePolicy, PersistentAifArm, PersistentAifConfig, RoleId,
+    RoleModulation, ThresholdPolicy, TrialBoundary,
 };
 // Part 7 (koalisi #69) EQ3 instrumentation surface + the upstream certificate /
 // factorization enums it reports. Feature-gated exactly like the `mag-eq3` arm.
@@ -6696,6 +6696,39 @@ fn p8_untyped_covered(inst: &TypedInstance, members: &[usize], required: u32) ->
     (union & required).count_ones()
 }
 
+/// Fraction of a task's required bits that are held by workers of EXACTLY ONE
+/// role in the pool — the tag-conditioning disclosure (review finding).
+///
+/// The feasibility re-draw conditions tags on the pool, not just on task size:
+/// if only one role holds bit `b`, every feasible tag for `b` IS that role, so
+/// the bit is decided before any arm runs. On such a bit role-matched coverage
+/// coincides with untyped coverage, and the typed arm has no edge to gain —
+/// which makes the direction CONSERVATIVE for H-T (the contest happens only on
+/// the remaining bits).
+fn p8_single_role_fraction(inst: &TypedInstance, required: u32) -> f64 {
+    let bits: Vec<usize> = (0..UNIVERSE)
+        .filter(|&b| required & (1u32 << b) != 0)
+        .collect();
+    if bits.is_empty() {
+        return 0.0;
+    }
+    let single = bits
+        .iter()
+        .filter(|&&b| {
+            let mut roles: Vec<RoleId> = inst
+                .agents
+                .iter()
+                .filter(|a| a.caps & (1u32 << b) != 0)
+                .filter_map(|a| inst.roles.get(a.id).copied())
+                .collect();
+            roles.sort_unstable();
+            roles.dedup();
+            roles.len() == 1
+        })
+        .count();
+    single as f64 / bits.len() as f64
+}
+
 /// Mean pairwise `ρ_world(role_i, role_j)` over the final members (E-ρq, prereg
 /// §5): the mean over ordered pairs `i ≠ j`, `1.0` for a singleton (no pair to
 /// average) and `0.0` for an empty coalition (which scores `cov_eff = 0` anyway).
@@ -6874,23 +6907,38 @@ fn p8_run_seed(
     }
 }
 
-/// A square `R × R` table with an exact `1.0` diagonal and a uniform
-/// off-diagonal — the shape every registered Part 8 table takes (the oracle
-/// `ρ = δ` at `off = 0.0`, the X-identity `ρ ≡ 1` at `off = 1.0`, the E-deg cells
-/// at `0.25`/`0.5`, and the E-ρq planted world table at `P8_RHOQ_OFF`).
-fn p8_rho_table(off: f64) -> [[f64; P8_ROLES]; P8_ROLES] {
+/// A square `R × R` table with a uniform diagonal and a uniform off-diagonal.
+///
+/// Every Part 8 table is of this shape: the oracle `ρ = δ` at `(1, 0)`, the
+/// X-identity `ρ ≡ 1` at `(1, 1)`, the E-deg cells at `(1, 0.25)` / `(1, 0.5)`,
+/// the E-ρq planted world table at `(1, P8_RHOQ_OFF)`, and the E-ρq-inv cell
+/// (Amendment 2) at the FLIPPED `(P8_RHOQ_OFF, 1)`.
+fn p8_rho_table_at(diag: f64, off: f64) -> [[f64; P8_ROLES]; P8_ROLES] {
     let mut t = [[off; P8_ROLES]; P8_ROLES];
     for (i, row) in t.iter_mut().enumerate() {
-        row[i] = 1.0;
+        row[i] = diag;
     }
     t
 }
 
-/// [`p8_rho_table`] as a validated upstream [`RoleModulation`].
-fn p8_rho(off: f64) -> RoleModulation {
-    let rows: Vec<Vec<f64>> = p8_rho_table(off).iter().map(|r| r.to_vec()).collect();
+/// [`p8_rho_table_at`] with the `1.0` diagonal every registered table carries.
+fn p8_rho_table(off: f64) -> [[f64; P8_ROLES]; P8_ROLES] {
+    p8_rho_table_at(1.0, off)
+}
+
+/// [`p8_rho_table_at`] as a validated upstream [`RoleModulation`].
+fn p8_rho_at(diag: f64, off: f64) -> RoleModulation {
+    let rows: Vec<Vec<f64>> = p8_rho_table_at(diag, off)
+        .iter()
+        .map(|r| r.to_vec())
+        .collect();
     RoleModulation::new(rows)
         .expect("invariant: a literal square table whose entries are all in [0, 1]")
+}
+
+/// [`p8_rho_at`] with the `1.0` diagonal.
+fn p8_rho(off: f64) -> RoleModulation {
+    p8_rho_at(1.0, off)
 }
 
 /// The `mag-typed` arm for one instance: the library typed policy over a role map
@@ -7179,6 +7227,41 @@ impl CoalitionDecisionPolicy for TypedRelevanceMag {
 // through the upstream declared homomorphism `ChannelCouplings::collapse`.
 // ---------------------------------------------------------------------------
 
+/// Decision-INERT tallies for the E-T3 caveat (review finding: the neutral-`1.0`
+/// convention was asserted as the account without ever being measured).
+///
+/// Counted over every channel entry the leg builds — i.e. over EVALUATIONS
+/// (`should_join` pays two, `should_leave` two), not over decisions. Nothing here
+/// is read back into a value: the counters are written after the coupling has
+/// already been computed.
+#[derive(Default)]
+struct P8ChannelCounters {
+    /// Channel entries built, `(i, j, c)` triples.
+    entries: AtomicUsize,
+    /// Of those, entries whose denominator `rel_i ∩ tagged(c)` was EMPTY and
+    /// therefore took the registered neutral `1.0`.
+    neutral: AtomicUsize,
+    /// Collapsed couplings that came out exactly `1.0` with EVERY channel
+    /// neutral — "no evidence anywhere", the caveat's pure case.
+    unit_all_neutral: AtomicUsize,
+    /// Collapsed couplings that came out exactly `1.0` with at least one
+    /// NON-neutral channel — the upstream `powf` trap (a strictly-sub-1 base can
+    /// round up to exactly `1.0`), which manufactures a skeletal merge between
+    /// agents no single channel perfectly couples.
+    unit_rounded: AtomicUsize,
+}
+
+impl P8ChannelCounters {
+    fn get(&self) -> (usize, usize, usize, usize) {
+        (
+            self.entries.load(Ordering::Relaxed),
+            self.neutral.load(Ordering::Relaxed),
+            self.unit_all_neutral.load(Ordering::Relaxed),
+            self.unit_rounded.load(Ordering::Relaxed),
+        )
+    }
+}
+
 /// Channel-collapsed coalition magnitude at the pinned `t = 1`.
 ///
 /// `masks` are the [`relevant_masks`] survivors (untyped relevance). For each
@@ -7188,6 +7271,9 @@ impl CoalitionDecisionPolicy for TypedRelevanceMag {
 /// product collapse makes "no evidence" neutral-high, biasing cross-role coupling
 /// upward — one reason this leg is exploratory).
 ///
+/// `counters`, when supplied, tallies that caveat's incidence. It is written
+/// only after each value is already fixed, so it cannot influence a decision.
+///
 /// # Errors
 ///
 /// Propagates upstream validation (`ChannelCouplings::set` / `collapse`) and any
@@ -7196,6 +7282,7 @@ fn p8_channel_magnitude(
     masks: &[u32],
     required: u32,
     tags: &[RoleId; UNIVERSE],
+    counters: Option<&P8ChannelCounters>,
 ) -> Result<f64, CatgraphError> {
     if masks.is_empty() {
         return Ok(0.0);
@@ -7206,6 +7293,9 @@ fn p8_channel_magnitude(
         .collect();
 
     let mut channels = ChannelCouplings::new(P8_CHANNELS)?;
+    // Pairs whose every channel took the neutral `1.0`, so an exact-`1.0`
+    // collapse there is the caveat rather than a `powf` rounding artifact.
+    let mut all_neutral: HashSet<(usize, usize)> = HashSet::new();
     for (i, &from) in masks.iter().enumerate() {
         for (j, &to) in masks.iter().enumerate() {
             if i == j {
@@ -7213,23 +7303,43 @@ fn p8_channel_magnitude(
             }
             let rel_i = from & required;
             let rel_j = to & required;
+            let mut neutral_here = 0usize;
             let v: Vec<f64> = tagged
                 .iter()
                 .map(|&t| {
                     let denom = (rel_i & t).count_ones();
                     if denom == 0 {
+                        neutral_here += 1;
                         1.0
                     } else {
                         f64::from((rel_i & rel_j & t).count_ones()) / f64::from(denom)
                     }
                 })
                 .collect();
+            if let Some(c) = counters {
+                c.entries.fetch_add(P8_CHANNELS, Ordering::Relaxed);
+                c.neutral.fetch_add(neutral_here, Ordering::Relaxed);
+            }
+            if neutral_here == P8_CHANNELS {
+                all_neutral.insert((i, j));
+            }
             channels.set(i, j, v)?;
         }
     }
 
     let theta = [1.0 / P8_CHANNELS as f64; P8_CHANNELS];
     let couplings = channels.collapse(&theta)?;
+    if let Some(c) = counters {
+        for &(from, to, p) in &couplings {
+            if p == 1.0 {
+                if all_neutral.contains(&(from, to)) {
+                    c.unit_all_neutral.fetch_add(1, Ordering::Relaxed);
+                } else {
+                    c.unit_rounded.fetch_add(1, Ordering::Relaxed);
+                }
+            }
+        }
+    }
     catgraph_magnitude::coalition_magnitude_from_couplings(&agents, &couplings, &agents, 1.0)
 }
 
@@ -7237,6 +7347,10 @@ fn p8_channel_magnitude(
 struct ChannelMagnitudePolicy {
     tags: [RoleId; UNIVERSE],
     join_margin: f64,
+    /// Shared with every other task's policy of the same leg, so the printed
+    /// tallies cover the whole battery. `Arc` because
+    /// [`CoalitionDecisionPolicy`] is `Send + Sync`.
+    counters: Arc<P8ChannelCounters>,
 }
 
 impl CoalitionDecisionPolicy for ChannelMagnitudePolicy {
@@ -7252,8 +7366,8 @@ impl CoalitionDecisionPolicy for ChannelMagnitudePolicy {
         with.push(agent);
         let masks_with = relevant_masks(&with, required);
         join_decision(
-            p8_channel_magnitude(&masks_with, required, &self.tags),
-            p8_channel_magnitude(&masks_without, required, &self.tags),
+            p8_channel_magnitude(&masks_with, required, &self.tags, Some(&self.counters)),
+            p8_channel_magnitude(&masks_without, required, &self.tags, Some(&self.counters)),
             self.join_margin,
         )
     }
@@ -7274,8 +7388,8 @@ impl CoalitionDecisionPolicy for ChannelMagnitudePolicy {
             .collect();
         let masks_out = relevant_masks(&without, required);
         leave_decision(
-            p8_channel_magnitude(&masks_in, required, &self.tags),
-            p8_channel_magnitude(&masks_out, required, &self.tags),
+            p8_channel_magnitude(&masks_in, required, &self.tags, Some(&self.counters)),
+            p8_channel_magnitude(&masks_out, required, &self.tags, Some(&self.counters)),
         )
     }
 }
@@ -7661,7 +7775,11 @@ fn part8_eq4_typed_roles() {
     );
     println!();
     println!(
-        "- **Cap headroom:** the budget is {P8_REDRAW_CAP} attempts per TASK and the worst single task in this run needed **{worst_attempts}** ({:.1}% of the budget). Exceeding the budget panics the run as RUN-INVALID rather than silently biasing the draw.",
+        "- **What a re-draw replaces:** the FULL v2 task draw — the size `r ∈ 2..=8`, the `r` distinct required bits, and then all `r` role tags, all off the same stream. It does NOT re-tag a kept requirement, and it never re-draws the arrival order (which is role-independent and is drawn once in the v2 prefix)."
+    );
+    println!(
+        "- **Cap headroom:** the budget is {P8_REDRAW_CAP} **total attempts per TASK** — the initial draw is attempt 1, so the budget allows {} re-draws — and the worst single task in this run needed **{worst_attempts}** attempts ({:.1}% of the budget). Exceeding it panics the run as RUN-INVALID rather than silently biasing the draw.",
+        P8_REDRAW_CAP - 1,
         100.0 * worst_attempts as f64 / P8_REDRAW_CAP as f64
     );
     println!(
@@ -7671,6 +7789,35 @@ fn part8_eq4_typed_roles() {
         median(v2t_req.clone()),
         mean(&v2_req),
         median(v2_req.clone())
+    );
+    // Tag conditioning: the re-draw also conditions the TAGS on the pool, not
+    // only the task size.
+    let per_seed_single: Vec<f64> = insts
+        .iter()
+        .map(|inst| {
+            let f: Vec<f64> = inst
+                .tasks
+                .iter()
+                .map(|t| p8_single_role_fraction(inst, t.required))
+                .collect();
+            mean(&f)
+        })
+        .collect();
+    let single_all: Vec<f64> = insts
+        .iter()
+        .flat_map(|inst| {
+            inst.tasks
+                .iter()
+                .map(|t| p8_single_role_fraction(inst, t.required))
+                .collect::<Vec<f64>>()
+        })
+        .collect();
+    println!(
+        "- **Tag conditioning (disclosure):** the re-draw conditions TAGS on the pool as well. A required bit held by workers of exactly ONE role has its tag forced — every feasible tag for it is that role — so on such a bit role-matched coverage coincides with untyped coverage and the bit is contest-dead. Measured here: **{:.1}%** of required bits across all {} tasks (per-seed mean {:.1}% … {:.1}%). The direction is CONSERVATIVE for H-T — the typed arm can only earn its margin on the remaining bits — and re-draw intensity anti-correlates with pool size, so the small-pool seeds carry the most conditioning.",
+        100.0 * mean(&single_all),
+        single_all.len(),
+        100.0 * per_seed_single.iter().copied().fold(f64::INFINITY, f64::min),
+        100.0 * per_seed_single.iter().copied().fold(f64::NEG_INFINITY, f64::max)
     );
     println!();
 
@@ -7737,6 +7884,11 @@ fn part8_eq4_typed_roles() {
         mag.iter().map(|r| r.success_rate).sum::<f64>() / n_seeds as f64,
         typed.iter().map(|r| r.success_rate).sum::<f64>() / n_seeds as f64
     );
+    println!(
+        "- **Mechanism (what the arm can and cannot do):** `mag-typed` never sees a tag — its relevance masks stay untyped by registration (prereg §4), so it cannot route coverage toward the role a bit asks for. Its ONE lever is refusing to treat cross-role members as substitutes: `ρ = δ` zeroes their coupling, so they never skeletalize into a single effective agent and each keeps its own diversity weight. The arm therefore RETAINS role-diverse redundancy that the untyped arm collapses away, and the win shows up as role-matched completion (mean success {:.2} → {:.2}) rather than as smarter coverage selection.",
+        mag.iter().map(|r| r.success_rate).sum::<f64>() / n_seeds as f64,
+        typed.iter().map(|r| r.success_rate).sum::<f64>() / n_seeds as f64
+    );
     println!();
 
     let verdict = if h_t {
@@ -7744,10 +7896,10 @@ fn part8_eq4_typed_roles() {
     } else {
         "FALSIFIED (typed roles)"
     };
-    println!("## VERDICT: **{verdict}** — PRELIMINARY");
+    println!("## VERDICT: **{verdict}**");
     println!();
     println!(
-        "_Grammar (prereg §7): `VALIDATED (typed roles)` = both H-T conjuncts with every §6 gate holding · `FALSIFIED (typed roles)` = gates hold, either conjunct fails · `RUN-INVALID` = any §6 gate fails. This run: conjunct 1 {} · conjunct 2 {} · gates X-identity {} / S-fib {}. **PRELIMINARY**: the official verdict is the post-review run — no bar moves either way, and the v1/v2 K4 verdicts, EQ3's verdict, and the #54 arm question (mag = demonstrated default, FINAL) are untouched regardless of outcome._",
+        "_Grammar (prereg §7): `VALIDATED (typed roles)` = both H-T conjuncts with every §6 gate holding · `FALSIFIED (typed roles)` = gates hold, either conjunct fails · `RUN-INVALID` = any §6 gate fails. This run: conjunct 1 {} · conjunct 2 {} · gates X-identity {} / S-fib {}. No bar moves either way, and the v1/v2 K4 verdicts, EQ3's verdict, and the #54 arm question (mag = demonstrated default, FINAL) are untouched regardless of outcome (prereg §7 pre-commitments)._",
         pass(h_t_median),
         pass(h_t_consistency),
         pass(true),
@@ -7794,10 +7946,10 @@ fn part8_eq4_typed_roles() {
         },
         P8Metric::Typed,
     );
-    println!("## E-ceil (registered exploratory, non-gating) — typed-relevance ceiling");
+    println!("## E-ceil (registered exploratory, non-gating) — typed-relevance reference arm");
     println!();
     println!(
-        "_An example-side arm that re-types the relevance masks themselves — `rel_i = caps_i ∩ (required bits tagged role_i)` — and then runs the ORDINARY untyped substitutability couplings over those masks (no ρ), evaluated fresh through the example's `magnitude_at_t` at the pinned `t = 1`. It is the arm that fully understands role-matching, so it measures the total convertible signal; the gap between it and `mag-typed` mechanism-scopes any H-T failure (valuation-layer limit vs no signal present)._"
+        "_An example-side arm that re-types the relevance masks themselves — `rel_i = caps_i ∩ (required bits tagged role_i)` — and then runs the ORDINARY untyped substitutability couplings over those masks (no ρ), evaluated fresh through the example's `magnitude_at_t` at the pinned `t = 1`. It is the **fully-informed reference arm within the magnitude family**: it reads the tags the registered lever deliberately withholds. It is NOT a supremum — no oracle anchor exists at these pool sizes, and nothing rules out a non-magnitude arm scoring higher — so read it as a reference margin, not a ceiling on what is achievable._"
     );
     println!();
     println!(
@@ -7809,6 +7961,17 @@ fn part8_eq4_typed_roles() {
     p8_row("mag", &mag, &mag, &mag_lat);
     p8_row("mag-typed", &typed, &mag, &typed_lat);
     p8_row("E-ceil", &ceil, &mag, &ceil_lat);
+    println!();
+    let ceil_med = median(p8_primaries(&ceil));
+    let reference_margin = ceil_med - mag_med;
+    let converted = if reference_margin.abs() > 0.0 {
+        format!("{:.1}%", 100.0 * (typed_med - mag_med) / reference_margin)
+    } else {
+        "n/a (reference margin is zero)".to_owned()
+    };
+    println!(
+        "- **Conversion fraction:** `(mag-typed − mag) / (E-ceil − mag)` = ({typed_med:.4} − {mag_med:.4}) / ({ceil_med:.4} − {mag_med:.4}) = **{converted}**. The ρ-modulation lever converts that fraction of the tag-informed reference margin; the remainder requires tag knowledge the registered lever deliberately withholds (prereg §4 keeps the relevance masks untyped precisely so the test can fail). Medians, so the ratio is a summary contrast, not a per-seed decomposition."
+    );
     println!();
 
     // --- E-ρq ----------------------------------------------------------------
@@ -7823,10 +7986,20 @@ fn part8_eq4_typed_roles() {
         |inst| Box::new(p8_typed_policy(inst, &rho_q)) as Box<dyn CoalitionDecisionPolicy>,
         P8Metric::RhoQ,
     );
+    let rho_inv = p8_rho_at(P8_RHOQ_OFF, 1.0);
+    let (rq_inv, rq_inv_lat) = p8_battery(
+        &insts,
+        |inst| Box::new(p8_typed_policy(inst, &rho_inv)) as Box<dyn CoalitionDecisionPolicy>,
+        P8Metric::RhoQ,
+    );
     println!("## E-ρq (registered exploratory, non-gating) — the ρ-structured quality world");
     println!();
     println!(
-        "_Same pool and same tasks, a different WORLD (prereg §5, D1c): coverage is UNTYPED and task quality is `cov_eff × mean pairwise ρ_world(role_i, role_j)` over the final members (singleton ⇒ `1.0`), with `ρ_world` the planted symmetric table (`ρ(r,r) = 1`, `ρ_off = {P8_RHOQ_OFF}`). `mag-typed` here carries THAT table as its oracle, so the arm's valuation and the world's quality model agree by construction — which is exactly what makes this the friendliest possible world for the lever, and therefore context rather than evidence._"
+        "_Same pool and same tasks, a different WORLD (prereg §5, D1c): coverage is UNTYPED and task quality is `cov_eff × mean pairwise ρ_world(role_i, role_j)` over the final members (singleton ⇒ `1.0`), with `ρ_world` the planted symmetric table (`ρ(r,r) = 1`, `ρ_off = {P8_RHOQ_OFF}`). `mag-typed` here carries THAT table as its oracle — and per **Amendment A1.2** that configuration is structurally **ANTI-aligned**, not friendly: a `ρ < 1` entry WEAKENS the cross-role coupling, magnitude rewards diversity, so weakly-coupled cross-role candidates look MORE additive and are MORE likely to be admitted — while this world's quality term rewards role COHESION. The leg measures that anti-alignment (the gotcha-23 lesson restated: magnitude scores diversity, not dependability, and a table that reads as 'these two are unlike' is an argument to keep both)._"
+    );
+    println!();
+    println!(
+        "_The **E-ρq-inv** cell (Amendment 2, owner-approved) flips the modulation direction to test whether alignment is recoverable INSIDE T2: `ρ(r,r) = {P8_RHOQ_OFF}` on the diagonal and `ρ(r ≠ r′) = 1.0` off it, so cross-role members now look fully substitutable and same-role members look only partly so — magnitude should then favour role-cohesive coalitions, which is what this world pays for. The world's quality table is unchanged; only the arm's table is inverted._"
     );
     println!();
     println!(
@@ -7837,19 +8010,23 @@ fn part8_eq4_typed_roles() {
     );
     p8_row("mag", &rq_mag, &rq_mag, &rq_mag_lat);
     p8_row("mag-typed (ρ_world)", &rq_typed, &rq_mag, &rq_typed_lat);
+    p8_row("mag-typed-inv (ρ flipped)", &rq_inv, &rq_mag, &rq_inv_lat);
     println!();
 
     // --- E-T3 ----------------------------------------------------------------
+    let t3_counters = Arc::new(P8ChannelCounters::default());
     let (t3, t3_lat) = p8_pertask_battery(
         &insts,
         |_inst, task| {
             Box::new(ChannelMagnitudePolicy {
                 tags: task.tags,
                 join_margin: 0.0,
+                counters: Arc::clone(&t3_counters),
             }) as Box<dyn CoalitionDecisionPolicy>
         },
         P8Metric::Typed,
     );
+    let (t3_entries, t3_neutral, t3_unit_neutral, t3_unit_rounded) = t3_counters.get();
     println!("## E-T3 (registered exploratory, non-gating) — channel-valued couplings");
     println!();
     println!(
@@ -7864,6 +8041,11 @@ fn part8_eq4_typed_roles() {
     );
     p8_row("mag", &mag, &mag, &mag_lat);
     p8_row("E-T3", &t3, &mag, &t3_lat);
+    println!();
+    println!(
+        "- **Caveat incidence (measured, decision-inert counters):** of **{t3_entries}** channel entries built across the leg's evaluations, **{t3_neutral}** ({:.1}%) took the neutral `1.0` for an empty `rel_i ∩ tagged(c)` denominator. Exactly-`1.0` collapsed couplings — each of which forces a skeletal merge — split into **{t3_unit_neutral}** where EVERY channel was neutral (the registered caveat's pure 'no evidence anywhere' case) and **{t3_unit_rounded}** where at least one channel was non-neutral, i.e. `powf` rounded a strictly-sub-1 product up to exactly `1.0` (the upstream trap). Counted per EVALUATION, not per decision (`should_join` pays two, `should_leave` two), and written only after each value was already fixed — the counters cannot move a decision.",
+        100.0 * t3_neutral as f64 / t3_entries.max(1) as f64
+    );
     println!();
 
     // --- T1 instrumentation --------------------------------------------------
@@ -9017,7 +9199,9 @@ mod part4c_tests {
 
         // The policy's own magnitude must be finite and match a hand-built
         // evaluation of the very same collapsed table.
-        let got = p8_channel_magnitude(&masks, required, &tags).expect("channel magnitude");
+        let counters = P8ChannelCounters::default();
+        let got =
+            p8_channel_magnitude(&masks, required, &tags, Some(&counters)).expect("channel magnitude");
         let agents = [0usize, 1];
         let want =
             catgraph_magnitude::coalition_magnitude_from_couplings(&agents, &expected, &agents, 1.0)
@@ -9026,13 +9210,34 @@ mod part4c_tests {
             (got - want).abs() <= 1e-12 * want.abs().max(1.0),
             "channel magnitude {got} vs hand-built {want}"
         );
-        // Empty and singleton guards.
+
+        // The decision-inert caveat counters on the same hand case: 2 ordered
+        // pairs × 3 channels = 6 entries; the neutral ones are channel 2 in both
+        // directions (no bit carries tag 2) plus channel 0 in the 1 → 0
+        // direction (rel_1 ∩ tagged(0) is empty) = 3. Neither collapsed coupling
+        // is exactly 1.0 (0 and 0.5^(1/3)), and no pair is all-neutral.
+        let (entries, neutral, unit_all_neutral, unit_rounded) = counters.get();
+        assert_eq!((entries, neutral), (6, 3));
+        assert_eq!((unit_all_neutral, unit_rounded), (0, 0));
+
+        // A pair with NO tagged evidence at all is the caveat's pure case: every
+        // channel neutral ⇒ collapsed exactly 1.0, counted as all-neutral.
+        let mut lone = [0usize; UNIVERSE];
+        lone[3] = 0; // bit 3 tagged role 0; the masks below hold none of it
+        let blind = P8ChannelCounters::default();
+        let _ = p8_channel_magnitude(&[0b011, 0b110], 0b1000, &lone, Some(&blind))
+            .expect("no relevant bits");
+        let (_, blind_neutral, blind_all, blind_rounded) = blind.get();
+        assert_eq!(blind_neutral, 6, "every channel entry is neutral");
+        assert_eq!((blind_all, blind_rounded), (2, 0));
+
+        // Empty and singleton guards (no counters — `None` must be accepted).
         assert_eq!(
-            p8_channel_magnitude(&[], required, &tags).expect("empty is 0"),
+            p8_channel_magnitude(&[], required, &tags, None).expect("empty is 0"),
             0.0
         );
         assert!(
-            (p8_channel_magnitude(&[0b011], required, &tags).expect("singleton") - 1.0).abs()
+            (p8_channel_magnitude(&[0b011], required, &tags, None).expect("singleton") - 1.0).abs()
                 < 1e-12
         );
     }
@@ -9108,16 +9313,21 @@ mod part4c_tests {
             },
             P8Metric::Typed,
         );
+        let counters = Arc::new(P8ChannelCounters::default());
         let (t3, _) = p8_pertask_battery(
             &insts,
             |_inst, task| {
                 Box::new(ChannelMagnitudePolicy {
                     tags: task.tags,
                     join_margin: 0.0,
+                    counters: Arc::clone(&counters),
                 }) as Box<dyn CoalitionDecisionPolicy>
             },
             P8Metric::Typed,
         );
+        let (entries, neutral, _, _) = counters.get();
+        assert!(entries > 0, "the E-T3 leg must build channel entries");
+        assert!(neutral <= entries, "neutral entries are a subset");
         let (rq, _) = p8_battery(
             &insts,
             |_| Box::new(MagnitudePolicy::default()) as Box<dyn CoalitionDecisionPolicy>,
