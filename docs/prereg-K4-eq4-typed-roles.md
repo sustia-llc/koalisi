@@ -213,3 +213,59 @@ leg changes.
   identity-by-construction: implemented as a determinism assert (an
   independently constructed default policy reproduces acts + score
   bits) plus the R = 1 identity-world metric-reduction assert.
+
+## Amendment 2 (pre-run, 2026-08-03 — posted to #72 BEFORE the official run)
+
+Outcome of the 3-lens review (correctness / registration-conformance /
+modeling-semantics: 1 blocking + 5 important + ~9 minor, ALL applied
+or ledgered) plus one owner-approved cell addition. No bar, seed, or
+confirmatory-leg changes.
+
+- **A2.1 — §2 erratum (v2-prefix gloss).** §2's parenthetical
+  transcribed the *w12* draw's numbers. The frozen `draw_prefix_v2` —
+  the named function, which is the registered anchor and what the
+  implementation uses — is: pool `n ∈ 4..=16`, worker caps **`1..=4`**
+  bits, `|required| ∈ 2..=8`, **8-bit** universe. The registration
+  binds to the named frozen function; the erroneous gloss numbers are
+  void (verify-before-prescribe miss, recorded).
+- **A2.2 — re-draw scope + cap reading.** "Rejection re-draw (required
+  bits + tags)" repeats the FULL v2 task draw — size, bits, and tags
+  (A1.3.i's disclosed size shift already presupposes this; now
+  explicit). The 1000-attempt cap counts TOTAL attempts per task
+  (initial draw = attempt 1).
+- **A2.3 — E-ρq inverse-table cell (owner-approved, exploratory,
+  non-gating).** One added cell `mag-typed-inv`: the INVERSE table
+  `ρ(r,r) = 0.25`, `ρ(r ≠ r′) = 1.0` on the same ρ-quality world and
+  seeds — flipping the modulation direction so magnitude favors
+  role-cohesive coalitions; tests whether alignment with a
+  cohesion-rewarding world is recoverable inside T2 or the modulation
+  axis itself is mismatched there.
+- **A2.4 — E-T3 measurement + caveat scope.** The neutral-1.0 caveat
+  must be MEASURED, not just named: decision-inert counters are
+  registered — (a) neutral-denominator channel entries, (b) exact-1.0
+  collapsed couplings split all-neutral vs powf-rounded — printed with
+  the leg. Scope correction: the upward bias applies to any coupling
+  with an empty channel (same-role near-clones included), most often
+  but not exclusively cross-role.
+- **A2.5 — interpretation-wording corrections + added disclosures.**
+  (i) E-ceil is a "fully-informed reference arm within the magnitude
+  family", NOT a supremum — no oracle anchor exists at these pool
+  sizes; §5's "measures the total convertible signal" is corrected to
+  that reading (registered text stays; this note governs, #63 ledger
+  precedent). (ii) Pass-side E-ceil scoping is mandatory in the
+  report: the conversion fraction
+  `(typed − mag) / (ceil − mag)` medians, with the statement that the
+  remainder requires tag knowledge the registered lever deliberately
+  withholds. (iii) Tag-distribution conditioning disclosure: the
+  feasibility re-draw makes single-role-held required bits
+  deterministically tagged and contest-dead (typed ≡ untyped coverage
+  there — conservative for H-T); re-draw intensity anti-correlates
+  with pool size; the per-run fraction of single-role-held required
+  bits is printed. (iv) The H-T mechanism statement is mandatory in
+  the report: the arm never sees tags — its sole lever is refusing to
+  skeletalize cross-role members (decoupled diversity accounting);
+  the win is role-diverse redundancy retained, not coverage routing.
+  (v) arm-E1 context notes: e1 is the only context arm receiving
+  typed ground truth (e1-vs-mag is not a role-blind contrast), and
+  its per-bit posterior is a tag-marginal (mixes capability coverage
+  with tag luck; non-stationary relative to the v5 world).
