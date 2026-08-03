@@ -1,5 +1,12 @@
 # Pre-registration: K4 EQ4 — typed roles (typed coalition valuation)
 
+> **RESULT (official run 2026-08-03, seeds 240..270): `VALIDATED (typed
+> roles)`** — H-T conjunct 1 PASS (mag-typed 0.1810 vs bar 0.0626, 3.61×),
+> conjunct 2 PASS (30/30); X-identity ×2, S-fib, X-battery all PASS.
+> First VALIDATED verdict in the K4 lineage since v5. Full report:
+> `docs/ab-report-K4-eq4-typed-roles.md` (15-item ledger). This document
+> is now immutable.
+
 **Status: REGISTERED.** Committed BEFORE implementation. Design-lock of
 record: [koalisi #72](https://github.com/sustia-llc/koalisi/issues/72)
 (owner design-lock comment, 2026-08-03, D1–D9). Pre-run amendments are
