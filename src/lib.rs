@@ -18,7 +18,8 @@
 //! - [`llm`] — Phase 5/6 LLM provider stub (real backends land later).
 //! - [`subsystems`] — the [`CoalitionService`](subsystems::coalition_actor::CoalitionService)
 //!   policy-gated membership seam (plus, behind feature `durable`, an optional
-//!   durable decision log).
+//!   durable decision log, and behind feature `remote`, a domain-neutral
+//!   coalition-event gateway for outside-the-process consumers).
 //!
 //! ## Quick start
 //!
@@ -38,6 +39,8 @@ pub mod subsystems {
     #[cfg(feature = "durable")]
     pub mod durable;
     pub mod outcome;
+    #[cfg(feature = "remote")]
+    pub mod remote;
 }
 
 pub use decision::{CoalitionDecisionPolicy, Decision, DecisionContext, ThresholdPolicy};
