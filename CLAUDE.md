@@ -22,7 +22,8 @@ time-travel queries, analytics), Algorithms (DCVC workload distribution,
 AIPA partition search, pluggable value calculators), and Runtime (since K3:
 tokio tasks with mpsc/oneshot command handles — kameo is gone — the
 `CoalitionService` policy-gated membership seam, a thin task-restart layer,
-and an optional SurrealDB-backed durable decision log). koalisi began as a
+an optional SurrealDB-backed durable decision log, and — since v0.25.0,
+#38 — an optional libp2p remote coalition-event gateway). koalisi began as a
 forex triangular-arbitrage tool; that domain was removed in v0.11.0 (#37) —
 the architecture is domain-agnostic and the demonstrated runtime is now a
 synthetic coalition-formation pipeline. Market/trading work lives in the
@@ -51,10 +52,34 @@ forex domain since removed).
   `surrealdb:surrealql-language` — for K3 (#6) surrealdb-live-message work,
   per the user CLAUDE.md routing rules.
 
-## Current state — 2026-08-02
+## Current state — 2026-08-03
 
 ### Done
 
+- **#38 remote coalition-event gateway — v0.25.0 (2026-08-03)**: the
+  gap-filler slice (owner pick while catgraph runs the EQ5 design
+  round). Re-introduces the off-process publish boundary deleted with
+  the forex swarm (v0.11.0), domain-neutral, design owner-locked on #38
+  (D1–D6) BEFORE code, folding the old #24 hardening list. New
+  `src/subsystems/remote.rs` (feature `remote`, gated `libp2p 0.56`):
+  raw-libp2p `request-response` gateway on
+  `/koalisi/coalition-events/1` (TCP+noise+yamux, CBOR; mDNS via
+  `Toggle` — genuinely off when disabled, the old 24h-query-interval
+  trick did NOT stop inbound discovery), `RemoteCoalitionEventV1`
+  stable wire schema (`DecisionRecord` stays serde-free; boundary
+  conversion, P7.2 precedent), bounded `EventBuffer` (default 1024,
+  oldest evicted), monotonic `seq` + `PollSince`/`Head` cursor polling
+  (NO `Clear` — destructive under multiple consumers),
+  `RemoteCoalitionClient` (refuses `schema_version` newer than
+  supported). Always-compiled `spawn_decision_tee` fans the
+  single-consumer decision tap into N sinks (`durable` + `remote`
+  compose). Deferred: QUIC, mDNS-expiry changes, topology-event
+  protocol (second behaviour on the same swarm, own protocol name).
+  5-agent review: 1 issue ≥80 (docs pass, landed in-PR) + 3 sub-bar
+  findings ALL applied (token-direct convention, cap-clamp rationale
+  corrected, client schema check implemented + tested). See
+  **gotcha 29**. Suites: all baselines +3 (tee tests) — see table;
+  `remote` 112 (new). #24 stays closed (folded); #38 CLOSED.
 - **EQ4 typed-roles RUN — v0.24.0 (2026-08-03, #72): `VALIDATED (typed
   roles)`** — the FIRST validated registration in the K4 lineage since
   v5, and the first typed-vs-untyped contrast. Full discipline (owner
@@ -671,21 +696,25 @@ forex domain since removed).
 - **Tests passing**:
   | Suite | Tests | Command |
   |---|---|---|
-  | Default | 103 | `cargo test` |
-  | `--features decision` | 159 | `cargo test --features decision` |
-  | `--features magnitude` | 132 | `cargo test --features magnitude` |
-  | `--features decision,magnitude` | 188 | `cargo test --features decision,magnitude` |
-  | `--features magnitude-fast` | 140 | `cargo test --features magnitude-fast` (EQ3 L2+L3 + probes) |
-  | `--features persistence` | 123 | `cargo test --features persistence` |
-  | `--features persistence,magnitude` | 153 (incl. the #18/#30 replay parity gate) | `cargo test --features persistence,magnitude` |
+  | Default | 106 | `cargo test` |
+  | `--features decision` | 162 | `cargo test --features decision` |
+  | `--features magnitude` | 135 | `cargo test --features magnitude` |
+  | `--features decision,magnitude` | 191 | `cargo test --features decision,magnitude` |
+  | `--features magnitude-fast` | 143 | `cargo test --features magnitude-fast` (EQ3 L2+L3 + probes) |
+  | `--features persistence` | 126 | `cargo test --features persistence` |
+  | `--features persistence,magnitude` | 156 (incl. the #18/#30 replay parity gate) | `cargo test --features persistence,magnitude` |
+  | `--features remote` | 112 (gateway buffer + loopback round-trip) | `cargo test --features remote` |
   | `--features durable` | +1 container-backed restart test; needs Docker | `cargo test --features durable` |
+
+  (All non-remote suites are the pre-v0.25.0 baselines +3 — the
+  always-compiled `spawn_decision_tee` unit tests.)
   | All examples | exit 0 | see Reproducers below |
 
 ### File inventory
 
 ```
 koalisi/
-├── Cargo.toml                              git tag deps: catgraph-applied + catgraph-magnitude v0.7.0 in lockstep (one checkout — K6); aif, surrealdb-live-message (optional); no path deps since K3; MSRV 1.93
+├── Cargo.toml                              git tag deps: catgraph-applied + catgraph-magnitude v0.7.0 in lockstep (one checkout — K6); aif, surrealdb-live-message, libp2p 0.56 (optional); no path deps since K3; MSRV 1.93
 ├── README.md                               user-facing
 ├── CLAUDE.md                               THIS FILE
 ├── config/{default,development,test}.toml  coalition threshold, history capacity; [sdb]+[docker] for the durable feature's upstream SETTINGS (cwd-resolved)
@@ -739,8 +768,9 @@ koalisi/
 │   │   ├── tee.rs                          spawn_topology_forwarder (tap → CBOR → store writer; shutdown disciplines) (#30)
 │   │   └── replay.rs                       replay_into_event_log (batched read → fresh EventLog; quiescence precondition) (#30)
 │   └── subsystems/
-│       ├── coalition_actor.rs              CoalitionService + handle (policy-gated membership seam, #1) + DecisionRecord tap (K3) — THE runtime seam
+│       ├── coalition_actor.rs              CoalitionService + handle (policy-gated membership seam, #1) + DecisionRecord tap (K3) + spawn_decision_tee (#38, always compiled) — THE runtime seam
 │       ├── outcome.rs                      #55 (v0.14.0): TaskOutcome + OutcomeSink fan-out + emit_outcome tap + spawn_outcome_forwarder (always compiled; the L2 outcome seam)
+│       ├── remote.rs                       #38 (v0.25.0): libp2p request-response coalition-event gateway + EventBuffer + RemoteCoalitionClient (feature `remote`; gotcha 29)
 │       └── durable.rs                      DecisionEvent + DurableDecisionBus + forwarder (feature `durable`, K3)
 ├── examples/
 │   ├── topology_coalition.rs               coalition lifecycle + time-travel queries
@@ -750,6 +780,7 @@ koalisi/
 │   ├── population_search.rs                #42: TaskCoverage-driven structure search + record/replay (default features; was missing from this inventory — added v0.16.0)
 │   ├── population_reliability.rs           #57 (v0.16.0): outcome stream → world-model snapshot → ReliabilityCoverage → search + replay (feature decision)
 │   ├── strategy_comparison.rs              divergence demo + K4 A/B battery (features decision,magnitude)
+│   ├── remote_coalition_consumer.rs        #38 (v0.25.0): gateway + client in one process over a live CoalitionService (feature `remote`)
 │   └── durable_decisions.rs                durable decision log end-to-end (feature `durable`)
 ├── .claude/docs/                           TRACKED internal design docs + references (docs/ reorg 2026-07-27; rest of .claude/ stays gitignored)
 │   ├── phase7-persistence-design.md        Phase 7 EventStore design (#21 deliverable; P7.1–P7.5 phasing)
@@ -785,6 +816,7 @@ koalisi/
     ├── magnitude_trajectory.rs             6 tests (#18: hand-computed trajectory semantics; feature `magnitude`)
     ├── persistence_integration.rs          7 tests (#29: roundtrip, rotation+reopen, tamper, torn tail, sealed opaque, writer drain, bounds; feature `persistence`)
     ├── topology_replay.rs                  3 tests (#30: 13-variant round-trip, reconstruction equality, schema/Sealed rejection; feature `persistence`)
+    ├── remote_integration.rs               1 test (#38: loopback round-trip service → tee → gateway → client, cursor deltas + seq ordering; feature `remote`)
     └── replay_parity.rs                    1 test (#30: magnitude_history live == replayed — THE parity gate; features `persistence,magnitude`)
 ```
 
@@ -816,7 +848,7 @@ These cost time during the build; future-me should not relearn them.
    - Wrap with `timeout 30s` (or 60s, 120s as appropriate) so a hang in a freshly-built binary is killed cleanly, not just the shell wrapper.
    - Pattern: `timeout 30s cargo run --manifest-path Cargo.toml --target-dir /tmp/… --example foo 2>/dev/null ; echo "exit=$?"`. Exit 124 = unix `timeout` fired.
 
-8. **~~libp2p remote RPC: hybrid, NOT hot-path.~~ OBSOLETE since v0.11.0 (#37)** — the `remote` feature (raw libp2p `request-response` gateway on `subsystems/distributed.rs`) was deleted with the forex swarm it subscribed to. Re-introduction as a domain-neutral coalition-event gateway is tracked in [#38](https://github.com/sustia-llc/koalisi/issues/38); the "publish-to-outside-world boundary, never the hot path" design rationale is recoverable from the git history at `v0.10.0` and #38.
+8. **~~libp2p remote RPC: hybrid, NOT hot-path.~~ OBSOLETE since v0.11.0 (#37)** — the `remote` feature (raw libp2p `request-response` gateway on `subsystems/distributed.rs`) was deleted with the forex swarm it subscribed to. **Re-introduced domain-neutral in v0.25.0 ([#38](https://github.com/sustia-llc/koalisi/issues/38), `subsystems/remote.rs`)** — the "publish-to-outside-world boundary, never the hot path" design rationale carries over unchanged; see gotcha 29 for the live contracts.
 
 9. **~~`kameo::remote::Behaviour::init_global()` is process-wide.~~ OBSOLETE since K3 (#6)** — no global init; producer + client coexist in one process (the remote test does exactly that). Kept for history:
    - Called once inside `enable_remote_alerts`. Calling it twice in the same process (e.g., from two integration tests in a single binary) will conflict.
@@ -827,7 +859,7 @@ These cost time during the build; future-me should not relearn them.
     - Without `remote`: sync, just returns `Result<(), RegistryError>` (no `.await`).
     - With `remote`: returns a future that resolves once libp2p propagates the registration.
 
-11. **~~libp2p `#[derive(NetworkBehaviour)]` requires the `macros` feature.~~ OBSOLETE since v0.11.0 (#37)** — the `libp2p` dep left with the `remote` gateway. Relevant again only when #38 re-adds a gateway.
+11. **libp2p `#[derive(NetworkBehaviour)]` requires the `macros` feature.** LIVE AGAIN since v0.25.0 (#38 re-added the gateway; the dep line carries `macros`). Was obsolete v0.11.0–v0.24.0 while the `libp2p` dep was gone.
 
 12. **catgraph backend contracts (K1, #4) — rely on these, don't re-derive.**
     - **Stable, never-reused indices**: `VertexIndex`/`HyperedgeIndex` come from
@@ -1264,12 +1296,47 @@ These cost time during the build; future-me should not relearn them.
       declines AND leave declines). Harness-side, assert full-pool
       role-map coverage (Part 8 does).
 
+29. **Remote-gateway contracts (#38, v0.25.0) — rely on these.**
+    - **Quietening mDNS does NOT disable it.** The v0.10.0 gateway's
+      "disabled" mDNS (24 h `query_interval`) still received other peers'
+      inbound announcements — a live `mdns::Behaviour` discovers passively
+      regardless of its own query cadence (measured: two in-process swarms
+      found each other over three LAN interfaces). `enable_mdns: false` now
+      wraps the behaviour in `Toggle::from(None)`, which is genuinely off.
+      Never reintroduce the interval trick.
+    - **Delivery is at-most-once with TWO lossy hops**: `emit_decision`
+      try_send → `spawn_decision_tee` try_send → gateway buffer. Both hops
+      drop-with-warn; drops correlate in time (same burst). Size both
+      channels for peak burst. The tee needs no per-sink `catch_unwind`
+      (sinks are plain `mpsc::Sender`s — no caller code runs inside it),
+      unlike `spawn_outcome_forwarder`'s trait-object sinks.
+    - **The `buffer_cap` clamp guards unbounded growth, not empty polls.**
+      `push_record` evicts only when `len == cap`; unclamped `cap = 0`
+      evicts only while empty and then grows without bound. `new(0)` ⇒
+      `new(1)`; don't "relax" the clamp thinking cap 0 just means empty
+      replies.
+    - **No `Clear` request, on purpose** (the v0.10.0 gateway had one):
+      destructive under multiple consumers. Eviction belongs solely to the
+      cap; consumers track their own `last_seq` cursor and detect gaps
+      (first returned `seq > last_seq + 1` ⇒ evicted events).
+    - **`RemoteCoalitionClient::poll_since` refuses events with
+      `schema_version > REMOTE_WIRE_SCHEMA_VERSION`** (the P7.2
+      replay-error discipline). A schema bump is a wire-contract change —
+      old clients must error, not guess.
+    - **Token convention**: `enable_remote_gateway` uses the passed
+      `CancellationToken` DIRECTLY (same as `spawn_decision_tee` /
+      `spawn_outcome_forwarder`); callers wanting isolated gateway
+      cancellation pass their own `child_token()`.
+    - A future topology-event gateway is a SECOND `request_response`
+      behaviour on the same swarm (`/koalisi/topology-events/1`, own
+      schema version), NOT new `EventRequest` variants.
+
 ## Reproducers
 
 All assume `cwd = koalisi/`.
 
 ```sh
-# === default features (103 tests) ===
+# === default features (106 tests) ===
 timeout 60s  cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target
 timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example topology_coalition
 timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example algorithm_values
@@ -1277,16 +1344,20 @@ timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-tar
 timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example supervised_monitor
 timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example population_search   # P5.2 (#42)
 
-# === decision-layer feature combos (152 / 125 / 174 tests) ===
+# === decision-layer feature combos (162 / 135 / 191 tests) ===
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features magnitude
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision,magnitude
 timeout 120s cargo run --release --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision,magnitude --example strategy_comparison
 timeout 60s  cargo run --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision --example population_reliability   # #57 (v0.16.0)
 
-# === with persistence feature (P7.1 store + P7.2 replay, 123 tests) ===
+# === with persistence feature (P7.1 store + P7.2 replay, 126 tests) ===
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features persistence
-timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features persistence,magnitude   # 146, incl. the replay parity gate
+timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features persistence,magnitude   # 156, incl. the replay parity gate
+
+# === with remote feature (#38 gateway, 112 tests) ===
+timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features remote
+timeout 60s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features remote --example remote_coalition_consumer
 
 # === with durable feature (needs Docker; container-backed restart test) ===
 timeout 300s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features durable
@@ -1787,8 +1858,9 @@ Their GitHub issues are candidates to close:
 
 - **[#24] Remote gateway hardening** — the gateway itself was deleted (#37);
   its hardening ideas (bounded/cursor buffer, stable wire schema `V1`, QUIC,
-  multi-protocol) fold into **[#38]** (re-introduce a domain-neutral remote
-  coalition-event gateway). Close #24 → #38.
+  multi-protocol) folded into **[#38]**, which SHIPPED in v0.25.0
+  (bounded buffer + cursor + `V1` schema in; QUIC + topology protocol
+  deliberately deferred). Both closed.
 - **[#26] Multi-triangle stress** and **[#27] bid/ask execution model** — pure
   forex (`coordinator.triangles`, `Triangle` spread math); no coordinator
   exists any more. Moot.

@@ -116,7 +116,9 @@ pub const PROTOCOL_NAME: &str = "/koalisi/coalition-events/1";
 
 /// Wire-schema version of [`RemoteCoalitionEventV1`]. Bump on any change to the
 /// struct's shape; a consumer that sees a `schema_version` it does not
-/// understand should refuse the record rather than guess.
+/// understand must refuse the record rather than guess —
+/// [`RemoteCoalitionClient::poll_since`] enforces this by erroring on any
+/// event with a version newer than this constant.
 pub const REMOTE_WIRE_SCHEMA_VERSION: u16 = 1;
 
 /// Default request-response timeout, sized for the network (not the hot path).
@@ -221,9 +223,12 @@ pub enum EventResponse {
 /// semantics are unit-testable without any libp2p involvement. Push order is
 /// the tap's order; poll results are always oldest-first.
 ///
-/// Capacity is clamped to at least 1: a zero `buffer_cap` would make `head_seq`
-/// unobservable and every poll empty, which is indistinguishable from a broken
-/// gateway. `EventBuffer::new(0)` therefore behaves as `new(1)` (and
+/// Capacity is clamped to at least 1: [`push_record`](Self::push_record)
+/// evicts only when `len == cap`, so an unclamped `cap = 0` would evict only
+/// while the deque is still empty and then grow WITHOUT BOUND — the clamp
+/// guards against unbounded memory growth, not against empty polls
+/// (`head_seq` reads `next_seq` and stays observable at any cap).
+/// `EventBuffer::new(0)` therefore behaves as `new(1)` (and
 /// [`enable_remote_gateway`] warns).
 #[derive(Debug)]
 pub struct EventBuffer {
@@ -398,8 +403,12 @@ pub struct RemoteHandle {
 /// the full lifecycle and shutdown disciplines.
 ///
 /// Builds a libp2p swarm, listens on `config.listen_addr`, captures the bound
-/// address, and spawns the gateway task on `tracker` under
-/// `token.child_token()`. `rx` is the receiving end of a
+/// address, and spawns the gateway task on `tracker` under `token` — the token
+/// is used directly, the same convention as
+/// [`spawn_decision_tee`](crate::subsystems::coalition_actor::spawn_decision_tee)
+/// and [`spawn_outcome_forwarder`](crate::subsystems::outcome::spawn_outcome_forwarder);
+/// pass `your_token.child_token()` if the gateway should be cancellable in
+/// isolation. `rx` is the receiving end of a
 /// [`DecisionRecord`](crate::subsystems::coalition_actor::DecisionRecord) tap
 /// (directly the [`CoalitionService`](crate::subsystems::coalition_actor::CoalitionService)'s,
 /// or one leg of a
@@ -440,12 +449,7 @@ pub async fn enable_remote_gateway(
     );
 
     let buffer = EventBuffer::new(config.buffer_cap);
-    tracker.spawn(run_gateway(
-        libp2p_swarm,
-        rx,
-        buffer,
-        token.child_token(),
-    ));
+    tracker.spawn(run_gateway(libp2p_swarm, rx, buffer, token));
 
     Ok(RemoteHandle {
         local_peer_id,
@@ -734,8 +738,11 @@ impl RemoteCoalitionClient {
     ///
     /// # Errors
     ///
-    /// Returns an error if the request fails/times out, or the gateway answers
-    /// with an unexpected response variant.
+    /// Returns an error if the request fails/times out, the gateway answers
+    /// with an unexpected response variant, or any returned event carries a
+    /// `schema_version` newer than [`REMOTE_WIRE_SCHEMA_VERSION`] — refused
+    /// rather than guessed at, the P7.2 replay-error discipline for
+    /// `WireTopologyEvent`.
     pub async fn poll_since(
         &mut self,
         peer: PeerId,
@@ -746,7 +753,10 @@ impl RemoteCoalitionClient {
             .request(peer, EventRequest::PollSince { last_seq }, timeout)
             .await?
         {
-            EventResponse::Events { head_seq, events } => Ok((head_seq, events)),
+            EventResponse::Events { head_seq, events } => {
+                refuse_newer_schema(&events)?;
+                Ok((head_seq, events))
+            }
             other => Err(anyhow!("unexpected response to PollSince: {other:?}")),
         }
     }
@@ -763,6 +773,24 @@ impl RemoteCoalitionClient {
             other => Err(anyhow!("unexpected response to Head: {other:?}")),
         }
     }
+}
+
+/// Refuse (error) if any event carries a `schema_version` newer than
+/// [`REMOTE_WIRE_SCHEMA_VERSION`] — the consumer-side enforcement of the wire
+/// contract (P7.2 replay-error discipline). Older/equal versions pass.
+fn refuse_newer_schema(events: &[RemoteCoalitionEventV1]) -> Result<()> {
+    if let Some(ev) = events
+        .iter()
+        .find(|e| e.schema_version > REMOTE_WIRE_SCHEMA_VERSION)
+    {
+        return Err(anyhow!(
+            "gateway event seq {} has schema_version {} > supported {}",
+            ev.seq,
+            ev.schema_version,
+            REMOTE_WIRE_SCHEMA_VERSION
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -785,6 +813,19 @@ mod tests {
             EventResponse::Events { events, .. } => events,
             other => panic!("expected Events, got {other:?}"),
         }
+    }
+
+    /// The consumer-side wire contract: an event with a `schema_version` newer
+    /// than [`REMOTE_WIRE_SCHEMA_VERSION`] is refused; equal (and older, once
+    /// one exists) versions pass.
+    #[test]
+    fn newer_schema_version_is_refused() {
+        let mut ev = RemoteCoalitionEventV1::from_record(1, &record(1, DecisionKind::Join));
+        assert!(refuse_newer_schema(std::slice::from_ref(&ev)).is_ok());
+        assert!(refuse_newer_schema(&[]).is_ok(), "empty reply passes");
+        ev.schema_version = REMOTE_WIRE_SCHEMA_VERSION + 1;
+        let err = refuse_newer_schema(std::slice::from_ref(&ev));
+        assert!(err.is_err(), "newer schema_version must be refused");
     }
 
     /// Sequencing starts at 1, is monotonic, and the projection carries every
