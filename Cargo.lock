@@ -605,8 +605,8 @@ dependencies = [
 
 [[package]]
 name = "catgraph"
-version = "0.6.0"
-source = "git+https://github.com/sustia-llc/catgraph?tag=v0.6.0#cd8fa943571b823685fea3bd7c6fb8afc35cdb78"
+version = "0.7.0"
+source = "git+https://github.com/sustia-llc/catgraph?tag=v0.7.0#9eae951b7b01ec7ab444e162850a6d5f18d04910"
 dependencies = [
  "either",
  "itertools 0.15.0",
@@ -620,8 +620,8 @@ dependencies = [
 
 [[package]]
 name = "catgraph-applied"
-version = "0.6.0"
-source = "git+https://github.com/sustia-llc/catgraph?tag=v0.6.0#cd8fa943571b823685fea3bd7c6fb8afc35cdb78"
+version = "0.7.0"
+source = "git+https://github.com/sustia-llc/catgraph?tag=v0.7.0#9eae951b7b01ec7ab444e162850a6d5f18d04910"
 dependencies = [
  "catgraph",
  "deep_causality_num",
@@ -639,8 +639,8 @@ dependencies = [
 
 [[package]]
 name = "catgraph-magnitude"
-version = "0.6.0"
-source = "git+https://github.com/sustia-llc/catgraph?tag=v0.6.0#cd8fa943571b823685fea3bd7c6fb8afc35cdb78"
+version = "0.7.0"
+source = "git+https://github.com/sustia-llc/catgraph?tag=v0.7.0#9eae951b7b01ec7ab444e162850a6d5f18d04910"
 dependencies = [
  "catgraph",
  "catgraph-applied",
@@ -2403,7 +2403,7 @@ dependencies = [
 
 [[package]]
 name = "koalisi"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "aif",
  "anyhow",

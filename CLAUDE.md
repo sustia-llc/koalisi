@@ -55,6 +55,33 @@ forex domain since removed).
 
 ### Done
 
+- **catgraph re-pin `v0.6.0` ×2 → `v0.7.0` — v0.23.0 (2026-08-03)**: the
+  EQ4 pin-first step — the typed-roles registration
+  ([#72](https://github.com/sustia-llc/koalisi/issues/72)) must be born
+  on the final pins. Both catgraph deps bumped in lockstep (K6 rule).
+  **Drift check CLEAN**: seven suites at baseline counts
+  (103/159/126/182/134/123/**147** incl. the replay parity gate),
+  default clippy `--all-targets` clean, frozen K4 battery (Parts 1–7,
+  `--release`) reproduced byte-identical on every quality/churn/verdict
+  line vs a fresh v0.6.0 baseline — latency-only diffs, per the
+  protocol's standing exclusion. Lockfile moved exactly the three
+  catgraph workspace packages; v0.7.0's sole delta is cg#211
+  `coalition_typed` (magnitude-only, purely additive); MSRV stays 1.93.
+  Count correction: `persistence,magnitude` is **147**, not 146 — EQ3's
+  +1 `magnitude` lib test lands there too, never re-measured at v0.22.0
+  (verified identical pre-change; documentation fix, not drift).
+  **EQ4 IS IN FLIGHT**: #72 carries the owner design-lock (posted
+  2026-08-03 BEFORE prereg): D1 role-matched-coverage world confirmatory
+  + ρ-quality exploratory; D2 T2 ρ-modulation confirmatory, T3
+  exploratory (D3 θ uniform); D4 planted symmetric oracle-ρ +
+  degraded-ρ leg; D5 aif-typed arm OUT (EQ4b candidate); D6 R = 3
+  sub-params + role-matched feasibility guarantee; D7 fresh seeds
+  240..270; D8 library placement behind `magnitude`, identity default
+  routes structurally to the untyped path, typed path evaluates FRESH
+  (no evaluator cache — the K6 key `(required, member_masks)` would
+  collide same-mask/different-role agents); D9 Path-B bars + X-identity
+  (acts/PRIMARY/churn, not score bits) + X-battery + fibration sanity.
+  Next: prereg doc → implementation → 3-lens review → official run.
 - **EQ3 latency re-match RUN — v0.22.0 (2026-08-02, #69): `FALSIFIED
   (latency re-match)`**, full discipline (owner design-lock D2/D3/D4 +
   placement on #69 BEFORE prereg; prereg 557af83 BEFORE implementation;
@@ -622,7 +649,7 @@ forex domain since removed).
   | `--features decision,magnitude` | 182 | `cargo test --features decision,magnitude` |
   | `--features magnitude-fast` | 134 | `cargo test --features magnitude-fast` (EQ3 L2+L3 + probes) |
   | `--features persistence` | 123 | `cargo test --features persistence` |
-  | `--features persistence,magnitude` | 146 (incl. the #18/#30 replay parity gate) | `cargo test --features persistence,magnitude` |
+  | `--features persistence,magnitude` | 147 (incl. the #18/#30 replay parity gate; was mis-recorded 146 at v0.22.0) | `cargo test --features persistence,magnitude` |
   | `--features durable` | +1 container-backed restart test; needs Docker | `cargo test --features durable` |
   | All examples | exit 0 | see Reproducers below |
 
@@ -630,7 +657,7 @@ forex domain since removed).
 
 ```
 koalisi/
-├── Cargo.toml                              git tag deps: catgraph-applied + catgraph-magnitude v0.6.0 in lockstep (one checkout — K6); aif, surrealdb-live-message (optional); no path deps since K3; MSRV 1.93
+├── Cargo.toml                              git tag deps: catgraph-applied + catgraph-magnitude v0.7.0 in lockstep (one checkout — K6); aif, surrealdb-live-message (optional); no path deps since K3; MSRV 1.93
 ├── README.md                               user-facing
 ├── CLAUDE.md                               THIS FILE
 ├── config/{default,development,test}.toml  coalition threshold, history capacity; [sdb]+[docker] for the durable feature's upstream SETTINGS (cwd-resolved)
@@ -1498,7 +1525,8 @@ The categorical A/B mirror of the AIF arm, behind feature `magnitude`
   `v0.1.1` for the catgraph#29 triangle-tolerance fix; **K6 (#14) bumped
   again to `v0.2.0`** for the catgraph#31 `CoalitionEvaluator`; re-pinned
   `v0.5.0` 2026-07-30, EQ1 pin-first; re-pinned `v0.6.0` 2026-08-02, EQ3
-  pin-first, both drift-free — see Current state). Originally
+  pin-first; re-pinned `v0.7.0` 2026-08-03, EQ4 pin-first, all
+  drift-free — see Current state). Originally
   an SSH URL (catgraph was private then; cargo's libgit2 can't authenticate
   HTTPS) — re-pinned to HTTPS in the 2026-07-27 release sweep after catgraph
   went public. `coalition_value` = magnitude at pinned `t = 1`;
