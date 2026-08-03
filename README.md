@@ -40,7 +40,7 @@ from temporal hypergraph topology to coalition formation algorithms to
 | `ingest` | Domain-neutral ingestion (K5): `Sample`/`DataSource` traits, generic `SampleMonitor<S>`, `Pacing` + `pump_source`, synthetic NEST-shaped multi-resolution and tauhokohoko-shaped sensor-event fixture sources (seeded, no credentials) |
 | `decision` | `CoalitionDecisionPolicy` trait + always-available `ThresholdPolicy`; optional Active Inference strategy (`EfeValueCalculator`, `AifDecisionPolicy`) behind the `decision` feature; optional categorical-magnitude strategy (`MagnitudeValueCalculator`, `MagnitudePolicy`) behind the `magnitude` feature |
 | `persistence` | Append-only event store (feature `persistence`): hash-chained streams, CBOR frame log (`FileEventStore`), crash-tail recovery, writer task; topology events tap in and replay back into a fresh `EventLog` all queries run on unchanged (P7.1 + P7.2) — see `.claude/docs/phase7-persistence-design.md` |
-| `subsystems` | `CoalitionService` — the policy-gated coalition-membership seam (join/leave consult a `CoalitionDecisionPolicy` before mutating the hypergraph) — plus an optional durable decision log (`durable`) |
+| `subsystems` | `CoalitionService` — the policy-gated coalition-membership seam (join/leave consult a `CoalitionDecisionPolicy` before mutating the hypergraph) — plus a decision-tap tee (`spawn_decision_tee`), an optional durable decision log (`durable`), and an optional libp2p remote coalition-event gateway (`remote`: bounded buffer, cursor polling, stable `RemoteCoalitionEventV1` wire schema) |
 
 ## Quick start
 
@@ -103,6 +103,7 @@ cargo run --example population_search
 cargo run --release --features decision,magnitude --example strategy_comparison   # divergence demo + AIF-vs-magnitude A/B report (#7)
 cargo run --features decision --example population_reliability                    # learned-reliability fitness for the structure search (#57)
 cargo run --features durable --example durable_decisions                          # durable decision log (needs Docker)
+cargo run --features remote --example remote_coalition_consumer                   # remote coalition-event gateway + client, one process (#38)
 ```
 
 > **Value models for structure search (population_search).** `search` maximises
@@ -152,23 +153,26 @@ upstream side.
 ## Tests
 
 ```sh
-cargo test                                 # 103 tests (core + topology + algorithms + population search + decision + ingestion)
-cargo test --features decision             # 152 tests (+ Active Inference decision strategies: scalar, multimodal, persistent + the derived ReliabilityCoverage calculator)
-cargo test --features magnitude            # 125 tests (+ categorical-magnitude decision strategy + trajectory analytics)
-cargo test --features decision,magnitude   # 174 tests (both decision arms)
-cargo test --features persistence          # 123 tests (+ chained event store + topology replay)
-cargo test --features persistence,magnitude # 146 tests (incl. the live-vs-replayed parity gate)
+cargo test                                 # 106 tests (core + topology + algorithms + population search + decision + ingestion + decision-tap tee)
+cargo test --features decision             # 162 tests (+ Active Inference decision strategies: scalar, multimodal, persistent + the derived ReliabilityCoverage calculator)
+cargo test --features magnitude            # 135 tests (+ categorical-magnitude decision strategy + typed-role modulation + trajectory analytics)
+cargo test --features decision,magnitude   # 191 tests (both decision arms)
+cargo test --features magnitude-fast       # 143 tests (+ EQ3 opt-in levers + read-only probes)
+cargo test --features persistence          # 126 tests (+ chained event store + topology replay)
+cargo test --features persistence,magnitude # 156 tests (incl. the live-vs-replayed parity gate)
+cargo test --features remote               # 112 tests (+ gateway event buffer + loopback round-trip)
 cargo test --features durable              # + container-backed restart-durability test (needs Docker)
 ```
 
 ## Dependencies
 
-- [catgraph-applied](https://github.com/sustia-llc/catgraph) (tag `v0.6.0`, kept in lockstep with catgraph-magnitude — one repo, one checkout) — CRUD hypergraph container backing the topology layer (the K1 re-back; replaced yamafaktory `hypergraph` v4.2.0)
+- [catgraph-applied](https://github.com/sustia-llc/catgraph) (tag `v0.7.0`, kept in lockstep with catgraph-magnitude — one repo, one checkout) — CRUD hypergraph container backing the topology layer (the K1 re-back; replaced yamafaktory `hypergraph` v4.2.0)
 - tokio + tokio-util — async runtime + lifecycle primitives
 - rayon + tokio-rayon — CPU-bound graph operations bridge
 - [surrealdb-live-message](https://github.com/sustia-llc/surrealdb-live-message) (tag `v0.2.1`, **optional**, feature `durable`) — two-tier restart-durable message bus for the coalition decision log
 - [aif](https://github.com/sustia-llc/tira) (tag `aif-v0.12.0`, **optional**, feature `decision`) — active-inference engine for the AIF decision strategies (scalar, multimodal, persistent); `nalgebra` is only compiled when the feature is enabled
-- [catgraph-magnitude](https://github.com/sustia-llc/catgraph) (tag `v0.6.0`, **optional**, feature `magnitude`) — enriched-category coalition magnitude for the categorical decision strategy
+- [catgraph-magnitude](https://github.com/sustia-llc/catgraph) (tag `v0.7.0`, **optional**, feature `magnitude`) — enriched-category coalition magnitude for the categorical decision strategy
+- libp2p 0.56 (**optional**, feature `remote`) — TCP+noise+yamux `request-response` transport for the remote coalition-event gateway
 
 ## References
 

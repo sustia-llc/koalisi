@@ -31,6 +31,9 @@
 
 use anyhow::{Result, anyhow};
 use tokio::sync::{mpsc, oneshot};
+use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
+use tokio_util::task::TaskTracker;
 
 use crate::algorithms::AgentCapabilities;
 use crate::decision::{CoalitionDecisionPolicy, Decision, DecisionContext};
@@ -118,6 +121,83 @@ fn emit_decision(
             );
         }
     }
+}
+
+/// Spawn a task that drains ONE decision tap and fans each record out to every
+/// sink channel.
+///
+/// The [`CoalitionService`] carries a single `Option<mpsc::Sender<DecisionRecord>>`
+/// tap. When more than one consumer needs the decision stream — e.g. the
+/// `durable` decision log *and* the `remote` coalition-event gateway (issue #38)
+/// — this tee is the fan-out point: give the service the tee's input `Sender`
+/// and hand each consumer one of `sinks`.
+///
+/// ## Delivery contract: at-most-once, one MORE lossy hop
+///
+/// The tap itself is already best-effort (see [`emit_decision`] — `try_send`,
+/// drop-with-warn). This tee adds a second such hop: each sink receives a clone
+/// via non-blocking [`try_send`](mpsc::Sender::try_send), and a full or closed
+/// sink drops that record with a `warn`. A slow sink therefore thins its OWN
+/// stream and never blocks the loop, the other sinks, or the decision path.
+/// Sinks are independent: a closed sink is tolerated for the lifetime of the
+/// tee (it simply never receives). Size each sink channel for the producer's
+/// peak burst rate — drops correlate in time.
+///
+/// No `catch_unwind` is needed here (unlike
+/// [`spawn_outcome_forwarder`](crate::subsystems::outcome::spawn_outcome_forwarder)'s
+/// per-sink isolation): a sink is an `mpsc::Sender`, so this task runs no
+/// caller-supplied code.
+///
+/// ## Shutdown: pick ONE discipline, don't mix
+///
+/// Mirrors [`spawn_outcome_forwarder`](crate::subsystems::outcome::spawn_outcome_forwarder):
+///
+/// - **Lossless shutdown**: drop every tap `Sender` (i.e. the
+///   [`CoalitionService`]) → `rx.recv()` yields `None` after buffered records
+///   drain → the tee exits, having pushed everything it held into the sinks.
+/// - **Prompt teardown**: cancelling `token` breaks the loop immediately; a
+///   buffered record may be dropped (still at-most-once).
+///
+/// Spawned on `tracker` so the caller's cancel→close→drain shutdown covers it.
+pub fn spawn_decision_tee(
+    mut rx: mpsc::Receiver<DecisionRecord>,
+    sinks: Vec<mpsc::Sender<DecisionRecord>>,
+    tracker: &TaskTracker,
+    token: CancellationToken,
+) -> JoinHandle<()> {
+    tracker.spawn(async move {
+        loop {
+            tokio::select! {
+                biased;
+                _ = token.cancelled() => break,
+                maybe = rx.recv() => match maybe {
+                    Some(record) => {
+                        for (i, sink) in sinks.iter().enumerate() {
+                            match sink.try_send(record.clone()) {
+                                Ok(()) => {}
+                                Err(mpsc::error::TrySendError::Full(_)) => {
+                                    tracing::warn!(
+                                        sink = i,
+                                        kind = record.kind.as_str(),
+                                        "decision tee sink full — dropping record (other sinks unaffected)"
+                                    );
+                                }
+                                Err(mpsc::error::TrySendError::Closed(_)) => {
+                                    tracing::warn!(
+                                        sink = i,
+                                        kind = record.kind.as_str(),
+                                        "decision tee sink closed — dropping record (other sinks unaffected)"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    None => break, // tap dropped; nothing more to tee
+                },
+            }
+        }
+        tracing::debug!("decision tee stopped");
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -427,5 +507,96 @@ mod tests {
         let members = service.members(coalition).await.expect("members");
         assert_eq!(members.len(), 2, "join applied despite closed tap");
         assert!(members.contains(&candidate));
+    }
+
+    // -----------------------------------------------------------------------
+    // spawn_decision_tee
+    // -----------------------------------------------------------------------
+
+    fn record(agent_id: usize) -> DecisionRecord {
+        DecisionRecord {
+            coalition: "coalition-0".to_string(),
+            agent_id,
+            kind: DecisionKind::Join,
+            act: true,
+            score: 1.5,
+        }
+    }
+
+    /// Both sinks see every record, in order, and the tee drains after the tap
+    /// sender is dropped (the lossless path).
+    #[tokio::test]
+    async fn tee_fans_out_to_every_sink_and_drains() {
+        let tracker = TaskTracker::new();
+        let token = CancellationToken::new();
+        let (tap_tx, tap_rx) = mpsc::channel(16);
+        let (a_tx, mut a_rx) = mpsc::channel(16);
+        let (b_tx, mut b_rx) = mpsc::channel(16);
+
+        let handle = spawn_decision_tee(tap_rx, vec![a_tx, b_tx], &tracker, token);
+
+        tap_tx.send(record(1)).await.expect("send 1");
+        tap_tx.send(record(2)).await.expect("send 2");
+
+        // Lossless shutdown: drop the only tap sender ⇒ drain, then exit.
+        drop(tap_tx);
+        handle.await.expect("tee joins");
+
+        for rx in [&mut a_rx, &mut b_rx] {
+            assert_eq!(rx.recv().await.expect("record 1").agent_id, 1);
+            assert_eq!(rx.recv().await.expect("record 2").agent_id, 2);
+            assert!(rx.recv().await.is_none(), "sink closed after the tee exits");
+        }
+
+        tracker.close();
+        tracker.wait().await;
+    }
+
+    /// A FULL sink drops its own records without stalling the loop or starving
+    /// the other sink; a CLOSED sink is tolerated for the tee's lifetime.
+    #[tokio::test]
+    async fn tee_tolerates_full_and_closed_sinks() {
+        let tracker = TaskTracker::new();
+        let token = CancellationToken::new();
+        let (tap_tx, tap_rx) = mpsc::channel(16);
+        // Capacity-1 sink that is never read ⇒ full after the first record.
+        let (full_tx, _full_rx) = mpsc::channel(1);
+        // Closed sink: receiver dropped before the tee ever runs.
+        let (closed_tx, closed_rx) = mpsc::channel(16);
+        drop(closed_rx);
+        let (ok_tx, mut ok_rx) = mpsc::channel(16);
+
+        let handle = spawn_decision_tee(tap_rx, vec![full_tx, closed_tx, ok_tx], &tracker, token);
+
+        for id in 1..=3 {
+            tap_tx.send(record(id)).await.expect("send");
+        }
+        drop(tap_tx);
+        handle.await.expect("tee joins despite full + closed sinks");
+
+        // The healthy sink saw all three — neither the full nor the closed sink
+        // cost it anything.
+        for id in 1..=3 {
+            assert_eq!(ok_rx.recv().await.expect("healthy record").agent_id, id);
+        }
+
+        tracker.close();
+        tracker.wait().await;
+    }
+
+    /// Cancelling the token exits the tee promptly even with a live tap sender.
+    #[tokio::test]
+    async fn tee_cancel_exits_promptly() {
+        let tracker = TaskTracker::new();
+        let token = CancellationToken::new();
+        let (tap_tx, tap_rx) = mpsc::channel::<DecisionRecord>(16);
+        let handle = spawn_decision_tee(tap_rx, vec![], &tracker, token.clone());
+
+        token.cancel();
+        handle.await.expect("tee joins on cancel");
+
+        drop(tap_tx);
+        tracker.close();
+        tracker.wait().await;
     }
 }

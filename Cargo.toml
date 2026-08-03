@@ -1,6 +1,6 @@
 [package]
 name = "koalisi"
-version = "0.24.0"
+version = "0.25.0"
 edition = "2024"
 # 1.93 floor forced by catgraph's deep_causality_num 0.4.1 pin (unchanged at
 # the v0.7.0 re-pin — catgraph holds num =0.4.1).
@@ -67,6 +67,22 @@ surrealdb-types = { version = "3.2.1", optional = true }
 ciborium = { version = "0.2", optional = true }
 sha2 = { version = "0.10", optional = true }
 
+# Optional: transport for the domain-neutral remote coalition-event gateway
+# (feature `remote`, issue #38). Raw libp2p `request-response` over TCP + noise
+# + yamux, with mDNS discovery and CBOR codecs. This is the
+# publish-to-outside-world boundary only — never the hot path. Feature-off
+# builds pull NONE of it.
+libp2p = { version = "0.56", features = [
+    "macros",
+    "noise",
+    "mdns",
+    "tcp",
+    "tokio",
+    "yamux",
+    "request-response",
+    "cbor",
+], optional = true }
+
 [features]
 default = []
 # Active Inference coalition-decision strategy (pluggable, off by default).
@@ -87,6 +103,9 @@ magnitude-fast = ["magnitude", "catgraph-magnitude/f64-fast"]
 durable = ["dep:surrealdb-live-message", "dep:surrealdb-types"]
 # Phase 7 persistence core: portable hash-chained event log (off by default).
 persistence = ["dep:ciborium", "dep:sha2"]
+# Domain-neutral remote coalition-event gateway over raw libp2p
+# `request-response` (off by default, issue #38).
+remote = ["dep:libp2p"]
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "test-util"] }
@@ -103,6 +122,10 @@ required-features = ["durable"]
 [[example]]
 name = "population_reliability"
 required-features = ["decision"]
+
+[[example]]
+name = "remote_coalition_consumer"
+required-features = ["remote"]
 
 [[test]]
 name = "magnitude_trajectory"
@@ -123,3 +146,7 @@ required-features = ["persistence"]
 [[test]]
 name = "replay_parity"
 required-features = ["persistence", "magnitude"]
+
+[[test]]
+name = "remote_integration"
+required-features = ["remote"]

@@ -16,10 +16,51 @@ Planned work — issue-tracked (details in [`CLAUDE.md`](./CLAUDE.md)
   registry (*blocked on the tauhokohoko KEK-granularity answer*), [#32]
   decision/belief streams (the `TaskOutcome` durable home), [#33] federation
   manifests + FAIR provenance.
-- **[#38]** domain-neutral remote coalition-event gateway (successor to the
-  removed `remote` feature; folds in the [#24] hardening ideas).
 - **[#25]** metrics example, reframed onto the `CoalitionService` decision
   path / topology events.
+
+## [0.25.0] — 2026-08-03
+
+The [#38] gap-filler release: the domain-neutral remote coalition-event
+gateway, re-introducing (and hardening) the off-process publish boundary
+deleted with the forex swarm in v0.11.0. Design owner-locked on [#38]
+(D1–D6) before implementation; the old [#24] hardening list is folded in
+(bounded buffer, cursor polling, stable wire schema); QUIC, mDNS-expiry
+changes, and a topology-event protocol are deliberately deferred.
+
+### Added
+- **`subsystems::remote`** (new feature `remote`, gated `libp2p 0.56`
+  dep — feature-off builds pull none of it): raw-libp2p
+  `request-response` gateway on `/koalisi/coalition-events/1`
+  (TCP + noise + yamux, CBOR; mDNS via `Toggle`, genuinely off when
+  disabled). `RemoteCoalitionEventV1` stable wire schema
+  (`DecisionRecord` stays serde-free; conversion at the boundary, the
+  P7.2 `WireTopologyEvent` precedent), bounded `EventBuffer` (cap
+  default 1024, oldest evicted; cap 0 clamps to 1 — unclamped it would
+  grow unbounded), gateway-stamped monotonic `seq` (from 1),
+  `EventRequest::{PollSince, Head}` cursor polling (no `Clear` —
+  destructive under multiple consumers), `enable_remote_gateway`
+  (tracker + token runtime handles), `RemoteCoalitionClient`
+  (`dial`/`discover`/`pump`/`poll_since`/`head`; refuses events with a
+  `schema_version` newer than `REMOTE_WIRE_SCHEMA_VERSION`).
+- **`subsystems::coalition_actor::spawn_decision_tee`** (always
+  compiled): fans the single-consumer decision tap into N sinks with
+  per-sink `try_send` drop-with-warn — `durable` and `remote` compose
+  on one tap. At-most-once gains one more lossy hop; documented.
+- `examples/remote_coalition_consumer.rs` — gateway + client in one
+  process over a live policy-gated `CoalitionService`.
+- `tests/remote_integration.rs` — loopback round-trip (mDNS off,
+  explicit dial) through service → tee → gateway → client, cursor
+  deltas + seq ordering asserted.
+
+### Fixed
+- README drift: test counts were stale (v0.16.0-era) and the
+  `magnitude-fast` suite line was missing; catgraph tag citations said
+  `v0.6.0` after the v0.23.0 re-pin to `v0.7.0`.
+
+Suites: 106 default / 162 decision / 135 magnitude / 191
+decision,magnitude / 143 magnitude-fast / 126 persistence / 156
+persistence,magnitude (all +3 tee unit tests) / **112 remote** (new).
 
 ## [0.24.0] — 2026-08-03
 
