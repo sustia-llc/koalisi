@@ -196,6 +196,62 @@
 //! values (`base_value` / `value_with_scratch`) are never routed: only fresh
 //! evaluations are.
 //!
+//! # The typed-roles arm (koalisi #72, EQ4)
+//!
+//! [`MagnitudePolicy::with_role_modulation`] attaches a role assignment
+//! (`agent_id → RoleId`) and a role-interaction table `ρ : R × R → [0, 1]`. The
+//! arm then modulates every substitutability coupling before evaluation —
+//! `A′(i → j) = ρ(role_i, role_j) · A(i → j)`, via
+//! [`catgraph_magnitude::modulate`] (upstream #211 T2) — and evaluates magnitude
+//! on the modulated table. Under the BTV lift `d = −ln π` the modulation is
+//! additive in the metric, so a `ρ ≤ 1` entry can only *lengthen* a distance:
+//! cross-role substitutability is weakened, never invented.
+//!
+//! What the arm does **not** do: the relevance masks stay **untyped**
+//! (`rel = caps & required`; no role enters the mask), so roles reach a decision
+//! only through the valuation layer. That is the registered lever, not an
+//! omission — the arm tests whether this one multiplication converts role
+//! structure into decisions.
+//!
+//! The registered contract (prereg §4, `docs/prereg-K4-eq4-typed-roles.md`):
+//!
+//! 1. **Identity default.** With no typed configuration,
+//!    [`should_join`](CoalitionDecisionPolicy::should_join) /
+//!    [`should_leave`](CoalitionDecisionPolicy::should_leave) and the async
+//!    overrides route *structurally* to the untyped path described above — same
+//!    evaluator cache, same knife-edge band, same code. Identity is by
+//!    construction, not by measurement.
+//! 2. **Fresh evaluation, no cache, no band.** The typed path evaluates *both*
+//!    sides of every decision with a fresh
+//!    [`catgraph_magnitude::coalition_value`] over the modulated couplings. The
+//!    K6 evaluator cache is deliberately not reused: it keys on
+//!    `(required, member_masks)`, which cannot separate two agents that share a
+//!    capability mask but carry different roles — such a pair would hit an entry
+//!    built for a different coupling table (the gotcha-16 precedent, where
+//!    change-driven sampling likewise bypasses the evaluator). With no
+//!    incremental value there is also nothing for the knife-edge band to
+//!    reconcile: the band exists to make an incremental margin reproduce the
+//!    fresh one, and here both sides are already fresh. Latency is the price of
+//!    that, reported and never gating.
+//! 3. **Exclusion precedes modulation.** Task-irrelevant agents (`rel == 0`) are
+//!    dropped by [`relevant_masks`]'s contract *before* any role is read, so `ρ`
+//!    can never resurrect a bystander — such an agent's role is never consulted.
+//! 4. **Decline, never panic.** A *participating* agent (one that survived
+//!    relevance filtering) with no role assignment declines the decision
+//!    (`act = false`, `score = 0.0`) after a `tracing::warn!`, exactly as an
+//!    upstream [`CatgraphError`] does; a role outside `ρ`'s range is an upstream
+//!    [`catgraph_magnitude::modulate`] error and declines the same way. On the
+//!    [`MagnitudeValueCalculator`] surface both cases return
+//!    [`f64::NEG_INFINITY`], mirroring that surface's existing error convention.
+//!
+//! Interaction with the other opt-ins: [`MagnitudePolicy::with_eq3_levers`] and
+//! [`MagnitudePolicy::with_evaluator_leave`] both govern the *untyped* cached /
+//! fresh evaluation sites, and neither has an effect while a typed configuration
+//! is set — the typed path has no cached candidate query for the L2 proof branch
+//! to fire on, no reduced-set evaluator for leave variant B to use, and takes the
+//! generic `coalition_value` route (never the L3 `f64` factorization) on every
+//! evaluation.
+//!
 //! `t = 1` stays pinned (never exposed). Removal is an upstream non-goal
 //! (max-product closures do not downdate), so `should_leave` defaults to the
 //! fresh two-evaluation path; an opt-in reduced-set-evaluator leave variant
@@ -205,11 +261,12 @@
 //! holding an evaluator handle does not fit, see
 //! [`catgraph_magnitude::coalition_value_delta`].
 
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
-use catgraph_magnitude::{CatgraphError, CoalitionEvaluator, EvalScratch};
+use catgraph_magnitude::{CatgraphError, CoalitionEvaluator, EvalScratch, RoleId, RoleModulation};
 #[cfg(feature = "magnitude-fast")]
 use catgraph_magnitude::{Coalition, HomMap, LawvereMetricSpace, UnitInterval, ZeroDiversityProof};
 
@@ -755,6 +812,148 @@ pub(crate) fn magnitude_or_zero(masks: &[u32], required: u32) -> Result<f64, Cat
     magnitude_of_masks(masks, required)
 }
 
+/// The typed-roles configuration (koalisi #72, EQ4): who carries which role, and
+/// how strongly two roles substitute for one another.
+///
+/// Held behind an [`Arc`] by [`MagnitudePolicy`] / [`MagnitudeValueCalculator`]
+/// so a clone shares it and the async offload can move an owned handle into the
+/// rayon closure. See the
+/// [module docs](self#the-typed-roles-arm-koalisi-72-eq4) for the registered
+/// contract.
+#[derive(Debug, Clone)]
+struct TypedConfig {
+    /// `agent_id → RoleId`. Consulted **only** for agents that survive relevance
+    /// filtering, so a task-irrelevant agent needs no entry (contract point 3).
+    roles: HashMap<usize, RoleId>,
+    /// The role-interaction table `ρ`, validated at construction by
+    /// [`RoleModulation::new`].
+    rho: RoleModulation,
+}
+
+/// One side of a typed decision: the relevance-filtered member capability masks
+/// and the roles of exactly those members, positionally aligned
+/// (`roles[i]` is the role of the agent whose mask is `masks[i]`).
+///
+/// Produced by [`typed_relevant_masks`], which is the sole constructor — the
+/// positional alignment is the invariant every typed evaluation rests on, since
+/// [`catgraph_magnitude::modulate`] indexes its `roles` slice by agent index.
+#[derive(Debug, Clone, Default)]
+struct TypedSide {
+    masks: Vec<u32>,
+    roles: Vec<RoleId>,
+}
+
+/// [`relevant_masks`] with each survivor's [`RoleId`] carried alongside its mask.
+///
+/// Applies exactly the same dedup-by-`agent_id` / drop-`rel == 0` filter, in the
+/// same order, so the `masks` component is identical to what [`relevant_masks`]
+/// would produce on the same input — the role lookup happens **after** the
+/// filter, which is what keeps `ρ` from resurrecting a task-irrelevant agent
+/// (module docs, contract point 3).
+///
+/// Returns `None` — after a `tracing::warn!` naming the agent — when a
+/// *surviving* agent carries no role assignment. Callers turn that into a
+/// decline (or [`f64::NEG_INFINITY`] on the value surface); it is never a panic.
+fn typed_relevant_masks(
+    agents: &[&dyn AgentCapabilities],
+    required: u32,
+    roles: &HashMap<usize, RoleId>,
+) -> Option<TypedSide> {
+    let mut seen = std::collections::HashSet::new();
+    let mut side = TypedSide {
+        masks: Vec::with_capacity(agents.len()),
+        roles: Vec::with_capacity(agents.len()),
+    };
+    for a in agents {
+        let caps = a.capabilities();
+        let id = a.agent_id();
+        if caps & required == 0 || !seen.insert(id) {
+            continue;
+        }
+        let Some(&role) = roles.get(&id) else {
+            tracing::warn!(
+                agent_id = id,
+                "typed magnitude: participating agent has no role assignment; declining"
+            );
+            return None;
+        };
+        side.masks.push(caps);
+        side.roles.push(role);
+    }
+    Some(side)
+}
+
+/// Coalition magnitude of a typed side under the **ρ-modulated**
+/// substitutability coupling, at the pinned scale `t = 1`.
+///
+/// Builds the coupling list exactly as [`magnitude_of_masks`] does (same
+/// [`CouplingModel::coupling`] map, same `i`-outer / `j`-inner order, same
+/// `p > 0.0` filter, no self-couplings), applies
+/// [`catgraph_magnitude::modulate`] to it, and evaluates the modulated table
+/// through the same [`catgraph_magnitude::coalition_value`] entry point. At
+/// `ρ ≡ 1` the modulation is the exact identity on every entry (`1.0 * p == p`
+/// in IEEE), so this reduces to [`magnitude_of_masks`] bit-for-bit.
+///
+/// A `ρ` entry of `0` yields an explicit `0.0` coupling, which upstream treats
+/// exactly as an absent one.
+///
+/// `side.masks` must be non-empty (callers guard the empty case via
+/// [`typed_magnitude_or_zero`]).
+///
+/// # Errors
+///
+/// Propagates a [`catgraph_magnitude::modulate`] failure (a role outside `ρ`'s
+/// range) and any [`CatgraphError`] from the upstream magnitude computation.
+fn typed_magnitude_of_masks(
+    side: &TypedSide,
+    required: u32,
+    rho: &RoleModulation,
+) -> Result<f64, CatgraphError> {
+    let agents: Vec<usize> = (0..side.masks.len()).collect();
+
+    let mut couplings: Vec<(usize, usize, f64)> = Vec::new();
+    for (i, &from) in side.masks.iter().enumerate() {
+        for (j, &to) in side.masks.iter().enumerate() {
+            if i == j {
+                continue;
+            }
+            let p = CouplingModel::coupling(from, to, required);
+            if p > 0.0 {
+                couplings.push((i, j, p));
+            }
+        }
+    }
+
+    let modulated = catgraph_magnitude::modulate(&couplings, &side.roles, rho)?;
+    catgraph_magnitude::coalition_value(&agents, modulated.couplings(), &agents)
+}
+
+/// [`typed_magnitude_of_masks`], or `Ok(0.0)` when the side is empty
+/// (`Mag(∅) = 0` — the same guard [`magnitude_or_zero`] applies to the untyped
+/// path, including the all-irrelevant and `required == 0` cases).
+///
+/// # Errors
+///
+/// Whatever [`typed_magnitude_of_masks`] propagates.
+fn typed_magnitude_or_zero(
+    side: &TypedSide,
+    required: u32,
+    rho: &RoleModulation,
+) -> Result<f64, CatgraphError> {
+    if side.masks.is_empty() {
+        return Ok(0.0);
+    }
+    typed_magnitude_of_masks(side, required, rho)
+}
+
+/// The decline a typed decision returns when the configuration cannot be applied
+/// to it (a participating agent has no role) — the same shape as the
+/// upstream-error decline in [`MagnitudePolicy::join_decision_from_values`].
+const TYPED_DECLINE: Decision = Decision {
+    act: false,
+    score: 0.0,
+};
+
 /// [`magnitude_of_masks`] over the upstream `f64` factorization (EQ3 lever L3,
 /// feature `magnitude-fast`, upstream #165).
 ///
@@ -996,27 +1195,78 @@ impl FreshRoute {
 /// here). [`Clone`] shares the cache (via [`Arc`]); [`Default`] / [`new`] start
 /// empty. The calculator no longer derives [`Copy`].
 ///
+/// # Typed roles
+///
+/// [`with_role_modulation`](Self::with_role_modulation) switches the calculator
+/// to the EQ4 typed arm: couplings are `ρ`-modulated and every value is computed
+/// **fresh** (the cache above is bypassed entirely — the module's *typed-roles
+/// arm* docs explain why the `(required, member_masks)` key cannot serve a typed
+/// evaluation). Without a typed configuration the calculator is exactly the
+/// untyped one described above.
+///
 /// [`new`]: MagnitudeValueCalculator::new
 #[derive(Debug, Clone, Default)]
 pub struct MagnitudeValueCalculator {
     pub required_capabilities: u32,
     cache: Arc<Mutex<Option<EvaluatorCache>>>,
+    /// The EQ4 typed-roles configuration, or `None` for the untyped default.
+    typed: Option<Arc<TypedConfig>>,
 }
 
 impl MagnitudeValueCalculator {
     /// A calculator for the given task requirement, with an empty evaluator
-    /// cache.
+    /// cache and no typed configuration (the untyped arm).
     #[must_use]
     pub fn new(required_capabilities: u32) -> Self {
         Self {
             required_capabilities,
             cache: Arc::default(),
+            typed: None,
         }
+    }
+
+    /// Switch the calculator to the **EQ4 typed arm** (koalisi #72): score
+    /// coalitions on `ρ`-modulated substitutability couplings,
+    /// `A′(i → j) = ρ(role_i, role_j) · A(i → j)`.
+    ///
+    /// `roles` maps `AgentCapabilities::agent_id` to a
+    /// [`RoleId`](catgraph_magnitude::RoleId); only agents that survive
+    /// relevance filtering (`capabilities & required != 0`) are looked up, so a
+    /// task-irrelevant agent needs no entry. A *participating* agent with no
+    /// entry — or with a role outside `ρ`'s range — makes the value
+    /// [`f64::NEG_INFINITY`] with a warning, this surface's existing
+    /// cannot-evaluate convention.
+    ///
+    /// The typed arm evaluates **fresh**: the membership-keyed evaluator cache
+    /// is bypassed, since its `(required, member_masks)` key cannot distinguish
+    /// two agents that share a mask and differ in role. The module's
+    /// *typed-roles arm* docs carry the full contract.
+    #[must_use]
+    pub fn with_role_modulation(
+        mut self,
+        roles: HashMap<usize, RoleId>,
+        rho: RoleModulation,
+    ) -> Self {
+        self.typed = Some(Arc::new(TypedConfig { roles, rho }));
+        self
     }
 }
 
 impl ValueCalculator for MagnitudeValueCalculator {
     fn calculate_value(&self, agents: &[&dyn AgentCapabilities]) -> f64 {
+        if let Some(cfg) = self.typed.as_deref() {
+            let Some(side) = typed_relevant_masks(agents, self.required_capabilities, &cfg.roles)
+            else {
+                return f64::NEG_INFINITY;
+            };
+            return match typed_magnitude_or_zero(&side, self.required_capabilities, &cfg.rho) {
+                Ok(m) => m,
+                Err(e) => {
+                    tracing::warn!(error = %e, "typed magnitude value calculation failed");
+                    f64::NEG_INFINITY
+                }
+            };
+        }
         let masks = relevant_masks(agents, self.required_capabilities);
         if masks.is_empty() {
             return 0.0;
@@ -1066,6 +1316,12 @@ pub(crate) enum LeaveVariant {
 /// [`Clone`] shares the cache (via [`Arc`]); [`Default`] / [`new`] start empty.
 /// The policy no longer derives [`Copy`].
 ///
+/// # Typed roles
+///
+/// [`with_role_modulation`](Self::with_role_modulation) switches the policy to
+/// the EQ4 typed arm (koalisi #72). Without it the policy is exactly the untyped
+/// one described above — the identity default is structural, not measured.
+///
 /// [`new`]: MagnitudePolicy::new
 #[derive(Debug, Clone, Default)]
 pub struct MagnitudePolicy {
@@ -1075,11 +1331,14 @@ pub struct MagnitudePolicy {
     /// L3). Zero-sized — and the toggle absent — without `magnitude-fast`.
     fresh_route: FreshRoute,
     cache: Arc<Mutex<Option<EvaluatorCache>>>,
+    /// The EQ4 typed-roles configuration, or `None` for the untyped default.
+    /// `None` is what routes every decision structurally to the untyped path.
+    typed: Option<Arc<TypedConfig>>,
 }
 
 impl MagnitudePolicy {
     /// A policy with the given `join_margin`, the default (fresh) leave variant,
-    /// and an empty evaluator cache.
+    /// an empty evaluator cache, and no typed configuration.
     #[must_use]
     pub fn new(join_margin: f64) -> Self {
         Self {
@@ -1087,7 +1346,41 @@ impl MagnitudePolicy {
             leave_variant: LeaveVariant::Fresh,
             fresh_route: FreshRoute::default(),
             cache: Arc::default(),
+            typed: None,
         }
+    }
+
+    /// Switch the policy to the **EQ4 typed arm** (koalisi #72): modulate every
+    /// substitutability coupling by the role-interaction table,
+    /// `A′(i → j) = ρ(role_i, role_j) · A(i → j)`
+    /// ([`catgraph_magnitude::modulate`]), then decide on **fresh** magnitudes
+    /// of the modulated coalition — join iff
+    /// `Mag′(S ∪ {x}) − Mag′(S) > join_margin`, leave iff
+    /// `Mag′(S) − Mag′(S ∖ {x}) <= 0`, the same rules as the untyped arm over a
+    /// different coupling table.
+    ///
+    /// `roles` maps [`AgentCapabilities::agent_id`] to a
+    /// [`RoleId`](catgraph_magnitude::RoleId). Only agents that survive
+    /// relevance filtering (`capabilities & required != 0`) are looked up, so a
+    /// task-irrelevant agent needs no entry — `ρ` cannot resurrect one. A
+    /// *participating* agent with no entry, or with a role outside `ρ`'s range,
+    /// declines the decision (`act = false`, `score = 0.0`) with a warning;
+    /// nothing on this path panics.
+    ///
+    /// Not composable with the cache-based opt-ins: the typed path evaluates
+    /// fresh on both sides of every decision, so `with_eq3_levers` (feature
+    /// `magnitude-fast`) and
+    /// [`with_evaluator_leave`](Self::with_evaluator_leave) have no effect while
+    /// a typed configuration is set. The module's *typed-roles arm* docs carry
+    /// the registered contract and the reasons behind it.
+    #[must_use]
+    pub fn with_role_modulation(
+        mut self,
+        roles: HashMap<usize, RoleId>,
+        rho: RoleModulation,
+    ) -> Self {
+        self.typed = Some(Arc::new(TypedConfig { roles, rho }));
+        self
     }
 
     /// Switch the policy to the **EQ3 arm** (koalisi #69, feature
@@ -1183,6 +1476,7 @@ impl MagnitudePolicy {
             leave_variant: LeaveVariant::Evaluator,
             fresh_route: FreshRoute::default(),
             cache: Arc::default(),
+            typed: None,
         }
     }
 
@@ -1223,6 +1517,83 @@ impl MagnitudePolicy {
             .collect();
         let masks_out = relevant_masks(&without, required);
         (masks_in, masks_out)
+    }
+
+    /// The typed analogue of [`join_masks`](Self::join_masks): the `(with,
+    /// without)` [`TypedSide`]s for a join decision, roles included.
+    ///
+    /// `None` (⇒ [`TYPED_DECLINE`]) when a participating agent has no role — see
+    /// [`typed_relevant_masks`], which also emits the warning.
+    fn typed_join_sides(
+        cfg: &TypedConfig,
+        agent: &dyn AgentCapabilities,
+        coalition: &[&dyn AgentCapabilities],
+        required: u32,
+    ) -> Option<(TypedSide, TypedSide)> {
+        let without = typed_relevant_masks(coalition, required, &cfg.roles)?;
+        let mut with_view: Vec<&dyn AgentCapabilities> = coalition.to_vec();
+        with_view.push(agent);
+        let with = typed_relevant_masks(&with_view, required, &cfg.roles)?;
+        Some((with, without))
+    }
+
+    /// The typed analogue of [`leave_masks`](Self::leave_masks): the `(in, out)`
+    /// [`TypedSide`]s for a leave decision, roles included. `coalition` includes
+    /// `agent`, which is removed from the `out` side by `agent_id`.
+    ///
+    /// `None` (⇒ [`TYPED_DECLINE`]) when a participating agent has no role.
+    fn typed_leave_sides(
+        cfg: &TypedConfig,
+        agent: &dyn AgentCapabilities,
+        coalition: &[&dyn AgentCapabilities],
+        required: u32,
+    ) -> Option<(TypedSide, TypedSide)> {
+        let side_in = typed_relevant_masks(coalition, required, &cfg.roles)?;
+        let agent_id = agent.agent_id();
+        let without: Vec<&dyn AgentCapabilities> = coalition
+            .iter()
+            .filter(|a| a.agent_id() != agent_id)
+            .copied()
+            .collect();
+        let side_out = typed_relevant_masks(&without, required, &cfg.roles)?;
+        Some((side_in, side_out))
+    }
+
+    /// Typed join decision: two **fresh** `ρ`-modulated magnitudes through the
+    /// shared [`join_decision_from_values`](Self::join_decision_from_values)
+    /// rule.
+    ///
+    /// No cache and no knife-edge band (module docs, contract point 2), so the
+    /// three-way dispatch the untyped
+    /// [`join_dispatch`](Self::join_dispatch) needs collapses: an empty side is
+    /// handled by [`typed_magnitude_or_zero`], and an excluded candidate makes
+    /// the two sides *identical inputs* — hence identical values and an exactly
+    /// `0.0` margin, the pre-K6 fresh behaviour.
+    fn typed_join_dispatch(
+        cfg: &TypedConfig,
+        required: u32,
+        with: &TypedSide,
+        without: &TypedSide,
+        join_margin: f64,
+    ) -> Decision {
+        let mag_with = typed_magnitude_or_zero(with, required, &cfg.rho);
+        let mag_without = typed_magnitude_or_zero(without, required, &cfg.rho);
+        Self::join_decision_from_values(mag_with, mag_without, join_margin)
+    }
+
+    /// Typed leave decision: the dual of
+    /// [`typed_join_dispatch`](Self::typed_join_dispatch), mirroring the untyped
+    /// default (variant A) leave path — two fresh magnitudes through
+    /// [`leave_decision_from_values`](Self::leave_decision_from_values).
+    fn typed_leave_dispatch(
+        cfg: &TypedConfig,
+        required: u32,
+        side_in: &TypedSide,
+        side_out: &TypedSide,
+    ) -> Decision {
+        let mag_in = typed_magnitude_or_zero(side_in, required, &cfg.rho);
+        let mag_out = typed_magnitude_or_zero(side_out, required, &cfg.rho);
+        Self::leave_decision_from_values(mag_in, mag_out)
     }
 
     /// Pure join decision over owned magnitude results.
@@ -1454,6 +1825,10 @@ impl CoalitionDecisionPolicy for MagnitudePolicy {
     /// `margin = Mag(coalition + agent) - Mag(coalition)` is positive when the
     /// candidate adds effective-member diversity (new task-relevant coverage or
     /// non-substitutable specialization).
+    ///
+    /// With a typed configuration ([`with_role_modulation`](Self::with_role_modulation))
+    /// the margin is taken over `ρ`-modulated couplings, evaluated fresh on both
+    /// sides; without one this is the untyped, evaluator-cached path verbatim.
     fn should_join(
         &self,
         agent: &dyn AgentCapabilities,
@@ -1461,6 +1836,13 @@ impl CoalitionDecisionPolicy for MagnitudePolicy {
         ctx: &DecisionContext,
     ) -> Decision {
         let required = ctx.required_capabilities;
+        if let Some(cfg) = self.typed.as_deref() {
+            let Some((with, without)) = Self::typed_join_sides(cfg, agent, coalition, required)
+            else {
+                return TYPED_DECLINE;
+            };
+            return Self::typed_join_dispatch(cfg, required, &with, &without, self.join_margin);
+        }
         let (masks_with, masks_without) = Self::join_masks(agent, coalition, required);
         Self::join_dispatch(
             &self.cache,
@@ -1480,6 +1862,10 @@ impl CoalitionDecisionPolicy for MagnitudePolicy {
     /// (a clone, or one whose task-relevant capabilities are subsumed) leaves
     /// magnitude unchanged (`delta <= 0`) and should leave. A sole member has
     /// `delta = 1 - 0 > 0` and stays.
+    ///
+    /// With a typed configuration ([`with_role_modulation`](Self::with_role_modulation))
+    /// the delta is taken over `ρ`-modulated couplings, evaluated fresh on both
+    /// sides (the leave variant does not apply — see the module docs).
     fn should_leave(
         &self,
         agent: &dyn AgentCapabilities,
@@ -1487,6 +1873,14 @@ impl CoalitionDecisionPolicy for MagnitudePolicy {
         ctx: &DecisionContext,
     ) -> Decision {
         let required = ctx.required_capabilities;
+        if let Some(cfg) = self.typed.as_deref() {
+            let Some((side_in, side_out)) =
+                Self::typed_leave_sides(cfg, agent, coalition, required)
+            else {
+                return TYPED_DECLINE;
+            };
+            return Self::typed_leave_dispatch(cfg, required, &side_in, &side_out);
+        }
         let (masks_in, masks_out) = Self::leave_masks(agent, coalition, required);
         match self.leave_variant {
             LeaveVariant::Fresh => {
@@ -1521,9 +1915,24 @@ impl CoalitionDecisionPolicy for MagnitudePolicy {
         ctx: &'a DecisionContext,
     ) -> Pin<Box<dyn Future<Output = Decision> + Send + 'a>> {
         let required = ctx.required_capabilities;
+        let join_margin = self.join_margin;
+        // Typed arm: snapshot the owned `(masks, roles)` sides and an owned
+        // config handle in the sync prologue, exactly as the untyped path
+        // snapshots masks, then offload the fresh magnitudes.
+        if let Some(cfg) = self.typed.clone() {
+            let sides = Self::typed_join_sides(&cfg, agent, coalition, required);
+            return Box::pin(async move {
+                let Some((with, without)) = sides else {
+                    return TYPED_DECLINE;
+                };
+                tokio_rayon::spawn(move || {
+                    Self::typed_join_dispatch(&cfg, required, &with, &without, join_margin)
+                })
+                .await
+            });
+        }
         let (masks_with, masks_without) = Self::join_masks(agent, coalition, required);
         let candidate_caps = agent.capabilities();
-        let join_margin = self.join_margin;
         let route = self.fresh_route;
         let cache = Arc::clone(&self.cache);
 
@@ -1558,6 +1967,19 @@ impl CoalitionDecisionPolicy for MagnitudePolicy {
         ctx: &'a DecisionContext,
     ) -> Pin<Box<dyn Future<Output = Decision> + Send + 'a>> {
         let required = ctx.required_capabilities;
+        // Typed arm: same prologue-snapshot / offload shape as the join path.
+        if let Some(cfg) = self.typed.clone() {
+            let sides = Self::typed_leave_sides(&cfg, agent, coalition, required);
+            return Box::pin(async move {
+                let Some((side_in, side_out)) = sides else {
+                    return TYPED_DECLINE;
+                };
+                tokio_rayon::spawn(move || {
+                    Self::typed_leave_dispatch(&cfg, required, &side_in, &side_out)
+                })
+                .await
+            });
+        }
         let (masks_in, masks_out) = Self::leave_masks(agent, coalition, required);
         let leaver_caps = agent.capabilities();
         let variant = self.leave_variant;
@@ -3358,5 +3780,433 @@ mod tests {
                 }
             }
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // 11. EQ4 typed-roles gates (koalisi #72, prereg §4): the identity default,
+    // ρ ≡ 1 agreement with the untyped arm, δ-ρ cross-role decoupling,
+    // exclusion-before-modulation, and the decline-never-panic surface.
+    // -----------------------------------------------------------------------
+
+    /// A `ρ` of all-`1.0` entries over `n` roles — the exact identity of the
+    /// modulation (`1.0 * p == p` in IEEE, and upstream's validator returns `p`
+    /// unchanged).
+    fn rho_ones(n: usize) -> RoleModulation {
+        RoleModulation::new(vec![vec![1.0; n]; n]).unwrap()
+    }
+
+    /// The registered oracle table `ρ = δ`: same-role substitutability
+    /// unchanged, cross-role substitutability exactly `0`.
+    fn rho_identity(n: usize) -> RoleModulation {
+        let rows: Vec<Vec<f64>> = (0..n)
+            .map(|i| {
+                (0..n)
+                    .map(|j| if i == j { 1.0 } else { 0.0 })
+                    .collect::<Vec<f64>>()
+            })
+            .collect();
+        RoleModulation::new(rows).unwrap()
+    }
+
+    /// Round-robin role assignment over agent ids `0..n`.
+    fn round_robin_roles(n: usize, n_roles: usize) -> HashMap<usize, RoleId> {
+        (0..n).map(|id| (id, id % n_roles)).collect()
+    }
+
+    /// Every join/leave decision one policy makes over a seeded stream, in
+    /// order; membership advances on the policy's own decisions.
+    fn eq4_decision_stream(policy: &MagnitudePolicy, seed: u64) -> Vec<Decision> {
+        let (agents, tasks) = generate_instance(seed);
+        let mut out = Vec::new();
+
+        for task in &tasks {
+            let ctx = DecisionContext {
+                required_capabilities: task.required,
+            };
+            let mut members: Vec<usize> = vec![task.order[0]];
+
+            for &idx in &task.order[1..] {
+                let candidate: &dyn AgentCapabilities = &agents[idx];
+                let coalition = view(&agents, &members);
+                let d = policy.should_join(candidate, &coalition, &ctx);
+                out.push(d);
+                if d.act {
+                    members.push(idx);
+                }
+            }
+
+            for &idx in &task.order {
+                let Some(pos) = members.iter().position(|&m| m == idx) else {
+                    continue;
+                };
+                let coalition = view(&agents, &members);
+                let agent: &dyn AgentCapabilities = &agents[idx];
+                let d = policy.should_leave(agent, &coalition, &ctx);
+                out.push(d);
+                if d.act {
+                    members.remove(pos);
+                }
+            }
+        }
+        out
+    }
+
+    /// Drive `typed` alongside the untyped `reference` over a seeded stream,
+    /// asserting act-equality and 1e-9-relative score agreement at every
+    /// decision. Membership advances on the REFERENCE decision, so both arms
+    /// always score identical states even if one had diverged.
+    fn assert_typed_tracks_untyped(
+        typed: &MagnitudePolicy,
+        reference: &MagnitudePolicy,
+        seed: u64,
+    ) {
+        let (agents, tasks) = generate_instance(seed);
+
+        for task in &tasks {
+            let required = task.required;
+            let ctx = DecisionContext {
+                required_capabilities: required,
+            };
+            let mut members: Vec<usize> = vec![task.order[0]];
+
+            for &idx in &task.order[1..] {
+                let candidate: &dyn AgentCapabilities = &agents[idx];
+                let coalition = view(&agents, &members);
+                let want = reference.should_join(candidate, &coalition, &ctx);
+                let got = typed.should_join(candidate, &coalition, &ctx);
+                assert!(
+                    decisions_match(got, want),
+                    "seed {seed} typed join idx {idx}: got {got:?} want {want:?}"
+                );
+                if want.act {
+                    members.push(idx);
+                }
+            }
+
+            for &idx in &task.order {
+                let Some(pos) = members.iter().position(|&m| m == idx) else {
+                    continue;
+                };
+                let coalition = view(&agents, &members);
+                let agent: &dyn AgentCapabilities = &agents[idx];
+                let want = reference.should_leave(agent, &coalition, &ctx);
+                let got = typed.should_leave(agent, &coalition, &ctx);
+                assert!(
+                    decisions_match(got, want),
+                    "seed {seed} typed leave idx {idx}: got {got:?} want {want:?}"
+                );
+                if want.act {
+                    members.remove(pos);
+                }
+            }
+        }
+    }
+
+    /// X-identity cell 1: no typed configuration ⇒ the untyped path, structurally.
+    /// The policy still reproduces the fresh untyped reference over the seeded
+    /// stream (cache path included), and is decision-for-decision **bit**-identical
+    /// to a plain policy — the typed field adds a branch, never an arithmetic step.
+    #[test]
+    fn typed_identity_default_is_the_untyped_path() {
+        for seed in 0..5u64 {
+            assert_stream_matches_reference(&MagnitudePolicy::new(0.0), seed);
+        }
+
+        let plain = MagnitudePolicy::default();
+        let no_roles = MagnitudePolicy::new(0.0);
+        for seed in 0..5u64 {
+            let want = eq4_decision_stream(&plain, seed);
+            let got = eq4_decision_stream(&no_roles, seed);
+            assert_eq!(want.len(), got.len(), "seed {seed}: decision counts differ");
+            for (i, (w, g)) in want.iter().zip(got.iter()).enumerate() {
+                assert_eq!(w.act, g.act, "seed {seed} decision {i}: act differs");
+                assert_eq!(
+                    w.score.to_bits(),
+                    g.score.to_bits(),
+                    "seed {seed} decision {i}: score not bit-identical ({w:?} vs {g:?})"
+                );
+            }
+        }
+    }
+
+    /// X-identity cell 2: the typed path at `ρ ≡ 1` reproduces the untyped
+    /// arm's **acts** over the seeded stream (scores within 1e-9 relative — the
+    /// untyped arm answers joins incrementally, the typed one always fresh).
+    /// On the value surface, where the untyped arm is itself bit-identical to
+    /// fresh, the agreement is bit-exact.
+    #[test]
+    fn typed_rho_ones_agrees_with_the_untyped_arm() {
+        for seed in 0..5u64 {
+            let (agents, tasks) = generate_instance(seed);
+            let roles = round_robin_roles(agents.len(), 3);
+            let typed = MagnitudePolicy::new(0.0).with_role_modulation(roles.clone(), rho_ones(3));
+            assert_typed_tracks_untyped(&typed, &MagnitudePolicy::default(), seed);
+
+            // Value surface: `1.0 · p == p`, so the modulated coupling list is
+            // the untyped one bit-for-bit and so is the magnitude.
+            for task in &tasks {
+                let coalition = view(&agents, &task.order);
+                let untyped = MagnitudeValueCalculator::new(task.required);
+                let typed_calc = MagnitudeValueCalculator::new(task.required)
+                    .with_role_modulation(roles.clone(), rho_ones(3));
+                assert_eq!(
+                    untyped.calculate_value(&coalition).to_bits(),
+                    typed_calc.calculate_value(&coalition).to_bits(),
+                    "seed {seed}: ρ ≡ 1 must not move the value"
+                );
+            }
+        }
+    }
+
+    /// The oracle table `ρ = δ` decouples cross-role clones: two agents with
+    /// IDENTICAL relevant masks are mutually coupled at `1.0` untyped (⇒
+    /// skeletalized into one effective agent ⇒ margin `0` ⇒ decline), but at
+    /// `ρ(0, 1) = 0` the coupling vanishes and they count as two — a positive
+    /// margin. Same-role clones still merge. This is the arm's whole mechanism,
+    /// in one fixture.
+    #[test]
+    fn identity_rho_decouples_cross_role_clones() {
+        let ctx = DecisionContext {
+            required_capabilities: 0b111,
+        };
+        let member = TestAgent {
+            id: 0,
+            caps: 0b001,
+            trust: 50,
+        };
+        let clone = TestAgent {
+            id: 1,
+            caps: 0b001,
+            trust: 50,
+        };
+        let coalition: [&dyn AgentCapabilities; 1] = [&member];
+
+        // Untyped control: the clone is redundant and declines.
+        let untyped = MagnitudePolicy::default().should_join(&clone, &coalition, &ctx);
+        assert!(!untyped.act, "untyped: a clone must not join");
+        assert!(untyped.score.abs() < EPS);
+
+        // Cross-role (member role 0, clone role 1) under ρ = δ: the coupling is
+        // zeroed both ways ⇒ Mag 1.0 → 2.0 ⇒ join with margin ≈ 1.0.
+        let cross: HashMap<usize, RoleId> = [(0usize, 0usize), (1usize, 1usize)].into();
+        let typed_cross = MagnitudePolicy::new(0.0).with_role_modulation(cross, rho_identity(2));
+        let d = typed_cross.should_join(&clone, &coalition, &ctx);
+        assert!(
+            d.act,
+            "cross-role clone must join under ρ = δ (score={})",
+            d.score
+        );
+        assert!(
+            (d.score - 1.0).abs() < EPS,
+            "cross-role join margin = {}, expected 1.0",
+            d.score
+        );
+
+        // Same-role: ρ(0, 0) = 1 leaves the mutual-1.0 coupling intact ⇒ the
+        // pair still skeletalizes ⇒ decline, margin ≈ 0.
+        let same: HashMap<usize, RoleId> = [(0usize, 0usize), (1usize, 0usize)].into();
+        let typed_same = MagnitudePolicy::new(0.0).with_role_modulation(same, rho_identity(2));
+        let d = typed_same.should_join(&clone, &coalition, &ctx);
+        assert!(!d.act, "same-role clone must not join (score={})", d.score);
+        assert!(d.score.abs() < EPS);
+
+        // The leave dual: with the cross-role pair seated, neither is redundant.
+        let seated: [&dyn AgentCapabilities; 2] = [&member, &clone];
+        let cross: HashMap<usize, RoleId> = [(0usize, 0usize), (1usize, 1usize)].into();
+        let typed_cross = MagnitudePolicy::new(0.0).with_role_modulation(cross, rho_identity(2));
+        let stay = typed_cross.should_leave(&clone, &seated, &ctx);
+        assert!(!stay.act, "cross-role clone contributes ⇒ stays");
+        assert!((stay.score - 1.0).abs() < EPS);
+        // ... while under ρ ≡ 1 it is redundant again and leaves.
+        let same_role_all: HashMap<usize, RoleId> = [(0usize, 0usize), (1usize, 1usize)].into();
+        let typed_ones = MagnitudePolicy::new(0.0).with_role_modulation(same_role_all, rho_ones(2));
+        let leave = typed_ones.should_leave(&clone, &seated, &ctx);
+        assert!(leave.act, "ρ ≡ 1 ⇒ the clone is redundant and leaves");
+        assert!(leave.score.abs() < EPS);
+    }
+
+    /// Contract point 3: task-irrelevant agents are excluded BEFORE any role is
+    /// read, so `ρ` can never resurrect a bystander — and the bystander does not
+    /// even need a role assignment. Mirrors the untyped
+    /// `irrelevant_bystander_*` regression.
+    #[test]
+    fn typed_irrelevant_bystander_is_excluded_before_modulation() {
+        let ctx = DecisionContext {
+            required_capabilities: 0b111,
+        };
+        let a0 = TestAgent {
+            id: 0,
+            caps: 0b001,
+            trust: 50,
+        };
+        let a1 = TestAgent {
+            id: 1,
+            caps: 0b010,
+            trust: 50,
+        };
+        let a2 = TestAgent {
+            id: 2,
+            caps: 0b100,
+            trust: 50,
+        };
+        // Every capability bit lies outside `required` — and it has NO role
+        // entry, which must not matter.
+        let bystander = TestAgent {
+            id: 3,
+            caps: 0b1000,
+            trust: 50,
+        };
+        let roles: HashMap<usize, RoleId> =
+            [(0usize, 0usize), (1usize, 1usize), (2usize, 2usize)].into();
+        let policy = MagnitudePolicy::new(0.0).with_role_modulation(roles.clone(), rho_identity(3));
+        let calc =
+            MagnitudeValueCalculator::new(0b111).with_role_modulation(roles, rho_identity(3));
+
+        let specialists: [&dyn AgentCapabilities; 3] = [&a0, &a1, &a2];
+        let with_bystander: [&dyn AgentCapabilities; 4] = [&a0, &a1, &a2, &bystander];
+
+        // Value is unmoved by the bystander (and the missing role is never hit).
+        assert!((calc.calculate_value(&with_bystander) - 3.0).abs() < EPS);
+        assert!((calc.calculate_value(&specialists) - 3.0).abs() < EPS);
+
+        // Join: nothing task-relevant ⇒ margin exactly 0 ⇒ decline (NOT a
+        // missing-role decline — the score would be 0.0 either way, but the
+        // value assertion above pins that the agent never reached the lookup).
+        let join = policy.should_join(&bystander, &specialists, &ctx);
+        assert!(!join.act && join.score.abs() < EPS);
+
+        // Leave: the bystander is redundant; a unique specialist still stays.
+        let leave = policy.should_leave(&bystander, &with_bystander, &ctx);
+        assert!(leave.act && leave.score.abs() < EPS);
+        let stay = policy.should_leave(&a0, &with_bystander, &ctx);
+        assert!(
+            !stay.act,
+            "unique specialist must stay (score={})",
+            stay.score
+        );
+        assert!((stay.score - 1.0).abs() < EPS);
+
+        // `required == 0` ⇒ every agent irrelevant ⇒ value 0.0, everyone leaves,
+        // and again no role is consulted.
+        let ctx0 = DecisionContext {
+            required_capabilities: 0,
+        };
+        let calc0 =
+            MagnitudeValueCalculator::new(0).with_role_modulation(HashMap::new(), rho_identity(3));
+        assert!(calc0.calculate_value(&specialists).abs() < EPS);
+        let policy0 =
+            MagnitudePolicy::new(0.0).with_role_modulation(HashMap::new(), rho_identity(3));
+        let leave0 = policy0.should_leave(&a0, &specialists, &ctx0);
+        assert!(leave0.act && leave0.score.abs() < EPS);
+    }
+
+    /// Contract point 4: an unusable typed configuration declines — it never
+    /// panics. Two ways to be unusable: a participating agent with no role
+    /// assignment, and a role outside `ρ`'s range (an upstream `modulate`
+    /// error). The value surface reports both as `-∞`, its cannot-evaluate
+    /// convention.
+    #[test]
+    fn typed_missing_or_out_of_range_role_declines_without_panic() {
+        let ctx = DecisionContext {
+            required_capabilities: 0b111,
+        };
+        let member = TestAgent {
+            id: 0,
+            caps: 0b001,
+            trust: 50,
+        };
+        let candidate = TestAgent {
+            id: 1,
+            caps: 0b010,
+            trust: 50,
+        };
+        let coalition: [&dyn AgentCapabilities; 1] = [&member];
+        let seated: [&dyn AgentCapabilities; 2] = [&member, &candidate];
+
+        // (a) The candidate is task-relevant but carries no role.
+        let partial: HashMap<usize, RoleId> = [(0usize, 0usize)].into();
+        let policy = MagnitudePolicy::new(0.0).with_role_modulation(partial.clone(), rho_ones(2));
+        let join = policy.should_join(&candidate, &coalition, &ctx);
+        assert!(
+            !join.act && join.score.abs() < EPS,
+            "missing role ⇒ decline"
+        );
+        let leave = policy.should_leave(&candidate, &seated, &ctx);
+        assert!(
+            !leave.act && leave.score.abs() < EPS,
+            "missing role ⇒ decline (a leave decline keeps the member seated)"
+        );
+        let calc = MagnitudeValueCalculator::new(0b111).with_role_modulation(partial, rho_ones(2));
+        assert_eq!(
+            calc.calculate_value(&seated).to_bits(),
+            f64::NEG_INFINITY.to_bits(),
+            "missing role ⇒ the value surface's cannot-evaluate sentinel"
+        );
+
+        // (b) The candidate's role is outside a 2-role ρ ⇒ upstream `modulate`
+        // errors ⇒ the same decline, no panic.
+        let out_of_range: HashMap<usize, RoleId> = [(0usize, 0usize), (1usize, 7usize)].into();
+        let policy =
+            MagnitudePolicy::new(0.0).with_role_modulation(out_of_range.clone(), rho_ones(2));
+        let join = policy.should_join(&candidate, &coalition, &ctx);
+        assert!(
+            !join.act && join.score.abs() < EPS,
+            "out-of-range role ⇒ decline"
+        );
+        let calc =
+            MagnitudeValueCalculator::new(0b111).with_role_modulation(out_of_range, rho_ones(2));
+        assert_eq!(
+            calc.calculate_value(&seated).to_bits(),
+            f64::NEG_INFINITY.to_bits(),
+            "out-of-range role ⇒ the value surface's cannot-evaluate sentinel"
+        );
+    }
+
+    /// The typed async overrides produce the same [`Decision`] as their sync
+    /// counterparts, including through a trait object (the offload snapshots
+    /// owned `(masks, roles)` sides plus an owned config handle).
+    #[tokio::test]
+    async fn typed_async_matches_sync() {
+        let ctx = DecisionContext {
+            required_capabilities: 0b111,
+        };
+        let member = TestAgent {
+            id: 0,
+            caps: 0b001,
+            trust: 50,
+        };
+        let clone = TestAgent {
+            id: 1,
+            caps: 0b001,
+            trust: 50,
+        };
+        let roles: HashMap<usize, RoleId> = [(0usize, 0usize), (1usize, 1usize)].into();
+        let policy = MagnitudePolicy::new(0.0).with_role_modulation(roles, rho_identity(2));
+
+        let coalition: [&dyn AgentCapabilities; 1] = [&member];
+        let sync_join = policy.should_join(&clone, &coalition, &ctx);
+        let async_join = policy.should_join_async(&clone, &coalition, &ctx).await;
+        assert_eq!(sync_join, async_join, "typed async join must equal sync");
+        assert!(async_join.act);
+
+        let seated: [&dyn AgentCapabilities; 2] = [&member, &clone];
+        let sync_leave = policy.should_leave(&clone, &seated, &ctx);
+        let async_leave = policy.should_leave_async(&clone, &seated, &ctx).await;
+        assert_eq!(sync_leave, async_leave, "typed async leave must equal sync");
+        assert!(!async_leave.act);
+
+        // Missing role through the async path: decline, no panic.
+        let orphan = TestAgent {
+            id: 9,
+            caps: 0b010,
+            trust: 50,
+        };
+        let d = policy.should_join_async(&orphan, &coalition, &ctx).await;
+        assert!(!d.act && d.score.abs() < EPS);
+
+        // Reachable behind the trait object.
+        let boxed: Box<dyn CoalitionDecisionPolicy> = Box::new(policy);
+        let d = boxed.should_join_async(&clone, &coalition, &ctx).await;
+        assert!(d.act, "trait-object typed async join should fire");
     }
 }

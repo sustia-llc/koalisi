@@ -82,10 +82,12 @@
     clippy::similar_names
 )]
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
-use catgraph_magnitude::CatgraphError;
+use catgraph_magnitude::{
+    CatgraphError, ChannelCouplings, CoalitionEvaluator, RoleId, RoleModulation, role_grid,
+};
 use koalisi::algorithms::{
     AgentCapabilities, CoalitionStructure, FeedbackCalculator, FeedbackStore, PopulationConfig,
     SynergisticCalculator, ValueCalculator, search,
@@ -246,6 +248,10 @@ fn main() {
     println!("{}", "=".repeat(72));
     println!();
     part7_eq3_latency_rematch();
+    println!();
+    println!("{}", "=".repeat(72));
+    println!();
+    part8_eq4_typed_roles();
 }
 
 // ===========================================================================
@@ -6480,6 +6486,1431 @@ fn part7_run() {
     println!();
 }
 
+// ===========================================================================
+// Part 8 — EQ4 typed-roles battery (koalisi #72).
+//
+// Governed by `docs/prereg-K4-eq4-typed-roles.md`, registered BEFORE this code
+// (owner design-lock D1–D9 on #72). The world is the **v2t** regime: the frozen
+// `draw_prefix_v2` prefix with per-worker roles and per-required-bit role tags
+// APPENDED off the same SplitMix64 stream (the #46/#48 shared-prefix
+// discipline), plus a feasibility rejection re-draw. Ground truth is
+// role-matched coverage; the confirmatory arm is the library's ρ-modulated
+// typed magnitude (`MagnitudePolicy::with_role_modulation`).
+//
+// Everything here is ADDITIVE — Parts 1–7 above are the byte-identity gate
+// (§6 X-battery), so no frozen draw, runner, or print statement is touched.
+// ===========================================================================
+
+/// Part 8 seed range (prereg §1, owner D4) — fresh seeds; 90..120 and 150..180
+/// stay reserved.
+const P8_SEED_START: u64 = 240;
+const P8_SEED_END: u64 = 270;
+/// `R` — the role count of the registered v2t world (prereg §2).
+const P8_ROLES: usize = 3;
+/// The identity world's role count: `next() % 1 == 0`, so every worker and every
+/// tag lands in role 0 and the typed metric reduces to the untyped one
+/// (prereg §2, "Identity world (for §6 X-identity)").
+const P8_IDENTITY_ROLES: usize = 1;
+/// H-T conjunct 1: median `PRIMARY(mag-typed)` must be at least this multiple of
+/// median `PRIMARY(mag)`.
+const P8_HT_FACTOR: f64 = 1.25;
+/// H-T conjunct 2: `mag-typed` must be strictly superior on at least this many of
+/// the 30 seeds (the 60 % consistency bar inherited from K4-v2/v3).
+const P8_HT_SUPERIOR_MIN: usize = 18;
+/// Rejection-re-draw budget per task (prereg §2). A task still infeasible after
+/// this many attempts is a RUN-INVALID condition — expected never at these draws.
+const P8_REDRAW_CAP: usize = 1000;
+/// E-deg cells: the off-diagonal `ρ` entries the oracle's exact `0` is lifted to.
+const P8_RHO_OFF_GRID: [f64; 2] = [0.25, 0.5];
+/// E-ρq: the off-diagonal of the planted symmetric world table (diagonal 1.0).
+const P8_RHOQ_OFF: f64 = 0.25;
+/// E-T3: the channel count `C = R` (one channel per role).
+const P8_CHANNELS: usize = P8_ROLES;
+/// S-fib: the relative tolerance grid-vs-certificate agreement is checked at.
+/// **Adopted from upstream's own documented figure**, not chosen here: catgraph
+/// `v0.7.0`'s `coalition_typed` tests compare with
+/// `rel_close(a, b) = |a − b| ≤ 1e-9 · max(|a|, |b|, 1)` and `RoleGrid::proof`'s
+/// doctest asserts `≤ 1e-9 · max(|expected|, 1)`. Upstream also documents that
+/// this tightness is only safe away from near-1 non-merged couplings (adversarial
+/// tables at `1 − O(1e-12)` deviate up to ~1e-2), which is why the shapes below
+/// keep every off-diagonal well inside `(0, 1)`.
+const P8_FIB_REL_TOL: f64 = 1e-9;
+/// Report date for the Part 8 battery, stamped per committed run.
+const P8_REPORT_DATE: &str = "2026-08-03";
+
+/// One v2t task: the v2 `required` mask and arrival order, plus the role tag of
+/// every required bit. `tags[b]` is meaningful exactly for `b ∈ required`; the
+/// other entries are never read (they stay at the `0` the array is built with).
+struct TypedTask {
+    required: u32,
+    tags: [RoleId; UNIVERSE],
+    order: Vec<usize>,
+}
+
+/// One seeded v2t instance: the v2 pool, each worker's role (indexed by
+/// `Worker.id`, which is the pool index), the tagged task stream, and how many
+/// rejection re-draws the feasibility pass needed.
+struct TypedInstance {
+    agents: Vec<Worker>,
+    roles: Vec<RoleId>,
+    tasks: Vec<TypedTask>,
+    redraws: usize,
+    /// The most attempts any SINGLE task of this instance needed — the distance
+    /// to the [`P8_REDRAW_CAP`] RUN-INVALID trigger. The per-seed `redraws` total
+    /// does not bound it usefully (it is a sum over 20 tasks), and the cap is a
+    /// gate, so the headroom is measured and printed rather than assumed.
+    max_attempts: usize,
+}
+
+/// Draw the role tag of every required bit in ASCENDING bit order (prereg §2).
+/// Non-required bits consume no draw.
+fn draw_tags(rng: &mut SplitMix64, required: u32, n_roles: u64) -> [RoleId; UNIVERSE] {
+    let mut tags = [0usize; UNIVERSE];
+    for (b, tag) in tags.iter_mut().enumerate() {
+        if required & (1u32 << b) != 0 {
+            *tag = (rng.next_u64() % n_roles) as RoleId;
+        }
+    }
+    tags
+}
+
+/// Role-matched feasibility of one task against the pool (prereg §2): for every
+/// required bit `b` tagged `r`, some pool worker of role `r` must hold `b`.
+///
+/// Strictly stronger than the untyped pool coverage the #63 draw guarantees —
+/// the same worker no longer covers a bit for every tag, only for its own role.
+fn p8_task_feasible(
+    agents: &[Worker],
+    roles: &[RoleId],
+    required: u32,
+    tags: &[RoleId; UNIVERSE],
+) -> bool {
+    (0..UNIVERSE)
+        .filter(|&b| required & (1u32 << b) != 0)
+        .all(|b| {
+            agents.iter().any(|a| {
+                roles.get(a.id).is_some_and(|&r| r == tags[b]) && a.caps & (1u32 << b) != 0
+            })
+        })
+}
+
+/// The v2t instance prefix (prereg §2): [`draw_prefix_v2`] verbatim, then the
+/// role draws APPENDED off the SAME stream — so the untyped prefix of the stream
+/// is bit-identical to a pure-v2 draw of the same seed (the #46/#48 discipline;
+/// pinned by `v2t_prefix_matches_v2`).
+///
+/// Post-prefix draw order (fixed, arm-independent):
+/// 1. one `next() % n_roles` per worker, in worker order;
+/// 2. per task, one `next() % n_roles` per required bit in ascending bit order,
+///    followed — only if the task is role-infeasible — by a rejection re-draw of
+///    `(|required|, required, tags)` off the same stream.
+///
+/// # Panics
+///
+/// Panics with a RUN-INVALID message if a task is still infeasible after
+/// [`P8_REDRAW_CAP`] attempts (expected never at these draws — the run is
+/// invalid rather than silently biased if it ever fires).
+fn draw_prefix_v2t(
+    rng: &mut SplitMix64,
+    n_roles: u64,
+) -> (Vec<Worker>, Vec<RoleId>, Vec<TypedTask>, usize, usize) {
+    let (agents, base_tasks) = draw_prefix_v2(rng);
+    let roles: Vec<RoleId> = (0..agents.len())
+        .map(|_| (rng.next_u64() % n_roles) as RoleId)
+        .collect();
+
+    let mut redraws = 0usize;
+    let mut max_attempts = 0usize;
+    let mut tasks: Vec<TypedTask> = Vec::with_capacity(base_tasks.len());
+    for base in base_tasks {
+        let mut required = base.required;
+        let mut tags = draw_tags(rng, required, n_roles);
+        let mut attempts = 1usize;
+        while !p8_task_feasible(&agents, &roles, required, &tags) {
+            assert!(
+                attempts < P8_REDRAW_CAP,
+                "RUN-INVALID: a v2t task stayed role-infeasible after {P8_REDRAW_CAP} rejection re-draws (prereg §2)"
+            );
+            // The re-draw repeats the v2 task draw for `required` (`r ∈ 2..=8`)
+            // and re-tags it; the arrival order is drawn once in the prefix and
+            // is NOT re-drawn (it is role-independent).
+            let r = 2 + rng.next_u64() % 7;
+            required = draw_distinct_bits(rng, r);
+            tags = draw_tags(rng, required, n_roles);
+            attempts += 1;
+            redraws += 1;
+        }
+        max_attempts = max_attempts.max(attempts);
+        tasks.push(TypedTask {
+            required,
+            tags,
+            order: base.order,
+        });
+    }
+
+    (agents, roles, tasks, redraws, max_attempts)
+}
+
+/// One seeded v2t instance at `n_roles` roles.
+fn draw_typed_instance(seed: u64, n_roles: usize) -> TypedInstance {
+    let mut rng = SplitMix64::new(seed);
+    let (agents, roles, tasks, redraws, max_attempts) = draw_prefix_v2t(&mut rng, n_roles as u64);
+    TypedInstance {
+        agents,
+        roles,
+        tasks,
+        redraws,
+        max_attempts,
+    }
+}
+
+/// The registered seed range's instances, drawn once and shared by every arm
+/// (identical instances across arms is the standing battery invariant).
+fn p8_instances(n_roles: usize) -> Vec<TypedInstance> {
+    (P8_SEED_START..P8_SEED_END)
+        .map(|s| draw_typed_instance(s, n_roles))
+        .collect()
+}
+
+/// Role-matched covered required bits (prereg §2): bit `b` tagged `r` counts iff
+/// some member of role `r` holds it.
+fn p8_typed_covered(inst: &TypedInstance, members: &[usize], task: &TypedTask) -> u32 {
+    (0..UNIVERSE)
+        .filter(|&b| task.required & (1u32 << b) != 0)
+        .filter(|&b| {
+            members.iter().any(|&i| {
+                inst.roles.get(i).is_some_and(|&r| r == task.tags[b])
+                    && inst.agents[i].caps & (1u32 << b) != 0
+            })
+        })
+        .count() as u32
+}
+
+/// Untyped covered required bits — the frozen `run_instance` formula, used by
+/// the E-ρq world (whose coverage is deliberately untyped) and by the
+/// identity-world reduction check.
+fn p8_untyped_covered(inst: &TypedInstance, members: &[usize], required: u32) -> u32 {
+    let union = members
+        .iter()
+        .fold(0u32, |acc, &i| acc | inst.agents[i].caps);
+    (union & required).count_ones()
+}
+
+/// Mean pairwise `ρ_world(role_i, role_j)` over the final members (E-ρq, prereg
+/// §5): the mean over ordered pairs `i ≠ j`, `1.0` for a singleton (no pair to
+/// average) and `0.0` for an empty coalition (which scores `cov_eff = 0` anyway).
+fn p8_mean_pairwise_rho(
+    inst: &TypedInstance,
+    members: &[usize],
+    rho: &[[f64; P8_ROLES]; P8_ROLES],
+) -> f64 {
+    if members.is_empty() {
+        return 0.0;
+    }
+    if members.len() == 1 {
+        return 1.0;
+    }
+    let mut sum = 0.0;
+    let mut pairs = 0usize;
+    for (a, &i) in members.iter().enumerate() {
+        for (b, &j) in members.iter().enumerate() {
+            if a == b {
+                continue;
+            }
+            sum += rho[inst.roles[i]][inst.roles[j]];
+            pairs += 1;
+        }
+    }
+    sum / pairs as f64
+}
+
+/// Which quality model a Part 8 run scores under.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum P8Metric {
+    /// The registered v2t metric: role-matched coverage (prereg §2).
+    Typed,
+    /// The E-ρq exploratory world (prereg §5): UNTYPED coverage, with task
+    /// quality `cov_eff × mean pairwise ρ_world` over the final members.
+    RhoQ,
+}
+
+/// How a Part 8 arm supplies its policy for a seed.
+enum P8Arm<'a> {
+    /// One policy for the whole seed (`mag`, `mag-typed`, `scalar`, `arm-E1`).
+    Fixed(&'a dyn CoalitionDecisionPolicy),
+    /// A policy rebuilt per task, because the value model reads that task's role
+    /// tags (the example-side `E-ceil` and `E-T3` arms).
+    PerTask(&'a dyn Fn(&TypedTask) -> Box<dyn CoalitionDecisionPolicy>),
+}
+
+/// The per-task hook a Part 8 run fires after every leave sweep:
+/// `(required, per-bit role-matched success, whole-task success, final members)`
+/// — the [`run_seed_b_regime`] hook shape, so the learning arm wires in unchanged.
+type P8OutcomeHook<'a> = dyn FnMut(u32, &[bool], bool, &[usize]) + 'a;
+
+/// Per-seed Part 8 result. `scores` carries the raw `Decision::score` BIT
+/// PATTERNS in decision order — the X-identity cell-1 conjunct is a bit-identity
+/// claim, and `f64` equality would not express it (it also makes the comparison
+/// total in the presence of a `NaN` score, which the arms guard against but the
+/// gate should not assume away).
+struct P8Seed {
+    primary: f64,
+    churn: usize,
+    acts: Vec<bool>,
+    scores: Vec<u64>,
+    success_rate: f64,
+}
+
+/// Run one arm over one v2t instance with the standing battery protocol
+/// (bootstrap first arrival, one leave sweep per task in arrival order, every
+/// removal counts as churn, `Instant` around every sync decision), scoring under
+/// `metric`.
+///
+/// `on_task` fires once per task AFTER the leave sweep with
+/// `(required, per_bit, success, members)` — the same hook shape
+/// [`run_seed_b_regime`] uses, so the learning arm wires in unchanged. The
+/// per-bit slice is the **role-matched** oracle signal (bit `b` is `true` iff it
+/// is role-matched covered by the final coalition); it is `UNIVERSE` wide, and
+/// non-required bits are `false` (`observe_outcome` ignores them).
+fn p8_run_seed(
+    arm: &P8Arm<'_>,
+    inst: &TypedInstance,
+    metric: P8Metric,
+    lat: &mut Vec<f64>,
+    on_task: &mut P8OutcomeHook<'_>,
+) -> P8Seed {
+    let rho_world = p8_rho_table(P8_RHOQ_OFF);
+
+    let mut success_count = 0usize;
+    let mut quality_sum = 0.0f64;
+    let mut churn = 0usize;
+    let mut acts = Vec::new();
+    let mut scores = Vec::new();
+
+    for task in &inst.tasks {
+        let ctx = DecisionContext {
+            required_capabilities: task.required,
+        };
+        let per_task;
+        let policy: &dyn CoalitionDecisionPolicy = match arm {
+            P8Arm::Fixed(p) => *p,
+            P8Arm::PerTask(make) => {
+                per_task = make(task);
+                &*per_task
+            }
+        };
+
+        let mut members: Vec<usize> = vec![task.order[0]];
+
+        for &idx in &task.order[1..] {
+            let candidate: &dyn AgentCapabilities = &inst.agents[idx];
+            let coalition = coalition_view(&inst.agents, &members);
+            let t0 = Instant::now();
+            let d = policy.should_join(candidate, &coalition, &ctx);
+            lat.push(seconds_to_us(t0.elapsed()));
+            acts.push(d.act);
+            scores.push(d.score.to_bits());
+            if d.act {
+                members.push(idx);
+            }
+        }
+
+        for &idx in &task.order {
+            let Some(pos) = members.iter().position(|&m| m == idx) else {
+                continue;
+            };
+            let coalition = coalition_view(&inst.agents, &members);
+            let agent: &dyn AgentCapabilities = &inst.agents[idx];
+            let t0 = Instant::now();
+            let d = policy.should_leave(agent, &coalition, &ctx);
+            lat.push(seconds_to_us(t0.elapsed()));
+            acts.push(d.act);
+            scores.push(d.score.to_bits());
+            if d.act {
+                members.remove(pos);
+                churn += 1;
+            }
+        }
+
+        let req_bits = f64::from(task.required.count_ones());
+        let covered = match metric {
+            P8Metric::Typed => p8_typed_covered(inst, &members, task),
+            P8Metric::RhoQ => p8_untyped_covered(inst, &members, task.required),
+        };
+        let completed = covered == task.required.count_ones();
+        let cov_eff = if members.is_empty() {
+            0.0
+        } else {
+            (f64::from(covered) / req_bits) / members.len() as f64
+        };
+        let quality = match metric {
+            P8Metric::Typed => cov_eff,
+            P8Metric::RhoQ => cov_eff * p8_mean_pairwise_rho(inst, &members, &rho_world),
+        };
+        if completed {
+            success_count += 1;
+        }
+        quality_sum += quality;
+
+        let mut per_bit = vec![false; UNIVERSE];
+        for (b, slot) in per_bit.iter_mut().enumerate() {
+            *slot = task.required & (1u32 << b) != 0
+                && members.iter().any(|&i| {
+                    inst.roles.get(i).is_some_and(|&r| r == task.tags[b])
+                        && inst.agents[i].caps & (1u32 << b) != 0
+                });
+        }
+        on_task(task.required, &per_bit, completed, &members);
+    }
+
+    let n_tasks = inst.tasks.len() as f64;
+    let success_rate = success_count as f64 / n_tasks;
+    P8Seed {
+        primary: success_rate * (quality_sum / n_tasks),
+        churn,
+        acts,
+        scores,
+        success_rate,
+    }
+}
+
+/// A square `R × R` table with an exact `1.0` diagonal and a uniform
+/// off-diagonal — the shape every registered Part 8 table takes (the oracle
+/// `ρ = δ` at `off = 0.0`, the X-identity `ρ ≡ 1` at `off = 1.0`, the E-deg cells
+/// at `0.25`/`0.5`, and the E-ρq planted world table at `P8_RHOQ_OFF`).
+fn p8_rho_table(off: f64) -> [[f64; P8_ROLES]; P8_ROLES] {
+    let mut t = [[off; P8_ROLES]; P8_ROLES];
+    for (i, row) in t.iter_mut().enumerate() {
+        row[i] = 1.0;
+    }
+    t
+}
+
+/// [`p8_rho_table`] as a validated upstream [`RoleModulation`].
+fn p8_rho(off: f64) -> RoleModulation {
+    let rows: Vec<Vec<f64>> = p8_rho_table(off).iter().map(|r| r.to_vec()).collect();
+    RoleModulation::new(rows)
+        .expect("invariant: a literal square table whose entries are all in [0, 1]")
+}
+
+/// The `mag-typed` arm for one instance: the library typed policy over a role map
+/// covering the WHOLE pool.
+///
+/// # Panics
+///
+/// Panics if the role map does not cover every pool worker. The library declines
+/// (with a warning) for a participating agent that carries no role, which would
+/// silently freeze membership rather than fail — so full coverage is asserted
+/// here, where a gap is a harness bug and must stop the run.
+fn p8_typed_policy(inst: &TypedInstance, rho: &RoleModulation) -> MagnitudePolicy {
+    let roles: HashMap<usize, RoleId> = inst
+        .agents
+        .iter()
+        .map(|a| {
+            let role = *inst
+                .roles
+                .get(a.id)
+                .expect("invariant: the v2t draw assigns one role per pool worker");
+            (a.id, role)
+        })
+        .collect();
+    assert_eq!(
+        roles.len(),
+        inst.agents.len(),
+        "the typed role map must cover every pool worker (agent ids are the pool indices)"
+    );
+    MagnitudePolicy::default().with_role_modulation(roles, rho.clone())
+}
+
+/// Run one fixed-policy arm over the shared instances. A discarded warm-up on the
+/// first instance runs first (warm caches / warm allocator, the standing
+/// convention); it cannot perturb the seed-derived results.
+fn p8_battery<F>(insts: &[TypedInstance], make: F, metric: P8Metric) -> (Vec<P8Seed>, Vec<f64>)
+where
+    F: Fn(&TypedInstance) -> Box<dyn CoalitionDecisionPolicy>,
+{
+    if let Some(first) = insts.first() {
+        let p = make(first);
+        let mut warm = Vec::new();
+        let _ = p8_run_seed(
+            &P8Arm::Fixed(&*p),
+            first,
+            metric,
+            &mut warm,
+            &mut |_, _, _, _| {},
+        );
+    }
+    let mut lat = Vec::new();
+    let results = insts
+        .iter()
+        .map(|inst| {
+            let p = make(inst);
+            p8_run_seed(
+                &P8Arm::Fixed(&*p),
+                inst,
+                metric,
+                &mut lat,
+                &mut |_, _, _, _| {},
+            )
+        })
+        .collect();
+    (results, lat)
+}
+
+/// Run one per-task-policy arm (E-ceil, E-T3) over the shared instances.
+fn p8_pertask_battery<F>(
+    insts: &[TypedInstance],
+    make: F,
+    metric: P8Metric,
+) -> (Vec<P8Seed>, Vec<f64>)
+where
+    F: Fn(&TypedInstance, &TypedTask) -> Box<dyn CoalitionDecisionPolicy>,
+{
+    if let Some(first) = insts.first() {
+        let f = |task: &TypedTask| make(first, task);
+        let mut warm = Vec::new();
+        let _ = p8_run_seed(
+            &P8Arm::PerTask(&f),
+            first,
+            metric,
+            &mut warm,
+            &mut |_, _, _, _| {},
+        );
+    }
+    let mut lat = Vec::new();
+    let results = insts
+        .iter()
+        .map(|inst| {
+            let f = |task: &TypedTask| make(inst, task);
+            p8_run_seed(
+                &P8Arm::PerTask(&f),
+                inst,
+                metric,
+                &mut lat,
+                &mut |_, _, _, _| {},
+            )
+        })
+        .collect();
+    (results, lat)
+}
+
+/// The `arm-E1` context battery: a FRESH [`PersistentAifArm`] per seed (the
+/// #44/#53 factory pattern) fed the role-matched per-bit outcome after every
+/// task. Warm-up on the first instance discarded.
+fn p8_e1_battery(insts: &[TypedInstance], config: PersistentAifConfig) -> (Vec<P8Seed>, Vec<f64>) {
+    if let Some(first) = insts.first() {
+        let arm = PersistentAifArm::new(P8_SEED_START, config).expect("persistent arm construction");
+        let mut warm = Vec::new();
+        let _ = p8_run_seed(
+            &P8Arm::Fixed(&arm),
+            first,
+            P8Metric::Typed,
+            &mut warm,
+            &mut |req, bits, _success, _members| arm.observe_outcome(req, bits),
+        );
+    }
+    let mut lat = Vec::new();
+    let results = insts
+        .iter()
+        .enumerate()
+        .map(|(i, inst)| {
+            let seed = P8_SEED_START + i as u64;
+            let arm = PersistentAifArm::new(seed, config).expect("persistent arm construction");
+            p8_run_seed(
+                &P8Arm::Fixed(&arm),
+                inst,
+                P8Metric::Typed,
+                &mut lat,
+                &mut |req, bits, _success, _members| arm.observe_outcome(req, bits),
+            )
+        })
+        .collect();
+    (results, lat)
+}
+
+fn p8_primaries(rs: &[P8Seed]) -> Vec<f64> {
+    rs.iter().map(|r| r.primary).collect()
+}
+fn p8_churns(rs: &[P8Seed]) -> Vec<f64> {
+    rs.iter().map(|r| r.churn as f64).collect()
+}
+/// Seeds on which `a` strictly beats `b` on PRIMARY.
+fn p8_superior_count(a: &[P8Seed], b: &[P8Seed]) -> usize {
+    (0..a.len().min(b.len()))
+        .filter(|&i| a[i].primary > b[i].primary)
+        .count()
+}
+
+/// One summary row of a Part 8 table: medians plus the paired contrast against
+/// the `mag` control.
+fn p8_row(label: &str, rs: &[P8Seed], base: &[P8Seed], lat: &[f64]) {
+    let med = median(p8_primaries(rs));
+    let base_med = median(p8_primaries(base));
+    let ratio = if base_med > 0.0 {
+        format!("{:.2}×", med / base_med)
+    } else {
+        "n/a".to_owned()
+    };
+    println!(
+        "| `{label}` | {med:.4} | {ratio} | {}/{} | {:.2} | {:.3} |",
+        p8_superior_count(rs, base),
+        rs.len(),
+        median(p8_churns(rs)),
+        median(lat.to_vec())
+    );
+}
+
+// ---------------------------------------------------------------------------
+// E-ceil — the typed-relevance ceiling (registered exploratory, example-side).
+//
+// The registered `mag-typed` lever keeps relevance masks UNTYPED and lets roles
+// in only through coupling modulation. This arm instead re-types the masks
+// themselves — `rel_i = caps_i ∩ (required bits tagged role_i)` — and then runs
+// the ORDINARY untyped substitutability couplings over them (no ρ). It is the
+// arm that fully understands role-matching, so it measures the total convertible
+// signal; the gap to `mag-typed` mechanism-scopes any H-T failure.
+// ---------------------------------------------------------------------------
+
+/// The mask of required bits carrying tag `role`.
+fn p8_tagged_mask(required: u32, tags: &[RoleId; UNIVERSE], role: RoleId) -> u32 {
+    (0..UNIVERSE)
+        .filter(|&b| required & (1u32 << b) != 0 && tags[b] == role)
+        .fold(0u32, |acc, b| acc | (1u32 << b))
+}
+
+/// E-ceil policy (exploratory; example-only, one instance per task).
+struct TypedRelevanceMag {
+    /// Role of each pool worker, indexed by `agent_id`.
+    roles: Vec<RoleId>,
+    /// This task's per-bit role tags.
+    tags: [RoleId; UNIVERSE],
+    join_margin: f64,
+}
+
+impl TypedRelevanceMag {
+    /// Deduplicate by `agent_id` (first wins) and drop agents whose TYPED
+    /// relevance is empty, returning the survivors' typed masks.
+    ///
+    /// The typed mask is a submask of `required`, so
+    /// [`CouplingModel::coupling`]'s internal `& required` is a no-op on it and
+    /// the coupling it computes is exactly `|rel_i ∩ rel_j| / |rel_i|` over the
+    /// TYPED relevance — which is the whole point of this arm.
+    ///
+    /// Returns `None` (⇒ decline) if an agent id has no role, mirroring the
+    /// library's typed decline rather than panicking.
+    fn typed_masks(&self, agents: &[&dyn AgentCapabilities], required: u32) -> Option<Vec<u32>> {
+        let mut seen = HashSet::new();
+        let mut masks = Vec::with_capacity(agents.len());
+        for a in agents {
+            let id = a.agent_id();
+            if !seen.insert(id) {
+                continue;
+            }
+            let &role = self.roles.get(id)?;
+            let m = a.capabilities() & p8_tagged_mask(required, &self.tags, role);
+            if m != 0 {
+                masks.push(m);
+            }
+        }
+        Some(masks)
+    }
+}
+
+impl CoalitionDecisionPolicy for TypedRelevanceMag {
+    fn should_join(
+        &self,
+        agent: &dyn AgentCapabilities,
+        coalition: &[&dyn AgentCapabilities],
+        ctx: &DecisionContext,
+    ) -> Decision {
+        let required = ctx.required_capabilities;
+        let mut with: Vec<&dyn AgentCapabilities> = coalition.to_vec();
+        with.push(agent);
+        let (Some(masks_without), Some(masks_with)) = (
+            self.typed_masks(coalition, required),
+            self.typed_masks(&with, required),
+        ) else {
+            return Decision {
+                act: false,
+                score: 0.0,
+            };
+        };
+        join_decision(
+            magnitude_at_t(&masks_with, required, 1.0),
+            magnitude_at_t(&masks_without, required, 1.0),
+            self.join_margin,
+        )
+    }
+
+    fn should_leave(
+        &self,
+        agent: &dyn AgentCapabilities,
+        coalition: &[&dyn AgentCapabilities],
+        ctx: &DecisionContext,
+    ) -> Decision {
+        let required = ctx.required_capabilities;
+        let agent_id = agent.agent_id();
+        let without: Vec<&dyn AgentCapabilities> = coalition
+            .iter()
+            .filter(|a| a.agent_id() != agent_id)
+            .copied()
+            .collect();
+        let (Some(masks_in), Some(masks_out)) = (
+            self.typed_masks(coalition, required),
+            self.typed_masks(&without, required),
+        ) else {
+            return Decision {
+                act: false,
+                score: 0.0,
+            };
+        };
+        leave_decision(
+            magnitude_at_t(&masks_in, required, 1.0),
+            magnitude_at_t(&masks_out, required, 1.0),
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------
+// E-T3 — channel-valued couplings (registered exploratory, example-side).
+//
+// `C = R = 3` channels; channel `c` carries the role-`c`-restricted
+// substitutability, collapsed with the registered uniform θ = (1/3, 1/3, 1/3)
+// through the upstream declared homomorphism `ChannelCouplings::collapse`.
+// ---------------------------------------------------------------------------
+
+/// Channel-collapsed coalition magnitude at the pinned `t = 1`.
+///
+/// `masks` are the [`relevant_masks`] survivors (untyped relevance). For each
+/// ordered pair `i ≠ j` and channel `c`,
+/// `A_c(i → j) = |rel_i ∩ rel_j ∩ tagged(c)| / |rel_i ∩ tagged(c)|` with an
+/// EMPTY denominator collapsing to the neutral `1.0` (the registered caveat: the
+/// product collapse makes "no evidence" neutral-high, biasing cross-role coupling
+/// upward — one reason this leg is exploratory).
+///
+/// # Errors
+///
+/// Propagates upstream validation (`ChannelCouplings::set` / `collapse`) and any
+/// [`CatgraphError`] from the magnitude computation.
+fn p8_channel_magnitude(
+    masks: &[u32],
+    required: u32,
+    tags: &[RoleId; UNIVERSE],
+) -> Result<f64, CatgraphError> {
+    if masks.is_empty() {
+        return Ok(0.0);
+    }
+    let agents: Vec<usize> = (0..masks.len()).collect();
+    let tagged: Vec<u32> = (0..P8_CHANNELS)
+        .map(|c| p8_tagged_mask(required, tags, c))
+        .collect();
+
+    let mut channels = ChannelCouplings::new(P8_CHANNELS)?;
+    for (i, &from) in masks.iter().enumerate() {
+        for (j, &to) in masks.iter().enumerate() {
+            if i == j {
+                continue;
+            }
+            let rel_i = from & required;
+            let rel_j = to & required;
+            let v: Vec<f64> = tagged
+                .iter()
+                .map(|&t| {
+                    let denom = (rel_i & t).count_ones();
+                    if denom == 0 {
+                        1.0
+                    } else {
+                        f64::from((rel_i & rel_j & t).count_ones()) / f64::from(denom)
+                    }
+                })
+                .collect();
+            channels.set(i, j, v)?;
+        }
+    }
+
+    let theta = [1.0 / P8_CHANNELS as f64; P8_CHANNELS];
+    let couplings = channels.collapse(&theta)?;
+    catgraph_magnitude::coalition_magnitude_from_couplings(&agents, &couplings, &agents, 1.0)
+}
+
+/// E-T3 policy (exploratory; example-only, one instance per task).
+struct ChannelMagnitudePolicy {
+    tags: [RoleId; UNIVERSE],
+    join_margin: f64,
+}
+
+impl CoalitionDecisionPolicy for ChannelMagnitudePolicy {
+    fn should_join(
+        &self,
+        agent: &dyn AgentCapabilities,
+        coalition: &[&dyn AgentCapabilities],
+        ctx: &DecisionContext,
+    ) -> Decision {
+        let required = ctx.required_capabilities;
+        let masks_without = relevant_masks(coalition, required);
+        let mut with: Vec<&dyn AgentCapabilities> = coalition.to_vec();
+        with.push(agent);
+        let masks_with = relevant_masks(&with, required);
+        join_decision(
+            p8_channel_magnitude(&masks_with, required, &self.tags),
+            p8_channel_magnitude(&masks_without, required, &self.tags),
+            self.join_margin,
+        )
+    }
+
+    fn should_leave(
+        &self,
+        agent: &dyn AgentCapabilities,
+        coalition: &[&dyn AgentCapabilities],
+        ctx: &DecisionContext,
+    ) -> Decision {
+        let required = ctx.required_capabilities;
+        let masks_in = relevant_masks(coalition, required);
+        let agent_id = agent.agent_id();
+        let without: Vec<&dyn AgentCapabilities> = coalition
+            .iter()
+            .filter(|a| a.agent_id() != agent_id)
+            .copied()
+            .collect();
+        let masks_out = relevant_masks(&without, required);
+        leave_decision(
+            p8_channel_magnitude(&masks_in, required, &self.tags),
+            p8_channel_magnitude(&masks_out, required, &self.tags),
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------
+// T1 — role-share instrumentation (non-gating).
+// ---------------------------------------------------------------------------
+
+/// The `role_shares` tally over every task's final `mag-typed` coalition.
+#[derive(Default)]
+struct P8RoleShareStats {
+    /// Coalitions the evaluator was successfully built and decomposed on.
+    samples: usize,
+    /// Samples whose every skeletal class was single-role.
+    exact: usize,
+    /// Samples carrying at least one role-mixed class.
+    mixed_samples: usize,
+    /// Total role-mixed classes across all samples.
+    mixed_classes: usize,
+    /// Tasks whose final coalition had no relevance-surviving member (nothing to
+    /// decompose) — counted, not silently dropped.
+    empty: usize,
+    /// Upstream errors on the instrumentation path (never a decision path).
+    errors: usize,
+    /// Per-role attributed share samples, `share(r)` for `r ∈ 0..R`.
+    per_role: [Vec<f64>; P8_ROLES],
+    /// Largest observed relative gap between `Σ_r share(r)` and `base_value()`
+    /// on EXACT samples (upstream contracts these as equal up to float
+    /// re-association, not bit-identical).
+    max_rel_gap: f64,
+}
+
+/// Decompose one final coalition's magnitude across its roles (T1), off the
+/// decision path: a fresh [`CoalitionEvaluator`] over the SAME ρ-modulated
+/// couplings the typed arm evaluated, then `role_shares` with member-local roles.
+fn p8_record_role_shares(
+    inst: &TypedInstance,
+    required: u32,
+    members: &[usize],
+    rho: &RoleModulation,
+    stats: &mut P8RoleShareStats,
+) {
+    // Relevance filter + role lookup, positionally aligned exactly as the
+    // library's typed path builds its side.
+    let mut seen = HashSet::new();
+    let mut masks: Vec<u32> = Vec::with_capacity(members.len());
+    let mut roles: Vec<RoleId> = Vec::with_capacity(members.len());
+    for &i in members {
+        let caps = inst.agents[i].caps;
+        if caps & required == 0 || !seen.insert(i) {
+            continue;
+        }
+        let Some(&role) = inst.roles.get(i) else {
+            stats.errors += 1;
+            return;
+        };
+        masks.push(caps);
+        roles.push(role);
+    }
+    if masks.is_empty() {
+        stats.empty += 1;
+        return;
+    }
+
+    let agents: Vec<usize> = (0..masks.len()).collect();
+    let mut couplings: Vec<(usize, usize, f64)> = Vec::new();
+    for (i, &from) in masks.iter().enumerate() {
+        for (j, &to) in masks.iter().enumerate() {
+            if i == j {
+                continue;
+            }
+            let p = CouplingModel::coupling(from, to, required);
+            if p > 0.0 {
+                couplings.push((i, j, p));
+            }
+        }
+    }
+
+    let Ok(modulated) = catgraph_magnitude::modulate(&couplings, &roles, rho) else {
+        stats.errors += 1;
+        return;
+    };
+    let Ok(ev) = CoalitionEvaluator::new(&agents, modulated.couplings(), &agents, 1.0) else {
+        stats.errors += 1;
+        return;
+    };
+    // `role_shares` indexes roles by MEMBER-LOCAL position; members were passed
+    // as `0..k` in `masks` order, so `roles` is already that alignment.
+    let Ok(shares) = ev.role_shares(&roles) else {
+        stats.errors += 1;
+        return;
+    };
+
+    stats.samples += 1;
+    if shares.is_exact() {
+        stats.exact += 1;
+        let sum: f64 = (0..P8_ROLES).filter_map(|r| shares.share(r)).sum();
+        let base = ev.base_value();
+        stats.max_rel_gap = stats
+            .max_rel_gap
+            .max((sum - base).abs() / base.abs().max(1.0));
+    } else {
+        stats.mixed_samples += 1;
+        stats.mixed_classes += shares.mixed_classes().len();
+    }
+    for (r, bucket) in stats.per_role.iter_mut().enumerate() {
+        if let Some(v) = shares.share(r) {
+            bucket.push(v);
+        }
+    }
+}
+
+/// Re-run the `mag-typed` arm and decompose every task's final coalition (T1).
+/// Off the decision path: the instrumentation happens in the post-sweep hook.
+fn p8_role_share_pass(insts: &[TypedInstance], rho: &RoleModulation) -> P8RoleShareStats {
+    let mut stats = P8RoleShareStats::default();
+    let mut lat = Vec::new();
+    for inst in insts {
+        let policy = p8_typed_policy(inst, rho);
+        let _ = p8_run_seed(
+            &P8Arm::Fixed(&policy),
+            inst,
+            P8Metric::Typed,
+            &mut lat,
+            &mut |required, _bits, _success, members| {
+                p8_record_role_shares(inst, required, members, rho, &mut stats);
+            },
+        );
+    }
+    stats
+}
+
+// ---------------------------------------------------------------------------
+// S-fib — the role-grid factorization sanity gate.
+// ---------------------------------------------------------------------------
+
+/// One deterministic `role_space × fiber` shape. Off-diagonals are hand-fixed
+/// strictly inside `(0, 1)` and well away from `1` (upstream documents the
+/// tight relative tolerance as safe only away from near-1 non-merged couplings);
+/// diagonals are exactly `1.0`, which `role_grid` requires.
+struct P8FibShape {
+    label: &'static str,
+    role: Vec<Vec<f64>>,
+    fiber: Vec<Vec<f64>>,
+}
+
+fn p8_fib_shapes() -> Vec<P8FibShape> {
+    vec![
+        P8FibShape {
+            label: "2 × 2 (symmetric role, asymmetric fiber)",
+            role: vec![vec![1.0, 0.5], vec![0.5, 1.0]],
+            fiber: vec![vec![1.0, 0.6], vec![0.3, 1.0]],
+        },
+        P8FibShape {
+            label: "3 × 2 (asymmetric role)",
+            role: vec![
+                vec![1.0, 0.4, 0.2],
+                vec![0.25, 1.0, 0.5],
+                vec![0.1, 0.35, 1.0],
+            ],
+            fiber: vec![vec![1.0, 0.7], vec![0.45, 1.0]],
+        },
+        P8FibShape {
+            label: "3 × 3 (both non-trivial)",
+            role: vec![
+                vec![1.0, 0.5, 0.25],
+                vec![0.5, 1.0, 0.5],
+                vec![0.25, 0.5, 1.0],
+            ],
+            fiber: vec![
+                vec![1.0, 0.3, 0.6],
+                vec![0.2, 1.0, 0.4],
+                vec![0.55, 0.15, 1.0],
+            ],
+        },
+    ]
+}
+
+/// Evaluate every S-fib shape and print its row; returns `true` iff all agree.
+fn p8_sfib_gate() -> bool {
+    println!("| shape | agents | harness magnitude | `expected_magnitude()` | rel Δ | gate |");
+    println!("|-------|-------:|------------------:|-----------------------:|------:|------|");
+    let mut all_ok = true;
+    for shape in p8_fib_shapes() {
+        let role = RoleModulation::new(shape.role.clone())
+            .expect("invariant: literal square table with entries in [0, 1]");
+        let fiber = RoleModulation::new(shape.fiber.clone())
+            .expect("invariant: literal square table with entries in [0, 1]");
+        let grid = role_grid(&role, &fiber)
+            .expect("invariant: both S-fib factors carry an exact 1.0 diagonal");
+        let agents: Vec<usize> = (0..grid.n_agents()).collect();
+        // The example's own fresh route — the same public entry point
+        // `magnitude_at_t` calls, on the grid's product couplings.
+        let actual =
+            catgraph_magnitude::coalition_magnitude_from_couplings(&agents, grid.couplings(), &agents, 1.0);
+        let proof = grid.proof(1.0);
+        match (actual, proof) {
+            (Ok(a), Ok(p)) => {
+                let e = p.expected_magnitude();
+                let rel = (a - e).abs() / a.abs().max(e.abs()).max(1.0);
+                let ok = rel <= P8_FIB_REL_TOL;
+                all_ok &= ok;
+                println!(
+                    "| {} | {} | {a:.12} | {e:.12} | {rel:.2e} | {} |",
+                    shape.label,
+                    grid.n_agents(),
+                    pass(ok)
+                );
+            }
+            (a, p) => {
+                all_ok = false;
+                println!(
+                    "| {} | {} | {} | {} | — | {} |",
+                    shape.label,
+                    grid.n_agents(),
+                    a.map_or_else(|e| format!("Err({e})"), |v| format!("{v:.12}")),
+                    p.map_or_else(
+                        |e| format!("Err({e})"),
+                        |v| format!("{:.12}", v.expected_magnitude())
+                    ),
+                    pass(false)
+                );
+            }
+        }
+    }
+    all_ok
+}
+
+#[allow(clippy::too_many_lines)]
+fn part8_eq4_typed_roles() {
+    println!("# koalisi #72 — Part 8: EQ4 typed-roles battery (REGISTERED)");
+    println!();
+    println!(
+        "_governed by `docs/prereg-K4-eq4-typed-roles.md` (registered BEFORE this code; owner design-lock D1–D9 on #72). Report date {P8_REPORT_DATE}. World **v2t** (prereg §2): the frozen `draw_prefix_v2` prefix, then `R = {P8_ROLES}` worker roles and per-required-bit role tags APPENDED off the same SplitMix64 stream, with a role-feasibility rejection re-draw (≤ {P8_REDRAW_CAP} attempts per task). Ground truth is **role-matched coverage** — a required bit `b` tagged `r` counts only if a member of role `r` holds it — and `PRIMARY = success_rate × mean cov_eff` keeps the standing stream-level shape. Seeds **{P8_SEED_START}..{P8_SEED_END}** (fresh; 90..120 and 150..180 stay reserved). Arms: `mag` = frozen `MagnitudePolicy::default()` (control, sees bit masks only), `mag-typed` = the same policy `.with_role_modulation(pool roles, ρ)` at the **oracle `ρ = δ`** (identity matrix: cross-role substitutability exactly 0), `scalar` = `AifDecisionPolicy::default()` and `arm-E1` = the v5 E1 `PersistentAifArm` (untyped context, non-gating). Latency is recorded and NEVER gating (prereg §7)._"
+    );
+    println!();
+    println!(
+        "_Instance convention: a FRESH policy per seed for every arm. `mag-typed`'s role map keys on the pool, so a per-seed rebuild is structural there; applying the same convention to every arm keeps the arms comparable. It differs from Part 7's one-instance-per-arm choice and costs the untyped control its cross-seed evaluator-cache warmth — which moves latency only: the cache is decision-frozen by the knife-edge fallback (gotcha 15), and latency is non-gating in this registration._"
+    );
+    println!();
+    println!(
+        "_Metric note: `success ≡ completed` under the typed ground truth (prereg §2 defines `completed(task)` and `PRIMARY = success_rate × mean_cov_eff`, and the v2t draw carries no per-member performance matrix). The Scope-B reliability gate of Parts 3–7 is deliberately NOT layered on top — the registered question is whether role structure converts, not whether reliability does._"
+    );
+    println!();
+
+    // --- Instances (shared by every arm) ------------------------------------
+    let insts = p8_instances(P8_ROLES);
+    let n_seeds = insts.len();
+    let total_redraws: usize = insts.iter().map(|i| i.redraws).sum();
+    let seeds_with_redraws = insts.iter().filter(|i| i.redraws > 0).count();
+    let max_redraws = insts.iter().map(|i| i.redraws).max().unwrap_or(0);
+    let worst_attempts = insts.iter().map(|i| i.max_attempts).max().unwrap_or(0);
+    // What the rejection re-draw does to the task-size distribution: the v2t
+    // requirements against the pure-v2 requirements of the SAME seeds.
+    let v2t_req: Vec<f64> = insts
+        .iter()
+        .flat_map(|i| i.tasks.iter().map(|t| f64::from(t.required.count_ones())))
+        .collect();
+    let v2_req: Vec<f64> = (P8_SEED_START..P8_SEED_END)
+        .flat_map(|s| {
+            let mut rng = SplitMix64::new(s);
+            let (_, tasks) = draw_prefix_v2(&mut rng);
+            tasks
+                .into_iter()
+                .map(|t| f64::from(t.required.count_ones()))
+                .collect::<Vec<f64>>()
+        })
+        .collect();
+    let mean = |v: &[f64]| v.iter().sum::<f64>() / v.len() as f64;
+
+    // --- The registered arms -------------------------------------------------
+    let oracle = p8_rho(0.0);
+    let (mag, mag_lat) = p8_battery(
+        &insts,
+        |_| Box::new(MagnitudePolicy::default()) as Box<dyn CoalitionDecisionPolicy>,
+        P8Metric::Typed,
+    );
+    let (typed, typed_lat) = p8_battery(
+        &insts,
+        |inst| Box::new(p8_typed_policy(inst, &oracle)) as Box<dyn CoalitionDecisionPolicy>,
+        P8Metric::Typed,
+    );
+    let (scalar, scalar_lat) = p8_battery(
+        &insts,
+        |_| Box::new(AifDecisionPolicy::default()) as Box<dyn CoalitionDecisionPolicy>,
+        P8Metric::Typed,
+    );
+    let (e1, e1_lat) = p8_e1_battery(&insts, e1_config());
+
+    // --- §6 gates (run and asserted BEFORE any leg is read) ------------------
+    println!("## Gates (prereg §6 — any failure ⇒ RUN-INVALID)");
+    println!();
+
+    // X-identity cell 1 — the identity configuration IS the untyped path.
+    let (mag_again, _) = p8_battery(
+        &insts,
+        |_| Box::new(MagnitudePolicy::default()) as Box<dyn CoalitionDecisionPolicy>,
+        P8Metric::Typed,
+    );
+    for (i, (a, b)) in mag.iter().zip(mag_again.iter()).enumerate() {
+        assert_eq!(
+            a.acts, b.acts,
+            "X-identity cell 1: identity-configuration acts must match `mag` on seed {}",
+            P8_SEED_START + i as u64
+        );
+        assert_eq!(
+            a.scores, b.scores,
+            "X-identity cell 1: identity-configuration score bits must match `mag` on seed {}",
+            P8_SEED_START + i as u64
+        );
+    }
+
+    // The identity WORLD (R = 1): every worker and every tag in role 0, so
+    // role-matched coverage IS untyped coverage — the reduction prereg §2 claims,
+    // checked per task on the whole pool (the strongest member set available).
+    let id_insts = p8_instances(P8_IDENTITY_ROLES);
+    let mut id_tasks = 0usize;
+    for inst in &id_insts {
+        let all: Vec<usize> = (0..inst.agents.len()).collect();
+        for task in &inst.tasks {
+            assert_eq!(
+                p8_typed_covered(inst, &all, task),
+                p8_untyped_covered(inst, &all, task.required),
+                "X-identity cell 1: at R = 1 the typed metric must reduce to the untyped one"
+            );
+            id_tasks += 1;
+        }
+    }
+    println!(
+        "- **X-identity cell 1 — {}.** The identity configuration (no roles supplied) routes STRUCTURALLY to the untyped path, so this is identity by construction, not by measurement; the run asserts it anyway as a determinism check — an independently constructed `MagnitudePolicy::default()` reproduces the `mag` arm's acts AND raw score BIT PATTERNS on all {n_seeds} seeds ({} decisions). Alongside it, the R = 1 identity world (`next() % 1`, same code path) is checked for the metric reduction prereg §2 claims: role-matched coverage equals untyped coverage on all {id_tasks} of its tasks.",
+        pass(true),
+        mag.iter().map(|r| r.acts.len()).sum::<usize>()
+    );
+
+    // X-identity cell 2 — the typed path at ρ ≡ 1 is the untyped arm's decisions.
+    let ones = p8_rho(1.0);
+    let (typed_ones, _) = p8_battery(
+        &insts,
+        |inst| Box::new(p8_typed_policy(inst, &ones)) as Box<dyn CoalitionDecisionPolicy>,
+        P8Metric::Typed,
+    );
+    for (i, (a, b)) in mag.iter().zip(typed_ones.iter()).enumerate() {
+        let seed = P8_SEED_START + i as u64;
+        assert_eq!(a.acts, b.acts, "X-identity cell 2: acts on seed {seed}");
+        assert_eq!(
+            a.primary.to_bits(),
+            b.primary.to_bits(),
+            "X-identity cell 2: PRIMARY on seed {seed}"
+        );
+        assert_eq!(a.churn, b.churn, "X-identity cell 2: churn on seed {seed}");
+    }
+    println!(
+        "- **X-identity cell 2 — {}.** The typed path at `ρ ≡ 1` (exact `1.0` entries; `1.0·π == π` in IEEE) over the R = {P8_ROLES} world reproduces `mag` on **acts + per-seed PRIMARY (bit-identical) + churn**, all {n_seeds} seeds. Raw scores are NOT compared: the typed route evaluates both sides fresh where the untyped arm answers a cached incremental query, which re-associates the low bits — the registered gate is on decisions, not float bit patterns (the EQ3 H-par′ lesson).",
+        pass(true)
+    );
+    println!();
+
+    // S-fib.
+    println!("### S-fib — role-grid factorization certificate");
+    println!();
+    println!(
+        "_Three deterministic `role_space × fiber` shapes built with `role_grid`; each grid coalition is evaluated through the example's own fresh route (`coalition_magnitude_from_couplings` at the pinned `t = 1`, the entry point `magnitude_at_t` uses) and compared against `RoleGrid::proof(1.0).expected_magnitude()` within the **upstream-documented** relative tolerance `{P8_FIB_REL_TOL:.0e} · max(|a|, |b|, 1)` — the bound catgraph `v0.7.0`'s own `coalition_typed` tests (`rel_close`) and the `proof` doctest use. Upstream documents that tightness as safe only away from near-1 non-merged couplings, so every off-diagonal here sits well inside `(0, 1)`._"
+    );
+    println!();
+    let sfib_ok = p8_sfib_gate();
+    println!();
+    assert!(
+        sfib_ok,
+        "S-fib: every role-grid instance must match its factorization certificate"
+    );
+    println!("- **S-fib — {}** (all shapes agree).", pass(sfib_ok));
+    println!();
+    println!(
+        "- **X-battery** (frozen Parts 1–7 byte-identical on every quality/churn/verdict line) is checked OUTSIDE this binary, by diffing this run's Parts 1–7 against a pre-change baseline; latency-only diffs are the standing exclusion."
+    );
+    println!();
+
+    // --- Draw / feasibility --------------------------------------------------
+    println!("## Draw and feasibility (prereg §2)");
+    println!();
+    println!(
+        "Rejection re-draws over the {n_seeds} seeds: **{total_redraws}** in total, on **{seeds_with_redraws}** seeds, worst seed **{max_redraws}** (a per-SEED sum over its {TASKS} tasks). Per-seed counts are the `redraws` column of the H-T table below. Role-matched feasibility is strictly stronger than the untyped pool coverage of the #63 draw — the same worker no longer covers a bit for every tag, only for its own role — so this regime rejects heavily where the #63 draw barely did."
+    );
+    println!();
+    println!(
+        "- **Cap headroom:** the budget is {P8_REDRAW_CAP} attempts per TASK and the worst single task in this run needed **{worst_attempts}** ({:.1}% of the budget). Exceeding the budget panics the run as RUN-INVALID rather than silently biasing the draw.",
+        100.0 * worst_attempts as f64 / P8_REDRAW_CAP as f64
+    );
+    println!(
+        "- **Induced task-size shift (disclosure, not a deviation):** rejection sampling is not size-neutral — a large requirement is far likelier to contain a bit no worker of that bit's role holds, so it is rejected more often. Realized `|required|` over the {} v2t tasks: mean **{:.2}**, median **{:.1}**; the pure-v2 draw of the SAME seeds has mean {:.2}, median {:.1}. The registered v2t world IS the post-rejection distribution (prereg §2 fixes the mechanism), so this is the world both arms face — but any cross-part comparison against a v2 number must read it as a different task-size mix, not only a different metric.",
+        v2t_req.len(),
+        mean(&v2t_req),
+        median(v2t_req.clone()),
+        mean(&v2_req),
+        median(v2_req.clone())
+    );
+    println!();
+
+    // --- Arms ----------------------------------------------------------------
+    println!("## Arms (pooled over {n_seeds} seeds, v2t world)");
+    println!();
+    println!(
+        "| arm | median PRIMARY | vs `mag` | superior seeds | median churn | median µs/decision |"
+    );
+    println!(
+        "|-----|---------------:|---------:|---------------:|-------------:|-------------------:|"
+    );
+    p8_row("mag", &mag, &mag, &mag_lat);
+    p8_row("mag-typed", &typed, &mag, &typed_lat);
+    p8_row("scalar", &scalar, &mag, &scalar_lat);
+    p8_row("arm-E1", &e1, &mag, &e1_lat);
+    println!();
+    println!(
+        "_`scalar` and `arm-E1` are untyped context baselines, non-gating (prereg §3). `arm-E1` is the v5 E1 configuration (learned per-bit precisions + fixed-γ = 16 MeanField queries) fed the ROLE-MATCHED per-bit outcome after every task — the typed analogue of the oracle signal it was registered on._"
+    );
+    println!();
+
+    // --- H-T -----------------------------------------------------------------
+    let mag_med = median(p8_primaries(&mag));
+    let typed_med = median(p8_primaries(&typed));
+    let bar = P8_HT_FACTOR * mag_med;
+    let superior = p8_superior_count(&typed, &mag);
+    let h_t_median = typed_med >= bar;
+    let h_t_consistency = superior >= P8_HT_SUPERIOR_MIN;
+    let h_t = h_t_median && h_t_consistency;
+
+    println!("## H-T (confirmatory) — typed valuation beats untyped");
+    println!();
+    println!(
+        "| seed | n | redraws | mag | mag-typed | Δ | churn mag | churn typed |"
+    );
+    println!(
+        "|-----:|--:|--------:|----:|----------:|--:|----------:|------------:|"
+    );
+    for (i, ((m, t), inst)) in mag.iter().zip(typed.iter()).zip(insts.iter()).enumerate() {
+        println!(
+            "| {} | {} | {} | {:.4} | {:.4} | {:+.4} | {} | {} |",
+            P8_SEED_START + i as u64,
+            inst.agents.len(),
+            inst.redraws,
+            m.primary,
+            t.primary,
+            t.primary - m.primary,
+            m.churn,
+            t.churn
+        );
+    }
+    println!();
+    println!(
+        "- Conjunct 1 (median): `mag-typed` **{typed_med:.4}** vs bar {P8_HT_FACTOR} × {mag_med:.4} = **{bar:.4}** ⇒ **{}**.",
+        pass(h_t_median)
+    );
+    println!(
+        "- Conjunct 2 (consistency): strictly superior on **{superior}/{n_seeds}** seeds, bar {P8_HT_SUPERIOR_MIN} ⇒ **{}**.",
+        pass(h_t_consistency)
+    );
+    println!(
+        "- Success-rate context (never gated): `mag` {:.4} · `mag-typed` {:.4} (mean over seeds).",
+        mag.iter().map(|r| r.success_rate).sum::<f64>() / n_seeds as f64,
+        typed.iter().map(|r| r.success_rate).sum::<f64>() / n_seeds as f64
+    );
+    println!();
+
+    let verdict = if h_t {
+        "VALIDATED (typed roles)"
+    } else {
+        "FALSIFIED (typed roles)"
+    };
+    println!("## VERDICT: **{verdict}** — PRELIMINARY");
+    println!();
+    println!(
+        "_Grammar (prereg §7): `VALIDATED (typed roles)` = both H-T conjuncts with every §6 gate holding · `FALSIFIED (typed roles)` = gates hold, either conjunct fails · `RUN-INVALID` = any §6 gate fails. This run: conjunct 1 {} · conjunct 2 {} · gates X-identity {} / S-fib {}. **PRELIMINARY**: the official verdict is the post-review run — no bar moves either way, and the v1/v2 K4 verdicts, EQ3's verdict, and the #54 arm question (mag = demonstrated default, FINAL) are untouched regardless of outcome._",
+        pass(h_t_median),
+        pass(h_t_consistency),
+        pass(true),
+        pass(sfib_ok)
+    );
+    println!();
+
+    // --- E-deg ---------------------------------------------------------------
+    println!("## E-deg (registered context, non-gating) — ρ mis-specification");
+    println!();
+    println!(
+        "_The oracle table's exact-`0` off-diagonal is lifted to `ρ_off ∈ {{{}, {}}}` (diagonal stays `1.0`), same {n_seeds} seeds, same world: how much of any H-T margin survives a mis-specified table (#54 oracle-vs-degraded discipline)._",
+        P8_RHO_OFF_GRID[0], P8_RHO_OFF_GRID[1]
+    );
+    println!();
+    println!(
+        "| arm | median PRIMARY | vs `mag` | superior seeds | median churn | median µs/decision |"
+    );
+    println!(
+        "|-----|---------------:|---------:|---------------:|-------------:|-------------------:|"
+    );
+    p8_row("mag-typed (ρ_off = 0, oracle)", &typed, &mag, &typed_lat);
+    for off in P8_RHO_OFF_GRID {
+        let rho = p8_rho(off);
+        let (cell, cell_lat) = p8_battery(
+            &insts,
+            |inst| Box::new(p8_typed_policy(inst, &rho)) as Box<dyn CoalitionDecisionPolicy>,
+            P8Metric::Typed,
+        );
+        p8_row(&format!("mag-typed (ρ_off = {off})"), &cell, &mag, &cell_lat);
+    }
+    p8_row("mag (control)", &mag, &mag, &mag_lat);
+    println!();
+
+    // --- E-ceil --------------------------------------------------------------
+    let (ceil, ceil_lat) = p8_pertask_battery(
+        &insts,
+        |inst, task| {
+            Box::new(TypedRelevanceMag {
+                roles: inst.roles.clone(),
+                tags: task.tags,
+                join_margin: 0.0,
+            }) as Box<dyn CoalitionDecisionPolicy>
+        },
+        P8Metric::Typed,
+    );
+    println!("## E-ceil (registered exploratory, non-gating) — typed-relevance ceiling");
+    println!();
+    println!(
+        "_An example-side arm that re-types the relevance masks themselves — `rel_i = caps_i ∩ (required bits tagged role_i)` — and then runs the ORDINARY untyped substitutability couplings over those masks (no ρ), evaluated fresh through the example's `magnitude_at_t` at the pinned `t = 1`. It is the arm that fully understands role-matching, so it measures the total convertible signal; the gap between it and `mag-typed` mechanism-scopes any H-T failure (valuation-layer limit vs no signal present)._"
+    );
+    println!();
+    println!(
+        "| arm | median PRIMARY | vs `mag` | superior seeds | median churn | median µs/decision |"
+    );
+    println!(
+        "|-----|---------------:|---------:|---------------:|-------------:|-------------------:|"
+    );
+    p8_row("mag", &mag, &mag, &mag_lat);
+    p8_row("mag-typed", &typed, &mag, &typed_lat);
+    p8_row("E-ceil", &ceil, &mag, &ceil_lat);
+    println!();
+
+    // --- E-ρq ----------------------------------------------------------------
+    let rho_q = p8_rho(P8_RHOQ_OFF);
+    let (rq_mag, rq_mag_lat) = p8_battery(
+        &insts,
+        |_| Box::new(MagnitudePolicy::default()) as Box<dyn CoalitionDecisionPolicy>,
+        P8Metric::RhoQ,
+    );
+    let (rq_typed, rq_typed_lat) = p8_battery(
+        &insts,
+        |inst| Box::new(p8_typed_policy(inst, &rho_q)) as Box<dyn CoalitionDecisionPolicy>,
+        P8Metric::RhoQ,
+    );
+    println!("## E-ρq (registered exploratory, non-gating) — the ρ-structured quality world");
+    println!();
+    println!(
+        "_Same pool and same tasks, a different WORLD (prereg §5, D1c): coverage is UNTYPED and task quality is `cov_eff × mean pairwise ρ_world(role_i, role_j)` over the final members (singleton ⇒ `1.0`), with `ρ_world` the planted symmetric table (`ρ(r,r) = 1`, `ρ_off = {P8_RHOQ_OFF}`). `mag-typed` here carries THAT table as its oracle, so the arm's valuation and the world's quality model agree by construction — which is exactly what makes this the friendliest possible world for the lever, and therefore context rather than evidence._"
+    );
+    println!();
+    println!(
+        "| arm | median PRIMARY_ρq | vs `mag` | superior seeds | median churn | median µs/decision |"
+    );
+    println!(
+        "|-----|------------------:|---------:|---------------:|-------------:|-------------------:|"
+    );
+    p8_row("mag", &rq_mag, &rq_mag, &rq_mag_lat);
+    p8_row("mag-typed (ρ_world)", &rq_typed, &rq_mag, &rq_typed_lat);
+    println!();
+
+    // --- E-T3 ----------------------------------------------------------------
+    let (t3, t3_lat) = p8_pertask_battery(
+        &insts,
+        |_inst, task| {
+            Box::new(ChannelMagnitudePolicy {
+                tags: task.tags,
+                join_margin: 0.0,
+            }) as Box<dyn CoalitionDecisionPolicy>
+        },
+        P8Metric::Typed,
+    );
+    println!("## E-T3 (registered exploratory, non-gating) — channel-valued couplings");
+    println!();
+    println!(
+        "_`C = R = {P8_CHANNELS}` channels; channel `c` carries the role-`c`-restricted substitutability `A_c(i → j) = |rel_i ∩ rel_j ∩ tagged(c)| / |rel_i ∩ tagged(c)|` over UNTYPED relevance, collapsed with the registered uniform `θ = (1/3, 1/3, 1/3)` (D3) through `ChannelCouplings::collapse`, then evaluated fresh at `t = 1`. **REGISTERED CAVEAT** (prereg §5): an empty denominator collapses to the neutral `1.0`, so the product collapse makes 'no evidence' neutral-HIGH and biases cross-role coupling upward — one reason this leg is exploratory. A second float trap upstream names: `powf` can round up to exactly `1.0`, so a collapsed table can carry exact-`1.0` couplings and hence skeletal merges between agents no single channel perfectly couples._"
+    );
+    println!();
+    println!(
+        "| arm | median PRIMARY | vs `mag` | superior seeds | median churn | median µs/decision |"
+    );
+    println!(
+        "|-----|---------------:|---------:|---------------:|-------------:|-------------------:|"
+    );
+    p8_row("mag", &mag, &mag, &mag_lat);
+    p8_row("E-T3", &t3, &mag, &t3_lat);
+    println!();
+
+    // --- T1 instrumentation --------------------------------------------------
+    let shares = p8_role_share_pass(&insts, &oracle);
+    println!("## T1 instrumentation (non-gating) — role shares of the final coalitions");
+    println!();
+    println!(
+        "_`CoalitionEvaluator::role_shares` (upstream T1) on every task's final `mag-typed` coalition, constructed fresh OFF the decision path over the same ρ-modulated couplings the arm evaluated, with roles indexed by member-local position. Weights are read, never moved: `Mag = Σ_c w_c` (Leinster 2013 Lemma 1.1.4) bucketed by role, and a role-mixed skeletal class is reported rather than split._"
+    );
+    println!();
+    println!(
+        "- Samples: **{}** decomposed coalitions ({} tasks skipped — no relevance-surviving member; {} upstream errors).",
+        shares.samples, shares.empty, shares.errors
+    );
+    println!(
+        "- **Mixed classes: {}** across {} samples ({} samples exact, i.e. every skeletal class single-role). Expected 0 under the oracle `ρ = δ`: a cross-role coupling is modulated to exactly `0`, so two agents of different roles can never reach mutual closure `1.0` and never share a class — the only merges left are same-role clones, which are single-role by construction. A nonzero count would mean the modulation is not reaching the closure, and is printed either way.",
+        shares.mixed_classes, shares.samples, shares.exact
+    );
+    println!(
+        "- `Σ_r share(r)` vs `base_value()` on exact samples: largest relative gap **{:.2e}** (upstream contracts these as equal up to float re-association, not bit-identity).",
+        shares.max_rel_gap
+    );
+    println!();
+    println!("| role | samples | p25 | median | p75 |");
+    println!("|-----:|--------:|----:|-------:|----:|");
+    for (r, bucket) in shares.per_role.iter().enumerate() {
+        if bucket.is_empty() {
+            println!("| {r} | 0 | — | — | — |");
+            continue;
+        }
+        let mut sorted = bucket.clone();
+        sorted.sort_by(f64::total_cmp);
+        println!(
+            "| {r} | {} | {:.4} | {:.4} | {:.4} |",
+            sorted.len(),
+            percentile(&sorted, 0.25),
+            percentile(&sorted, 0.5),
+            percentile(&sorted, 0.75)
+        );
+    }
+    println!();
+    println!(
+        "_A role present only inside mixed classes still appears with share `0.0`; a role that never appeared in a coalition's partition contributes no sample at all (upstream's `Some(0.0)` vs `None` distinction)._"
+    );
+    println!();
+}
+
 #[cfg(test)]
 mod part4c_tests {
     use super::*;
@@ -7431,6 +8862,279 @@ mod part4c_tests {
         assert!(
             certified > 0,
             "the registered stream must exercise the certificate at least once"
+        );
+    }
+
+    /// Part 8 (#72): the v2t draw APPENDS to the v2 stream — the untyped prefix
+    /// (pool, caps, trust, arrival orders) is bit-identical to a pure-v2 draw of
+    /// the same seed, which is the #46/#48 shared-prefix discipline the prereg
+    /// invokes. `required` is compared only on tasks the feasibility pass did NOT
+    /// re-draw (a re-draw legitimately replaces it); the run prints the re-draw
+    /// count so that exemption is never silent.
+    #[test]
+    fn v2t_prefix_matches_v2() {
+        for seed in P8_SEED_START..P8_SEED_START + 4 {
+            let mut rng_v2 = SplitMix64::new(seed);
+            let (base_agents, base_tasks) = draw_prefix_v2(&mut rng_v2);
+            let inst = draw_typed_instance(seed, P8_ROLES);
+
+            assert_eq!(base_agents.len(), inst.agents.len(), "pool size unchanged");
+            for (b, a) in base_agents.iter().zip(inst.agents.iter()) {
+                assert_eq!((b.id, b.caps, b.trust), (a.id, a.caps, a.trust));
+            }
+            assert_eq!(base_tasks.len(), inst.tasks.len());
+            for (b, t) in base_tasks.iter().zip(inst.tasks.iter()) {
+                assert_eq!(b.order, t.order, "arrival orders are never re-drawn");
+            }
+            if inst.redraws == 0 {
+                for (b, t) in base_tasks.iter().zip(inst.tasks.iter()) {
+                    assert_eq!(b.required, t.required, "no re-draw ⇒ v2 `required` kept");
+                }
+            }
+            assert_eq!(inst.roles.len(), inst.agents.len(), "one role per worker");
+            assert!(inst.roles.iter().all(|&r| r < P8_ROLES), "roles are 0..R");
+        }
+    }
+
+    /// Part 8 (#72): the feasibility guarantee HOLDS after the rejection re-draw —
+    /// every required bit of every task is coverable by a pool worker of that
+    /// bit's tag role — and the identity world (R = 1) collapses roles and tags
+    /// to 0 while keeping the same guarantee.
+    #[test]
+    fn v2t_tasks_are_role_feasible() {
+        for n_roles in [P8_ROLES, P8_IDENTITY_ROLES] {
+            for seed in P8_SEED_START..P8_SEED_START + 4 {
+                let inst = draw_typed_instance(seed, n_roles);
+                assert!(inst.roles.iter().all(|&r| r < n_roles));
+                for task in &inst.tasks {
+                    assert!(
+                        (2..=8).contains(&task.required.count_ones()),
+                        "the re-draw keeps the v2 |required| shape"
+                    );
+                    assert!(
+                        p8_task_feasible(&inst.agents, &inst.roles, task.required, &task.tags),
+                        "seed {seed}: a task survived the feasibility pass infeasible"
+                    );
+                    for b in 0..UNIVERSE {
+                        if task.required & (1u32 << b) != 0 {
+                            assert!(task.tags[b] < n_roles, "tags are 0..R");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Part 8 (#72): the typed scorer on a hand-computed mini case. Two required
+    /// bits with different tags; the member of role 0 holds both, so only the
+    /// bit tagged 0 is role-matched — the untyped scorer would count both.
+    #[test]
+    fn p8_typed_metric_hand_case() {
+        let agents = vec![
+            Worker {
+                id: 0,
+                caps: 0b011,
+                trust: 50,
+            },
+            Worker {
+                id: 1,
+                caps: 0b100,
+                trust: 50,
+            },
+        ];
+        let mut tags = [0usize; UNIVERSE];
+        tags[0] = 0; // bit 0 wants role 0 — agent 0 (role 0) holds it ⇒ matched
+        tags[1] = 1; // bit 1 wants role 1 — only agent 0 holds it, role 0 ⇒ unmatched
+        let inst = TypedInstance {
+            agents,
+            roles: vec![0, 1],
+            tasks: Vec::new(),
+            redraws: 0,
+            max_attempts: 0,
+        };
+        let task = TypedTask {
+            required: 0b011,
+            tags,
+            order: vec![0, 1],
+        };
+
+        assert_eq!(p8_typed_covered(&inst, &[0], &task), 1, "only bit 0 matches");
+        assert_eq!(
+            p8_untyped_covered(&inst, &[0], task.required),
+            2,
+            "untyped coverage sees both bits"
+        );
+        // Agent 1 is role 1 but holds neither required bit, so it adds nothing.
+        assert_eq!(p8_typed_covered(&inst, &[0, 1], &task), 1);
+        // Re-tag bit 1 to role 0: now the same member matches both.
+        let mut tags0 = tags;
+        tags0[1] = 0;
+        let task0 = TypedTask {
+            required: 0b011,
+            tags: tags0,
+            order: vec![0, 1],
+        };
+        assert_eq!(p8_typed_covered(&inst, &[0], &task0), 2);
+
+        // Mean pairwise ρ: singleton is 1.0 by convention; the 0/1 cross pair
+        // reads the off-diagonal in both directions.
+        let rho = p8_rho_table(0.25);
+        assert!((p8_mean_pairwise_rho(&inst, &[0], &rho) - 1.0).abs() < 1e-12);
+        assert!((p8_mean_pairwise_rho(&inst, &[0, 1], &rho) - 0.25).abs() < 1e-12);
+        assert!((p8_mean_pairwise_rho(&inst, &[0, 0], &rho) - 1.0).abs() < 1e-12);
+    }
+
+    /// Part 8 (#72): the E-T3 channel formula on a hand case, including the
+    /// registered neutral-`1.0` convention for an empty denominator, and the
+    /// uniform-θ geometric-mean collapse.
+    #[test]
+    fn p8_channel_formula_hand_case() {
+        // required = bits 0,1,2; tags: bit0 → channel 0, bits 1,2 → channel 1.
+        let required = 0b111u32;
+        let mut tags = [0usize; UNIVERSE];
+        tags[0] = 0;
+        tags[1] = 1;
+        tags[2] = 1;
+
+        let masks = [0b011u32, 0b110u32];
+        // rel_0 = {0,1}, rel_1 = {1,2}; tagged(0) = {0}, tagged(1) = {1,2},
+        // tagged(2) = {} (no bit carries tag 2).
+        // A_0(0→1) = |{} ∩ {0}| / |{0}| = 0
+        // A_1(0→1) = |{1}| / |{1}| = 1
+        // A_2(0→1) = empty denominator ⇒ neutral 1.0
+        // collapse θ = (1/3,1/3,1/3) ⇒ 0^(1/3) · 1 · 1 = 0
+        // A_0(1→0): rel_1 ∩ tagged(0) = {} ⇒ neutral 1.0
+        // A_1(1→0) = |{1}| / |{1,2}| = 0.5 ; A_2 ⇒ 1.0
+        // collapse ⇒ 0.5^(1/3)
+        let mut cc = ChannelCouplings::new(P8_CHANNELS).expect("3 channels");
+        cc.set(0, 1, vec![0.0, 1.0, 1.0]).expect("valid vector");
+        cc.set(1, 0, vec![1.0, 0.5, 1.0]).expect("valid vector");
+        let theta = [1.0 / 3.0; P8_CHANNELS];
+        let expected = cc.collapse(&theta).expect("valid theta");
+        assert_eq!(expected.len(), 2);
+        assert!((expected[0].2 - 0.0).abs() < 1e-12);
+        assert!((expected[1].2 - 0.5f64.powf(1.0 / 3.0)).abs() < 1e-12);
+
+        // The policy's own magnitude must be finite and match a hand-built
+        // evaluation of the very same collapsed table.
+        let got = p8_channel_magnitude(&masks, required, &tags).expect("channel magnitude");
+        let agents = [0usize, 1];
+        let want =
+            catgraph_magnitude::coalition_magnitude_from_couplings(&agents, &expected, &agents, 1.0)
+                .expect("hand-built magnitude");
+        assert!(
+            (got - want).abs() <= 1e-12 * want.abs().max(1.0),
+            "channel magnitude {got} vs hand-built {want}"
+        );
+        // Empty and singleton guards.
+        assert_eq!(
+            p8_channel_magnitude(&[], required, &tags).expect("empty is 0"),
+            0.0
+        );
+        assert!(
+            (p8_channel_magnitude(&[0b011], required, &tags).expect("singleton") - 1.0).abs()
+                < 1e-12
+        );
+    }
+
+    /// Part 8 (#72), S-fib: one deterministic role-grid shape agrees with its
+    /// construction-carried certificate within the upstream-documented relative
+    /// tolerance. The full three-shape gate runs in the battery.
+    #[test]
+    fn p8_sfib_one_shape() {
+        let shape = p8_fib_shapes().remove(0);
+        let role = RoleModulation::new(shape.role).expect("square [0,1] table");
+        let fiber = RoleModulation::new(shape.fiber).expect("square [0,1] table");
+        let grid = role_grid(&role, &fiber).expect("unit diagonals");
+        assert_eq!(grid.n_agents(), 4);
+        let agents: Vec<usize> = (0..grid.n_agents()).collect();
+        let actual = catgraph_magnitude::coalition_magnitude_from_couplings(
+            &agents,
+            grid.couplings(),
+            &agents,
+            1.0,
+        )
+        .expect("grid evaluates");
+        let expected = grid.proof(1.0).expect("certificate").expected_magnitude();
+        assert!(
+            (actual - expected).abs() <= P8_FIB_REL_TOL * actual.abs().max(expected.abs()).max(1.0),
+            "grid {actual} vs certificate {expected}"
+        );
+    }
+
+    /// Part 8 (#72), 2-seed smoke: the registered arms run end-to-end on the v2t
+    /// world, the ρ ≡ 1 typed path reproduces `mag`'s decisions (the X-identity
+    /// cell-2 property at 2-seed scale), and the exploratory example-side arms
+    /// produce finite in-range metrics. Does NOT run the 30-seed battery.
+    #[test]
+    fn p8_two_seed_smoke() {
+        let insts: Vec<TypedInstance> = (P8_SEED_START..P8_SEED_START + 2)
+            .map(|s| draw_typed_instance(s, P8_ROLES))
+            .collect();
+
+        let (mag, mag_lat) = p8_battery(
+            &insts,
+            |_| Box::new(MagnitudePolicy::default()) as Box<dyn CoalitionDecisionPolicy>,
+            P8Metric::Typed,
+        );
+        let ones = p8_rho(1.0);
+        let (typed_ones, _) = p8_battery(
+            &insts,
+            |inst| Box::new(p8_typed_policy(inst, &ones)) as Box<dyn CoalitionDecisionPolicy>,
+            P8Metric::Typed,
+        );
+        assert_eq!(mag.len(), 2);
+        assert!(!mag_lat.is_empty(), "latencies recorded");
+        for (m, t) in mag.iter().zip(typed_ones.iter()) {
+            assert_eq!(m.acts, t.acts, "ρ ≡ 1 must reproduce the untyped acts");
+            assert_eq!(m.primary.to_bits(), t.primary.to_bits());
+            assert_eq!(m.churn, t.churn);
+        }
+
+        let oracle = p8_rho(0.0);
+        let (typed, _) = p8_battery(
+            &insts,
+            |inst| Box::new(p8_typed_policy(inst, &oracle)) as Box<dyn CoalitionDecisionPolicy>,
+            P8Metric::Typed,
+        );
+        let (ceil, _) = p8_pertask_battery(
+            &insts,
+            |inst, task| {
+                Box::new(TypedRelevanceMag {
+                    roles: inst.roles.clone(),
+                    tags: task.tags,
+                    join_margin: 0.0,
+                }) as Box<dyn CoalitionDecisionPolicy>
+            },
+            P8Metric::Typed,
+        );
+        let (t3, _) = p8_pertask_battery(
+            &insts,
+            |_inst, task| {
+                Box::new(ChannelMagnitudePolicy {
+                    tags: task.tags,
+                    join_margin: 0.0,
+                }) as Box<dyn CoalitionDecisionPolicy>
+            },
+            P8Metric::Typed,
+        );
+        let (rq, _) = p8_battery(
+            &insts,
+            |_| Box::new(MagnitudePolicy::default()) as Box<dyn CoalitionDecisionPolicy>,
+            P8Metric::RhoQ,
+        );
+        for r in typed.iter().chain(&ceil).chain(&t3).chain(&rq) {
+            assert!(r.primary.is_finite() && (0.0..=1.0).contains(&r.primary));
+        }
+
+        // T1: the instrumentation pass decomposes real coalitions, and under the
+        // oracle ρ = δ no skeletal class can span two roles.
+        let stats = p8_role_share_pass(&insts, &oracle);
+        assert!(stats.samples > 0, "some coalition must be decomposable");
+        assert_eq!(stats.errors, 0, "no upstream error on the T1 path");
+        assert_eq!(
+            stats.mixed_classes, 0,
+            "ρ = δ zeroes cross-role couplings, so no class can be role-mixed"
         );
     }
 }
