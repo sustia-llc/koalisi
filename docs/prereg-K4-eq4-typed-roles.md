@@ -178,3 +178,38 @@ registration.
 `docs/ab-report-K4-eq4-typed-roles.md` — registered sections mirror
 §5/§6; implementation/deviation ledger mandatory; appended-addendum
 convention applies to any follow-up.
+
+## Amendment 1 (pre-run, 2026-08-03 — posted to #72 BEFORE the official run)
+
+Implementation surfaced three ambiguities in the registered text;
+resolved here per the standing amendment protocol. No bar, seed, or
+leg changes.
+
+- **A1.1 — `success ≡ completed` (typed Scope-A).** §2 defines
+  `completed` and then writes `success_rate` without defining a
+  separate success draw; the v2t world carries no Scope-B `perf`
+  matrix. Resolution: the v2t world is a **typed Scope-A** —
+  `success_rate` IS the role-matched completion rate. Consequently
+  `arm-E1`'s outcome signal in this world is: per-bit = "bit
+  role-matched covered by the final coalition", whole-task success =
+  `completed` (the typed analogue of the oracle signal).
+- **A1.2 — E-ρq interpretation note (leg unchanged).** The registered
+  "oracle = the planted table" arm configuration is structurally
+  ANTI-aligned with the ρ-quality world: ρ-modulation weakens
+  cross-role couplings, magnitude rewards diversity, so the typed arm
+  is *more* likely to form role-mixed coalitions — while that world's
+  quality term rewards role cohesion. The leg runs as registered; the
+  anti-alignment (echoing gotcha 23's "magnitude = diversity, not
+  dependability") is itself the exploratory datum and the report must
+  explain it rather than presenting the cell as a lever failure.
+- **A1.3 — registered disclosure clauses for the report.** (i) The
+  role-matched feasibility rejection re-draw is not task-size-neutral:
+  the realized `|required|` distribution shifts low (mean ≈ 3.3 vs the
+  pure-v2 ≈ 4.9 on the same seeds) — the registered world IS the
+  post-rejection distribution, and cross-part comparisons must carry
+  this clause. (ii) Every Part 8 arm is constructed fresh per seed
+  (structural for `mag-typed`'s seed-dependent role map; applied
+  uniformly — latency-only effect). (iii) X-identity cell 1 is
+  identity-by-construction: implemented as a determinism assert (an
+  independently constructed default policy reproduces acts + score
+  bits) plus the R = 1 identity-world metric-reduction assert.
