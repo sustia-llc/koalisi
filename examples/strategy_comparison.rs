@@ -8191,10 +8191,30 @@ struct WorkflowInstance {
 /// Why it is worth counting: coverage is per DISTINCT `(bit, role)`, and
 /// idempotence and spider absorption change only OCCURRENCE count. Fusion is
 /// therefore the ONLY schema that can move a staffing decision, and this
-/// predicate is the structural ceiling on how many tasks the confirmatory leg can
-/// possibly act on. It is a NECESSARY condition, not a sufficient one — the two
-/// steps must also become adjacent in the diagram for the rule to match convexly
-/// (a fan-out between them has to be absorbed first).
+/// predicate is a structural ceiling on how many tasks the confirmatory leg can
+/// possibly act on.
+///
+/// # It is a NECESSARY condition only, and looser than it looks
+///
+/// The two steps must also become **adjacent** in the diagram for the rule to
+/// match convexly, and there are two distinct reasons they may not (Amendment
+/// A5.2 — the second was missing from this comment and is the more serious):
+///
+/// 1. **Probabilistic** — a drawn fan-out sits between them, so the
+///    spider-absorption rule has to fire first. Recoverable: the search does that
+///    routinely.
+/// 2. **Permanent** — an *unfusable* bit sits between them in the ascending
+///    same-role chain. At `bits = 8`, `fusion_target(b, 4) = b` and
+///    `fusion_target(4, b') = b'`, so **every pair touching bit 4 is skipped and
+///    bit 4 has no fusion partner at all**. Bit 4 can therefore never be consumed,
+///    and a chain `s1 ; s4 ; s5` can never bring the counted-eligible pair
+///    `(1, 5)` adjacent — no amount of fuel or rewriting helps.
+///
+/// So the eligibility rate is a **loose** upper bound. The verdict never reads it:
+/// H-P is computed from the measured `demand_moved` counter, i.e. actual search
+/// results. Reported beside `demand_moved` as the bound it is, and the schema is
+/// deliberately NOT re-tuned — re-targeting the instrument after outcomes have
+/// been seen would be worse than disclosing the bound.
 fn p9_fusion_eligible(pairs: &[(u8, u8, u8)], task: &TypedTask) -> bool {
     let tagged = |bit: u8, role: usize| {
         let b = usize::from(bit);
@@ -8217,6 +8237,25 @@ fn p9_fusion_eligible(pairs: &[(u8, u8, u8)], task: &TypedTask) -> bool {
 /// confirmatory leg is now powered.
 const P9_NARROW_ELIGIBLE_PRIOR: usize = 43;
 const P9_NARROW_ELIGIBLE_TOTAL_PRIOR: usize = 600;
+
+/// Bits that appear in NO fusion instance — the Amendment A5.2 "void"
+/// (mandatory report line).
+///
+/// A bit with no fusion partner can never be consumed by the only
+/// staffing-relevant schema, so it is a **permanent** obstruction wherever it sits
+/// between two otherwise-fusable steps of the same role. Derived from the
+/// library's own pair set rather than restated: at `bits = 8` this is exactly
+/// `{4}`, because `b'' = (b + b' + 4) mod 8` equals `b` iff `b' = 4` and equals
+/// `b'` iff `b = 4`.
+fn p9_fusion_void_bits(bits: u8, pairs: &[(u8, u8, u8)]) -> Vec<u8> {
+    (0..bits)
+        .filter(|bit| {
+            !pairs
+                .iter()
+                .any(|&(first, second, _)| first == *bit || second == *bit)
+        })
+        .collect()
+}
 
 /// The `(bit, role)` steps of a task, in ascending bit order.
 ///
@@ -8666,6 +8705,10 @@ struct P9ValuationPolicy {
     /// `Box<dyn CoalitionDecisionPolicy>` is `'static`; the pool is ≤ 16 workers,
     /// so the per-task clone is noise next to one magnitude evaluation.
     roles: Vec<u8>,
+    /// Decisions declined because the independent evaluation probe reported an
+    /// upstream failure (Amendment A5.3). Shared across the whole cell so the run
+    /// can report ONE number; reported, never asserted on.
+    declines: Arc<AtomicUsize>,
 }
 
 impl P9ValuationPolicy {
@@ -8673,10 +8716,7 @@ impl P9ValuationPolicy {
     /// has no role for it — the same condition the library declines on, so the
     /// wrapper forwards the library's decision rather than inventing one.
     fn staff_of(&self, agent: &dyn AgentCapabilities) -> Option<(u8, u32)> {
-        Some((
-            *self.roles.get(agent.agent_id())?,
-            agent.capabilities(),
-        ))
+        Some((*self.roles.get(agent.agent_id())?, agent.capabilities()))
     }
 
     fn staff(&self, members: &[&dyn AgentCapabilities]) -> Option<Vec<(u8, u32)>> {
@@ -8699,20 +8739,27 @@ impl P9ValuationPolicy {
         self.lambda * self.uncovered(&[]) as f64
     }
 
+    /// A decline in the library's own shape, counted.
+    fn decline(&self) -> Decision {
+        self.declines.fetch_add(1, Ordering::Relaxed);
+        Decision {
+            act: false,
+            score: 0.0,
+        }
+    }
+
     /// Fold a non-negative residual correction into a base decision.
     ///
-    /// A **zero** correction forwards the base decision VERBATIM, which is not
-    /// merely an optimization: the library signals a decline (upstream error,
-    /// non-finite margin, missing role) as `Decision { act: false, score: 0.0 }`,
-    /// indistinguishable at this seam from a legitimate zero margin. Forwarding
-    /// on zero keeps every decline exactly as the library made it. A decline
-    /// coinciding with a NONZERO correction would still be read as a zero margin
-    /// — an unavoidable ambiguity of the `Decision` surface, bounded here by the
-    /// harness asserting full role-map coverage (`p8_typed_policy`), which is the
-    /// only decline reachable on this world short of an upstream failure that
-    /// would equally break the control arm.
+    /// The act predicate is re-derived from the corrected score unconditionally.
+    /// That is safe **because** [`p9_evaluation_failed`] has
+    /// already ruled out a decline: every base score reaching here is a genuine
+    /// margin, so at `correction == 0` the re-derivation reproduces the library's
+    /// own decision exactly (`margin > join_margin` / `delta <= 0` over an
+    /// unchanged score), and at `correction > 0` it applies the registered value
+    /// rule. The non-finite guard stays — a non-finite base has no correction that
+    /// means anything.
     fn fold(base: Decision, correction: f64, act: impl Fn(f64) -> bool) -> Decision {
-        if !base.score.is_finite() || correction == 0.0 {
+        if !base.score.is_finite() {
             return base;
         }
         let score = base.score + correction;
@@ -8721,6 +8768,44 @@ impl P9ValuationPolicy {
             score,
         }
     }
+}
+
+/// Independently detect an upstream evaluation failure over the two member sets a
+/// decision compares (Amendment A5.3).
+///
+/// # Why this exists, and why inferring it from the score is wrong
+///
+/// The library reports an upstream decline as `Decision { act: false, score: 0.0 }`
+/// — **the same value a legitimate exact-zero margin carries**. Treating a zero
+/// score as a decline would suppress corrections on a population this lineage
+/// knows to be large (EQ3 measured knife-edge decisions at ~43 % of the stream);
+/// treating a decline as a margin could flip it into an accept. The ambiguity
+/// cannot be resolved from the returned `Decision`, so it is resolved BEFORE the
+/// fold: the harness runs its own evaluation of both sides and, on `Err`, the
+/// caller declines and counts.
+///
+/// # What the probe does and does not reproduce
+///
+/// It is the harness's own [`relevant_masks`] + [`magnitude_at_t`] (`t = 1`) path
+/// — the same dedup-and-relevance filter, the same member sets, the same
+/// restrict-then-close Möbius pipeline the arm runs on. It differs in ONE respect:
+/// its couplings are UNTYPED, where the arm's are ρ-modulated. So it detects the
+/// structural failure modes (a member set the upstream metric space rejects)
+/// exactly, and a hypothetical failure that only the ρ-modulated coupling matrix
+/// could trigger would slip past it. That residual is disclosed rather than
+/// assumed away; the library exposes no typed-evaluation probe to close it.
+///
+/// Free rather than a method: it reads nothing off the policy, and saying so in
+/// the signature is worth more than the call-site brevity.
+fn p9_evaluation_failed(
+    left: &[&dyn AgentCapabilities],
+    right: &[&dyn AgentCapabilities],
+    required: u32,
+) -> bool {
+    let probe = |members: &[&dyn AgentCapabilities]| {
+        magnitude_at_t(&relevant_masks(members, required), required, 1.0).is_err()
+    };
+    probe(left) || probe(right)
 }
 
 /// Whether any member of `staff` can perform `step` — role-matched, the same
@@ -8745,10 +8830,17 @@ impl CoalitionDecisionPolicy for P9ValuationPolicy {
         coalition: &[&dyn AgentCapabilities],
         ctx: &DecisionContext,
     ) -> Decision {
-        let base = self.inner.should_join(agent, coalition, ctx);
         let (Some(without), Some(joined)) = (self.staff(coalition), self.staff_of(agent)) else {
-            return base;
+            // No role for a participant: the library declines for exactly this
+            // reason, so forward ITS decision rather than inventing one.
+            return self.inner.should_join(agent, coalition, ctx);
         };
+        let mut with_view: Vec<&dyn AgentCapabilities> = coalition.to_vec();
+        with_view.push(agent);
+        if p9_evaluation_failed(coalition, &with_view, ctx.required_capabilities) {
+            return self.decline();
+        }
+        let base = self.inner.should_join(agent, coalition, ctx);
         let mut with = without.clone();
         with.push(joined);
         // `saturating_sub` states the monotonicity rather than trusting it: a
@@ -8773,7 +8865,6 @@ impl CoalitionDecisionPolicy for P9ValuationPolicy {
         coalition: &[&dyn AgentCapabilities],
         ctx: &DecisionContext,
     ) -> Decision {
-        let base = self.inner.should_leave(agent, coalition, ctx);
         // `coalition` INCLUDES `agent` on the leave path (library convention).
         let id = agent.agent_id();
         let remaining: Vec<&dyn AgentCapabilities> = coalition
@@ -8782,8 +8873,12 @@ impl CoalitionDecisionPolicy for P9ValuationPolicy {
             .copied()
             .collect();
         let (Some(inside), Some(outside)) = (self.staff(coalition), self.staff(&remaining)) else {
-            return base;
+            return self.inner.should_leave(agent, coalition, ctx);
         };
+        if p9_evaluation_failed(coalition, &remaining, ctx.required_capabilities) {
+            return self.decline();
+        }
+        let base = self.inner.should_leave(agent, coalition, ctx);
         let correction =
             self.lambda * self.uncovered(&outside).saturating_sub(self.uncovered(&inside)) as f64;
         Self::fold(base, correction, |score| score <= 0.0)
@@ -8798,6 +8893,26 @@ enum P9Arm<'a> {
     PerTask(&'a dyn Fn(usize) -> Box<dyn CoalitionDecisionPolicy>),
 }
 
+/// What happened to one task's DECLARED demand — the E-conc classification
+/// (Amendment A5.3).
+///
+/// The three causes were previously collapsed into one `declared_feasible: bool`,
+/// which let an optimizer/S-sound decline inflate E-conc's "concentration onto an
+/// absent `(bit, role)`" rate. They are now distinct, and **E-conc counts only
+/// [`PoolInfeasible`](P9DemandStatus::PoolInfeasible)**.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum P9DemandStatus {
+    /// Every distinct `(bit, role)` of the declared demand has a pool holder.
+    Feasible,
+    /// The declared demand names a `(bit, role)` no pool worker holds — the
+    /// registered two-sided-lever failure mode E-conc exists to measure.
+    PoolInfeasible,
+    /// No writing was declared at all: `optimize` errored or the declared writing
+    /// failed S-sound, so the task was declined-and-counted. NOT a concentration
+    /// event — nothing was concentrated anywhere.
+    Declined,
+}
+
 /// Per-seed Part 9 result. `scores` carries raw `Decision::score` BIT PATTERNS,
 /// for the same reason [`P8Seed`] does — the identity gates are bit-identity
 /// claims and `f64` equality would not express them.
@@ -8809,9 +8924,10 @@ struct P9Seed {
     success_rate: f64,
     /// `cov_eff` per task, index-aligned with the task stream (E-conc reads it).
     quality: Vec<f64>,
-    /// Whether the DECLARED demand was role-matched feasible in the pool (E-conc).
-    declared_feasible: Vec<bool>,
-    /// Tasks declined because `optimize` failed.
+    /// Per-task declared-demand classification (E-conc), index-aligned with the
+    /// task stream.
+    demand_status: Vec<P9DemandStatus>,
+    /// Tasks declined because `optimize` failed or the writing was unsound.
     declined: usize,
 }
 
@@ -8846,7 +8962,7 @@ fn p9_run_seed_hooked(
     let mut acts = Vec::new();
     let mut scores = Vec::new();
     let mut quality = Vec::with_capacity(declared.len());
-    let mut declared_feasible = Vec::with_capacity(declared.len());
+    let mut demand_status = Vec::with_capacity(declared.len());
     let mut declined = 0usize;
 
     for (t, (task, decl)) in inst.base.tasks.iter().zip(declared.iter()).enumerate() {
@@ -8855,7 +8971,7 @@ fn p9_run_seed_hooked(
             // nothing falls back to the as-written writing.
             declined += 1;
             quality.push(0.0);
-            declared_feasible.push(false);
+            demand_status.push(P9DemandStatus::Declined);
             continue;
         }
 
@@ -8925,7 +9041,11 @@ fn p9_run_seed_hooked(
         }
         quality_sum += cov_eff;
         quality.push(cov_eff);
-        declared_feasible.push(p9_demand_feasible(inst, &decl.demand));
+        demand_status.push(if p9_demand_feasible(inst, &decl.demand) {
+            P9DemandStatus::Feasible
+        } else {
+            P9DemandStatus::PoolInfeasible
+        });
 
         // Role-matched per-bit signal over the DECLARED demand: bit `b` is
         // `true` iff some declared step on `b` is covered by a member of that
@@ -8950,7 +9070,7 @@ fn p9_run_seed_hooked(
         scores,
         success_rate,
         quality,
-        declared_feasible,
+        demand_status,
         declined,
     }
 }
@@ -9022,33 +9142,58 @@ fn p9_residual(inst: &WorkflowInstance, decl: &P9Declared, cost: P9Cost) -> Vec<
         .collect()
 }
 
+/// One cell of the E-fuel sweep, declared BEFORE the gates so S-sound can cover
+/// it at §6's stated scope (Amendment A5.3).
+struct P9SweepCell {
+    cost: P9Cost,
+    fuel: usize,
+    declared: Vec<Vec<P9Declared>>,
+    stats: P9DeclareStats,
+    /// Wall time of this cell's `p9_declare`, for the A3.2 (ii) search-cost
+    /// disclosure.
+    declare_secs: f64,
+}
+
+/// What one valuation-cell battery produced.
+struct P9ValuationRun {
+    seeds: Vec<P9Seed>,
+    latencies: Vec<f64>,
+    /// Per-task **full residual** `λ · Σ per_gen` at an empty coalition — the
+    /// largest the term can be, read off the policy the arm actually carries so
+    /// the reported figure cannot drift from the one in the score.
+    terms: Vec<f64>,
+    /// Decisions declined by the A5.3 evaluation probe. Reported, never asserted.
+    probe_declines: usize,
+}
+
 /// The valuation-only battery: a per-task [`P9ValuationPolicy`] carrying that
 /// task's residual over the shared typed control.
-///
-/// The third return is the per-task **full residual** `λ · Σ per_gen` at an empty
-/// coalition — the largest the term can be, read off the policy the arm actually
-/// carries so the reported figure cannot drift from the one in the score.
 fn p9_valuation_battery(
     insts: &[WorkflowInstance],
     declared: &[Vec<P9Declared>],
     rho: &RoleModulation,
     lambda: f64,
     cost: P9Cost,
-) -> (Vec<P9Seed>, Vec<f64>, Vec<f64>) {
+) -> P9ValuationRun {
     let mut terms: Vec<f64> = Vec::new();
     let mut lat = Vec::new();
     let mut results = Vec::with_capacity(insts.len());
+    // One counter for the whole cell. The warm-up gets its own throw-away counter
+    // so a discarded pass cannot inflate the reported number.
+    let declines = Arc::new(AtomicUsize::new(0));
     // Discarded warm-up on the first instance, as in `p9_battery` — the arms stay
     // latency-comparable even though latency is never gating here.
     if let (Some(first), Some(first_decl)) = (insts.first(), declared.first()) {
         let inner = p8_typed_policy(&first.base, rho);
         let role_map = p9_role_map(first);
+        let warm_declines = Arc::new(AtomicUsize::new(0));
         let make = |t: usize| {
             Box::new(P9ValuationPolicy {
                 inner: inner.clone(),
                 lambda,
                 residual: p9_residual(first, &first_decl[t], cost),
                 roles: role_map.clone(),
+                declines: Arc::clone(&warm_declines),
             }) as Box<dyn CoalitionDecisionPolicy>
         };
         let mut warm = Vec::new();
@@ -9062,12 +9207,18 @@ fn p9_valuation_battery(
             lambda,
             residual: p9_residual(inst, &decl[t], cost),
             roles: role_map.clone(),
+            declines: Arc::clone(&declines),
         };
         let make = |t: usize| Box::new(build(t)) as Box<dyn CoalitionDecisionPolicy>;
         terms.extend((0..decl.len()).map(|t| build(t).full_term()));
         results.push(p9_run_seed(&P9Arm::PerTask(&make), inst, decl, &mut lat));
     }
-    (results, lat, terms)
+    P9ValuationRun {
+        seeds: results,
+        latencies: lat,
+        terms,
+        probe_declines: declines.load(Ordering::Relaxed),
+    }
 }
 
 /// The `arm-E1` context battery over the v2w world: a FRESH [`PersistentAifArm`]
@@ -9397,7 +9548,11 @@ fn part9_eq5a_process_structured() {
     );
     println!();
     println!(
-        "_**The declared-writing mechanic** (prereg §4 fairness clause): each arm declares the writing it staffs — the control declares the as-written workflow, a rewriting arm declares `optimize(...).best()` — and the scorer scores each arm's DECLARED writing. Every declared writing that is not the as-written one is `replay`-verified against the registered rules and `content_eq`-checked against the reported representative BEFORE it is scored (§6 S-sound), so an arm cannot grade its own homework and the control is not penalised for a legitimate alternative it did not take. **Consequence, stated because it is by design:** `cov_eff` denominators differ across arms — when both complete, the ratio term is `1.0` for both and the contrast comes through **member count**, which is the claimed advantage. The policy itself only ever sees a `required: u32` mask (the OR over the declared writing's distinct demand) plus the worker role map; the arm never sees a tag, exactly as in EQ4._"
+        "_**The declared-writing mechanic** (prereg §4 fairness clause, as CORRECTED by Amendment A5.1): each arm declares the writing it staffs — the control declares the as-written workflow, a rewriting arm declares `optimize(...).best()` — and the scorer scores each arm's DECLARED writing. Every declared writing that is not the as-written one is `replay`-verified against the registered rules and `content_eq`-checked against the reported representative BEFORE it is scored (§6 S-sound), so an arm cannot grade its own homework and the control is not penalised for a legitimate alternative it did not take. **Consequence, stated because it is by design:** `cov_eff` denominators differ across arms — when both complete, the ratio term is `1.0` for both and the contrast comes through **member count**, which is the claimed advantage (the clause's narrow, checkable half — verified true). The policy itself only ever sees a `required: u32` mask (the OR over the declared writing's distinct demand) plus the worker role map; the arm never sees a tag, exactly as in EQ4._"
+    );
+    println!();
+    println!(
+        "_**What \"sound\" means here, and what it does not** (Amendment A5.1 — §4's original wording overclaimed and is corrected): BGKSZ **Thm 5.6** certifies **theory-relative derivability** — the optimizer's output is a legal derivation under THE RULES IT WAS GIVEN. It certifies nothing about whether those rules preserve task semantics, and the rules here are **hand-authored for this experiment** (A1.1/A3.2) with no independent capability-semantics content. So \"sound\" means \"derivable from axioms this harness itself declared\", the rules are **stipulated** equivalences, and the sameness the comparison trades on is **theory-internal, not externally validated**. Scoping sentence, binding on the report: a `VALIDATED (process structure)` verdict would read \"**a sound-by-stipulation process transformation can unlock staffing value in this world**\" — NOT \"process reorganisation is generically valuable\"._"
     );
     println!();
     println!(
@@ -9484,6 +9639,35 @@ fn part9_eq5a_process_structured() {
         P9Cost::Priced,
         P9_FUEL,
     );
+    // The E-fuel sweep's eight declares and E-ceil leg (i)'s declare are computed
+    // HERE, before the gates, rather than inline in their own sections. §6 scopes
+    // S-sound to "every declared writing, all tasks, all seeds" (Amendment A5.3),
+    // and a gate cannot cover writings that do not exist yet when it prints.
+    let sweep: Vec<P9SweepCell> = [P9Cost::Uniform, P9Cost::Priced]
+        .into_iter()
+        .flat_map(|cost| P9_FUEL_GRID.map(move |fuel| (cost, fuel)))
+        .map(|(cost, fuel)| {
+            let t0 = Instant::now();
+            let (declared, stats) =
+                p9_declare(&insts, &rules, &labels, P9Mechanism::Rewrite, cost, fuel);
+            P9SweepCell {
+                cost,
+                fuel,
+                declared,
+                stats,
+                declare_secs: t0.elapsed().as_secs_f64(),
+            }
+        })
+        .collect();
+    let sweep_wall: f64 = sweep.iter().map(|c| c.declare_secs).sum();
+    let (d_ceil, s_ceil) = p9_declare(
+        &insts,
+        &rules,
+        &labels,
+        P9Mechanism::Rewrite,
+        P9Cost::Priced,
+        P9_ECEIL_FUEL,
+    );
 
     // --- The registered arms -------------------------------------------------
     let (asis, asis_lat) = p9_battery(&insts, &d_ctl, |inst| {
@@ -9495,10 +9679,12 @@ fn part9_eq5a_process_structured() {
     let (rw_p, rw_p_lat) = p9_battery(&insts, &d_rw_p, |inst| {
         Box::new(p8_typed_policy(&inst.base, &oracle)) as Box<dyn CoalitionDecisionPolicy>
     });
+    let val_u_run = p9_valuation_battery(&insts, &d_val_u, &oracle, P9_LAMBDA, P9Cost::Uniform);
+    let val_p_run = p9_valuation_battery(&insts, &d_val_p, &oracle, P9_LAMBDA, P9Cost::Priced);
     let (val_u, val_u_lat, val_u_terms) =
-        p9_valuation_battery(&insts, &d_val_u, &oracle, P9_LAMBDA, P9Cost::Uniform);
+        (&val_u_run.seeds, &val_u_run.latencies, &val_u_run.terms);
     let (val_p, val_p_lat, val_p_terms) =
-        p9_valuation_battery(&insts, &d_val_p, &oracle, P9_LAMBDA, P9Cost::Priced);
+        (&val_p_run.seeds, &val_p_run.latencies, &val_p_run.terms);
     let (mag, mag_lat) = p9_battery(&insts, &d_ctl, |_| {
         Box::new(MagnitudePolicy::default()) as Box<dyn CoalitionDecisionPolicy>
     });
@@ -9511,16 +9697,27 @@ fn part9_eq5a_process_structured() {
     println!("## Gates (prereg §6 — any failure ⇒ RUN-INVALID)");
     println!();
 
-    // S-sound.
-    let sound_cells = [
-        ("wf-rw-u", &s_rw_u),
-        ("wf-rw-p", &s_rw_p),
+    // S-sound, at the FULL §6 scope (Amendment A5.3): every declared writing the
+    // run produces — the two confirmatory cells, all eight E-fuel sweep cells, and
+    // E-ceil leg (i) — not just the cells the verdict reads.
+    let mut sound_cells: Vec<(String, &P9DeclareStats)> = vec![
+        ("wf-rw-u".to_owned(), &s_rw_u),
+        ("wf-rw-p".to_owned(), &s_rw_p),
     ];
+    sound_cells.extend(sweep.iter().map(|c| {
+        (
+            format!("E-fuel wf-rw-{} @ {}", c.cost.label(), c.fuel),
+            &c.stats,
+        )
+    }));
+    sound_cells.push((format!("E-ceil (i) @ {P9_ECEIL_FUEL}"), &s_ceil));
     let mut sound_ok = true;
     let mut verified_total = 0usize;
-    for (label, s) in sound_cells {
+    let mut unsound_total = 0usize;
+    for (label, s) in &sound_cells {
         sound_ok &= s.unsound == 0;
         verified_total += s.verified;
+        unsound_total += s.unsound;
         assert_eq!(
             s.unsound, 0,
             "S-sound: {label} declared {} writing(s) its own trace does not derive",
@@ -9528,9 +9725,10 @@ fn part9_eq5a_process_structured() {
         );
     }
     println!(
-        "- **S-sound — {}.** Every declared writing of the two rewriting cells `replay`s under the registered {} rules and the replayed content `content_eq`s the reported representative: **{verified_total}** verified ({n_seeds} seeds × {TASKS} tasks × 2), **0** unsound. This is strictly stronger than the registration asks — the writings the search left content-equal to the as-written one are verified too, rather than exempted on the grounds that nothing changed. The as-written control and the valuation cells declare the writing the world drew, so no verification is owed there (prereg §4). Amendment A2.4: `RewriteStep` has no public constructor, so the negative direction is exercised upstream and by the library's own tamper tests (empty rules slice, mismatched `start`, reordered rules) rather than by a forged step here.",
+        "- **S-sound — {}.** Every declared writing the run produces `replay`s under the registered {} rules and the replayed content `content_eq`s the reported representative: **{verified_total}** verified across **{}** declaring cells ({n_seeds} seeds × {TASKS} tasks each), **{unsound_total}** unsound. **Amendment A5.3 scope fix:** the gate previously asserted over the two confirmatory rewriting cells only, while the E-fuel sweep's eight cells and E-ceil leg (i) computed an `unsound` count that was discarded — §6 says \"every declared writing… all tasks, all seeds\", so all eleven are now asserted. (An unsound writing could never be SCORED as legitimate — `p9_declare` declines-and-counts it — but the gate must have the scope §6 states.) It is also strictly stronger than the registration asks in the other direction: writings the search left content-equal to the as-written one are verified too, rather than exempted on the grounds that nothing changed. The as-written control and the valuation cells declare the writing the world drew, so no verification is owed there (prereg §4). Amendment A2.4: `RewriteStep` has no public constructor, so the negative direction is exercised upstream and by the library's own tamper tests (empty rules slice, mismatched `start`, reordered rules) rather than by a forged step here.",
         pass(sound_ok),
-        rules.len()
+        rules.len(),
+        sound_cells.len()
     );
 
     // S-dedup, over the drawn (as-written) corpus.
@@ -9685,13 +9883,31 @@ fn part9_eq5a_process_structured() {
                 .count()
         })
         .sum();
-    let narrow_rate = 100.0 * P9_NARROW_ELIGIBLE_PRIOR as f64 / P9_NARROW_ELIGIBLE_TOTAL_PRIOR as f64;
+    let narrow_rate =
+        100.0 * P9_NARROW_ELIGIBLE_PRIOR as f64 / P9_NARROW_ELIGIBLE_TOTAL_PRIOR as f64;
+    let void_bits = p9_fusion_void_bits(bits, &pairs);
     println!(
-        "- **Fusion eligibility — the structural ceiling on the confirmatory lever (MANDATORY disclosure, Amendment A3.2).** Coverage is per DISTINCT `(bit, role)`, so idempotence and spider absorption — {} of the theory's {} instances — change OCCURRENCE count only and are staffing-INVISIBLE by construction: a task they alone touch scores bit-identically to the control. **Fusion is the only schema that can move a decision.** Under the WIDENED schema (every role × every ordered pair of distinct bits, target `(b + b' + 4) mod bits ∉ {{b, b'}}`) a task is eligible iff some role's tagged bits contain both members of one surviving pair: **{fusion_eligible}** of {} tasks (**{:.1} %**). Under the NARROW Amendment 1 schema (one designated pair per role) the recorded Stage-2 measurement on this same seed block was **{P9_NARROW_ELIGIBLE_PRIOR}/{P9_NARROW_ELIGIBLE_TOTAL_PRIOR} ({narrow_rate:.1} %)** — quoted as a recorded prior, since the narrow schema no longer exists in the theory and this run cannot re-measure it. That comparison is the evidence the leg is now powered: a stream-level bar over a stream where ~93 % of tasks were identical across arms was not reachable on merit. The eligibility figure is a NECESSARY condition and so an upper bound — the two steps must also become adjacent for the rule to match convexly — and every H-P number below should be read against it.",
+        "- **How much of the stream the confirmatory lever can act on — MANDATORY disclosure, Amendment A3.2 as RE-ANCHORED by A5.2.** Coverage is per DISTINCT `(bit, role)`, so idempotence and spider absorption — {} of the theory's {} instances — change OCCURRENCE count only and are staffing-INVISIBLE by construction: a task they alone touch scores bit-identically to the control. **Fusion is the only schema that can move a decision.** The evidence that the leg is powered is therefore the MEASURED **`demand_moved`** counter — tasks whose declared distinct demand actually differs from the as-written one, i.e. real search results: **{}/{} ({:.1} %)** for `wf-rw-u` and **{}/{} ({:.1} %)** for `wf-rw-p`. Under the NARROW Amendment 1 schema (one designated pair per role) the recorded Stage-2 eligibility was **{P9_NARROW_ELIGIBLE_PRIOR}/{P9_NARROW_ELIGIBLE_TOTAL_PRIOR} ({narrow_rate:.1} %)** — a recorded prior, since the narrow schema no longer exists to re-measure — over a stream where ~93 % of tasks were consequently identical across arms, which no stream-level bar could clear on merit.",
         2 * UNIVERSE * P8_ROLES,
         rules.len(),
+        s_rw_u.demand_moved,
+        occurrences.len(),
+        100.0 * s_rw_u.demand_moved as f64 / occurrences.len() as f64,
+        s_rw_p.demand_moved,
+        occurrences.len(),
+        100.0 * s_rw_p.demand_moved as f64 / occurrences.len() as f64
+    );
+    println!(
+        "  - **Eligibility heuristic, printed as the LOOSE upper bound it is:** a task is counted eligible iff some role's tagged bits contain both members of one surviving fusion pair — **{fusion_eligible}** of {} tasks (**{:.1} %**). It is a NECESSARY condition only; the verdict never reads it.",
         occurrences.len(),
         100.0 * fusion_eligible as f64 / occurrences.len() as f64
+    );
+    println!(
+        "  - **The bit-{} void — why the bound is loose, and PERMANENTLY so (Amendment A5.2, mandatory line).** `b'' = (b + b' + 4) mod {UNIVERSE}` equals `b` exactly when `b' = 4`, and equals `b'` exactly when `b = 4`, so every pair touching bit 4 is skipped and **bit 4 appears in no fusion instance at all** (bits with no fusion partner, computed from the theory's own pair set: **{:?}**). An unfusable bit can never be consumed, so wherever it sits between two otherwise-fusable steps of the same role — `s1 ; s4 ; s5` — the counted-eligible pair `(1, 5)` can NEVER be brought adjacent. That is a permanent obstruction, not the merely probabilistic \"a fan-out has to be absorbed first\"; the gap between eligibility and `demand_moved` above is partly structural and irreducible. **The schema is deliberately not re-tuned:** re-targeting the instrument after outcomes have been seen would be worse than disclosing the bound.",
+        void_bits
+            .first()
+            .map_or_else(|| "-".to_owned(), ToString::to_string),
+        void_bits
     );
     println!(
         "- **Feasibility (gotcha 25 / #63).** The v2t prefix carries the registered role-matched rejection re-draw ({total_redraws} re-draws over the {n_seeds} seeds; worst single task **{worst_attempts}** of the {P8_REDRAW_CAP}-attempt budget). The AS-WRITTEN demand is then re-checked in full: **{as_written_infeasible}** infeasible, which is structural — the shape draw repeats and fans steps but never introduces a new `(bit, role)`, so as-written feasibility is exactly the v2t feasibility the prefix already guarantees. **The OPTIMIZED demand is NOT re-drawn** (prereg §2): an optimizer that concentrates demand on an absent `(bit, role)` is the registered failure mode, counted in E-conc below and never a draw condition."
@@ -9705,8 +9921,8 @@ fn part9_eq5a_process_structured() {
     p9_row("wf-asis", &asis, &asis, &asis_lat);
     p9_row("wf-rw-u", &rw_u, &asis, &rw_u_lat);
     p9_row("wf-rw-p", &rw_p, &asis, &rw_p_lat);
-    p9_row("wf-val-u", &val_u, &asis, &val_u_lat);
-    p9_row("wf-val-p", &val_p, &asis, &val_p_lat);
+    p9_row("wf-val-u", val_u, &asis, val_u_lat);
+    p9_row("wf-val-p", val_p, &asis, val_p_lat);
     p9_row("mag", &mag, &asis, &mag_lat);
     p9_row("scalar", &scalar, &asis, &scalar_lat);
     p9_row("arm-E1", &e1, &asis, &e1_lat);
@@ -9717,9 +9933,9 @@ fn part9_eq5a_process_structured() {
     println!();
 
     // --- A3.1: the valuation-only cells are LIVE (measured, not assumed) ------
-    let (val_u_seeds, val_u_acts, val_u_scores) = p9_divergence(&val_u, &asis);
-    let (val_p_seeds, val_p_acts, val_p_scores) = p9_divergence(&val_p, &asis);
-    let val_live = !p9_bit_identical(&val_u, &asis) || !p9_bit_identical(&val_p, &asis);
+    let (val_u_seeds, val_u_acts, val_u_scores) = p9_divergence(val_u, &asis);
+    let (val_p_seeds, val_p_acts, val_p_scores) = p9_divergence(val_p, &asis);
+    let val_live = !p9_bit_identical(val_u, &asis) || !p9_bit_identical(val_p, &asis);
     println!("### A3.1 liveness: the valuation-only cells price the UNSTAFFABLE RESIDUAL");
     println!();
     println!(
@@ -9748,19 +9964,24 @@ fn part9_eq5a_process_structured() {
         "A3.1: the valuation-only cells must not be bit-identical to the control — a cancelling term is the defect the amendment removed"
     );
     println!();
+    println!(
+        "- **Upstream-evaluation declines (Amendment A5.3, reported not asserted): `wf-val-u` {} · `wf-val-p` {}.** The library reports an upstream decline as `Decision {{ act: false, score: 0.0 }}` — the SAME value a legitimate exact-zero margin carries, and this lineage knows exact-zero margins to be a large population (EQ3 measured knife-edge decisions at ~43 % of the stream). Inferring a decline from the score would therefore either suppress a great many real corrections or flip a genuine decline into an accept. The wrapper instead **detects evaluation failure independently**, before folding: it runs the harness's own `relevant_masks` + `magnitude_at_t(t = 1)` over both member sets a decision compares and, on `Err`, declines-and-counts. Every other zero score is then known to be a genuine margin and the correction folds safely. Residual, disclosed: the probe's couplings are UNTYPED where the arm's are ρ-modulated, so it detects the structural failure modes exactly but a failure only the ρ-modulated coupling matrix could trigger would slip past — the library exposes no typed-evaluation probe to close that.",
+        val_u_run.probe_declines, val_p_run.probe_declines
+    );
+    println!();
     // The registered λ grid, RUN: under A3.1 the term no longer cancels, so the
     // grid is a genuine sensitivity sweep rather than three cells a proof says
     // must coincide.
     let grid_row = P9_LAMBDA_GRID
         .iter()
         .map(|&lambda| {
-            let (cell, _, terms) =
-                p9_valuation_battery(&insts, &d_val_p, &oracle, lambda, P9Cost::Priced);
-            let (seeds, acts, _) = p9_divergence(&cell, &asis);
+            let run = p9_valuation_battery(&insts, &d_val_p, &oracle, lambda, P9Cost::Priced);
+            let (seeds, acts, _) = p9_divergence(&run.seeds, &asis);
             format!(
-                "λ = {lambda}: median PRIMARY {:.4}, median full term {:.3}, diverging {seeds}/{n_seeds} seeds ({acts} acts)",
-                median(p9_primaries(&cell)),
-                median(terms)
+                "λ = {lambda}: median PRIMARY {:.4}, median full term {:.3}, diverging {seeds}/{n_seeds} seeds ({acts} acts), probe declines {}",
+                median(p9_primaries(&run.seeds)),
+                median(run.terms.clone()),
+                run.probe_declines
             )
         })
         .collect::<Vec<String>>()
@@ -9776,8 +9997,8 @@ fn part9_eq5a_process_structured() {
     let cells: [(&str, &Vec<P9Seed>); 4] = [
         ("wf-rw-u", &rw_u),
         ("wf-rw-p", &rw_p),
-        ("wf-val-u", &val_u),
-        ("wf-val-p", &val_p),
+        ("wf-val-u", val_u),
+        ("wf-val-p", val_p),
     ];
 
     println!("## H-P (confirmatory, family-wise) — optimizing the process before staffing it");
@@ -9842,7 +10063,7 @@ fn part9_eq5a_process_structured() {
     println!("## VERDICT: **{verdict}**");
     println!();
     println!(
-        "_Grammar (prereg §7): `VALIDATED (process structure)` = at least one H-P cell passes BOTH conjuncts at the family-wise bar with every §6 gate holding · `FALSIFIED (process structure)` = gates hold, no cell clears the bar · `RUN-INVALID` = any §6 gate fails. This run: carrying cell {} · gates X-reduce {} / S-sound {} / S-dedup {}. E-ceil / E-conc / E-fuel mechanism-scoping is reported below but cannot upgrade the verdict. The v1/v2 K4 verdicts, EQ3's and EQ4's verdicts, and the #54 arm question (mag = demonstrated default, FINAL) are UNTOUCHED regardless of outcome, and a `VALIDATED` result would speak to the process-vs-as-written contrast within the typed magnitude family — not to the mag-vs-aif arm question, which is EQ5b's (prereg §7 pre-commitments)._",
+        "_Grammar (prereg §7): `VALIDATED (process structure)` = at least one H-P cell passes BOTH conjuncts at the family-wise bar with every §6 gate holding · `FALSIFIED (process structure)` = gates hold, no cell clears the bar · `RUN-INVALID` = any §6 gate fails. This run: carrying cell {} · gates X-reduce {} / S-sound {} / S-dedup {}. E-ceil / E-conc / E-fuel mechanism-scoping is reported below but cannot upgrade the verdict. **Scope of a `VALIDATED` reading (Amendment A5.1, binding):** it would read \"**a sound-by-stipulation process transformation can unlock staffing value in this world**\" — the rewrite rules are hand-authored for this experiment and BGKSZ Thm 5.6 certifies only that the optimizer stayed inside them, so the claim is NOT \"process reorganisation is generically valuable\". The v1/v2 K4 verdicts, EQ3's and EQ4's verdicts, and the #54 arm question (mag = demonstrated default, FINAL) are UNTOUCHED regardless of outcome, and a `VALIDATED` result would speak to the process-vs-as-written contrast within the typed magnitude family — not to the mag-vs-aif arm question, which is EQ5b's (prereg §7 pre-commitments)._",
         carried.map_or_else(|| "none".to_owned(), |c| format!("`{c}`")),
         pass(true),
         pass(sound_ok),
@@ -9863,28 +10084,23 @@ fn part9_eq5a_process_structured() {
     println!(
         "|------|-----:|---------------:|-------------:|---------------:|---------------------:|-------------------------:|-------------------:|---------------:|"
     );
-    let mut sweep_wall = 0.0f64;
-    for cost in [P9Cost::Uniform, P9Cost::Priced] {
-        for fuel in P9_FUEL_GRID {
-            let t0 = Instant::now();
-            let (d, s) = p9_declare(&insts, &rules, &labels, P9Mechanism::Rewrite, cost, fuel);
-            let declare_s = t0.elapsed().as_secs_f64();
-            sweep_wall += declare_s;
-            let (rs, _) = p9_battery(&insts, &d, |inst| {
-                Box::new(p8_typed_policy(&inst.base, &oracle)) as Box<dyn CoalitionDecisionPolicy>
-            });
-            let med = median(p9_primaries(&rs));
-            println!(
-                "| `wf-rw-{}` ({}) | {fuel} | {med:.4} | {:.2}× | {}/{n_seeds} | {} | {:.1} | {:.1} | {declare_s:.1} |",
-                if cost == P9Cost::Uniform { "u" } else { "p" },
-                cost.label(),
-                if asis_med > 0.0 { med / asis_med } else { f64::NAN },
-                p9_superior_count(&rs, &asis),
-                s.fuel_exhausted,
-                median(s.explored.clone()),
-                median(s.best.clone())
-            );
-        }
+    for cell in &sweep {
+        let (rs, _) = p9_battery(&insts, &cell.declared, |inst| {
+            Box::new(p8_typed_policy(&inst.base, &oracle)) as Box<dyn CoalitionDecisionPolicy>
+        });
+        let med = median(p9_primaries(&rs));
+        println!(
+            "| `wf-rw-{}` ({}) | {} | {med:.4} | {:.2}× | {}/{n_seeds} | {} | {:.1} | {:.1} | {:.1} |",
+            if cell.cost == P9Cost::Uniform { "u" } else { "p" },
+            cell.cost.label(),
+            cell.fuel,
+            if asis_med > 0.0 { med / asis_med } else { f64::NAN },
+            p9_superior_count(&rs, &asis),
+            cell.stats.fuel_exhausted,
+            median(cell.stats.explored.clone()),
+            median(cell.stats.best.clone()),
+            cell.declare_secs
+        );
     }
     println!();
     println!(
@@ -9900,17 +10116,22 @@ fn part9_eq5a_process_structured() {
     println!("## E-conc (registered disclosure, non-gating) — demand concentration onto absent `(bit, role)`");
     println!();
     println!(
-        "_The registered failure mode, MEASURED: a cheaper writing may concentrate demand on a `(bit, role)` no pool worker holds. Such a task is COUNTED, never re-drawn (prereg §2). `PRIMARY = success_rate × mean cov_eff` is not additive over tasks, so the contribution below decomposes the **mean-quality** factor: `Δ_infeasible` is the part of the per-seed `mean cov_eff` gap that comes from tasks whose declared demand is infeasible, and `Δ_feasible` the rest._"
+        "_The registered failure mode, MEASURED: a cheaper writing may concentrate demand on a `(bit, role)` no pool worker holds. Such a task is COUNTED, never re-drawn (prereg §2). `PRIMARY = success_rate × mean cov_eff` is not additive over tasks, so the contribution below decomposes the **mean-quality** factor: `Δ_infeasible` is the part of the per-seed `mean cov_eff` gap that comes from POOL-INFEASIBLE tasks, and `Δ_feasible` the rest._"
     );
     println!();
     println!(
-        "| cell | infeasible tasks | rate | mean `cov_eff` there (cell / control) | Δ_infeasible | Δ_feasible |"
+        "_**Cause separation (Amendment A5.3).** A task with no declared writing at all — `optimize` errored, or the writing failed S-sound, so it was declined-and-counted — used to be folded into the same \"not feasible\" bucket as a genuinely pool-infeasible declared demand, which could inflate the concentration rate with events that concentrated nothing. The two are now counted apart and **the rate below is the pool-infeasible one only**; the decline count is printed beside it._"
+    );
+    println!();
+    println!(
+        "| cell | pool-infeasible tasks | rate | declined tasks | mean `cov_eff` there (cell / control) | Δ_infeasible | Δ_feasible |"
     );
     println!(
-        "|------|-----------------:|-----:|--------------------------------------:|-------------:|-----------:|"
+        "|------|----------------------:|-----:|---------------:|--------------------------------------:|-------------:|-----------:|"
     );
     for (label, rs) in [("wf-rw-u", &rw_u), ("wf-rw-p", &rw_p)] {
         let mut infeasible = 0usize;
+        let mut declined = 0usize;
         let mut total = 0usize;
         let (mut q_cell, mut q_ctrl) = (0.0f64, 0.0f64);
         let (mut d_inf, mut d_feas) = (0.0f64, 0.0f64);
@@ -9919,19 +10140,27 @@ fn part9_eq5a_process_structured() {
             for i in 0..r.quality.len().min(c.quality.len()) {
                 total += 1;
                 let delta = (r.quality[i] - c.quality[i]) / n;
-                if r.declared_feasible[i] {
-                    d_feas += delta;
-                } else {
-                    infeasible += 1;
-                    q_cell += r.quality[i];
-                    q_ctrl += c.quality[i];
-                    d_inf += delta;
+                match r.demand_status[i] {
+                    P9DemandStatus::PoolInfeasible => {
+                        infeasible += 1;
+                        q_cell += r.quality[i];
+                        q_ctrl += c.quality[i];
+                        d_inf += delta;
+                    }
+                    // A declined task contributes to neither concentration bucket;
+                    // its quality gap rides with the feasible remainder so the two
+                    // Δ columns still sum to the whole mean-quality gap.
+                    P9DemandStatus::Declined => {
+                        declined += 1;
+                        d_feas += delta;
+                    }
+                    P9DemandStatus::Feasible => d_feas += delta,
                 }
             }
         }
         let denom = infeasible.max(1) as f64;
         println!(
-            "| `{label}` | {infeasible} | {:.1} % | {:.4} / {:.4} | {:+.4} | {:+.4} |",
+            "| `{label}` | {infeasible} | {:.1} % | {declined} | {:.4} / {:.4} | {:+.4} | {:+.4} |",
             100.0 * infeasible as f64 / total.max(1) as f64,
             q_cell / denom,
             q_ctrl / denom,
@@ -9985,14 +10214,8 @@ fn part9_eq5a_process_structured() {
         "_NOT a supremum (the #72 A2.5 correction). `cost_of` sums per-generator weights over OCCURRENCES, so \"minimise DISTINCT `(bit, role)` demand\" — the staffing question — is not expressible as a `per_gen` at all; E-ceil therefore runs as (i) a large-fuel scarcity-priced cell and (ii) a harness-side minimum-distinct-demand search on a pinned subsample._"
     );
     println!();
-    let (d_ceil, s_ceil) = p9_declare(
-        &insts,
-        &rules,
-        &labels,
-        P9Mechanism::Rewrite,
-        P9Cost::Priced,
-        P9_ECEIL_FUEL,
-    );
+    // `d_ceil` / `s_ceil` were declared before the gates so S-sound could cover
+    // them at §6's stated scope (Amendment A5.3).
     let (ceil_rs, ceil_lat) = p9_battery(&insts, &d_ceil, |inst| {
         Box::new(p8_typed_policy(&inst.base, &oracle)) as Box<dyn CoalitionDecisionPolicy>
     });
@@ -11561,8 +11784,8 @@ mod part4c_tests {
             P9Cost::Priced,
             P9_FUEL,
         );
-        let (val, _, terms) =
-            p9_valuation_battery(&insts, &d_val, &oracle, P9_LAMBDA, P9Cost::Priced);
+        let run = p9_valuation_battery(&insts, &d_val, &oracle, P9_LAMBDA, P9Cost::Priced);
+        let (val, terms) = (&run.seeds, &run.terms);
         assert_eq!(val.len(), 2);
         assert_eq!(terms.len(), 2 * TASKS);
         assert!(terms.iter().all(|t| t.is_finite() && *t >= 0.0));
@@ -11630,9 +11853,8 @@ mod part4c_tests {
                 cost,
                 P9_FUEL,
             );
-            let (val, _, _) =
-                p9_valuation_battery(&insts, &d_val, &oracle, P9_LAMBDA, cost);
-            let (_, acts, scores) = p9_divergence(&val, &asis);
+            let run = p9_valuation_battery(&insts, &d_val, &oracle, P9_LAMBDA, cost);
+            let (_, acts, scores) = p9_divergence(&run.seeds, &asis);
             live |= acts > 0 || scores > 0;
         }
         assert!(
@@ -11652,9 +11874,9 @@ mod part4c_tests {
             P9Cost::Priced,
             P9_FUEL,
         );
-        let (zero, _, terms) = p9_valuation_battery(&insts, &d_zero, &oracle, 0.0, P9Cost::Priced);
-        assert!(terms.iter().all(|&t| t == 0.0));
-        for (a, b) in zero.iter().zip(asis.iter()) {
+        let zero_run = p9_valuation_battery(&insts, &d_zero, &oracle, 0.0, P9Cost::Priced);
+        assert!(zero_run.terms.iter().all(|&t| t == 0.0));
+        for (a, b) in zero_run.seeds.iter().zip(asis.iter()) {
             assert_eq!(a.acts, b.acts, "λ = 0 must reproduce the control's acts");
             assert_eq!(a.scores, b.scores, "λ = 0 must reproduce the control's scores");
         }

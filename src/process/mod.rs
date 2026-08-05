@@ -40,7 +40,12 @@
 //! confluence, and no canonicality for it, and neither does this module: a
 //! cheaper writing may exist beyond the budget, and two budgets may return
 //! different representatives of the same class. What *is* claimed is soundness
-//! per step (BGKSZ Thm 5.6) — the result does the same job as the input.
+//! per step (BGKSZ Thm 5.6) — **theory-relative derivability**: the optimizer
+//! did not step outside the rule set it was given. That is NOT a claim that the
+//! result does the same job. Thm 5.6 says nothing about what the rules *mean*,
+//! and a hand-authored rule set stipulates its equivalences rather than proving
+//! them, so any "sameness" is theory-internal and belongs to whoever declared
+//! the rules. See [`optimize_workflow`].
 //!
 //! **4. Upstream errors are outcomes, not panics.** Every fallible entry point
 //! propagates [`CatgraphError`](catgraph_magnitude::CatgraphError) or

@@ -463,3 +463,96 @@ gates changes here.
   is a `FALSIFIED (process structure)` with the margin reported in full
   — not a bar renegotiation. Post-hoc bar movement is the one thing this
   lineage has never done.
+
+## Amendment 5 (pre-run, 2026-08-05 — the 3-lens review, posted to #76)
+
+The registered 3-lens review (correctness / registration-conformance /
+modeling-semantics) ran BEFORE the official run: **0 blocking, 4
+important, 3 minor, all applied or recorded here** per the house rule
+that every finding is applied or owner-adjudicated. No bar, seed, cell,
+or gate changes. Two items correct *claims this document makes*, which
+is why they land here rather than only in code.
+
+### A5.1 — the fairness clause overclaimed BGKSZ Thm 5.6 (important)
+
+§4 says rewriting means a coalition "does the same job", citing Thm 5.6.
+That imports more than the theorem grants. Thm 5.6 certifies
+**theory-relative derivability** — that the optimizer's output is a legal
+derivation under *the rules it was given* — not that those rules preserve
+any task semantics. The rules here are **hand-authored for this
+experiment** (A1.1/A3.2) and carry no independent capability-semantics
+content, so "sound" means "derivable from axioms this harness itself
+declared."
+
+**The corrected reading, binding on the report:** rules are *stipulated*
+equivalences; soundness means the optimizer did not change the process
+outside the declared rule set, which is what licenses comparing declared
+writings. The "sameness" traded on is **theory-internal, not externally
+validated**. Consequently a `VALIDATED (process structure)` verdict would
+read "*a sound-by-stipulation process transformation can unlock staffing
+value in this world*", NOT "process reorganisation is generically
+valuable". The report must carry this scoping sentence.
+
+The clause's narrow, checkable half is **verified true** and unchanged:
+when two arms both complete, `covered/|demand|` is exactly 1.0 for both,
+so the residual contrast really is member count.
+
+### A5.2 — fusion eligibility is a looser upper bound than stated (important)
+
+At the registered `bits = 8`, `fusion_target(b, 4) = b` and
+`fusion_target(4, b') = b'`, so **every pair touching bit 4 is excluded**
+and **bit 4 has no fusion partner at all**. Bit 4 can therefore never be
+consumed, and a same-role chain such as `s1 ; s4 ; s5` can never bring
+`(1, 5)` adjacent even though that pair is counted eligible — a
+**permanent** obstruction, not the merely probabilistic
+"a fan-out has to be absorbed first" the source comment gave as the
+reason. The eligibility rate is thus a looser upper bound than A3.2's
+disclosure implied.
+
+This does **not** reach the verdict: H-P is computed from the
+empirically measured `demand_moved` counter, i.e. actual search results,
+never from the eligibility heuristic. A3.2's "evidence that the leg is
+powered" claim is accordingly re-anchored to **`demand_moved`**, with
+the eligibility rate reported beside it as the loose upper bound it is.
+The bit-4 void is a mandatory report line. The schema is **not** re-tuned
+— re-targeting the instrument after outcomes have been seen is worse
+than disclosing a bound.
+
+### A5.3 — applied code findings
+
+- **S-sound scope (important).** §6 says "every declared writing… all
+  tasks, all seeds", but the assertion covered only the two confirmatory
+  rewriting cells; the E-fuel sweep and E-ceil leg (i) also produce
+  declared writings whose `unsound` count was computed and never checked.
+  The gate is extended to every declared writing the run produces. (An
+  unsound writing could never be *scored* as legitimate — `p9_declare`
+  declines-and-counts it — but §6's gate must have the scope §6 states.)
+- **Decline-vs-zero-margin (important).** The library signals an upstream
+  decline as `Decision { act: false, score: 0.0 }`, indistinguishable
+  from a legitimate exact-zero margin — a population this lineage knows
+  to be large (EQ3: knife-edge decisions are ~43 % of the stream). The
+  valuation wrapper therefore cannot safely fold a correction onto a
+  zero-scored base. Resolved by **independently detecting upstream
+  evaluation failure** in the harness rather than inferring it from the
+  score: a failed evaluation declines-and-counts, and every other
+  zero-score is treated as the genuine margin it is. The ambiguity is
+  removed rather than bounded by assumption.
+- **E-conc cause separation (minor).** `declared_feasible = false` was
+  set both for a genuinely pool-infeasible declared demand and for an
+  optimizer/S-sound decline, so E-conc's "concentration onto an absent
+  `(bit, role)`" rate could be inflated by declines. The two causes are
+  now counted and reported separately; E-conc reports only the former.
+
+### A5.4 — recorded deviations for the §8 ledger (minor)
+
+- **§2's re-draw prose** says the rejection re-draw repeats "size, bits,
+  tags, shape". The implementation re-draws `required` + `tags` and draws
+  the shape **once**, after a task's tags are confirmed feasible — there
+  is never a stale shape to discard, so this is functionally equivalent
+  to the registered intent, but the prose is broader than the code.
+- **E-ceil leg (ii) is not literally "brute-force"** as §5 words it:
+  `optimize` exposes only `best()`, its visited set is private, so the
+  class cannot be enumerated. Implemented as a pinned multi-objective
+  sweep (uniform, priced, and one "make this step expensive" objective
+  per distinct as-written step) at high fuel, labelled an upper bound at
+  every point of use.

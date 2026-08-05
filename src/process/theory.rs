@@ -198,6 +198,18 @@ pub fn rule_labels(bits: u8, roles: u8) -> Result<Vec<LabelledRule>, CatgraphErr
 /// the theory was built from.
 ///
 /// Empty only for `bits ≤ 2`, which [`rule_theory`] refuses.
+///
+/// # Some bits have no fusion partner at all
+///
+/// The skip is not spread evenly. `b'' = b` exactly when `b' ≡ −4`, and
+/// `b'' = b'` exactly when `b ≡ −4`, so the single bit `(bits − 4) mod bits`
+/// appears in **no** returned triple — at `bits = 8` that is bit 4, and every one
+/// of the 14 excluded ordered pairs touches it. Such a bit can never be consumed
+/// by fusion, which makes it a **permanent** obstruction between two otherwise
+/// fusable same-role steps: in a chain `s1 ; s4 ; s5` the pair `(1, 5)` can never
+/// be brought adjacent, no matter how much fuel the search is given. Any
+/// "how much of a workload could fusion act on" estimate built from this pair set
+/// is therefore an upper bound, and a loose one; measure the outcome instead.
 #[must_use]
 pub fn fusion_pairs(bits: u8) -> Vec<(u8, u8, u8)> {
     let mut pairs = Vec::new();

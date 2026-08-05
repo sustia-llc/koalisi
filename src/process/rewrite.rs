@@ -17,8 +17,16 @@ use super::signature::{Workflow, WorkflowGen};
 ///
 /// Each recorded step is a convex-DPO step, so by BGKSZ **Thm 5.6** the returned
 /// representative is related to `start` by `rules` in the free symmetric
-/// monoidal category — the same job, differently written. That is the whole
-/// claim.
+/// monoidal category. That is **theory-relative derivability** and nothing more:
+/// the optimizer did not step outside the rule set it was handed.
+///
+/// It is **not** a claim that the result does the same job. Thm 5.6 says nothing
+/// about what `rules` mean; a rule set is whatever its author declared, and a
+/// caller who declares `s_a ; s_b ⇒ s_c` has stipulated that equivalence, not
+/// proved it. Any "sameness" the caller trades on is therefore
+/// **theory-internal**, and must be justified — or disclosed as a stipulation —
+/// separately from this function. See [`verify_optimization`], which checks
+/// exactly the derivability half and no more.
 ///
 /// The search is **bounded and best-found**: it is a fuel-limited best-first
 /// walk over states deduplicated by canonical key. catgraph makes no
@@ -82,6 +90,13 @@ pub fn optimize_workflow(
 /// Validation is relative to `rules` **as given** — a trace binds rule *indices*,
 /// not rule identities. Verifying against a different slice than the one
 /// `optimize` ran on is checking a different theory, and is expected to fail.
+///
+/// **What passing means.** "Sound" here is *derivable from the declared rules*,
+/// nothing stronger: this checks the derivation, never the rules. A theory whose
+/// equivalences do not preserve the caller's task semantics will verify
+/// perfectly. The check is what licenses comparing two declared writings as
+/// members of one stipulated equivalence class; the class itself is the rule
+/// author's claim to defend.
 ///
 /// # Errors
 ///
