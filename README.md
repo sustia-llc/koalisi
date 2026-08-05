@@ -166,12 +166,12 @@ cargo test --features durable              # + container-backed restart-durabili
 
 ## Dependencies
 
-- [catgraph-applied](https://github.com/sustia-llc/catgraph) (tag `v0.7.0`, kept in lockstep with catgraph-magnitude — one repo, one checkout) — CRUD hypergraph container backing the topology layer (the K1 re-back; replaced yamafaktory `hypergraph` v4.2.0)
+- [catgraph-applied](https://github.com/sustia-llc/catgraph) (tag `v0.8.0`, kept in lockstep with catgraph-magnitude — one repo, one checkout) — CRUD hypergraph container backing the topology layer (the K1 re-back; replaced yamafaktory `hypergraph` v4.2.0)
 - tokio + tokio-util — async runtime + lifecycle primitives
 - rayon + tokio-rayon — CPU-bound graph operations bridge
 - [surrealdb-live-message](https://github.com/sustia-llc/surrealdb-live-message) (tag `v0.2.1`, **optional**, feature `durable`) — two-tier restart-durable message bus for the coalition decision log
 - [aif](https://github.com/sustia-llc/tira) (tag `aif-v0.12.0`, **optional**, feature `decision`) — active-inference engine for the AIF decision strategies (scalar, multimodal, persistent); `nalgebra` is only compiled when the feature is enabled
-- [catgraph-magnitude](https://github.com/sustia-llc/catgraph) (tag `v0.7.0`, **optional**, feature `magnitude`) — enriched-category coalition magnitude for the categorical decision strategy
+- [catgraph-magnitude](https://github.com/sustia-llc/catgraph) (tag `v0.8.0`, **optional**, feature `magnitude`) — enriched-category coalition magnitude for the categorical decision strategy
 - libp2p 0.56 (**optional**, feature `remote`) — TCP+noise+yamux `request-response` transport for the remote coalition-event gateway
 
 ## References
