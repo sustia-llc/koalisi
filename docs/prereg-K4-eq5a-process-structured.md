@@ -360,3 +360,79 @@ leg, or gate changes.
   mismatched `start`, reordered rules — rather than a forged step. The
   gate's positive direction (`replay` + `content_eq` on every declared
   writing, every task, every seed) is unchanged and remains mandatory.
+
+## Amendment 3 (pre-run, 2026-08-05 — posted to #76 BEFORE the official run)
+
+Stage-2 implementation **measured two structural defects in the
+registered design**, both of the gotcha-25 class (a registered predicate
+that cannot fire), both resolved here by owner decision before any
+official run. Seeds, gates, verdict labels and the family-wise bar are
+UNCHANGED; the confirmatory leg count stays four.
+
+### A3.1 — D3b valuation-only was inert; re-read as the *unstaffable residual*
+
+**The defect, measured not inferred.** §4 defined the valuation-only
+score as `Mag(S) − λ · cost_of(writing, per_gen)` while also fixing the
+declared writing to be independent of the coalition. `cost_of(writing)`
+is then a per-task constant, so it **cancels exactly** from every
+join/leave margin: `value(S ∪ {x}) − value(S)` reduces to the plain
+magnitude margin. Stage 2 confirmed this empirically — `wf-val-u` and
+`wf-val-p` were bit-identical to `wf-asis` on acts, raw score bit
+patterns, PRIMARY and churn, at every λ in the registered grid. Two of
+the four confirmatory cells could not move.
+
+**The re-read (owner, 2026-08-05).** The valuation-only cells now price
+the **residual process the coalition cannot execute**:
+
+```
+value(S) = Mag(S) − λ · Σ  per_gen(g)   over generator occurrences g of the
+                            declared writing whose (bit, role) is NOT covered by S
+```
+
+This depends on `S`, so it no longer cancels: admitting an agent that
+covers previously-unstaffable steps improves the score by `λ` times
+those steps' price. It is also genuinely distinct from the magnitude
+signal rather than a rescaling of it — the penalty is weighted by
+`per_gen`, so **occurrence multiplicity and step scarcity enter a
+decision for the first time**, which is precisely the process-structure
+signal EQ5 exists to test. Demand and the declared writing remain
+unchanged (this is still the valuation-only mechanism, not rewriting).
+λ stays **0.05** with the exploratory grid `{0.01, 0.05, 0.25}`.
+
+### A3.2 — the fusion schema is widened; the confirmatory leg was underpowered
+
+**The defect, measured.** Coverage is per *distinct* `(bit, role)`, so
+idempotence and spider absorption — 48 of the 51 instances — cannot
+change a staffing decision at all. Fusion was the only staffing-relevant
+schema, and A1.1's *one designated pair per role* made it eligible on
+**43 of 600 tasks (7.2 %)**, with demand actually moving on exactly
+those 43. A stream-level bar of 1.4× median PRIMARY over a stream where
+~93 % of tasks are identical across arms is not reachable on merit: the
+registered leg was a foregone `FALSIFIED` carrying no information about
+the hypothesis.
+
+**The widening (owner, 2026-08-05).** Fusion becomes a schema over
+*every* same-role ordered pair of distinct bits:
+
+```
+s_{b,r} ; s_{b',r}  ⇒  s_{b'',r}     b'' = (b + b' + 4) mod bits
+```
+
+instantiated for every role `r` and every ordered pair `b ≠ b'`, and
+**not built** when `b'' ∈ {b, b'}` — which at `bits = 8` excludes exactly
+the pairs involving bit 4. A1.1's two-sidedness guarantee is therefore
+preserved by the same rule it was before: the fused step always demands a
+capability neither consumed step required, so an application can still
+land on a scarce or absent `(bit, role)`, and E-conc still measures that
+losing side. Theory size at the registered `bits = 8, roles = 3` goes
+from 51 to **174 instances** (24 idempotence + 126 fusion + 24
+absorption); the full theory remains printed with the run.
+
+**Registered disclosures.** (i) The eligibility rate under the widened
+schema is a mandatory report line, next to the 7.2 % the narrow schema
+measured — the comparison is the evidence that the leg is now powered.
+(ii) `optimize` matches every rule against every state, so the widening
+raises search cost; if runtime forces any reduction in the fuel sweep,
+that reduction is a disclosure, never a silent trim. (iii) X-reduce is
+unaffected (it runs an empty rule set) and S-sound is unaffected (it
+verifies whatever was declared).
