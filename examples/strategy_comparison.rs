@@ -88,6 +88,21 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use catgraph_magnitude::{CatgraphError, ChannelCouplings, CoalitionEvaluator, role_grid};
+// Part 9 (koalisi #76) EQ5a: the colored-string-diagram surface. `catgraph_applied`
+// is a hard dependency; `catgraph_syntax` rides in with the `process` feature, which
+// the example now requires.
+use catgraph_applied::prop::colored::ColoredExpr;
+use catgraph_applied::prop::presentation::content::{
+    ContentKey, canonical_key, content_eq, content_of, content_of_colored,
+};
+use catgraph_applied::prop::presentation::rewrite::RewriteRule;
+use catgraph_applied::prop::{Free, PropExpr};
+use catgraph_syntax::frobenius::FrobeniusOr;
+use koalisi::process::{
+    Demand, LabelledRule, Role, Schema, StaffingTable, Step, Workflow, WorkflowGen, chain,
+    content_matches, demand, fusion_pairs, optimize_workflow, rule_labels, rule_theory,
+    spider_expr, staffing_price, step_expr, uniform_cost, verify_optimization, workflow_cost,
+};
 use koalisi::algorithms::{
     AgentCapabilities, CoalitionStructure, FeedbackCalculator, FeedbackStore, PopulationConfig,
     SynergisticCalculator, ValueCalculator, search,
@@ -252,6 +267,10 @@ fn main() {
     println!("{}", "=".repeat(72));
     println!();
     part8_eq4_typed_roles();
+    println!();
+    println!("{}", "=".repeat(72));
+    println!();
+    part9_eq5a_process_structured();
 }
 
 // ===========================================================================
@@ -8093,6 +8112,2235 @@ fn part8_eq4_typed_roles() {
     println!();
 }
 
+// ===========================================================================
+// Part 9 — EQ5a process-structured battery (koalisi #76). REGISTERED.
+//
+// Governed by `docs/prereg-K4-eq5a-process-structured.md` (registered BEFORE
+// this code; owner design-lock D1–D11 on #76, Amendment 1 pinning the rule
+// theory / fuel / staffing price / λ / draw parameters, Amendment 2 voiding
+// §4's "3–5 rules" numeral in favour of the schema closure, Amendment 3
+// re-reading valuation-only as the unstaffable residual (A3.1) and widening the
+// fusion schema to every same-role ordered pair — 174 instances (A3.2)).
+//
+// The world is the **v2w** regime: the Part 8 `v2t` prefix VERBATIM — so the
+// prefix of the stream stays bit-identical to a pure-v2t draw of the same seed
+// (`v2w_prefix_matches_v2t`) — with the workflow SHAPE draw appended off the
+// same SplitMix64. Every task becomes a colored string diagram over
+// `FrobeniusOr<Step>`; an arm declares the writing it staffs, and the scorer
+// scores each arm's DECLARED writing after verifying it.
+//
+// Everything here is ADDITIVE — Parts 1–8 above are the byte-identity gate
+// (§6 X-battery), so no frozen draw, runner, arm, or print statement is
+// touched.
+// ===========================================================================
+
+/// Part 9 seed range (prereg §1, owner D7) — fresh seeds; 90..120 and 150..180
+/// stay reserved.
+const P9_SEED_START: u64 = 270;
+const P9_SEED_END: u64 = 300;
+/// Confirmatory fuel budget, in rewrite APPLICATIONS (Amendment A1.2).
+const P9_FUEL: usize = 256;
+/// The registered E-fuel sweep (Amendment A1.2; exploratory, non-gating).
+const P9_FUEL_GRID: [usize; 4] = [32, 128, 512, 2048];
+/// The valuation-only coefficient λ (Amendment A1.4).
+const P9_LAMBDA: f64 = 0.05;
+/// The registered exploratory λ grid (Amendment A1.4; non-gating).
+const P9_LAMBDA_GRID: [f64; 3] = [0.01, 0.05, 0.25];
+/// Spider fan-out probability per same-role adjacent pair (Amendment A1.5) is
+/// `0.25`, drawn as `next_u64() % 4 == 0` — one draw per pair, exactly a quarter
+/// of the 2^64 range, no float comparison anywhere in a seeded draw.
+const P9_FANOUT_DENOM: u64 = 4;
+/// H-P conjunct 1: a cell's PRIMARY median must be at least this multiple of the
+/// control's. Raised from the lineage's standing 1.25× to pay for four looks
+/// (prereg §5), pinned pre-run.
+const P9_HP_FACTOR: f64 = 1.4;
+/// H-P conjunct 2: strictly superior on at least this many of the 30 seeds (70 %).
+const P9_HP_SUPERIOR_MIN: usize = 21;
+/// E-ceil leg (ii): the high fuel its harness-side search runs at.
+const P9_ECEIL_FUEL: usize = 2048;
+/// E-ceil leg (ii): the pinned subsample, `P9_SEED_START .. +P9_ECEIL_SEEDS`.
+const P9_ECEIL_SEEDS: u64 = 6;
+/// E-ceil leg (ii): the weight a singled-out step carries in the per-step
+/// objective family. Finite and modest so no cost sum can overflow or saturate.
+const P9_ECEIL_HEAVY: u64 = 1000;
+/// Report date for the Part 9 battery, stamped per committed run.
+const P9_REPORT_DATE: &str = "2026-08-05";
+
+/// One seeded v2w instance: the Part 8 `TypedInstance` verbatim, plus each
+/// task's as-written workflow and the task-constant pool staffing table.
+struct WorkflowInstance {
+    /// The v2t instance — pool, roles, tagged tasks, re-draw bookkeeping.
+    base: TypedInstance,
+    /// As-written workflow per task, index-aligned with `base.tasks`.
+    written: Vec<Workflow>,
+    /// `1 + scarcity` prices, built ONCE from the drawn pool before any decision
+    /// (Amendment A1.3) and constant for every task of the seed.
+    table: StaffingTable,
+}
+
+/// Whether the pinned FUSION schema can match this task at all — the WIDENED
+/// schema of prereg Amendment A3.2.
+///
+/// Fusion is instantiated for every role and every ordered pair of distinct bits
+/// `(b, b')` whose target `b'' = (b + b' + 4) mod bits` is neither of them, so a
+/// task is eligible iff some role's tagged required bits contain both members of
+/// one surviving pair. The pair set is read off the library's own
+/// [`fusion_pairs`] rather than re-derived here: a disclosure that restated the
+/// formula could drift from the theory it is reporting on.
+///
+/// Why it is worth counting: coverage is per DISTINCT `(bit, role)`, and
+/// idempotence and spider absorption change only OCCURRENCE count. Fusion is
+/// therefore the ONLY schema that can move a staffing decision, and this
+/// predicate is a structural ceiling on how many tasks the confirmatory leg can
+/// possibly act on.
+///
+/// # It is a NECESSARY condition only, and looser than it looks
+///
+/// The two steps must also become **adjacent** in the diagram for the rule to
+/// match convexly, and there are two distinct reasons they may not (Amendment
+/// A5.2 — the second was missing from this comment and is the more serious):
+///
+/// 1. **Probabilistic** — a drawn fan-out sits between them, so the
+///    spider-absorption rule has to fire first. Recoverable: the search does that
+///    routinely.
+/// 2. **Permanent** — an *unfusable* bit sits between them in the ascending
+///    same-role chain. At `bits = 8`, `fusion_target(b, 4) = b` and
+///    `fusion_target(4, b') = b'`, so **every pair touching bit 4 is skipped and
+///    bit 4 has no fusion partner at all**. Bit 4 can therefore never be consumed,
+///    and a chain `s1 ; s4 ; s5` can never bring the counted-eligible pair
+///    `(1, 5)` adjacent — no amount of fuel or rewriting helps.
+///
+/// So the eligibility rate is a **loose** upper bound. The verdict never reads it:
+/// H-P is computed from the measured `demand_moved` counter, i.e. actual search
+/// results. Reported beside `demand_moved` as the bound it is, and the schema is
+/// deliberately NOT re-tuned — re-targeting the instrument after outcomes have
+/// been seen would be worse than disclosing the bound.
+fn p9_fusion_eligible(pairs: &[(u8, u8, u8)], task: &TypedTask) -> bool {
+    let tagged = |bit: u8, role: usize| {
+        let b = usize::from(bit);
+        b < UNIVERSE && task.required & (1u32 << b) != 0 && task.tags[b] == role
+    };
+    (0..P8_ROLES).any(|r| {
+        pairs
+            .iter()
+            .any(|&(first, second, _)| tagged(first, r) && tagged(second, r))
+    })
+}
+
+/// The NARROW schema's eligibility, as measured at Stage 2 and quoted by prereg
+/// Amendment A3.2: **43 of 600 tasks (7.2 %)** on this seed block under
+/// Amendment 1's one-designated-pair-per-role fusion.
+///
+/// Hard-coded as a RECORDED PRIOR MEASUREMENT — the narrow schema no longer
+/// exists in the theory, so the run cannot re-measure it; A3.2 makes the
+/// comparison a mandatory report line because it is the evidence that the
+/// confirmatory leg is now powered.
+const P9_NARROW_ELIGIBLE_PRIOR: usize = 43;
+const P9_NARROW_ELIGIBLE_TOTAL_PRIOR: usize = 600;
+
+/// Bits that appear in NO fusion instance — the Amendment A5.2 "void"
+/// (mandatory report line).
+///
+/// A bit with no fusion partner can never be consumed by the only
+/// staffing-relevant schema, so it is a **permanent** obstruction wherever it sits
+/// between two otherwise-fusable steps of the same role. Derived from the
+/// library's own pair set rather than restated: at `bits = 8` this is exactly
+/// `{4}`, because `b'' = (b + b' + 4) mod 8` equals `b` iff `b' = 4` and equals
+/// `b'` iff `b = 4`.
+fn p9_fusion_void_bits(bits: u8, pairs: &[(u8, u8, u8)]) -> Vec<u8> {
+    (0..bits)
+        .filter(|bit| {
+            !pairs
+                .iter()
+                .any(|&(first, second, _)| first == *bit || second == *bit)
+        })
+        .collect()
+}
+
+/// The `(bit, role)` steps of a task, in ascending bit order.
+///
+/// Every required bit carries exactly one tag, so this list is already distinct
+/// — the shape draw is what introduces multiplicity, never the tagging.
+fn p9_steps(task: &TypedTask) -> Vec<Step> {
+    (0..UNIVERSE)
+        .filter(|&b| task.required & (1u32 << b) != 0)
+        .map(|b| Step::new(b as u8, Role::new(task.tags[b] as u8)))
+        .collect()
+}
+
+/// A task's steps grouped by role, roles ascending, empty roles dropped.
+fn p9_role_groups(task: &TypedTask) -> Vec<(Role, Vec<Step>)> {
+    let steps = p9_steps(task);
+    (0..P8_ROLES)
+        .map(|r| Role::new(r as u8))
+        .filter_map(|role| {
+            let group: Vec<Step> = steps.iter().copied().filter(|s| s.role == role).collect();
+            (!group.is_empty()).then_some((role, group))
+        })
+        .collect()
+}
+
+/// Pin a per-role leg list into one colored diagram: roles combined with
+/// [`Free::tensor`] in ascending order, then the whole thing pinned through
+/// [`ColoredExpr::new`].
+///
+/// # Panics
+///
+/// Panics on a color or arity rejection. Both are harness bugs rather than
+/// runtime conditions: every leg is a chain of `r → r` boxes of ONE role, so the
+/// pinned source word matches by construction. Amendment A2.3 is why the pin is
+/// not optional — `Free::compose` checks widths, not colors, so a diagram that is
+/// never pinned is never role-checked at all.
+fn p9_pin(legs: Vec<(Role, PropExpr<WorkflowGen>)>) -> Workflow {
+    let mut source: Vec<Role> = Vec::with_capacity(legs.len());
+    let mut exprs: Vec<PropExpr<WorkflowGen>> = Vec::with_capacity(legs.len());
+    for (role, expr) in legs {
+        source.push(role);
+        exprs.push(expr);
+    }
+    let expr = exprs
+        .into_iter()
+        .reduce(Free::tensor)
+        .expect("invariant: |required| >= 2, so at least one role carries a step");
+    ColoredExpr::new(source, expr)
+        .expect("invariant: every leg is a single-role r -> r chain, so the pin matches")
+}
+
+/// Draw one task's as-written workflow off the APPENDED stream (prereg §2,
+/// Amendment A1.5).
+///
+/// Per role, a sequential chain whose length is that role's tagged-bit count (no
+/// free parameter). For each same-role ADJACENT pair one `next_u64()` is drawn;
+/// on a `1/4` hit the later step is written as the fan-out-and-rejoin
+/// `δ_r ; (s ⊗ s) ; μ_r` instead of the bare `s`.
+///
+/// # Why that fan-out shape and not a generic two-successor split
+///
+/// `δ_r ; (s ⊗ s) ; μ_r` is EXACTLY the left-hand side of the pinned
+/// spider-absorption schema (Amendment A1.1 rule 3). A generic fan-out feeding
+/// two *different* same-role successors would leave that schema dead on drawn
+/// traffic — 24 of the theory's 174 instances would never match anything, and the
+/// dependency they justify would be decorative. This is a draw-shape choice the
+/// registration did not spell out; it is made so the registered schema is
+/// reachable, and it is disclosed with the run.
+fn p9_draw_shape(rng: &mut SplitMix64, task: &TypedTask) -> Workflow {
+    let legs = p9_role_groups(task)
+        .into_iter()
+        .map(|(role, steps)| {
+            let mut parts: Vec<PropExpr<WorkflowGen>> = Vec::with_capacity(steps.len());
+            for (i, &s) in steps.iter().enumerate() {
+                if i > 0 && rng.next_u64().is_multiple_of(P9_FANOUT_DENOM) {
+                    parts.push(spider_expr(FrobeniusOr::Delta(role)));
+                    parts.push(Free::tensor(step_expr(s), step_expr(s)));
+                    parts.push(spider_expr(FrobeniusOr::Mu(role)));
+                } else {
+                    parts.push(step_expr(s));
+                }
+            }
+            let expr = chain(parts)
+                .expect("invariant: a non-empty list of 1 -> 1 same-role segments composes");
+            (role, expr)
+        })
+        .collect();
+    p9_pin(legs)
+}
+
+/// The degenerate world's shape (prereg §2, X-reduce): the all-parallel tensor of
+/// the task's distinct steps, fan-out 0.
+///
+/// **Consumes ZERO stream draws** — load-bearing for the gate. Its instances are
+/// therefore bit-for-bit the v2t instances of the same seed, so X-reduce compares
+/// two code paths on ONE world rather than two worlds.
+fn p9_degenerate_shape(task: &TypedTask) -> Workflow {
+    let legs = p9_steps(task)
+        .into_iter()
+        .map(|s| (s.role, step_expr(s)))
+        .collect();
+    p9_pin(legs)
+}
+
+/// One seeded v2w instance. `degenerate` selects the X-reduce world.
+fn p9_draw_instance(seed: u64, degenerate: bool) -> WorkflowInstance {
+    let mut rng = SplitMix64::new(seed);
+    // The v2t prefix VERBATIM — including its own role-feasibility rejection
+    // re-draw, which is the "full task draw" re-draw prereg §2 registers. The
+    // shape draw is appended strictly after it.
+    let (agents, roles, tasks, redraws, max_attempts) = draw_prefix_v2t(&mut rng, P8_ROLES as u64);
+    let base = TypedInstance {
+        agents,
+        roles,
+        tasks,
+        redraws,
+        max_attempts,
+    };
+    let written: Vec<Workflow> = base
+        .tasks
+        .iter()
+        .map(|t| {
+            if degenerate {
+                p9_degenerate_shape(t)
+            } else {
+                p9_draw_shape(&mut rng, t)
+            }
+        })
+        .collect();
+    let table = StaffingTable::from_pool(base.agents.iter().map(|a| {
+        let role = *base
+            .roles
+            .get(a.id)
+            .expect("invariant: the v2t draw assigns one role per pool worker");
+        (a.caps, Role::new(role as u8))
+    }));
+    WorkflowInstance {
+        base,
+        written,
+        table,
+    }
+}
+
+/// The registered seed range's instances, drawn once and shared by every arm.
+fn p9_instances(degenerate: bool) -> Vec<WorkflowInstance> {
+    (P9_SEED_START..P9_SEED_END)
+        .map(|s| p9_draw_instance(s, degenerate))
+        .collect()
+}
+
+/// Whether a coalition covers one `(bit, role)` step: some member of that role
+/// holds that bit. The role-matched question of prereg §2, asked per step.
+fn p9_step_covered(inst: &WorkflowInstance, members: &[usize], step: Step) -> bool {
+    let Some(mask) = step.capability_mask() else {
+        return false;
+    };
+    members.iter().any(|&i| {
+        inst.base
+            .roles
+            .get(i)
+            .is_some_and(|&r| r as u8 == step.role.index())
+            && inst.base.agents[i].caps & mask != 0
+    })
+}
+
+/// Role-matched feasibility of a DEMAND against the whole pool — the E-conc
+/// question. `StaffingTable` already tabulates `(bit, role) → holders`, so this
+/// is a lookup per distinct pair, not a pool scan.
+fn p9_demand_feasible(inst: &WorkflowInstance, d: &Demand) -> bool {
+    d.distinct().all(|s| inst.table.is_staffable(s))
+}
+
+/// The OR-mask a policy sees: the union of the declared demand's bits.
+///
+/// **Documented consequence** (prereg §2): coverage is per DISTINCT `(bit, role)`
+/// pair, so if one bit appears under two roles the policy's mask carries it ONCE
+/// while the scorer counts TWO demands. The arm never sees a tag — exactly as in
+/// EQ4 — so the flattening is the whole of what it is told.
+fn p9_required_mask(d: &Demand) -> u32 {
+    d.distinct()
+        .filter_map(Step::capability_mask)
+        .fold(0u32, |acc, m| acc | m)
+}
+
+// ---------------------------------------------------------------------------
+// Declared writings — what each arm staffs, and the S-sound gate over them.
+// ---------------------------------------------------------------------------
+
+/// Which cost model a cell prices the process with (prereg §4 D5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum P9Cost {
+    /// `per_gen = |_| 1` — generator count. The arm is metric-blind.
+    Uniform,
+    /// `1 + scarcity(b, r)` per step, 1 per spider (Amendment A1.3).
+    Priced,
+}
+
+impl P9Cost {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Uniform => "uniform",
+            Self::Priced => "priced",
+        }
+    }
+}
+
+/// Which mechanism a cell runs (prereg §4 D3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum P9Mechanism {
+    /// The control: staff the workflow as written.
+    AsWritten,
+    /// Requirement rewriting: declare `optimize(...).best()` and staff THAT.
+    Rewrite,
+    /// Valuation-only: declared writing unchanged, `−λ · cost_of(...)` enters
+    /// the score.
+    Valuation,
+}
+
+/// What one arm declares for one task.
+///
+/// Per-task optimizer telemetry (`initial_cost`, `best_cost`, trace length,
+/// `states_explored`, `fuel_exhausted`, schema fires) is aggregated into
+/// [`P9DeclareStats`] as the writings are declared, so none of it is duplicated
+/// here. Since Amendment A3.1 the valuation term is a function of the DEMAND and
+/// the coalition rather than of a per-task cost constant, so the cost no longer
+/// needs carrying per declaration either.
+///
+/// Every writing that is not the as-written one has ALREADY been `replay`-verified
+/// and `content_eq`-checked by the time it lands in this struct (prereg §4
+/// fairness clause) — verification is a precondition of declaring, not a step the
+/// scorer could skip.
+struct P9Declared {
+    /// The writing this arm staffs. Read by the E-dedup pass over declared
+    /// corpora; the scorer itself only needs `demand` and `required`.
+    writing: Workflow,
+    /// Its `(bit, role)` demand.
+    demand: Demand,
+    /// The OR-mask the policy is handed.
+    required: u32,
+    /// The optimizer rejected the task. **Decline-and-count** (prereg §4
+    /// placement): the task forms no coalition and scores zero, never a silent
+    /// as-written fallback.
+    failed: bool,
+}
+
+/// Per-cell telemetry accumulated while declaring writings.
+#[derive(Default)]
+struct P9DeclareStats {
+    /// Tasks whose declared writing was verified (`replay` + `content_eq`).
+    verified: usize,
+    /// S-sound failures — any nonzero value is RUN-INVALID.
+    unsound: usize,
+    /// `optimize` rejections (decline-and-count).
+    failed: usize,
+    /// Tasks whose search hit the fuel budget (mandatory disclosure, A1.2).
+    fuel_exhausted: usize,
+    /// Fires per schema, in [`Schema`] order.
+    fired: [usize; 3],
+    /// Tasks whose declared writing is content-equal to the as-written one.
+    unchanged: usize,
+    /// Tasks whose declared DISTINCT demand differs from the as-written one.
+    ///
+    /// **The number that decides how to read this leg.** Coverage is per distinct
+    /// `(bit, role)`, so a rewrite that changes only OCCURRENCE count leaves the
+    /// score bit-identical to the control: idempotence and spider absorption are
+    /// staffing-invisible by construction (that is the inertness trap prereg §4
+    /// names), and FUSION is the only schema that can move a decision. This
+    /// counts the tasks where anything could have happened at all.
+    demand_moved: usize,
+    /// `initial_cost` / `best_cost` / step count / `states_explored` samples.
+    initial: Vec<f64>,
+    best: Vec<f64>,
+    trace_len: Vec<f64>,
+    explored: Vec<f64>,
+    /// Distinct-demand reduction `as_written − declared`, per task.
+    reduction: Vec<f64>,
+}
+
+fn p9_schema_slot(schema: Schema) -> usize {
+    match schema {
+        Schema::Idempotence => 0,
+        Schema::Fusion => 1,
+        Schema::SpiderAbsorption => 2,
+    }
+}
+
+/// Declare one cell's writings over every task of every instance, verifying
+/// every non-as-written writing before it is ever scored (prereg §4 fairness
+/// clause + §6 S-sound).
+fn p9_declare(
+    insts: &[WorkflowInstance],
+    rules: &[RewriteRule<WorkflowGen>],
+    labels: &[LabelledRule],
+    mechanism: P9Mechanism,
+    cost: P9Cost,
+    fuel: usize,
+) -> (Vec<Vec<P9Declared>>, P9DeclareStats) {
+    let mut stats = P9DeclareStats::default();
+    let declared = insts
+        .iter()
+        .map(|inst| {
+            inst.written
+                .iter()
+                .map(|written| match mechanism {
+                    P9Mechanism::AsWritten | P9Mechanism::Valuation => {
+                        let d = demand(written);
+                        let price = match cost {
+                            P9Cost::Uniform => workflow_cost(written, uniform_cost()),
+                            P9Cost::Priced => workflow_cost(written, staffing_price(&inst.table)),
+                        };
+                        stats.unchanged += 1;
+                        stats.initial.push(price as f64);
+                        stats.best.push(price as f64);
+                        stats.trace_len.push(0.0);
+                        stats.explored.push(1.0);
+                        stats.reduction.push(0.0);
+                        P9Declared {
+                            required: p9_required_mask(&d),
+                            writing: written.clone(),
+                            demand: d,
+                            failed: false,
+                        }
+                    }
+                    P9Mechanism::Rewrite => {
+                        let outcome = match cost {
+                            P9Cost::Uniform => {
+                                optimize_workflow(written, rules, fuel, uniform_cost())
+                            }
+                            P9Cost::Priced => {
+                                optimize_workflow(written, rules, fuel, staffing_price(&inst.table))
+                            }
+                        };
+                        let Ok(outcome) = outcome else {
+                            // Decline-and-count. The `Err` carries an upstream
+                            // rejection; the run reports the count and the task
+                            // scores zero rather than falling back silently.
+                            stats.failed += 1;
+                            let d = demand(written);
+                            return P9Declared {
+                                required: p9_required_mask(&d),
+                                writing: written.clone(),
+                                demand: d,
+                                failed: true,
+                            };
+                        };
+                        // S-sound, and it GATES the declaration rather than
+                        // merely annotating it: an unverified writing is
+                        // declined here, so it can never reach the scorer. The
+                        // §6 assert on `unsound` still fails the whole run — the
+                        // decline is what makes "verified before it is scored"
+                        // true in the code and not just in the reporting order.
+                        if verify_optimization(written, rules, &outcome).is_err() {
+                            stats.unsound += 1;
+                            let d = demand(written);
+                            return P9Declared {
+                                required: p9_required_mask(&d),
+                                writing: written.clone(),
+                                demand: d,
+                                failed: true,
+                            };
+                        }
+                        stats.verified += 1;
+                        for step in outcome.steps() {
+                            if let Some(label) = labels.get(step.rule()) {
+                                stats.fired[p9_schema_slot(label.schema)] += 1;
+                            }
+                        }
+                        if outcome.fuel_exhausted() {
+                            stats.fuel_exhausted += 1;
+                        }
+                        let best = outcome.best();
+                        if content_matches(written, best) {
+                            stats.unchanged += 1;
+                        }
+                        let d = demand(best);
+                        let before = demand(written).distinct_len();
+                        if d.distinct_len() != before {
+                            stats.demand_moved += 1;
+                        }
+                        stats.initial.push(outcome.initial_cost() as f64);
+                        stats.best.push(outcome.best_cost() as f64);
+                        stats.trace_len.push(outcome.steps().len() as f64);
+                        stats.explored.push(outcome.states_explored() as f64);
+                        stats
+                            .reduction
+                            .push(before as f64 - d.distinct_len() as f64);
+                        P9Declared {
+                            required: p9_required_mask(&d),
+                            writing: best.clone(),
+                            demand: d,
+                            failed: false,
+                        }
+                    }
+                })
+                .collect()
+        })
+        .collect();
+    (declared, stats)
+}
+
+// ---------------------------------------------------------------------------
+// Arms and the scorer.
+// ---------------------------------------------------------------------------
+
+/// The valuation-only arm (prereg §4 D3b as **re-read by Amendment A3.1**): the
+/// unstaffable residual.
+///
+/// ```text
+/// value(S) = Mag(S) − λ · Σ per_gen(g)   over generator occurrences g of the
+///                          declared writing whose (bit, role) is NOT covered by S
+/// ```
+///
+/// # Why the re-read exists
+///
+/// §4 D3b originally scored `Mag(S) − λ · cost_of(writing, per_gen)` while also
+/// fixing the declared writing to be independent of the coalition. That term is a
+/// per-task CONSTANT, so it cancelled exactly from every join/leave margin and
+/// both valuation cells measured bit-identical to the control at every registered
+/// λ. Amendment A3.1 prices the residual instead: the penalty depends on `S`, so
+/// admitting an agent that covers previously-unstaffable steps improves the score
+/// by `λ` times those steps' price.
+///
+/// # Why it is not a rescaling of the magnitude signal
+///
+/// The penalty is weighted by `per_gen`, so **occurrence multiplicity and step
+/// scarcity enter a decision for the first time** — neither is visible to
+/// magnitude, which sees only the OR-mask of distinct demand. Demand and the
+/// declared writing are unchanged; this is still valuation-only, not rewriting.
+///
+/// # Spiders
+///
+/// `μ`/`η`/`δ`/`ε` occurrences are **excluded from the residual**. They are
+/// priced by `cost_of` (they are hyperedges like any other), but they name no
+/// `(bit, role)`, so "uncovered" is not defined for them and no coalition could
+/// ever discharge them. Counting them would add a constant to every side of every
+/// margin — exactly the cancelling term A3.1 removed.
+struct P9ValuationPolicy {
+    inner: MagnitudePolicy,
+    /// The coefficient λ (Amendment A1.4, pinned at [`P9_LAMBDA`]).
+    lambda: f64,
+    /// One entry per step OCCURRENCE of the declared writing, with its `per_gen`
+    /// price under the cell's cost model. Multiplicity is deliberately NOT
+    /// collapsed: two occurrences of an unstaffable step are twice the penalty.
+    residual: Vec<(Step, u64)>,
+    /// Pool worker id → role index (the v2t draw's map, indexed by agent id).
+    /// Coverage is role-MATCHED, so the wrapper needs the same map the typed
+    /// policy carries. Owned rather than borrowed because a
+    /// `Box<dyn CoalitionDecisionPolicy>` is `'static`; the pool is ≤ 16 workers,
+    /// so the per-task clone is noise next to one magnitude evaluation.
+    roles: Vec<u8>,
+    /// Decisions declined because the independent evaluation probe reported an
+    /// upstream failure (Amendment A5.3). Shared across the whole cell so the run
+    /// can report ONE number; reported, never asserted on.
+    declines: Arc<AtomicUsize>,
+}
+
+impl P9ValuationPolicy {
+    /// The `(role, capabilities)` of one participant, or `None` when the harness
+    /// has no role for it — the same condition the library declines on, so the
+    /// wrapper forwards the library's decision rather than inventing one.
+    fn staff_of(&self, agent: &dyn AgentCapabilities) -> Option<(u8, u32)> {
+        Some((*self.roles.get(agent.agent_id())?, agent.capabilities()))
+    }
+
+    fn staff(&self, members: &[&dyn AgentCapabilities]) -> Option<Vec<(u8, u32)>> {
+        members.iter().map(|a| self.staff_of(*a)).collect()
+    }
+
+    /// `Σ per_gen(g)` over residual occurrences no member of `staff` can perform.
+    fn uncovered(&self, staff: &[(u8, u32)]) -> u64 {
+        self.residual
+            .iter()
+            .filter(|&&(step, _)| !p9_step_staffed(staff, step))
+            .map(|&(_, price)| price)
+            .sum()
+    }
+
+    /// The full residual at an EMPTY coalition — `λ ·` the price of the whole
+    /// declared writing's step occurrences, i.e. the largest the term can be.
+    /// Reported in the instrumentation section.
+    fn full_term(&self) -> f64 {
+        self.lambda * self.uncovered(&[]) as f64
+    }
+
+    /// A decline in the library's own shape, counted.
+    fn decline(&self) -> Decision {
+        self.declines.fetch_add(1, Ordering::Relaxed);
+        Decision {
+            act: false,
+            score: 0.0,
+        }
+    }
+
+    /// Fold a non-negative residual correction into a base decision.
+    ///
+    /// The act predicate is re-derived from the corrected score unconditionally.
+    /// That is safe **because** [`p9_evaluation_failed`] has
+    /// already ruled out a decline: every base score reaching here is a genuine
+    /// margin, so at `correction == 0` the re-derivation reproduces the library's
+    /// own decision exactly (`margin > join_margin` / `delta <= 0` over an
+    /// unchanged score), and at `correction > 0` it applies the registered value
+    /// rule. The non-finite guard stays — a non-finite base has no correction that
+    /// means anything.
+    fn fold(base: Decision, correction: f64, act: impl Fn(f64) -> bool) -> Decision {
+        if !base.score.is_finite() {
+            return base;
+        }
+        let score = base.score + correction;
+        Decision {
+            act: act(score),
+            score,
+        }
+    }
+}
+
+/// Independently detect an upstream evaluation failure over the two member sets a
+/// decision compares (Amendment A5.3).
+///
+/// # Why this exists, and why inferring it from the score is wrong
+///
+/// The library reports an upstream decline as `Decision { act: false, score: 0.0 }`
+/// — **the same value a legitimate exact-zero margin carries**. Treating a zero
+/// score as a decline would suppress corrections on a population this lineage
+/// knows to be large (EQ3 measured knife-edge decisions at ~43 % of the stream);
+/// treating a decline as a margin could flip it into an accept. The ambiguity
+/// cannot be resolved from the returned `Decision`, so it is resolved BEFORE the
+/// fold: the harness runs its own evaluation of both sides and, on `Err`, the
+/// caller declines and counts.
+///
+/// # What the probe does and does not reproduce
+///
+/// It is the harness's own [`relevant_masks`] + [`magnitude_at_t`] (`t = 1`) path
+/// — the same dedup-and-relevance filter, the same member sets, the same
+/// restrict-then-close Möbius pipeline the arm runs on. It differs in ONE respect:
+/// its couplings are UNTYPED, where the arm's are ρ-modulated. So it detects the
+/// structural failure modes (a member set the upstream metric space rejects)
+/// exactly, and a hypothetical failure that only the ρ-modulated coupling matrix
+/// could trigger would slip past it. That residual is disclosed rather than
+/// assumed away; the library exposes no typed-evaluation probe to close it.
+///
+/// Free rather than a method: it reads nothing off the policy, and saying so in
+/// the signature is worth more than the call-site brevity.
+fn p9_evaluation_failed(
+    left: &[&dyn AgentCapabilities],
+    right: &[&dyn AgentCapabilities],
+    required: u32,
+) -> bool {
+    let probe = |members: &[&dyn AgentCapabilities]| {
+        magnitude_at_t(&relevant_masks(members, required), required, 1.0).is_err()
+    };
+    probe(left) || probe(right)
+}
+
+/// Whether any member of `staff` can perform `step` — role-matched, the same
+/// question [`p9_step_covered`] asks of a member index list.
+fn p9_step_staffed(staff: &[(u8, u32)], step: Step) -> bool {
+    step.capability_mask().is_some_and(|mask| {
+        staff
+            .iter()
+            .any(|&(role, caps)| role == step.role.index() && caps & mask != 0)
+    })
+}
+
+impl CoalitionDecisionPolicy for P9ValuationPolicy {
+    /// `Δvalue = ΔMag + λ · (pen(S) − pen(S ∪ {x}))`.
+    ///
+    /// The correction is non-negative — admitting an agent can only cover more
+    /// steps — so it can turn a declined join into an accepted one, never the
+    /// reverse.
+    fn should_join(
+        &self,
+        agent: &dyn AgentCapabilities,
+        coalition: &[&dyn AgentCapabilities],
+        ctx: &DecisionContext,
+    ) -> Decision {
+        let (Some(without), Some(joined)) = (self.staff(coalition), self.staff_of(agent)) else {
+            // No role for a participant: the library declines for exactly this
+            // reason, so forward ITS decision rather than inventing one.
+            return self.inner.should_join(agent, coalition, ctx);
+        };
+        let mut with_view: Vec<&dyn AgentCapabilities> = coalition.to_vec();
+        with_view.push(agent);
+        if p9_evaluation_failed(coalition, &with_view, ctx.required_capabilities) {
+            return self.decline();
+        }
+        let base = self.inner.should_join(agent, coalition, ctx);
+        let mut with = without.clone();
+        with.push(joined);
+        // `saturating_sub` states the monotonicity rather than trusting it: a
+        // larger staff can never leave more uncovered.
+        let correction =
+            self.lambda * self.uncovered(&without).saturating_sub(self.uncovered(&with)) as f64;
+        // The library's own `margin > join_margin` rule, read off the very policy
+        // being wrapped rather than mirrored as a constant — the score changed,
+        // so the predicate has to be restated, but the threshold does not.
+        let margin = self.inner.join_margin;
+        Self::fold(base, correction, |score| score > margin)
+    }
+
+    /// `Δvalue = ΔMag + λ · (pen(S \ {x}) − pen(S))`, leaving iff `Δvalue ≤ 0`
+    /// (the library's leave rule, restated over value instead of magnitude).
+    ///
+    /// The correction is again non-negative, so a member holding otherwise
+    /// unstaffable steps becomes LESS likely to be swept out.
+    fn should_leave(
+        &self,
+        agent: &dyn AgentCapabilities,
+        coalition: &[&dyn AgentCapabilities],
+        ctx: &DecisionContext,
+    ) -> Decision {
+        // `coalition` INCLUDES `agent` on the leave path (library convention).
+        let id = agent.agent_id();
+        let remaining: Vec<&dyn AgentCapabilities> = coalition
+            .iter()
+            .filter(|a| a.agent_id() != id)
+            .copied()
+            .collect();
+        let (Some(inside), Some(outside)) = (self.staff(coalition), self.staff(&remaining)) else {
+            return self.inner.should_leave(agent, coalition, ctx);
+        };
+        if p9_evaluation_failed(coalition, &remaining, ctx.required_capabilities) {
+            return self.decline();
+        }
+        let base = self.inner.should_leave(agent, coalition, ctx);
+        let correction =
+            self.lambda * self.uncovered(&outside).saturating_sub(self.uncovered(&inside)) as f64;
+        Self::fold(base, correction, |score| score <= 0.0)
+    }
+}
+
+/// How a Part 9 arm supplies its policy for a seed — the [`P8Arm`] shape, with
+/// the per-task variant keyed by task index (the valuation term is a task
+/// constant).
+enum P9Arm<'a> {
+    Fixed(&'a dyn CoalitionDecisionPolicy),
+    PerTask(&'a dyn Fn(usize) -> Box<dyn CoalitionDecisionPolicy>),
+}
+
+/// What happened to one task's DECLARED demand — the E-conc classification
+/// (Amendment A5.3).
+///
+/// The three causes were previously collapsed into one `declared_feasible: bool`,
+/// which let an optimizer/S-sound decline inflate E-conc's "concentration onto an
+/// absent `(bit, role)`" rate. They are now distinct, and **E-conc counts only
+/// [`PoolInfeasible`](P9DemandStatus::PoolInfeasible)**.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum P9DemandStatus {
+    /// Every distinct `(bit, role)` of the declared demand has a pool holder.
+    Feasible,
+    /// The declared demand names a `(bit, role)` no pool worker holds — the
+    /// registered two-sided-lever failure mode E-conc exists to measure.
+    PoolInfeasible,
+    /// No writing was declared at all: `optimize` errored or the declared writing
+    /// failed S-sound, so the task was declined-and-counted. NOT a concentration
+    /// event — nothing was concentrated anywhere.
+    Declined,
+}
+
+/// Per-seed Part 9 result. `scores` carries raw `Decision::score` BIT PATTERNS,
+/// for the same reason [`P8Seed`] does — the identity gates are bit-identity
+/// claims and `f64` equality would not express them.
+struct P9Seed {
+    primary: f64,
+    churn: usize,
+    acts: Vec<bool>,
+    scores: Vec<u64>,
+    success_rate: f64,
+    /// `cov_eff` per task, index-aligned with the task stream (E-conc reads it).
+    quality: Vec<f64>,
+    /// Per-task declared-demand classification (E-conc), index-aligned with the
+    /// task stream.
+    demand_status: Vec<P9DemandStatus>,
+    /// Tasks declined because `optimize` failed or the writing was unsound.
+    declined: usize,
+}
+
+/// The per-task hook a Part 9 run fires after every leave sweep:
+/// `(required, per-bit role-matched success over the declared demand)`.
+type P9OutcomeHook<'a> = dyn FnMut(u32, &[bool]) + 'a;
+
+/// [`p9_run_seed_hooked`] with no outcome hook — every arm but `arm-E1`.
+fn p9_run_seed(
+    arm: &P9Arm<'_>,
+    inst: &WorkflowInstance,
+    declared: &[P9Declared],
+    lat: &mut Vec<f64>,
+) -> P9Seed {
+    p9_run_seed_hooked(arm, inst, declared, lat, &mut |_, _| {})
+}
+
+/// Run one arm over one v2w instance under the standing battery protocol
+/// (bootstrap first arrival, one leave sweep per task in arrival order, every
+/// removal counts as churn, `Instant` around every sync decision), scoring the
+/// arm's DECLARED writing.
+fn p9_run_seed_hooked(
+    arm: &P9Arm<'_>,
+    inst: &WorkflowInstance,
+    declared: &[P9Declared],
+    lat: &mut Vec<f64>,
+    on_task: &mut P9OutcomeHook<'_>,
+) -> P9Seed {
+    let mut success_count = 0usize;
+    let mut quality_sum = 0.0f64;
+    let mut churn = 0usize;
+    let mut acts = Vec::new();
+    let mut scores = Vec::new();
+    let mut quality = Vec::with_capacity(declared.len());
+    let mut demand_status = Vec::with_capacity(declared.len());
+    let mut declined = 0usize;
+
+    for (t, (task, decl)) in inst.base.tasks.iter().zip(declared.iter()).enumerate() {
+        if decl.failed {
+            // Decline-and-count: no coalition forms, the task scores zero, and
+            // nothing falls back to the as-written writing.
+            declined += 1;
+            quality.push(0.0);
+            demand_status.push(P9DemandStatus::Declined);
+            continue;
+        }
+
+        let ctx = DecisionContext {
+            required_capabilities: decl.required,
+        };
+        let per_task;
+        let policy: &dyn CoalitionDecisionPolicy = match arm {
+            P9Arm::Fixed(p) => *p,
+            P9Arm::PerTask(make) => {
+                per_task = make(t);
+                &*per_task
+            }
+        };
+
+        let mut members: Vec<usize> = vec![task.order[0]];
+
+        for &idx in &task.order[1..] {
+            let candidate: &dyn AgentCapabilities = &inst.base.agents[idx];
+            let coalition = coalition_view(&inst.base.agents, &members);
+            let t0 = Instant::now();
+            let d = policy.should_join(candidate, &coalition, &ctx);
+            lat.push(seconds_to_us(t0.elapsed()));
+            acts.push(d.act);
+            scores.push(d.score.to_bits());
+            if d.act {
+                members.push(idx);
+            }
+        }
+
+        for &idx in &task.order {
+            let Some(pos) = members.iter().position(|&m| m == idx) else {
+                continue;
+            };
+            let coalition = coalition_view(&inst.base.agents, &members);
+            let agent: &dyn AgentCapabilities = &inst.base.agents[idx];
+            let t0 = Instant::now();
+            let d = policy.should_leave(agent, &coalition, &ctx);
+            lat.push(seconds_to_us(t0.elapsed()));
+            acts.push(d.act);
+            scores.push(d.score.to_bits());
+            if d.act {
+                members.remove(pos);
+                churn += 1;
+            }
+        }
+
+        // Coverage is per DISTINCT (bit, role): multiplicity prices the process,
+        // it does not add coverage demand.
+        let d_len = decl.demand.distinct_len();
+        let covered = decl
+            .demand
+            .distinct()
+            .filter(|&s| p9_step_covered(inst, &members, s))
+            .count();
+        // An empty declared demand is structurally unreachable (no registered
+        // rule deletes a step outright), but it is scored as a non-completion
+        // rather than a vacuous success so it can never hand out a free point.
+        let completed = d_len > 0 && covered == d_len;
+        let cov_eff = if members.is_empty() || d_len == 0 {
+            0.0
+        } else {
+            (covered as f64 / d_len as f64) / members.len() as f64
+        };
+        if completed {
+            success_count += 1;
+        }
+        quality_sum += cov_eff;
+        quality.push(cov_eff);
+        demand_status.push(if p9_demand_feasible(inst, &decl.demand) {
+            P9DemandStatus::Feasible
+        } else {
+            P9DemandStatus::PoolInfeasible
+        });
+
+        // Role-matched per-bit signal over the DECLARED demand: bit `b` is
+        // `true` iff some declared step on `b` is covered by a member of that
+        // step's role. A bit demanded under two roles counts as satisfied when
+        // either is staffed; `observe_outcome` ignores non-required bits.
+        let mut per_bit = vec![false; UNIVERSE];
+        for step in decl.demand.distinct() {
+            let b = step.bit as usize;
+            if b < UNIVERSE && p9_step_covered(inst, &members, step) {
+                per_bit[b] = true;
+            }
+        }
+        on_task(decl.required, &per_bit);
+    }
+
+    let n_tasks = inst.base.tasks.len() as f64;
+    let success_rate = success_count as f64 / n_tasks;
+    P9Seed {
+        primary: success_rate * (quality_sum / n_tasks),
+        churn,
+        acts,
+        scores,
+        success_rate,
+        quality,
+        demand_status,
+        declined,
+    }
+}
+
+/// Run one fixed-policy arm over the shared instances against a cell's declared
+/// writings. A discarded warm-up on the first instance runs first (the standing
+/// convention); it cannot perturb the seed-derived results.
+fn p9_battery<F>(
+    insts: &[WorkflowInstance],
+    declared: &[Vec<P9Declared>],
+    make: F,
+) -> (Vec<P9Seed>, Vec<f64>)
+where
+    F: Fn(&WorkflowInstance) -> Box<dyn CoalitionDecisionPolicy>,
+{
+    if let (Some(first), Some(first_decl)) = (insts.first(), declared.first()) {
+        let p = make(first);
+        let mut warm = Vec::new();
+        let _ = p9_run_seed(&P9Arm::Fixed(&*p), first, first_decl, &mut warm);
+    }
+    let mut lat = Vec::new();
+    let results = insts
+        .iter()
+        .zip(declared.iter())
+        .map(|(inst, decl)| {
+            let p = make(inst);
+            p9_run_seed(&P9Arm::Fixed(&*p), inst, decl, &mut lat)
+        })
+        .collect();
+    (results, lat)
+}
+
+/// The pool's role map as a `Vec<u8>` indexed by agent id — the same map
+/// [`p8_typed_policy`] hands the library, in the shape the valuation wrapper's
+/// role-matched coverage check wants.
+///
+/// # Panics
+///
+/// Panics if a pool worker carries no role or a role index does not fit a `u8`.
+/// Both are harness bugs: `p8_typed_policy` already asserts full coverage, and
+/// `R = 3`.
+fn p9_role_map(inst: &WorkflowInstance) -> Vec<u8> {
+    inst.base
+        .roles
+        .iter()
+        .map(|&r| {
+            u8::try_from(r).expect("invariant: the v2t draw assigns role indices below R = 3")
+        })
+        .collect()
+}
+
+/// The per-occurrence residual of one declared writing under a cost model: every
+/// step occurrence paired with its `per_gen` price (Amendment A3.1).
+///
+/// Spiders never appear — [`Demand::occurrences`] carries `User` generators only,
+/// which is exactly the exclusion A3.1 requires (a spider names no `(bit, role)`,
+/// so it can never be uncovered).
+fn p9_residual(inst: &WorkflowInstance, decl: &P9Declared, cost: P9Cost) -> Vec<(Step, u64)> {
+    decl.demand
+        .occurrences()
+        .iter()
+        .map(|&step| {
+            let price = match cost {
+                P9Cost::Uniform => 1,
+                P9Cost::Priced => inst.table.price(step),
+            };
+            (step, price)
+        })
+        .collect()
+}
+
+/// One cell of the E-fuel sweep, declared BEFORE the gates so S-sound can cover
+/// it at §6's stated scope (Amendment A5.3).
+struct P9SweepCell {
+    cost: P9Cost,
+    fuel: usize,
+    declared: Vec<Vec<P9Declared>>,
+    stats: P9DeclareStats,
+    /// Wall time of this cell's `p9_declare`, for the A3.2 (ii) search-cost
+    /// disclosure.
+    declare_secs: f64,
+}
+
+/// What one valuation-cell battery produced.
+struct P9ValuationRun {
+    seeds: Vec<P9Seed>,
+    latencies: Vec<f64>,
+    /// Per-task **full residual** `λ · Σ per_gen` at an empty coalition — the
+    /// largest the term can be, read off the policy the arm actually carries so
+    /// the reported figure cannot drift from the one in the score.
+    terms: Vec<f64>,
+    /// Decisions declined by the A5.3 evaluation probe. Reported, never asserted.
+    probe_declines: usize,
+}
+
+/// The valuation-only battery: a per-task [`P9ValuationPolicy`] carrying that
+/// task's residual over the shared typed control.
+fn p9_valuation_battery(
+    insts: &[WorkflowInstance],
+    declared: &[Vec<P9Declared>],
+    rho: &RoleModulation,
+    lambda: f64,
+    cost: P9Cost,
+) -> P9ValuationRun {
+    let mut terms: Vec<f64> = Vec::new();
+    let mut lat = Vec::new();
+    let mut results = Vec::with_capacity(insts.len());
+    // One counter for the whole cell. The warm-up gets its own throw-away counter
+    // so a discarded pass cannot inflate the reported number.
+    let declines = Arc::new(AtomicUsize::new(0));
+    // Discarded warm-up on the first instance, as in `p9_battery` — the arms stay
+    // latency-comparable even though latency is never gating here.
+    if let (Some(first), Some(first_decl)) = (insts.first(), declared.first()) {
+        let inner = p8_typed_policy(&first.base, rho);
+        let role_map = p9_role_map(first);
+        let warm_declines = Arc::new(AtomicUsize::new(0));
+        let make = |t: usize| {
+            Box::new(P9ValuationPolicy {
+                inner: inner.clone(),
+                lambda,
+                residual: p9_residual(first, &first_decl[t], cost),
+                roles: role_map.clone(),
+                declines: Arc::clone(&warm_declines),
+            }) as Box<dyn CoalitionDecisionPolicy>
+        };
+        let mut warm = Vec::new();
+        let _ = p9_run_seed(&P9Arm::PerTask(&make), first, first_decl, &mut warm);
+    }
+    for (inst, decl) in insts.iter().zip(declared.iter()) {
+        let inner = p8_typed_policy(&inst.base, rho);
+        let role_map = p9_role_map(inst);
+        let build = |t: usize| P9ValuationPolicy {
+            inner: inner.clone(),
+            lambda,
+            residual: p9_residual(inst, &decl[t], cost),
+            roles: role_map.clone(),
+            declines: Arc::clone(&declines),
+        };
+        let make = |t: usize| Box::new(build(t)) as Box<dyn CoalitionDecisionPolicy>;
+        terms.extend((0..decl.len()).map(|t| build(t).full_term()));
+        results.push(p9_run_seed(&P9Arm::PerTask(&make), inst, decl, &mut lat));
+    }
+    P9ValuationRun {
+        seeds: results,
+        latencies: lat,
+        terms,
+        probe_declines: declines.load(Ordering::Relaxed),
+    }
+}
+
+/// The `arm-E1` context battery over the v2w world: a FRESH [`PersistentAifArm`]
+/// per seed (the #44/#53 factory pattern), fed the role-matched per-bit outcome
+/// over the DECLARED demand after every task. Warm-up on the first instance
+/// discarded, as everywhere else.
+fn p9_e1_battery(
+    insts: &[WorkflowInstance],
+    declared: &[Vec<P9Declared>],
+    config: PersistentAifConfig,
+) -> (Vec<P9Seed>, Vec<f64>) {
+    if let (Some(first), Some(first_decl)) = (insts.first(), declared.first()) {
+        let arm = PersistentAifArm::new(P9_SEED_START, config).expect("persistent arm construction");
+        let mut warm = Vec::new();
+        let _ = p9_run_seed_hooked(
+            &P9Arm::Fixed(&arm),
+            first,
+            first_decl,
+            &mut warm,
+            &mut |req, bits| arm.observe_outcome(req, bits),
+        );
+    }
+    let mut lat = Vec::new();
+    let results = insts
+        .iter()
+        .zip(declared.iter())
+        .enumerate()
+        .map(|(i, (inst, decl))| {
+            let seed = P9_SEED_START + i as u64;
+            let arm = PersistentAifArm::new(seed, config).expect("persistent arm construction");
+            p9_run_seed_hooked(&P9Arm::Fixed(&arm), inst, decl, &mut lat, &mut |req, bits| {
+                arm.observe_outcome(req, bits);
+            })
+        })
+        .collect();
+    (results, lat)
+}
+
+fn p9_primaries(rs: &[P9Seed]) -> Vec<f64> {
+    rs.iter().map(|r| r.primary).collect()
+}
+fn p9_churns(rs: &[P9Seed]) -> Vec<f64> {
+    rs.iter().map(|r| r.churn as f64).collect()
+}
+fn p9_superior_count(a: &[P9Seed], b: &[P9Seed]) -> usize {
+    (0..a.len().min(b.len()))
+        .filter(|&i| a[i].primary > b[i].primary)
+        .count()
+}
+
+/// One summary row of a Part 9 table: medians plus the paired contrast against
+/// the `wf-asis` control.
+fn p9_row(label: &str, rs: &[P9Seed], base: &[P9Seed], lat: &[f64]) {
+    let med = median(p9_primaries(rs));
+    let base_med = median(p9_primaries(base));
+    let ratio = if base_med > 0.0 {
+        format!("{:.2}×", med / base_med)
+    } else {
+        "n/a".to_owned()
+    };
+    println!(
+        "| `{label}` | {med:.4} | {ratio} | {}/{} | {:.2} | {:.3} |",
+        p9_superior_count(rs, base),
+        rs.len(),
+        median(p9_churns(rs)),
+        median(lat.to_vec())
+    );
+}
+
+fn p9_table_head() {
+    println!(
+        "| arm | median PRIMARY | vs `wf-asis` | superior seeds | median churn | median µs/decision |"
+    );
+    println!(
+        "|-----|---------------:|-------------:|---------------:|-------------:|-------------------:|"
+    );
+}
+
+/// Assert one cell is identical to another on **acts + PRIMARY bits + churn** —
+/// the registered X-reduce triple. Raw score bits are deliberately excluded: the
+/// gate is on DECISIONS, not float bit patterns (the EQ3 H-par′ lesson).
+fn p9_assert_identical(a: &[P9Seed], b: &[P9Seed], what: &str) {
+    for (i, (x, y)) in a.iter().zip(b.iter()).enumerate() {
+        let seed = P9_SEED_START + i as u64;
+        assert_eq!(x.acts, y.acts, "{what}: acts on seed {seed}");
+        assert_eq!(
+            x.primary.to_bits(),
+            y.primary.to_bits(),
+            "{what}: PRIMARY bits on seed {seed}"
+        );
+        assert_eq!(x.churn, y.churn, "{what}: churn on seed {seed}");
+    }
+}
+
+/// [`p9_assert_identical`] plus raw score BIT PATTERNS.
+///
+/// Only claimed where identity is exact by construction rather than by
+/// reduction: the valuation wrapper forwards to the very same policy instance on
+/// the very same declared writing, so every `Decision::score` must reproduce bit
+/// for bit — nothing re-associates. Returns whether it held, so the run can print
+/// the finding as a measurement.
+fn p9_bit_identical(a: &[P9Seed], b: &[P9Seed]) -> bool {
+    a.len() == b.len()
+        && a.iter().zip(b.iter()).all(|(x, y)| {
+            x.acts == y.acts
+                && x.scores == y.scores
+                && x.primary.to_bits() == y.primary.to_bits()
+                && x.churn == y.churn
+        })
+}
+
+/// How far a cell diverges from another: `(seeds with any differing act,
+/// decisions with a differing act, decisions with differing raw score BITS)`.
+///
+/// The A3.1 liveness measurement. A valuation cell that scored identically to the
+/// control on every decision would be the exact defect Amendment A3.1 removed —
+/// a term that cancels out of every margin — so this is reported as a number and
+/// asserted, never assumed.
+fn p9_divergence(cell: &[P9Seed], base: &[P9Seed]) -> (usize, usize, usize) {
+    let mut seeds = 0usize;
+    let mut acts = 0usize;
+    let mut scores = 0usize;
+    for (x, y) in cell.iter().zip(base.iter()) {
+        let act_diff = x
+            .acts
+            .iter()
+            .zip(y.acts.iter())
+            .filter(|(a, b)| a != b)
+            .count()
+            + x.acts.len().abs_diff(y.acts.len());
+        if act_diff > 0 {
+            seeds += 1;
+        }
+        acts += act_diff;
+        scores += x
+            .scores
+            .iter()
+            .zip(y.scores.iter())
+            .filter(|(a, b)| a != b)
+            .count()
+            + x.scores.len().abs_diff(y.scores.len());
+    }
+    (seeds, acts, scores)
+}
+
+// ---------------------------------------------------------------------------
+// The pinned rule theory, printed in full (prereg §4 / §5 instrumentation).
+// ---------------------------------------------------------------------------
+
+/// Print every instance of the pinned schema closure, so a trace's rule index
+/// reports as the rule that fired (Amendment A2.1: §4's "3–5 rules" numeral is
+/// void — the count "3–5" refers to SCHEMAS, and the closure governs; Amendment
+/// A3.2 widens the fusion schema to 174 instances in total).
+///
+/// The consumed steps come from [`LabelledRule::sources`], not from the role:
+/// since A3.2 the fusion instances no longer follow from the role alone, so a
+/// printer that re-derived them would be printing a different theory than the one
+/// the trace indexes into.
+fn p9_print_rule_theory(labels: &[LabelledRule]) {
+    println!("| # | schema | rule |");
+    println!("|--:|--------|------|");
+    for (i, label) in labels.iter().enumerate() {
+        let t = label.target;
+        let r = t.role.index();
+        let [first, second] = label.sources;
+        let rule = match label.schema {
+            Schema::Idempotence => format!("`s{b}_r{r} ; s{b}_r{r} ⇒ s{b}_r{r}`", b = t.bit),
+            Schema::Fusion => format!(
+                "`s{b1}_r{r} ; s{b2}_r{r} ⇒ s{b3}_r{r}`",
+                b1 = first.bit,
+                b2 = second.bit,
+                b3 = t.bit
+            ),
+            Schema::SpiderAbsorption => format!(
+                "`delta@r{r} ; (s{b}_r{r} ⊗ s{b}_r{r}) ; mu@r{r} ⇒ s{b}_r{r}`",
+                b = t.bit
+            ),
+        };
+        println!("| {i} | {:?} | {rule} |", label.schema);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// E-dedup / S-dedup — the content-vs-writing corpus facts (prereg §5, §6).
+// ---------------------------------------------------------------------------
+
+/// What the dedup pass measured over the drawn corpus.
+struct P9DedupStats {
+    /// Workflows in the corpus.
+    corpus: usize,
+    /// Distinct as WRITTEN (expression tree + pinned source word).
+    writings: usize,
+    /// Distinct as CONTENT (`canonical_key` buckets).
+    contents: usize,
+    /// Bucket sizes, descending.
+    buckets: Vec<usize>,
+    /// Arrivals that are distinct as written but equal as content.
+    collapsed: usize,
+    /// S-dedup: pairs where `canonical_key` equality and `content_eq` disagree.
+    /// Any nonzero value is RUN-INVALID.
+    biconditional_violations: usize,
+    /// Pairs compared.
+    pairs: usize,
+    /// Workflows whose MONO key (`content_of` on the bare expression) differs
+    /// from their COLORED key (`content_of_colored`) — the cg like-with-like
+    /// seam, measured rather than assumed.
+    mono_differs: usize,
+}
+
+/// Run the dedup pass over every as-written workflow of the corpus.
+///
+/// **One content entry point per table**: every key below comes from
+/// `content_of_colored`. `content_of` appears exactly once, in the `mono_differs`
+/// measurement, and never feeds a table — mixing the two would silently split or
+/// merge buckets on any wire no generator touches (cg seam note).
+///
+/// `ContentKey` is deliberately NOT `Ord`, so the tables are `HashMap`s and every
+/// reported figure is order-free: counts, and a bucket-size histogram sorted by
+/// SIZE (a `usize`), never by key.
+fn p9_dedup_pass(corpus: &[&Workflow]) -> P9DedupStats {
+    let contents: Vec<_> = corpus.iter().map(|w| content_of_colored(w)).collect();
+
+    let mut by_writing: HashSet<String> = HashSet::new();
+    let mut by_content: HashMap<ContentKey<WorkflowGen>, usize> = HashMap::new();
+    let mut mono_differs = 0usize;
+    for (w, c) in corpus.iter().zip(contents.iter()) {
+        by_writing.insert(format!(
+            "{:?}|{}",
+            w.source_word(),
+            catgraph_syntax::text::print(w.expr())
+        ));
+        *by_content.entry(canonical_key(c)).or_insert(0) += 1;
+        if canonical_key(&content_of(w.expr())) != canonical_key(c) {
+            mono_differs += 1;
+        }
+    }
+
+    let mut buckets: Vec<usize> = by_content.values().copied().collect();
+    buckets.sort_unstable_by(|a, b| b.cmp(a));
+
+    // S-dedup: `canonical_key(a) == canonical_key(b)` iff `content_eq(a, b)`,
+    // over every unordered pair of the corpus.
+    let keys: Vec<_> = contents.iter().map(canonical_key).collect();
+    let mut biconditional_violations = 0usize;
+    let mut pairs = 0usize;
+    for i in 0..contents.len() {
+        for j in (i + 1)..contents.len() {
+            pairs += 1;
+            if (keys[i] == keys[j]) != content_eq(&contents[i], &contents[j]) {
+                biconditional_violations += 1;
+            }
+        }
+    }
+
+    P9DedupStats {
+        corpus: corpus.len(),
+        writings: by_writing.len(),
+        contents: by_content.len(),
+        collapsed: by_writing.len().saturating_sub(by_content.len()),
+        buckets,
+        biconditional_violations,
+        pairs,
+        mono_differs,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// E-ceil (ii) — the harness-side minimum-distinct-demand reference.
+// ---------------------------------------------------------------------------
+
+/// The smallest DISTINCT demand reachable for one task through a pinned family
+/// of high-fuel `optimize` objectives.
+///
+/// prereg §5 registers "a harness-side brute-force minimum-distinct-demand search
+/// over the class `optimize` enumerates at high fuel". `optimize` returns only
+/// `best()` — the visited set is private — so the class it enumerates is not
+/// directly readable through the public API. What runs instead is a pinned
+/// multi-objective sweep over that class: the uniform and priced optima, plus one
+/// optimum per distinct as-written step under an objective that makes THAT step
+/// expensive (`P9_ECEIL_HEAVY`, others 1), which is how a per-generator weight
+/// can ask the search to route around a specific `(bit, role)`. The minimum over
+/// those optima is a **reference within the rewriting family and an upper bound
+/// on the true minimum** — never a supremum (the #72 A2.5 correction), and
+/// disclosed as such.
+fn p9_eceil_min_distinct(
+    inst: &WorkflowInstance,
+    written: &Workflow,
+    rules: &[RewriteRule<WorkflowGen>],
+) -> usize {
+    let as_written = demand(written);
+    let mut best = as_written.distinct_len();
+    let mut consider = |outcome: Result<_, CatgraphError>| {
+        if let Ok(o) = outcome {
+            let o: catgraph_applied::prop::presentation::rewrite::RewriteOutcome<WorkflowGen> = o;
+            best = best.min(demand(o.best()).distinct_len());
+        }
+    };
+    consider(optimize_workflow(
+        written,
+        rules,
+        P9_ECEIL_FUEL,
+        uniform_cost(),
+    ));
+    consider(optimize_workflow(
+        written,
+        rules,
+        P9_ECEIL_FUEL,
+        staffing_price(&inst.table),
+    ));
+    for target in as_written.distinct() {
+        consider(optimize_workflow(written, rules, P9_ECEIL_FUEL, |g| {
+            match g {
+                FrobeniusOr::User(s) if *s == target => P9_ECEIL_HEAVY,
+                _ => 1,
+            }
+        }));
+    }
+    best
+}
+
+#[allow(clippy::too_many_lines)]
+fn part9_eq5a_process_structured() {
+    println!("# koalisi #76 — Part 9: EQ5a process-structured battery (REGISTERED)");
+    println!();
+    println!(
+        "_governed by `docs/prereg-K4-eq5a-process-structured.md` (registered BEFORE this code; owner design-lock D1–D11 on #76, Amendment 1 pinning the rule theory / fuel / staffing price / λ / draw parameters, Amendment 2 voiding §4's \"3–5 rules\" numeral in favour of the schema closure, **Amendment 3** re-reading valuation-only as the unstaffable residual (A3.1) and widening the fusion schema to every same-role ordered pair (A3.2)). Report date {P9_REPORT_DATE}. World **v2w** (prereg §2): the Part 8 `v2t` prefix VERBATIM — `draw_prefix_v2`, then `R = {P8_ROLES}` worker roles and per-required-bit role tags with the role-feasibility rejection re-draw — and the workflow SHAPE draw APPENDED off the same SplitMix64 stream. Each tagged required bit `(b, r)` is a step generator `s_{{b,r}} : r → r`; steps chain per role (`Free::compose`), roles combine with `Free::tensor`, and every diagram is pinned through `ColoredExpr::new` (Amendment A2.3 — `Free::compose` checks WIDTHS, not colors, so the pin is the only color gate). Seeds **{P9_SEED_START}..{P9_SEED_END}** (fresh; 90..120 and 150..180 stay reserved). Latency is recorded and NEVER gating (prereg §7)._"
+    );
+    println!();
+    println!(
+        "_**The declared-writing mechanic** (prereg §4 fairness clause, as CORRECTED by Amendment A5.1): each arm declares the writing it staffs — the control declares the as-written workflow, a rewriting arm declares `optimize(...).best()` — and the scorer scores each arm's DECLARED writing. Every declared writing that is not the as-written one is `replay`-verified against the registered rules and `content_eq`-checked against the reported representative BEFORE it is scored (§6 S-sound), so an arm cannot grade its own homework and the control is not penalised for a legitimate alternative it did not take. **Consequence, stated because it is by design:** `cov_eff` denominators differ across arms — when both complete, the ratio term is `1.0` for both and the contrast comes through **member count**, which is the claimed advantage (the clause's narrow, checkable half — verified true). The policy itself only ever sees a `required: u32` mask (the OR over the declared writing's distinct demand) plus the worker role map; the arm never sees a tag, exactly as in EQ4._"
+    );
+    println!();
+    println!(
+        "_**What \"sound\" means here, and what it does not** (Amendment A5.1 — §4's original wording overclaimed and is corrected): BGKSZ **Thm 5.6** certifies **theory-relative derivability** — the optimizer's output is a legal derivation under THE RULES IT WAS GIVEN. It certifies nothing about whether those rules preserve task semantics, and the rules here are **hand-authored for this experiment** (A1.1/A3.2) with no independent capability-semantics content. So \"sound\" means \"derivable from axioms this harness itself declared\", the rules are **stipulated** equivalences, and the sameness the comparison trades on is **theory-internal, not externally validated**. Scoping sentence, binding on the report: a `VALIDATED (process structure)` verdict would read \"**a sound-by-stipulation process transformation can unlock staffing value in this world**\" — NOT \"process reorganisation is generically valuable\"._"
+    );
+    println!();
+    println!(
+        "_**Coverage is per DISTINCT `(bit, role)` pair** — multiplicity prices the process, it does not add coverage demand. So if one bit is demanded under two roles the OR-mask the policy sees carries it once while the scorer counts two demands; that asymmetry is what the rewrite theory acts on (prereg §2)._"
+    );
+    println!();
+
+    // --- The pinned theory ---------------------------------------------------
+    let bits = u8::try_from(UNIVERSE).expect("invariant: the universe is 8 bits");
+    let roles = u8::try_from(P8_ROLES).expect("invariant: R = 3");
+    let rules = rule_theory(bits, roles).expect("invariant: the registered (8, 3) theory constructs");
+    let labels = rule_labels(bits, roles).expect("invariant: labels mirror the theory");
+    assert_eq!(rules.len(), labels.len());
+    let pairs = fusion_pairs(bits);
+    let fusion_instances = pairs.len() * P8_ROLES;
+    assert_eq!(
+        rules.len(),
+        2 * UNIVERSE * P8_ROLES + fusion_instances,
+        "the printed theory size must be the schema closure's, not a restated constant"
+    );
+
+    println!("## The pinned rule theory (Amendment A1.1, widened by A3.2 — printed in full)");
+    println!();
+    println!(
+        "_Three SCHEMAS closed over the `(bit, role)` index set; at the registered `bits = {UNIVERSE}, roles = {P8_ROLES}` the closure is **{} instances** ({} idempotence + {fusion_instances} fusion + {} spider absorption). Amendment A2.1: §4's \"3–5 rules\" is an ERRATUM — the numeral refers to schemas and is void; the closure governs, and every instance constructs through `RewriteRule::new` so nothing is silently dropped. **Amendment A3.2** widened fusion from one designated pair per role to every role × every ordered pair of distinct bits `(b, b')`, target `b'' = (b + b' + 4) mod bits`, the instance NOT built when `b'' ∈ {{b, b'}}` — at `bits = 8` that skip excludes exactly the pairs involving bit 4, leaving {} per role. The skip is the two-sidedness guarantee A1.1 stated as a global condition, now enforced per instance: had a target been a consumed bit, every application would strictly shrink distinct demand and the rewriting cells would win BY CONSTRUCTION. A trace binds rule INDICES, so this order is part of the registered theory._",
+        rules.len(),
+        UNIVERSE * P8_ROLES,
+        UNIVERSE * P8_ROLES,
+        pairs.len()
+    );
+    println!();
+    p9_print_rule_theory(&labels);
+    println!();
+
+    // --- Instances (shared by every arm) ------------------------------------
+    let insts = p9_instances(false);
+    let n_seeds = insts.len();
+    let oracle = p8_rho(0.0);
+
+    // --- Declared writings, one set per cell ---------------------------------
+    let (d_ctl, s_ctl) = p9_declare(
+        &insts,
+        &rules,
+        &labels,
+        P9Mechanism::AsWritten,
+        P9Cost::Uniform,
+        P9_FUEL,
+    );
+    // Wall time of the two confirmatory declares — the A3.2 (ii) search-cost
+    // disclosure reports them next to the full fuel sweep.
+    let t0 = Instant::now();
+    let (d_rw_u, s_rw_u) = p9_declare(
+        &insts,
+        &rules,
+        &labels,
+        P9Mechanism::Rewrite,
+        P9Cost::Uniform,
+        P9_FUEL,
+    );
+    let confirm_wall_u = t0.elapsed().as_secs_f64();
+    let t0 = Instant::now();
+    let (d_rw_p, s_rw_p) = p9_declare(
+        &insts,
+        &rules,
+        &labels,
+        P9Mechanism::Rewrite,
+        P9Cost::Priced,
+        P9_FUEL,
+    );
+    let confirm_wall_p = t0.elapsed().as_secs_f64();
+    let (d_val_u, s_val_u) = p9_declare(
+        &insts,
+        &rules,
+        &labels,
+        P9Mechanism::Valuation,
+        P9Cost::Uniform,
+        P9_FUEL,
+    );
+    let (d_val_p, s_val_p) = p9_declare(
+        &insts,
+        &rules,
+        &labels,
+        P9Mechanism::Valuation,
+        P9Cost::Priced,
+        P9_FUEL,
+    );
+    // The E-fuel sweep's eight declares and E-ceil leg (i)'s declare are computed
+    // HERE, before the gates, rather than inline in their own sections. §6 scopes
+    // S-sound to "every declared writing, all tasks, all seeds" (Amendment A5.3),
+    // and a gate cannot cover writings that do not exist yet when it prints.
+    let sweep: Vec<P9SweepCell> = [P9Cost::Uniform, P9Cost::Priced]
+        .into_iter()
+        .flat_map(|cost| P9_FUEL_GRID.map(move |fuel| (cost, fuel)))
+        .map(|(cost, fuel)| {
+            let t0 = Instant::now();
+            let (declared, stats) =
+                p9_declare(&insts, &rules, &labels, P9Mechanism::Rewrite, cost, fuel);
+            P9SweepCell {
+                cost,
+                fuel,
+                declared,
+                stats,
+                declare_secs: t0.elapsed().as_secs_f64(),
+            }
+        })
+        .collect();
+    let sweep_wall: f64 = sweep.iter().map(|c| c.declare_secs).sum();
+    let (d_ceil, s_ceil) = p9_declare(
+        &insts,
+        &rules,
+        &labels,
+        P9Mechanism::Rewrite,
+        P9Cost::Priced,
+        P9_ECEIL_FUEL,
+    );
+
+    // --- The registered arms -------------------------------------------------
+    let (asis, asis_lat) = p9_battery(&insts, &d_ctl, |inst| {
+        Box::new(p8_typed_policy(&inst.base, &oracle)) as Box<dyn CoalitionDecisionPolicy>
+    });
+    let (rw_u, rw_u_lat) = p9_battery(&insts, &d_rw_u, |inst| {
+        Box::new(p8_typed_policy(&inst.base, &oracle)) as Box<dyn CoalitionDecisionPolicy>
+    });
+    let (rw_p, rw_p_lat) = p9_battery(&insts, &d_rw_p, |inst| {
+        Box::new(p8_typed_policy(&inst.base, &oracle)) as Box<dyn CoalitionDecisionPolicy>
+    });
+    let val_u_run = p9_valuation_battery(&insts, &d_val_u, &oracle, P9_LAMBDA, P9Cost::Uniform);
+    let val_p_run = p9_valuation_battery(&insts, &d_val_p, &oracle, P9_LAMBDA, P9Cost::Priced);
+    let (val_u, val_u_lat, val_u_terms) =
+        (&val_u_run.seeds, &val_u_run.latencies, &val_u_run.terms);
+    let (val_p, val_p_lat, val_p_terms) =
+        (&val_p_run.seeds, &val_p_run.latencies, &val_p_run.terms);
+    let (mag, mag_lat) = p9_battery(&insts, &d_ctl, |_| {
+        Box::new(MagnitudePolicy::default()) as Box<dyn CoalitionDecisionPolicy>
+    });
+    let (scalar, scalar_lat) = p9_battery(&insts, &d_ctl, |_| {
+        Box::new(AifDecisionPolicy::default()) as Box<dyn CoalitionDecisionPolicy>
+    });
+    let (e1, e1_lat) = p9_e1_battery(&insts, &d_ctl, e1_config());
+
+    // --- §6 gates (run and asserted BEFORE any leg is read) ------------------
+    println!("## Gates (prereg §6 — any failure ⇒ RUN-INVALID)");
+    println!();
+
+    // S-sound, at the FULL §6 scope (Amendment A5.3): every declared writing the
+    // run produces — the two confirmatory cells, all eight E-fuel sweep cells, and
+    // E-ceil leg (i) — not just the cells the verdict reads.
+    let mut sound_cells: Vec<(String, &P9DeclareStats)> = vec![
+        ("wf-rw-u".to_owned(), &s_rw_u),
+        ("wf-rw-p".to_owned(), &s_rw_p),
+    ];
+    sound_cells.extend(sweep.iter().map(|c| {
+        (
+            format!("E-fuel wf-rw-{} @ {}", c.cost.label(), c.fuel),
+            &c.stats,
+        )
+    }));
+    sound_cells.push((format!("E-ceil (i) @ {P9_ECEIL_FUEL}"), &s_ceil));
+    let mut sound_ok = true;
+    let mut verified_total = 0usize;
+    let mut unsound_total = 0usize;
+    for (label, s) in &sound_cells {
+        sound_ok &= s.unsound == 0;
+        verified_total += s.verified;
+        unsound_total += s.unsound;
+        assert_eq!(
+            s.unsound, 0,
+            "S-sound: {label} declared {} writing(s) its own trace does not derive",
+            s.unsound
+        );
+    }
+    println!(
+        "- **S-sound — {}.** Every declared writing the run produces `replay`s under the registered {} rules and the replayed content `content_eq`s the reported representative: **{verified_total}** verified across **{}** declaring cells ({n_seeds} seeds × {TASKS} tasks each), **{unsound_total}** unsound. **Amendment A5.3 scope fix:** the gate previously asserted over the two confirmatory rewriting cells only, while the E-fuel sweep's eight cells and E-ceil leg (i) computed an `unsound` count that was discarded — §6 says \"every declared writing… all tasks, all seeds\", so all eleven are now asserted. (An unsound writing could never be SCORED as legitimate — `p9_declare` declines-and-counts it — but the gate must have the scope §6 states.) It is also strictly stronger than the registration asks in the other direction: writings the search left content-equal to the as-written one are verified too, rather than exempted on the grounds that nothing changed. The as-written control and the valuation cells declare the writing the world drew, so no verification is owed there (prereg §4). Amendment A2.4: `RewriteStep` has no public constructor, so the negative direction is exercised upstream and by the library's own tamper tests (empty rules slice, mismatched `start`, reordered rules) rather than by a forged step here.",
+        pass(sound_ok),
+        rules.len(),
+        sound_cells.len()
+    );
+
+    // S-dedup, over the drawn (as-written) corpus.
+    let as_written_corpus: Vec<&Workflow> = insts.iter().flat_map(|i| i.written.iter()).collect();
+    let dedup = p9_dedup_pass(&as_written_corpus);
+    let dedup_ok = dedup.biconditional_violations == 0;
+    assert!(
+        dedup_ok,
+        "S-dedup: canonical_key equality and content_eq disagreed on {} pair(s)",
+        dedup.biconditional_violations
+    );
+    println!(
+        "- **S-dedup — {}.** `canonical_key(a) == canonical_key(b)` ⟺ `content_eq(a, b)` on all **{}** unordered pairs of the **{}**-workflow drawn corpus: **{}** disagreements. Like-with-like holds by construction — every key in every table comes from `content_of_colored`, and `content_of` appears exactly once, in the mono-vs-colored measurement below, where it feeds no table. `ContentKey` is deliberately NOT `Ord`, so the tables are hash-keyed and every reported figure is order-free (counts, and a histogram sorted by SIZE, never by key).",
+        pass(dedup_ok),
+        dedup.pairs,
+        dedup.corpus,
+        dedup.biconditional_violations
+    );
+    println!(
+        "  - Mono-vs-colored seam, MEASURED not assumed: **{}** of {} workflows have `canonical_key(content_of(expr)) != canonical_key(content_of_colored(w))`. Mixing the two entry points in one table would split or merge exactly those buckets.",
+        dedup.mono_differs, dedup.corpus
+    );
+
+    // X-reduce.
+    let deg = p9_instances(true);
+    let (deg_ctl, _) = p9_declare(
+        &deg,
+        &rules,
+        &labels,
+        P9Mechanism::AsWritten,
+        P9Cost::Uniform,
+        P9_FUEL,
+    );
+    let (deg_asis, _) = p9_battery(&deg, &deg_ctl, |inst| {
+        Box::new(p8_typed_policy(&inst.base, &oracle)) as Box<dyn CoalitionDecisionPolicy>
+    });
+    // The EQ4 typed arm on the SAME seeds, through the frozen Part 8 runner.
+    let eq4_ref: Vec<P8Seed> = {
+        let mut lat = Vec::new();
+        deg.iter()
+            .map(|inst| {
+                let p = p8_typed_policy(&inst.base, &oracle);
+                p8_run_seed(
+                    &P8Arm::Fixed(&p),
+                    &inst.base,
+                    P8Metric::Typed,
+                    &mut lat,
+                    &mut |_, _, _, _| {},
+                )
+            })
+            .collect()
+    };
+    for (i, (a, b)) in deg_asis.iter().zip(eq4_ref.iter()).enumerate() {
+        let seed = P9_SEED_START + i as u64;
+        assert_eq!(a.acts, b.acts, "X-reduce: acts vs the EQ4 typed arm, seed {seed}");
+        assert_eq!(
+            a.primary.to_bits(),
+            b.primary.to_bits(),
+            "X-reduce: PRIMARY bits vs the EQ4 typed arm, seed {seed}"
+        );
+        assert_eq!(
+            a.churn, b.churn,
+            "X-reduce: churn vs the EQ4 typed arm, seed {seed}"
+        );
+    }
+    // The rewriting cells with an EMPTY rule set must reproduce `wf-asis`.
+    let (deg_rw_u, _) = p9_declare(
+        &deg,
+        &[],
+        &labels,
+        P9Mechanism::Rewrite,
+        P9Cost::Uniform,
+        P9_FUEL,
+    );
+    let (deg_rw_p, _) = p9_declare(
+        &deg,
+        &[],
+        &labels,
+        P9Mechanism::Rewrite,
+        P9Cost::Priced,
+        P9_FUEL,
+    );
+    let (deg_rw_u_rs, _) = p9_battery(&deg, &deg_rw_u, |inst| {
+        Box::new(p8_typed_policy(&inst.base, &oracle)) as Box<dyn CoalitionDecisionPolicy>
+    });
+    let (deg_rw_p_rs, _) = p9_battery(&deg, &deg_rw_p, |inst| {
+        Box::new(p8_typed_policy(&inst.base, &oracle)) as Box<dyn CoalitionDecisionPolicy>
+    });
+    p9_assert_identical(&deg_rw_u_rs, &deg_asis, "X-reduce: empty-rule `wf-rw-u`");
+    p9_assert_identical(&deg_rw_p_rs, &deg_asis, "X-reduce: empty-rule `wf-rw-p`");
+    println!(
+        "- **X-reduce — {}.** On the degenerate world (every task the all-parallel `tensor` of its distinct steps, fan-out 0, and — load-bearing — **zero stream draws**, so its instances are bit-for-bit the v2t instances of the same seed), `wf-asis` reproduces the EQ4 typed arm's **acts + per-seed PRIMARY (bit-identical) + churn** on all {n_seeds} seeds, and both rewriting cells with an EMPTY rule set reproduce `wf-asis` bit-identically on the same three. Raw score bits are NOT compared: the gate is on DECISIONS, not float bit patterns (the EQ3 H-par′ lesson).",
+        pass(true)
+    );
+    println!(
+        "- **X-battery** (frozen Parts 1–8 byte-identical on every quality/ratio/superiority/churn/verdict line) is checked OUTSIDE this binary, by diffing this run's Parts 1–8 against a pre-change baseline; latency-only diffs are the standing exclusion."
+    );
+    println!();
+
+    // --- Draw, shape, and feasibility ---------------------------------------
+    let total_redraws: usize = insts.iter().map(|i| i.base.redraws).sum();
+    let worst_attempts = insts.iter().map(|i| i.base.max_attempts).max().unwrap_or(0);
+    let occurrences: Vec<f64> = insts
+        .iter()
+        .flat_map(|i| i.written.iter().map(|w| demand(w).total() as f64))
+        .collect();
+    let distincts: Vec<f64> = insts
+        .iter()
+        .flat_map(|i| i.written.iter().map(|w| demand(w).distinct_len() as f64))
+        .collect();
+    let fanned = occurrences
+        .iter()
+        .zip(distincts.iter())
+        .filter(|(o, d)| o > d)
+        .count();
+    // The as-written demand is re-checked for role-matched feasibility: it must
+    // hold by construction (the shape draw repeats steps, it never introduces a
+    // new `(bit, role)`), and a violation is RUN-INVALID.
+    let mut as_written_infeasible = 0usize;
+    for inst in &insts {
+        for w in &inst.written {
+            if !p9_demand_feasible(inst, &demand(w)) {
+                as_written_infeasible += 1;
+            }
+        }
+    }
+    assert_eq!(
+        as_written_infeasible, 0,
+        "RUN-INVALID: an as-written demand is role-matched infeasible (prereg §2)"
+    );
+    println!("## Draw, shape, and feasibility (prereg §2, Amendment A1.5)");
+    println!();
+    println!(
+        "- **Shape.** Per-role chain length is that role's tagged-bit count (A1.5 — no free parameter); the spider fan-out probability is **0.25** per same-role ADJACENT pair, drawn as `next_u64() % {P9_FANOUT_DENOM} == 0` (one draw per pair, exactly a quarter of the range, no float comparison inside a seeded draw). Over the {} tasks: median step **occurrences** {:.1}, median **distinct** `(bit, role)` {:.1}, and **{fanned}** tasks ({:.1} %) carry at least one fan-out.",
+        occurrences.len(),
+        median(occurrences.clone()),
+        median(distincts.clone()),
+        100.0 * fanned as f64 / occurrences.len() as f64
+    );
+    println!(
+        "- **Fan-out SHAPE (disclosure — a draw choice the registration did not spell out).** A firing pair writes the later step as `δ_r ; (s ⊗ s) ; μ_r`, which is EXACTLY the left-hand side of the pinned spider-absorption schema. prereg §2 phrases fan-out as \"a step may feed two same-role successors\"; a generic split feeding two DIFFERENT successors would leave the absorption schema dead on drawn traffic — {} of the theory's {} instances would never match anything and the `catgraph-syntax` dependency A1.1 justifies would be decorative. The reachable shape is used so the registered schema is testable.",
+        UNIVERSE * P8_ROLES,
+        rules.len()
+    );
+    let fusion_eligible: usize = insts
+        .iter()
+        .map(|i| {
+            i.base
+                .tasks
+                .iter()
+                .filter(|t| p9_fusion_eligible(&pairs, t))
+                .count()
+        })
+        .sum();
+    let narrow_rate =
+        100.0 * P9_NARROW_ELIGIBLE_PRIOR as f64 / P9_NARROW_ELIGIBLE_TOTAL_PRIOR as f64;
+    let void_bits = p9_fusion_void_bits(bits, &pairs);
+    println!(
+        "- **How much of the stream the confirmatory lever can act on — MANDATORY disclosure, Amendment A3.2 as RE-ANCHORED by A5.2.** Coverage is per DISTINCT `(bit, role)`, so idempotence and spider absorption — {} of the theory's {} instances — change OCCURRENCE count only and are staffing-INVISIBLE by construction: a task they alone touch scores bit-identically to the control. **Fusion is the only schema that can move a decision.** The evidence that the leg is powered is therefore the MEASURED **`demand_moved`** counter — tasks whose declared distinct demand actually differs from the as-written one, i.e. real search results: **{}/{} ({:.1} %)** for `wf-rw-u` and **{}/{} ({:.1} %)** for `wf-rw-p`. Under the NARROW Amendment 1 schema (one designated pair per role) the recorded Stage-2 eligibility was **{P9_NARROW_ELIGIBLE_PRIOR}/{P9_NARROW_ELIGIBLE_TOTAL_PRIOR} ({narrow_rate:.1} %)** — a recorded prior, since the narrow schema no longer exists to re-measure — over a stream where ~93 % of tasks were consequently identical across arms, which no stream-level bar could clear on merit.",
+        2 * UNIVERSE * P8_ROLES,
+        rules.len(),
+        s_rw_u.demand_moved,
+        occurrences.len(),
+        100.0 * s_rw_u.demand_moved as f64 / occurrences.len() as f64,
+        s_rw_p.demand_moved,
+        occurrences.len(),
+        100.0 * s_rw_p.demand_moved as f64 / occurrences.len() as f64
+    );
+    println!(
+        "  - **Eligibility heuristic, printed as the LOOSE upper bound it is:** a task is counted eligible iff some role's tagged bits contain both members of one surviving fusion pair — **{fusion_eligible}** of {} tasks (**{:.1} %**). It is a NECESSARY condition only; the verdict never reads it.",
+        occurrences.len(),
+        100.0 * fusion_eligible as f64 / occurrences.len() as f64
+    );
+    println!(
+        "  - **The bit-{} void — why the bound is loose, and PERMANENTLY so (Amendment A5.2, mandatory line).** `b'' = (b + b' + 4) mod {UNIVERSE}` equals `b` exactly when `b' = 4`, and equals `b'` exactly when `b = 4`, so every pair touching bit 4 is skipped and **bit 4 appears in no fusion instance at all** (bits with no fusion partner, computed from the theory's own pair set: **{:?}**). An unfusable bit can never be consumed, so wherever it sits between two otherwise-fusable steps of the same role — `s1 ; s4 ; s5` — the counted-eligible pair `(1, 5)` can NEVER be brought adjacent. That is a permanent obstruction, not the merely probabilistic \"a fan-out has to be absorbed first\"; the gap between eligibility and `demand_moved` above is partly structural and irreducible. **The schema is deliberately not re-tuned:** re-targeting the instrument after outcomes have been seen would be worse than disclosing the bound.",
+        void_bits
+            .first()
+            .map_or_else(|| "-".to_owned(), ToString::to_string),
+        void_bits
+    );
+    println!(
+        "- **Feasibility (gotcha 25 / #63).** The v2t prefix carries the registered role-matched rejection re-draw ({total_redraws} re-draws over the {n_seeds} seeds; worst single task **{worst_attempts}** of the {P8_REDRAW_CAP}-attempt budget). The AS-WRITTEN demand is then re-checked in full: **{as_written_infeasible}** infeasible, which is structural — the shape draw repeats and fans steps but never introduces a new `(bit, role)`, so as-written feasibility is exactly the v2t feasibility the prefix already guarantees. **The OPTIMIZED demand is NOT re-drawn** (prereg §2): an optimizer that concentrates demand on an absent `(bit, role)` is the registered failure mode, counted in E-conc below and never a draw condition."
+    );
+    println!();
+
+    // --- Arms ----------------------------------------------------------------
+    println!("## Arms (pooled over {n_seeds} seeds, v2w world)");
+    println!();
+    p9_table_head();
+    p9_row("wf-asis", &asis, &asis, &asis_lat);
+    p9_row("wf-rw-u", &rw_u, &asis, &rw_u_lat);
+    p9_row("wf-rw-p", &rw_p, &asis, &rw_p_lat);
+    p9_row("wf-val-u", val_u, &asis, val_u_lat);
+    p9_row("wf-val-p", val_p, &asis, val_p_lat);
+    p9_row("mag", &mag, &asis, &mag_lat);
+    p9_row("scalar", &scalar, &asis, &scalar_lat);
+    p9_row("arm-E1", &e1, &asis, &e1_lat);
+    println!();
+    println!(
+        "_`wf-asis` is the control: the **EQ4-validated typed arm** (`with_role_modulation`, oracle `ρ = δ`) staffing the workflow as written. EQ5a therefore measures process signal BEYOND role signal and cannot re-harvest EQ4's margin (prereg §1). `mag` (frozen untyped `MagnitudePolicy` over the flattened demand), `scalar` and `arm-E1` are context, non-gating (prereg §3); all three staff the as-written writing._"
+    );
+    println!();
+
+    // --- A3.1: the valuation-only cells are LIVE (measured, not assumed) ------
+    let (val_u_seeds, val_u_acts, val_u_scores) = p9_divergence(val_u, &asis);
+    let (val_p_seeds, val_p_acts, val_p_scores) = p9_divergence(val_p, &asis);
+    let val_live = !p9_bit_identical(val_u, &asis) || !p9_bit_identical(val_p, &asis);
+    println!("### A3.1 liveness: the valuation-only cells price the UNSTAFFABLE RESIDUAL");
+    println!();
+    println!(
+        "_prereg §4 D3b originally scored `value(S) = Mag(S) − λ · cost_of(writing, per_gen)` while ALSO fixing the declared writing to be independent of `S`. That term is a per-task CONSTANT, so it cancelled exactly from every join/leave margin, and Stage 2 measured both valuation cells bit-identical to the control at every registered λ — two of the four confirmatory cells could not move. **Amendment A3.1** re-reads the mechanism as the residual process the coalition cannot execute:_"
+    );
+    println!();
+    println!("```");
+    println!(
+        "value(S) = Mag(S) − λ · Σ per_gen(g)   over step occurrences g of the declared"
+    );
+    println!(
+        "                         writing whose (bit, role) is NOT covered by S"
+    );
+    println!("```");
+    println!();
+    println!(
+        "_This depends on `S`, so it no longer cancels: admitting an agent that covers previously-unstaffable steps improves the score by `λ` times those steps' price, and a member holding otherwise-unstaffable steps becomes less likely to be swept out. It is not a rescaling of the magnitude signal either — the penalty is weighted by `per_gen`, so **occurrence multiplicity and step scarcity enter a decision for the first time**, neither of which magnitude can see (it gets only the OR-mask of distinct demand). **Spiders are excluded** from the residual: they are priced by `cost_of` but name no `(bit, role)`, so \"uncovered\" is undefined for them and counting them would re-introduce exactly the cancelling constant A3.1 removed. Demand and the declared writing are unchanged — this is still valuation-only, not rewriting. λ stays {P9_LAMBDA} with the exploratory grid `{P9_LAMBDA_GRID:?}`._"
+    );
+    println!();
+    println!(
+        "- **Liveness, MEASURED against the control** (the regression the original formulation would have failed silently): `wf-val-u` diverges on **{val_u_seeds}/{n_seeds}** seeds, **{val_u_acts}** decisions by ACT and **{val_u_scores}** by raw score bits; `wf-val-p` on **{val_p_seeds}/{n_seeds}** seeds, **{val_p_acts}** acts and **{val_p_scores}** score bits. Cell is live ⇒ **{}**.",
+        pass(val_live)
+    );
+    assert!(
+        val_live,
+        "A3.1: the valuation-only cells must not be bit-identical to the control — a cancelling term is the defect the amendment removed"
+    );
+    println!();
+    println!(
+        "- **Upstream-evaluation declines (Amendment A5.3, reported not asserted): `wf-val-u` {} · `wf-val-p` {}.** The library reports an upstream decline as `Decision {{ act: false, score: 0.0 }}` — the SAME value a legitimate exact-zero margin carries, and this lineage knows exact-zero margins to be a large population (EQ3 measured knife-edge decisions at ~43 % of the stream). Inferring a decline from the score would therefore either suppress a great many real corrections or flip a genuine decline into an accept. The wrapper instead **detects evaluation failure independently**, before folding: it runs the harness's own `relevant_masks` + `magnitude_at_t(t = 1)` over both member sets a decision compares and, on `Err`, declines-and-counts. Every other zero score is then known to be a genuine margin and the correction folds safely. Residual, disclosed: the probe's couplings are UNTYPED where the arm's are ρ-modulated, so it detects the structural failure modes exactly but a failure only the ρ-modulated coupling matrix could trigger would slip past — the library exposes no typed-evaluation probe to close that.",
+        val_u_run.probe_declines, val_p_run.probe_declines
+    );
+    println!();
+    // The registered λ grid, RUN: under A3.1 the term no longer cancels, so the
+    // grid is a genuine sensitivity sweep rather than three cells a proof says
+    // must coincide.
+    let grid_row = P9_LAMBDA_GRID
+        .iter()
+        .map(|&lambda| {
+            let run = p9_valuation_battery(&insts, &d_val_p, &oracle, lambda, P9Cost::Priced);
+            let (seeds, acts, _) = p9_divergence(&run.seeds, &asis);
+            format!(
+                "λ = {lambda}: median PRIMARY {:.4}, median full term {:.3}, diverging {seeds}/{n_seeds} seeds ({acts} acts), probe declines {}",
+                median(p9_primaries(&run.seeds)),
+                median(run.terms.clone()),
+                run.probe_declines
+            )
+        })
+        .collect::<Vec<String>>()
+        .join(" · ");
+    println!(
+        "- **λ grid** `{P9_LAMBDA_GRID:?}` (§5, exploratory and non-gating), on the priced cell — {grid_row}. A1.4 pinned λ so the process term would be \"a tiebreaker between otherwise close candidates rather than the dominant term\" against O(1) magnitude margins; the sweep is the check on that reasoning."
+    );
+    println!();
+
+    // --- H-P -----------------------------------------------------------------
+    let asis_med = median(p9_primaries(&asis));
+    let bar = P9_HP_FACTOR * asis_med;
+    let cells: [(&str, &Vec<P9Seed>); 4] = [
+        ("wf-rw-u", &rw_u),
+        ("wf-rw-p", &rw_p),
+        ("wf-val-u", val_u),
+        ("wf-val-p", val_p),
+    ];
+
+    println!("## H-P (confirmatory, family-wise) — optimizing the process before staffing it");
+    println!();
+    println!(
+        "_Four cells against `wf-asis`, seeds {P9_SEED_START}..{P9_SEED_END}: PRIMARY median ≥ **{P9_HP_FACTOR}×** the control's AND strictly superior on ≥ **{P9_HP_SUPERIOR_MIN}/{n_seeds}** seeds (70 %). Both conjuncts, in the SAME cell. The bar is raised from the lineage's standing 1.25× / 60 % to pay for the four looks and was pinned pre-run. Any cell may carry the verdict; **all four report regardless** — no cell-shopping, no post-hoc bar movement._"
+    );
+    println!();
+    println!(
+        "| seed | n | wf-asis | wf-rw-u | wf-rw-p | wf-val-u | wf-val-p | churn asis | churn rw-u |"
+    );
+    println!(
+        "|-----:|--:|--------:|--------:|--------:|---------:|---------:|-----------:|-----------:|"
+    );
+    for i in 0..n_seeds {
+        println!(
+            "| {} | {} | {:.4} | {:.4} | {:.4} | {:.4} | {:.4} | {} | {} |",
+            P9_SEED_START + i as u64,
+            insts[i].base.agents.len(),
+            asis[i].primary,
+            rw_u[i].primary,
+            rw_p[i].primary,
+            val_u[i].primary,
+            val_p[i].primary,
+            asis[i].churn,
+            rw_u[i].churn
+        );
+    }
+    println!();
+    let mut carried: Option<&str> = None;
+    for (label, rs) in cells {
+        let med = median(p9_primaries(rs));
+        let superior = p9_superior_count(rs, &asis);
+        let c1 = med >= bar;
+        let c2 = superior >= P9_HP_SUPERIOR_MIN;
+        if c1 && c2 && carried.is_none() {
+            carried = Some(label);
+        }
+        println!(
+            "- `{label}`: median **{med:.4}** vs bar {P9_HP_FACTOR} × {asis_med:.4} = **{bar:.4}** ⇒ **{}** · strictly superior **{superior}/{n_seeds}**, bar {P9_HP_SUPERIOR_MIN} ⇒ **{}** · cell ⇒ **{}**.",
+            pass(c1),
+            pass(c2),
+            pass(c1 && c2)
+        );
+    }
+    println!();
+    let declined_total: usize = rw_u.iter().map(|r| r.declined).sum::<usize>()
+        + rw_p.iter().map(|r| r.declined).sum::<usize>();
+    println!(
+        "- Success-rate context (never gated): `wf-asis` {:.4} · `wf-rw-u` {:.4} · `wf-rw-p` {:.4} (mean over seeds). Optimizer declines across both rewriting cells: **{declined_total}** (a declined task forms no coalition and scores zero — never a silent as-written fallback).",
+        asis.iter().map(|r| r.success_rate).sum::<f64>() / n_seeds as f64,
+        rw_u.iter().map(|r| r.success_rate).sum::<f64>() / n_seeds as f64,
+        rw_p.iter().map(|r| r.success_rate).sum::<f64>() / n_seeds as f64
+    );
+    println!();
+
+    let verdict = if carried.is_some() {
+        "VALIDATED (process structure)"
+    } else {
+        "FALSIFIED (process structure)"
+    };
+    println!("## VERDICT: **{verdict}**");
+    println!();
+    println!(
+        "_Grammar (prereg §7): `VALIDATED (process structure)` = at least one H-P cell passes BOTH conjuncts at the family-wise bar with every §6 gate holding · `FALSIFIED (process structure)` = gates hold, no cell clears the bar · `RUN-INVALID` = any §6 gate fails. This run: carrying cell {} · gates X-reduce {} / S-sound {} / S-dedup {}. E-ceil / E-conc / E-fuel mechanism-scoping is reported below but cannot upgrade the verdict. **Scope of a `VALIDATED` reading (Amendment A5.1, binding):** it would read \"**a sound-by-stipulation process transformation can unlock staffing value in this world**\" — the rewrite rules are hand-authored for this experiment and BGKSZ Thm 5.6 certifies only that the optimizer stayed inside them, so the claim is NOT \"process reorganisation is generically valuable\". The v1/v2 K4 verdicts, EQ3's and EQ4's verdicts, and the #54 arm question (mag = demonstrated default, FINAL) are UNTOUCHED regardless of outcome, and a `VALIDATED` result would speak to the process-vs-as-written contrast within the typed magnitude family — not to the mag-vs-aif arm question, which is EQ5b's (prereg §7 pre-commitments)._",
+        carried.map_or_else(|| "none".to_owned(), |c| format!("`{c}`")),
+        pass(true),
+        pass(sound_ok),
+        pass(dedup_ok)
+    );
+    println!();
+
+    // --- E-fuel --------------------------------------------------------------
+    println!("## E-fuel (registered exploratory, non-gating) — how much of any margin is fuel-bought");
+    println!();
+    println!(
+        "_The registered sweep `{P9_FUEL_GRID:?}` on the rewriting cells (confirmatory fuel is F = {P9_FUEL}), a direct probe of catgraph's registered no-termination posture. `fuel_exhausted()` counts are a MANDATORY disclosure (A1.2), never a RUN-INVALID condition._"
+    );
+    println!();
+    println!(
+        "| cell | fuel | median PRIMARY | vs `wf-asis` | superior seeds | fuel-exhausted tasks | median `states_explored` | median `best_cost` | declare wall s |"
+    );
+    println!(
+        "|------|-----:|---------------:|-------------:|---------------:|---------------------:|-------------------------:|-------------------:|---------------:|"
+    );
+    for cell in &sweep {
+        let (rs, _) = p9_battery(&insts, &cell.declared, |inst| {
+            Box::new(p8_typed_policy(&inst.base, &oracle)) as Box<dyn CoalitionDecisionPolicy>
+        });
+        let med = median(p9_primaries(&rs));
+        println!(
+            "| `wf-rw-{}` ({}) | {} | {med:.4} | {:.2}× | {}/{n_seeds} | {} | {:.1} | {:.1} | {:.1} |",
+            if cell.cost == P9Cost::Uniform { "u" } else { "p" },
+            cell.cost.label(),
+            cell.fuel,
+            if asis_med > 0.0 { med / asis_med } else { f64::NAN },
+            p9_superior_count(&rs, &asis),
+            cell.stats.fuel_exhausted,
+            median(cell.stats.explored.clone()),
+            median(cell.stats.best.clone()),
+            cell.declare_secs
+        );
+    }
+    println!();
+    println!(
+        "- **Search-cost disclosure (Amendment A3.2 (ii), MANDATORY).** `optimize` matches every rule against every state, so widening the theory from 51 to {} instances ({:.1}×) raises search cost directly. Measured on this run: the confirmatory declare (F = {P9_FUEL}, {n_seeds} seeds × {TASKS} tasks) took **{:.1} s** uniform / **{:.1} s** priced, and the whole registered sweep `{P9_FUEL_GRID:?}` × 2 cost models took **{sweep_wall:.1} s**. **The sweep ran IN FULL — no fuel point was dropped, so there is no reduction to disclose.** Had runtime forced one, A3.2 requires it be reported here rather than silently trimmed.",
+        rules.len(),
+        rules.len() as f64 / 51.0,
+        confirm_wall_u,
+        confirm_wall_p
+    );
+    println!();
+
+    // --- E-conc --------------------------------------------------------------
+    println!("## E-conc (registered disclosure, non-gating) — demand concentration onto absent `(bit, role)`");
+    println!();
+    println!(
+        "_The registered failure mode, MEASURED: a cheaper writing may concentrate demand on a `(bit, role)` no pool worker holds. Such a task is COUNTED, never re-drawn (prereg §2). `PRIMARY = success_rate × mean cov_eff` is not additive over tasks, so the contribution below decomposes the **mean-quality** factor: `Δ_infeasible` is the part of the per-seed `mean cov_eff` gap that comes from POOL-INFEASIBLE tasks, and `Δ_feasible` the rest._"
+    );
+    println!();
+    println!(
+        "_**Cause separation (Amendment A5.3).** A task with no declared writing at all — `optimize` errored, or the writing failed S-sound, so it was declined-and-counted — used to be folded into the same \"not feasible\" bucket as a genuinely pool-infeasible declared demand, which could inflate the concentration rate with events that concentrated nothing. The two are now counted apart and **the rate below is the pool-infeasible one only**; the decline count is printed beside it._"
+    );
+    println!();
+    println!(
+        "| cell | pool-infeasible tasks | rate | declined tasks | mean `cov_eff` there (cell / control) | Δ_infeasible | Δ_feasible |"
+    );
+    println!(
+        "|------|----------------------:|-----:|---------------:|--------------------------------------:|-------------:|-----------:|"
+    );
+    for (label, rs) in [("wf-rw-u", &rw_u), ("wf-rw-p", &rw_p)] {
+        let mut infeasible = 0usize;
+        let mut declined = 0usize;
+        let mut total = 0usize;
+        let (mut q_cell, mut q_ctrl) = (0.0f64, 0.0f64);
+        let (mut d_inf, mut d_feas) = (0.0f64, 0.0f64);
+        for (r, c) in rs.iter().zip(asis.iter()) {
+            let n = r.quality.len().min(c.quality.len()) as f64;
+            for i in 0..r.quality.len().min(c.quality.len()) {
+                total += 1;
+                let delta = (r.quality[i] - c.quality[i]) / n;
+                match r.demand_status[i] {
+                    P9DemandStatus::PoolInfeasible => {
+                        infeasible += 1;
+                        q_cell += r.quality[i];
+                        q_ctrl += c.quality[i];
+                        d_inf += delta;
+                    }
+                    // A declined task contributes to neither concentration bucket;
+                    // its quality gap rides with the feasible remainder so the two
+                    // Δ columns still sum to the whole mean-quality gap.
+                    P9DemandStatus::Declined => {
+                        declined += 1;
+                        d_feas += delta;
+                    }
+                    P9DemandStatus::Feasible => d_feas += delta,
+                }
+            }
+        }
+        let denom = infeasible.max(1) as f64;
+        println!(
+            "| `{label}` | {infeasible} | {:.1} % | {declined} | {:.4} / {:.4} | {:+.4} | {:+.4} |",
+            100.0 * infeasible as f64 / total.max(1) as f64,
+            q_cell / denom,
+            q_ctrl / denom,
+            d_inf / n_seeds as f64,
+            d_feas / n_seeds as f64
+        );
+    }
+    println!();
+
+    // --- E-dedup -------------------------------------------------------------
+    println!("## E-dedup (registered exploratory, non-gating) — content vs writing over the corpus");
+    println!();
+    println!(
+        "_Reported as a corpus fact and a latency fact; it cannot carry the verdict (EQ3 spent this lineage's appetite for latency legs)._"
+    );
+    println!();
+    println!(
+        "- Corpus: **{}** as-written workflows ({n_seeds} seeds × {TASKS} tasks). Distinct as **written** (expression tree + pinned source word): **{}**. Distinct as **content** (`canonical_key`): **{}**. So **{}** arrivals are distinct as written but equal as content — what a content-keyed table buys over a writing-keyed one, at these draws.",
+        dedup.corpus, dedup.writings, dedup.contents, dedup.collapsed
+    );
+    let singletons = dedup.buckets.iter().filter(|&&b| b == 1).count();
+    println!(
+        "- Bucket-size distribution: largest **{}**, median **{:.1}**, **{singletons}** singleton buckets of {} (sorted by SIZE — `ContentKey` is not `Ord`, so nothing here depends on key order).",
+        dedup.buckets.first().copied().unwrap_or(0),
+        median(dedup.buckets.iter().map(|&b| b as f64).collect::<Vec<f64>>()),
+        dedup.buckets.len()
+    );
+    // The same question over a DECLARED corpus: rewriting is a normalizing pass,
+    // so the writing-vs-content gap should close after it.
+    let rw_corpus: Vec<&Workflow> = d_rw_u.iter().flat_map(|s| s.iter().map(|d| &d.writing)).collect();
+    let rw_dedup = p9_dedup_pass(&rw_corpus);
+    assert_eq!(
+        rw_dedup.biconditional_violations, 0,
+        "S-dedup must also hold on the declared corpus"
+    );
+    println!(
+        "- Same pass over the **`wf-rw-u` DECLARED** corpus ({} writings): distinct as written **{}**, distinct as content **{}**, collapsed **{}**. Rewriting is a normalizing pass, so the writing-vs-content gap is expected to close relative to the as-written corpus above; the two numbers side by side are what the leg reports.",
+        rw_dedup.corpus, rw_dedup.writings, rw_dedup.contents, rw_dedup.collapsed
+    );
+    println!(
+        "- **Latency fact:** the median `states_explored` of the confirmatory rewriting cells — {:.1} (uniform) / {:.1} (priced) — is the number of DISTINCT contents the search kept, which is exactly what `canonical_key` dedup bought inside `optimize`; a writing-keyed visited set would have revisited every re-association of each of them.",
+        median(s_rw_u.explored.clone()),
+        median(s_rw_p.explored.clone())
+    );
+    println!();
+
+    // --- E-ceil --------------------------------------------------------------
+    println!("## E-ceil (registered exploratory, non-gating) — a reference arm WITHIN the rewriting family");
+    println!();
+    println!(
+        "_NOT a supremum (the #72 A2.5 correction). `cost_of` sums per-generator weights over OCCURRENCES, so \"minimise DISTINCT `(bit, role)` demand\" — the staffing question — is not expressible as a `per_gen` at all; E-ceil therefore runs as (i) a large-fuel scarcity-priced cell and (ii) a harness-side minimum-distinct-demand search on a pinned subsample._"
+    );
+    println!();
+    // `d_ceil` / `s_ceil` were declared before the gates so S-sound could cover
+    // them at §6's stated scope (Amendment A5.3).
+    let (ceil_rs, ceil_lat) = p9_battery(&insts, &d_ceil, |inst| {
+        Box::new(p8_typed_policy(&inst.base, &oracle)) as Box<dyn CoalitionDecisionPolicy>
+    });
+    p9_table_head();
+    p9_row("wf-asis", &asis, &asis, &asis_lat);
+    p9_row("wf-rw-p", &rw_p, &asis, &rw_p_lat);
+    p9_row(
+        &format!("E-ceil (i): priced, fuel {P9_ECEIL_FUEL}"),
+        &ceil_rs,
+        &asis,
+        &ceil_lat,
+    );
+    println!();
+    let ceil_med = median(p9_primaries(&ceil_rs));
+    let reference_margin = ceil_med - asis_med;
+    let best_rw = median(p9_primaries(&rw_u)).max(median(p9_primaries(&rw_p)));
+    // A conversion fraction is only meaningful against a POSITIVE reference
+    // margin. If E-ceil does not beat the control there is no margin to convert,
+    // and a ratio of two negatives would print a confident-looking percentage
+    // that means the opposite of what it reads — so it is refused rather than
+    // formatted.
+    let converted = if reference_margin > 0.0 {
+        format!(
+            "**{:.1} %**",
+            100.0 * (best_rw - asis_med) / reference_margin
+        )
+    } else {
+        format!(
+            "**n/a** — the reference margin is not positive ({ceil_med:.4} − {asis_med:.4} = {reference_margin:+.4}), so there is no achievable margin for the confirmatory cells to have converted a fraction of. A ratio here would divide two same-signed numbers and read as a high conversion rate while describing a reference arm that does not beat the control"
+        )
+    };
+    println!(
+        "- **Conversion fraction (leg i):** `(best confirmatory cell − wf-asis) / (E-ceil − wf-asis)` = {converted}. Medians, so this is a summary contrast, not a per-seed decomposition."
+    );
+    println!(
+        "  Fuel-exhausted tasks at fuel {P9_ECEIL_FUEL}: **{}**; median `states_explored` **{:.1}**.",
+        s_ceil.fuel_exhausted,
+        median(s_ceil.explored.clone())
+    );
+    // Leg (ii): the pinned subsample.
+    let sub = &insts[..(P9_ECEIL_SEEDS as usize).min(insts.len())];
+    let mut as_written_d: Vec<f64> = Vec::new();
+    let mut rw_d: Vec<f64> = Vec::new();
+    let mut ref_d: Vec<f64> = Vec::new();
+    for (s, inst) in sub.iter().enumerate() {
+        for (t, w) in inst.written.iter().enumerate() {
+            as_written_d.push(demand(w).distinct_len() as f64);
+            rw_d.push(d_rw_u[s][t].demand.distinct_len() as f64);
+            ref_d.push(p9_eceil_min_distinct(inst, w, &rules) as f64);
+        }
+    }
+    println!(
+        "- **Leg (ii), pinned subsample (seeds {P9_SEED_START}..{}, {} tasks):** median DISTINCT `(bit, role)` demand — as written **{:.1}**, `wf-rw-u` at F = {P9_FUEL} **{:.1}**, reference **{:.1}**.",
+        P9_SEED_START + P9_ECEIL_SEEDS,
+        as_written_d.len(),
+        median(as_written_d.clone()),
+        median(rw_d.clone()),
+        median(ref_d.clone())
+    );
+    println!(
+        "  _What the reference actually searches, stated plainly: `optimize` returns only `best()` — its visited set is private — so the class it enumerates is not readable through the public API. The reference is a pinned MULTI-OBJECTIVE sweep over that class at fuel {P9_ECEIL_FUEL}: the uniform and priced optima, plus one optimum per distinct as-written step under an objective that prices THAT step at {P9_ECEIL_HEAVY} and everything else at 1 — which is how a per-generator weight can ask the search to route around a specific `(bit, role)`. The minimum over those optima is an UPPER bound on the true minimum-distinct demand, and a reference within the rewriting family; it is not a supremum on what any arm could achieve._"
+    );
+    println!();
+
+    // --- Instrumentation -----------------------------------------------------
+    println!("## Instrumentation (non-gating)");
+    println!();
+    println!(
+        "| cell | median `initial_cost` | median `best_cost` | median steps | median `states_explored` | unchanged writings | **demand moved** | idem / fusion / absorption fires |"
+    );
+    println!(
+        "|------|----------------------:|-------------------:|-------------:|-------------------------:|-------------------:|-----------------:|--------------------------------:|"
+    );
+    for (label, s) in [
+        ("wf-asis", &s_ctl),
+        ("wf-rw-u", &s_rw_u),
+        ("wf-rw-p", &s_rw_p),
+        ("wf-val-u", &s_val_u),
+        ("wf-val-p", &s_val_p),
+    ] {
+        println!(
+            "| `{label}` | {:.1} | {:.1} | {:.1} | {:.1} | {} | {} | {} / {} / {} |",
+            median(s.initial.clone()),
+            median(s.best.clone()),
+            median(s.trace_len.clone()),
+            median(s.explored.clone()),
+            s.unchanged,
+            s.demand_moved,
+            s.fired[0],
+            s.fired[1],
+            s.fired[2]
+        );
+    }
+    println!();
+    println!(
+        "- **`demand moved`** counts tasks whose declared DISTINCT `(bit, role)` demand differs from the as-written one — the only way a rewrite can change a score, since coverage is per distinct pair. Every other task in a rewriting cell scores bit-identically to `wf-asis` no matter how much cheaper its writing got. Against the fusion-eligibility bound printed in the draw section, this is the leg's whole causal budget: `wf-rw-u` **{}**/{}, `wf-rw-p` **{}**/{}.",
+        s_rw_u.demand_moved,
+        occurrences.len(),
+        s_rw_p.demand_moved,
+        occurrences.len()
+    );
+    println!();
+    let mut red_u = s_rw_u.reduction.clone();
+    red_u.sort_by(f64::total_cmp);
+    let mut red_p = s_rw_p.reduction.clone();
+    red_p.sort_by(f64::total_cmp);
+    println!(
+        "- **Distinct-demand reduction** (`as written − declared`, per task): `wf-rw-u` p25 {:.1} / median {:.1} / p75 {:.1} / max {:.1}; `wf-rw-p` p25 {:.1} / median {:.1} / p75 {:.1} / max {:.1}. A NEGATIVE value is the two-sided fusion lever working against the arm — the fused step demands a bit neither consumed step required.",
+        percentile(&red_u, 0.25),
+        percentile(&red_u, 0.5),
+        percentile(&red_u, 0.75),
+        red_u.last().copied().unwrap_or(0.0),
+        percentile(&red_p, 0.25),
+        percentile(&red_p, 0.5),
+        percentile(&red_p, 0.75),
+        red_p.last().copied().unwrap_or(0.0)
+    );
+    println!(
+        "- **The residual term** (λ = {P9_LAMBDA}, Amendment A3.1): median FULL residual `λ · Σ per_gen` at an empty coalition — the largest the penalty can be — is **{:.3}** uniform / **{:.3}** staffing-priced; it falls to zero as the coalition covers the writing. A1.4's rationale pins λ so the process term is \"a tiebreaker between otherwise close candidates rather than the dominant term\" against O(1) magnitude margins; these magnitudes plus the liveness divergence counts above are the check on that reasoning.",
+        median(val_u_terms.clone()),
+        median(val_p_terms.clone())
+    );
+    println!();
+}
+
 #[cfg(test)]
 mod part4c_tests {
     use super::*;
@@ -9346,5 +11594,337 @@ mod part4c_tests {
             stats.mixed_classes, 0,
             "ρ = δ zeroes cross-role couplings, so no class can be role-mixed"
         );
+    }
+
+    // -- Part 9 (#76, EQ5a) ---------------------------------------------------
+
+    /// Part 9 (#76): the v2w prefix is the v2t prefix VERBATIM — the workflow
+    /// shape draw is APPENDED, so pool, roles, tags, arrival orders and re-draw
+    /// bookkeeping are bit-identical to a pure-v2t draw of the same seed.
+    #[test]
+    fn v2w_prefix_matches_v2t() {
+        for seed in P9_SEED_START..P9_SEED_START + 4 {
+            let v2t = draw_typed_instance(seed, P8_ROLES);
+            for degenerate in [false, true] {
+                let v2w = p9_draw_instance(seed, degenerate);
+                assert_eq!(v2t.agents.len(), v2w.base.agents.len());
+                for (a, b) in v2t.agents.iter().zip(v2w.base.agents.iter()) {
+                    assert_eq!((a.id, a.caps, a.trust), (b.id, b.caps, b.trust));
+                }
+                assert_eq!(v2t.roles, v2w.base.roles);
+                assert_eq!(v2t.redraws, v2w.base.redraws);
+                assert_eq!(v2t.max_attempts, v2w.base.max_attempts);
+                assert_eq!(v2t.tasks.len(), v2w.base.tasks.len());
+                for (a, b) in v2t.tasks.iter().zip(v2w.base.tasks.iter()) {
+                    assert_eq!(a.required, b.required);
+                    assert_eq!(a.tags, b.tags);
+                    assert_eq!(a.order, b.order);
+                }
+                assert_eq!(v2w.written.len(), v2w.base.tasks.len());
+            }
+        }
+    }
+
+    /// Part 9 (#76): the degenerate world consumes ZERO stream draws, which is
+    /// what makes X-reduce a two-code-paths-one-world comparison. Checked by
+    /// continuing the SAME stream past the prefix: the degenerate build must
+    /// leave the generator exactly where the v2t prefix did, while the real
+    /// shape draw must move it.
+    #[test]
+    fn degenerate_shape_consumes_no_draws() {
+        for seed in P9_SEED_START..P9_SEED_START + 4 {
+            let mut a = SplitMix64::new(seed);
+            let (_, _, tasks, _, _) = draw_prefix_v2t(&mut a, P8_ROLES as u64);
+            let after_prefix = a.next_u64();
+
+            let mut b = SplitMix64::new(seed);
+            let (_, _, tasks_b, _, _) = draw_prefix_v2t(&mut b, P8_ROLES as u64);
+            for t in &tasks_b {
+                let _ = p9_degenerate_shape(t);
+            }
+            assert_eq!(
+                b.next_u64(),
+                after_prefix,
+                "the degenerate shape must consume no draws"
+            );
+
+            // And the real shape draw DOES consume draws — otherwise the check
+            // above would be vacuous.
+            let mut c = SplitMix64::new(seed);
+            let (_, _, tasks_c, _, _) = draw_prefix_v2t(&mut c, P8_ROLES as u64);
+            for t in &tasks_c {
+                let _ = p9_draw_shape(&mut c, t);
+            }
+            assert_ne!(
+                c.next_u64(),
+                after_prefix,
+                "the drawn shape must consume stream draws"
+            );
+
+            // The degenerate demand IS the v2t tagged required set.
+            let inst = p9_draw_instance(seed, true);
+            for (task, w) in tasks.iter().zip(inst.written.iter()) {
+                let d = demand(w);
+                assert_eq!(d.distinct_len(), task.required.count_ones() as usize);
+                assert_eq!(
+                    d.total(),
+                    d.distinct_len(),
+                    "no multiplicity when fan-out is 0"
+                );
+                assert_eq!(p9_required_mask(&d), task.required);
+            }
+        }
+    }
+
+    /// Part 9 (#76): the drawn world is well-formed — every diagram pins, its
+    /// demand is role-matched feasible in the pool, its distinct demand is
+    /// exactly the tagged required set, and multiplicity only ever comes from
+    /// the fan-out.
+    #[test]
+    fn v2w_shape_is_well_formed() {
+        for seed in P9_SEED_START..P9_SEED_START + 3 {
+            let inst = p9_draw_instance(seed, false);
+            for (task, w) in inst.base.tasks.iter().zip(inst.written.iter()) {
+                let d = demand(w);
+                assert_eq!(
+                    d.distinct_len(),
+                    task.required.count_ones() as usize,
+                    "the shape draw never introduces a new (bit, role)"
+                );
+                assert_eq!(p9_required_mask(&d), task.required);
+                assert!(d.total() >= d.distinct_len());
+                assert!(
+                    p9_demand_feasible(&inst, &d),
+                    "as-written demand must be role-matched feasible"
+                );
+                for s in d.distinct() {
+                    assert_eq!(usize::from(s.role.index()), task.tags[s.bit as usize]);
+                }
+            }
+        }
+    }
+
+    /// Part 9 (#76) 2-seed smoke: the whole declare → verify → score pipeline
+    /// runs end-to-end on the registered seeds, the rewriting cell is S-sound,
+    /// and the empty-rule cell reproduces the control bit-identically (the
+    /// X-reduce property at 2-seed scale). Does NOT run the 30-seed registered
+    /// battery. Valuation liveness has its own test below.
+    #[test]
+    fn part9_two_seed_smoke() {
+        let bits = u8::try_from(UNIVERSE).unwrap();
+        let roles = u8::try_from(P8_ROLES).unwrap();
+        let rules = rule_theory(bits, roles).unwrap();
+        let labels = rule_labels(bits, roles).unwrap();
+        // Amendment A3.2's widened closure: 24 idempotence + 126 fusion + 24
+        // absorption. The battery prints the theory in full, so a drift here
+        // would silently change what every rewriting cell searches over.
+        assert_eq!(rules.len(), 174);
+        assert_eq!(fusion_pairs(bits).len() * P8_ROLES, 126);
+
+        let insts: Vec<WorkflowInstance> = (P9_SEED_START..P9_SEED_START + 2)
+            .map(|s| p9_draw_instance(s, false))
+            .collect();
+        let oracle = p8_rho(0.0);
+
+        let (d_ctl, _) = p9_declare(
+            &insts,
+            &rules,
+            &labels,
+            P9Mechanism::AsWritten,
+            P9Cost::Uniform,
+            P9_FUEL,
+        );
+        let (d_rw, s_rw) = p9_declare(
+            &insts,
+            &rules,
+            &labels,
+            P9Mechanism::Rewrite,
+            P9Cost::Uniform,
+            P9_FUEL,
+        );
+        assert_eq!(s_rw.unsound, 0, "S-sound at 2-seed scale");
+        assert_eq!(s_rw.failed, 0, "no optimizer declines expected");
+        assert!(s_rw.verified > 0, "the rewriting cell must verify writings");
+
+        let (asis, lat) = p9_battery(&insts, &d_ctl, |inst| {
+            Box::new(p8_typed_policy(&inst.base, &oracle)) as Box<dyn CoalitionDecisionPolicy>
+        });
+        let (rw, _) = p9_battery(&insts, &d_rw, |inst| {
+            Box::new(p8_typed_policy(&inst.base, &oracle)) as Box<dyn CoalitionDecisionPolicy>
+        });
+        assert_eq!(asis.len(), 2);
+        assert!(!lat.is_empty(), "latencies recorded");
+        for r in asis.iter().chain(&rw) {
+            assert!(r.primary.is_finite() && (0.0..=1.0).contains(&r.primary));
+            assert!(!r.acts.is_empty(), "some join/leave decisions must have run");
+        }
+
+        // Empty rule set ⇒ the rewriting cell IS the control (X-reduce's second
+        // conjunct, at 2-seed scale).
+        let (d_empty, _) = p9_declare(
+            &insts,
+            &[],
+            &labels,
+            P9Mechanism::Rewrite,
+            P9Cost::Uniform,
+            P9_FUEL,
+        );
+        let (empty_rs, _) = p9_battery(&insts, &d_empty, |inst| {
+            Box::new(p8_typed_policy(&inst.base, &oracle)) as Box<dyn CoalitionDecisionPolicy>
+        });
+        p9_assert_identical(&empty_rs, &asis, "empty-rule rewriting cell");
+
+        // The valuation cell runs end-to-end and reports a finite, non-negative
+        // full residual per task (liveness is asserted separately).
+        let (d_val, _) = p9_declare(
+            &insts,
+            &rules,
+            &labels,
+            P9Mechanism::Valuation,
+            P9Cost::Priced,
+            P9_FUEL,
+        );
+        let run = p9_valuation_battery(&insts, &d_val, &oracle, P9_LAMBDA, P9Cost::Priced);
+        let (val, terms) = (&run.seeds, &run.terms);
+        assert_eq!(val.len(), 2);
+        assert_eq!(terms.len(), 2 * TASKS);
+        assert!(terms.iter().all(|t| t.is_finite() && *t >= 0.0));
+        assert!(
+            terms.iter().any(|&t| t > 0.0),
+            "a declared writing with steps must carry a nonzero residual at an empty coalition"
+        );
+
+        // Context arms run over the same declared writings.
+        let (mag, _) = p9_battery(&insts, &d_ctl, |_| {
+            Box::new(MagnitudePolicy::default()) as Box<dyn CoalitionDecisionPolicy>
+        });
+        assert_eq!(mag.len(), 2);
+        let (e1, _) = p9_e1_battery(&insts, &d_ctl, e1_config());
+        assert_eq!(e1.len(), 2);
+
+        // The dedup pass answers, and its biconditional holds.
+        let corpus: Vec<&Workflow> = insts.iter().flat_map(|i| i.written.iter()).collect();
+        let dedup = p9_dedup_pass(&corpus);
+        assert_eq!(dedup.biconditional_violations, 0, "S-dedup at 2-seed scale");
+        assert_eq!(dedup.corpus, 2 * TASKS);
+        assert!(dedup.contents <= dedup.writings);
+    }
+
+    /// Part 9 (#76), Amendment **A3.1**: the valuation-only arm must NOT be
+    /// bit-identical to the control.
+    ///
+    /// This is the regression the original D3b formulation would have failed
+    /// silently. `Mag(S) − λ · cost_of(writing)` with a coalition-independent
+    /// writing is a per-task CONSTANT: it cancels exactly from every join/leave
+    /// margin, so the cell reproduced `wf-asis` on acts, raw score bits, PRIMARY
+    /// and churn — every test it had passed, because it was a no-op. The
+    /// unstaffable-residual re-read depends on `S`, and this test proves the
+    /// difference is observable rather than argued.
+    #[test]
+    fn part9_valuation_is_live_a3_1() {
+        let bits = u8::try_from(UNIVERSE).unwrap();
+        let roles = u8::try_from(P8_ROLES).unwrap();
+        let rules = rule_theory(bits, roles).unwrap();
+        let labels = rule_labels(bits, roles).unwrap();
+        let oracle = p8_rho(0.0);
+        let insts: Vec<WorkflowInstance> = (P9_SEED_START..P9_SEED_START + 4)
+            .map(|s| p9_draw_instance(s, false))
+            .collect();
+
+        let (d_ctl, _) = p9_declare(
+            &insts,
+            &rules,
+            &labels,
+            P9Mechanism::AsWritten,
+            P9Cost::Uniform,
+            P9_FUEL,
+        );
+        let (asis, _) = p9_battery(&insts, &d_ctl, |inst| {
+            Box::new(p8_typed_policy(&inst.base, &oracle)) as Box<dyn CoalitionDecisionPolicy>
+        });
+
+        let mut live = false;
+        for cost in [P9Cost::Uniform, P9Cost::Priced] {
+            let (d_val, _) = p9_declare(
+                &insts,
+                &rules,
+                &labels,
+                P9Mechanism::Valuation,
+                cost,
+                P9_FUEL,
+            );
+            let run = p9_valuation_battery(&insts, &d_val, &oracle, P9_LAMBDA, cost);
+            let (_, acts, scores) = p9_divergence(&run.seeds, &asis);
+            live |= acts > 0 || scores > 0;
+        }
+        assert!(
+            live,
+            "A3.1: the valuation-only cells must diverge from the control on acts or score bits — \
+             a cell that cannot move is the inert formulation the amendment replaced"
+        );
+
+        // …and the divergence is caused by the residual, not by the wrapper:
+        // λ = 0 zeroes every correction, so the cell must collapse back onto the
+        // control exactly.
+        let (d_zero, _) = p9_declare(
+            &insts,
+            &rules,
+            &labels,
+            P9Mechanism::Valuation,
+            P9Cost::Priced,
+            P9_FUEL,
+        );
+        let zero_run = p9_valuation_battery(&insts, &d_zero, &oracle, 0.0, P9Cost::Priced);
+        assert!(zero_run.terms.iter().all(|&t| t == 0.0));
+        for (a, b) in zero_run.seeds.iter().zip(asis.iter()) {
+            assert_eq!(a.acts, b.acts, "λ = 0 must reproduce the control's acts");
+            assert_eq!(a.scores, b.scores, "λ = 0 must reproduce the control's scores");
+        }
+    }
+
+    /// Part 9 (#76): X-reduce's first conjunct at 2-seed scale — on the
+    /// degenerate world `wf-asis` reproduces the EQ4 typed arm's acts, per-seed
+    /// PRIMARY bits and churn through the FROZEN Part 8 runner.
+    #[test]
+    fn part9_x_reduce_two_seed() {
+        let labels = rule_labels(
+            u8::try_from(UNIVERSE).unwrap(),
+            u8::try_from(P8_ROLES).unwrap(),
+        )
+        .unwrap();
+        let oracle = p8_rho(0.0);
+        let deg: Vec<WorkflowInstance> = (P9_SEED_START..P9_SEED_START + 2)
+            .map(|s| p9_draw_instance(s, true))
+            .collect();
+        let (d, _) = p9_declare(
+            &deg,
+            &[],
+            &labels,
+            P9Mechanism::AsWritten,
+            P9Cost::Uniform,
+            P9_FUEL,
+        );
+        let (mine, _) = p9_battery(&deg, &d, |inst| {
+            Box::new(p8_typed_policy(&inst.base, &oracle)) as Box<dyn CoalitionDecisionPolicy>
+        });
+        let mut lat = Vec::new();
+        let reference: Vec<P8Seed> = deg
+            .iter()
+            .map(|inst| {
+                let p = p8_typed_policy(&inst.base, &oracle);
+                p8_run_seed(
+                    &P8Arm::Fixed(&p),
+                    &inst.base,
+                    P8Metric::Typed,
+                    &mut lat,
+                    &mut |_, _, _, _| {},
+                )
+            })
+            .collect();
+        for (a, b) in mine.iter().zip(reference.iter()) {
+            assert_eq!(a.acts, b.acts, "X-reduce acts");
+            assert_eq!(a.primary.to_bits(), b.primary.to_bits(), "X-reduce PRIMARY");
+            assert_eq!(a.churn, b.churn, "X-reduce churn");
+        }
     }
 }

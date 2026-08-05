@@ -1,6 +1,6 @@
 [package]
 name = "koalisi"
-version = "0.26.0"
+version = "0.27.0"
 edition = "2024"
 # 1.93 floor forced by catgraph's deep_causality_num 0.4.1 pin (unchanged at
 # the v0.8.0 re-pin — catgraph holds num =0.4.1 there; catgraph v0.9.0 removes
@@ -48,6 +48,15 @@ nalgebra = { version = "0.35", optional = true }
 # catgraph's enriched-category magnitude). HTTPS since catgraph went public;
 # tag in lockstep with `catgraph-applied` above.
 catgraph-magnitude = { git = "https://github.com/sustia-llc/catgraph", tag = "v0.8.0", optional = true }
+
+# Optional: the colored-syntax layer over catgraph-applied's free-prop term
+# engine — the `FrobeniusOr` spider family and the textual presentation surface.
+# Consumed by the EQ5a process-structured task surface (`src/process/`, feature
+# `process`, issue #76). Tag in LOCKSTEP with the two catgraph deps above (one
+# repo, one checkout — a tag split duplicates the catgraph/catgraph-applied
+# compile units). Feature-off builds pull NEITHER this nor its transitive
+# `deep_causality_haft`.
+catgraph-syntax = { git = "https://github.com/sustia-llc/catgraph", tag = "v0.8.0", optional = true }
 
 # Optional: durable coalition decision messaging (two-tier SurrealDB bus:
 # CHANGEFEED log + LIVE wake-up + cursor catch-up; at-least-once,
@@ -107,6 +116,13 @@ persistence = ["dep:ciborium", "dep:sha2"]
 # Domain-neutral remote coalition-event gateway over raw libp2p
 # `request-response` (off by default, issue #38).
 remote = ["dep:libp2p"]
+# EQ5a (#76, prereg `docs/prereg-K4-eq5a-process-structured.md` D6/D8):
+# process-structured coalition tasks. Workflows as colored string diagrams over
+# `FrobeniusOr<Step>`, demand extraction, the pinned rewrite theory (Amendment
+# 1), the staffing price, and the bounded convex-DPO `optimize` hook. Implies
+# `magnitude` — the arm the registration's control staffs a workflow with — and
+# gates the `catgraph-syntax` dependency.
+process = ["magnitude", "dep:catgraph-syntax"]
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "test-util"] }
@@ -114,7 +130,10 @@ futures = "0.3"
 
 [[example]]
 name = "strategy_comparison"
-required-features = ["decision", "magnitude"]
+# `process` joins the list at EQ5a (#76 Stage 2): Part 9 staffs colored string
+# diagrams through `koalisi::process`. CONSEQUENCE: the example — and the frozen
+# Parts 1–8 battery with it — now builds only with all THREE features on.
+required-features = ["decision", "magnitude", "process"]
 
 [[example]]
 name = "durable_decisions"

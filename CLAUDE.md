@@ -12,6 +12,18 @@ When you bump the project's behaviour, also:
   for PR releases) — per-release tagging resumed 2026-07-27, owner call;
   v0.7.0–v0.15.0 were backfilled onto their merges the same day
 
+**Review protocol (standing, owner 2026-08-05): EVERY PR gets the
+reviewer pass before tag/merge — re-pin and deps+docs slices included.**
+Every finding is applied or owner-adjudicated, including ones below the
+review skill's confidence bar. The former carve-out for re-pins ("the
+re-pin protocol's own gates are the review", PR #62 precedent) is
+REVOKED: the first re-pin reviewed under it (PR #77) produced three real
+findings, one of them a miss of the checklist directly above — and
+suites, clippy and a byte-identical battery structurally cannot detect
+stale docs, which is the failure mode a deps-only PR carries most often.
+Reviewer output is evidence, not verdict: check each claim against the
+diff (a PR #77 panel called the lockfile delta clean when it was not).
+
 ## Mission (one paragraph)
 
 **koalisi** — a reference implementation of agentic coalitions in Rust.
@@ -56,6 +68,37 @@ forex domain since removed).
 
 ### Done
 
+- **EQ5a process-structured RUN — v0.27.0 (2026-08-05, #76):
+  `FALSIFIED (process structure)`**. Full discipline (owner design-lock
+  D1–D11 on #76 BEFORE prereg; prereg 185a9a4 BEFORE implementation;
+  **five pre-run amendments**; 3-lens review BEFORE the run — 0 blocking
+  / 4 important / 3 minor, ALL applied). Official run seeds 270..300:
+  no H-P cell clears the family-wise bar (≥1.4×, ≥21/30) — `wf-rw-u`
+  0.2104 (1.06×, 17/30), `wf-rw-p` 0.2112 (1.06×, 19/30),
+  **`wf-val-u`/`wf-val-p` 0.2484 (1.25×, 30/30)**, control 0.1989.
+  Gates X-reduce / S-sound (6600 writings, 0 unsound) / S-dedup (179700
+  pairs, 0 disagreements) / X-battery all PASS; determinism confirmed
+  (official run reproduces the dry run, zero non-latency diffs).
+  **Mechanism inverts the registration's emphasis: the converting signal
+  is VALUATION, not rewriting** — the valuation cells change no demand
+  (`demand_moved` 0/600) yet post the strongest paired consistency since
+  v5, by pricing the unstaffable residual (the first mechanism here to
+  put occurrence multiplicity + step scarcity into a decision; magnitude
+  sees only the OR-mask). The rewriting arm converted **100 %** of its
+  achievable margin (E-ceil identical 0.2112) and the fuel sweep is flat
+  ⇒ low ceiling, not weak search. Two-sided lever bit: declared demand
+  pool-infeasible on 16.7 %/16.0 % of tasks. Dedup bought nothing (492
+  distinct written = 492 distinct content, 0 collapsed). Library:
+  `src/process/` behind feature `process` (+ `catgraph-syntax v0.8.0`,
+  three catgraph deps in lockstep now). Report
+  `docs/ab-report-K4-eq5a-process-structured.md` (15-item ledger). See
+  **gotcha 30**. Suites: `process` 152 / `decision,magnitude,process`
+  208; all others unchanged. Seeds consumed: 270..300; 90..120 + 150..180
+  still reserved. **EQ5b** (typed two-engine contest,
+  `GroupAgent`-over-e1) split to
+  [#78](https://github.com/sustia-llc/koalisi/issues/78) — its build gate
+  is discharged (`GroupAgent::with_slots` + `Aggregator` live at
+  `aif-v0.12.0`; no tira release needed).
 - **catgraph re-pin `v0.7.0` ×2 → `v0.8.0` — v0.26.0 (2026-08-05)**: the
   EQ5a pin-first step — the process-structured registration
   ([#76](https://github.com/sustia-llc/koalisi/issues/76)) must be born
@@ -742,6 +785,8 @@ forex domain since removed).
   | `--features persistence` | 126 | `cargo test --features persistence` |
   | `--features persistence,magnitude` | 156 (incl. the #18/#30 replay parity gate) | `cargo test --features persistence,magnitude` |
   | `--features remote` | 112 (gateway buffer + loopback round-trip) | `cargo test --features remote` |
+  | `--features process` | 152 (EQ5a library surface, #76) | `cargo test --features process` |
+  | `--features decision,magnitude,process` | 208 (the Part 9 battery's build) | `cargo test --features decision,magnitude,process` |
   | `--features durable` | +1 container-backed restart test; needs Docker | `cargo test --features durable` |
 
   (All non-remote suites are the pre-v0.25.0 baselines +3 — the
@@ -787,6 +832,14 @@ koalisi/
 │   │   ├── aif_policy.rs                   AifDecisionPolicy + EfeValueCalculator (feature `decision`)
 │   │   ├── reliability_value.rs            ReliabilityCoverage (#57, v0.16.0): reliability-weighted coverage ValueCalculator from the persistent world-model snapshot (feature `decision`; gotcha 24)
 │   │   └── magnitude_policy.rs             MagnitudePolicy + MagnitudeValueCalculator + CouplingModel + CoalitionEvaluator cache (K6) (feature `magnitude`); relevant_masks/magnitude_or_zero pub(crate) for #18
+│   ├── process/                            EQ5a (#76, v0.27.0): process-structured tasks (feature `process`; gotcha 30)
+│   │   ├── mod.rs                          re-exports + the four things a caller must know
+│   │   ├── signature.rs                    Role (Color) + Step { bit, role } : r → r + Workflow = ColoredExpr<FrobeniusOr<Step>>
+│   │   ├── demand.rs                       Demand + demand(): multiset over User occurrences, distinct set (spiders contribute none)
+│   │   ├── theory.rs                       rule_theory() — the 3 schemas closed over (bit, role), 174 instances; Schema/LabelledRule/fusion_pairs
+│   │   ├── cost.rs                         uniform_cost + StaffingTable + staffing_price (Amendment A1.3)
+│   │   ├── rewrite.rs                      optimize_workflow + verify_optimization (replay + content_eq — the S-sound helper)
+│   │   └── errors.rs                       ProcessError
 │   ├── ingest/                             K5 (#8): domain-neutral ingestion layer (always compiled, no new deps)
 │   │   ├── mod.rs                          re-exports
 │   │   ├── sample.rs                       Sample trait (Key routing + timestamp_ms + View)
@@ -844,7 +897,9 @@ koalisi/
 │   ├── prereg-K4-eq3-latency-rematch.md    #69 EQ3 pre-registration (+ pre-run Amendment 1: L2 behind toggle, H-par′, skeletal route; result appended)
 │   ├── ab-report-K4-eq3-latency-rematch.md #69 run — FALSIFIED (latency re-match); empty-band CONFIRMED; L3 ζ-asymmetry ceiling; 10-item ledger (gotcha 27)
 │   ├── prereg-K4-eq4-typed-roles.md        #72 EQ4 pre-registration (+ pre-run Amendments 1–2: typed Scope-A, E-ρq-inv cell, E-T3 counters; result appended)
-│   └── ab-report-K4-eq4-typed-roles.md     #72 run — VALIDATED (typed roles), first since v5; 43.5% conversion; E-ρq anti-alignment + inverse cell; 15-item ledger (gotcha 28)
+│   ├── ab-report-K4-eq4-typed-roles.md     #72 run — VALIDATED (typed roles), first since v5; 43.5% conversion; E-ρq anti-alignment + inverse cell; 15-item ledger (gotcha 28)
+│   ├── prereg-K4-eq5a-process-structured.md #76 EQ5a pre-registration (+ FIVE pre-run amendments: pinned constants, erratum, two inert-leg fixes, the 3-lens review)
+│   └── ab-report-K4-eq5a-process-structured.md #76 run — FALSIFIED (process structure); valuation converts where rewriting does not; 100% of a low ceiling; 15-item ledger (gotcha 30)
 └── tests/
     ├── topology_test.rs                    12 tests
     ├── algorithms_test.rs                  18 tests (incl. 3 feedback-loop/seeding tests, #41)
@@ -1369,6 +1424,47 @@ These cost time during the build; future-me should not relearn them.
       behaviour on the same swarm (`/koalisi/topology-events/1`, own
       schema version), NOT new `EventRequest` variants.
 
+30. **EQ5a process contracts (#76, v0.27.0) — rely on these.**
+    - **Multiplicity prices a process; it does not add coverage
+      demand.** Coverage is per DISTINCT `(bit, role)`, so idempotence
+      and spider-absorption rules change occurrence count only and are
+      **staffing-invisible by construction** — 48 of the theory's 174
+      instances cannot move any decision. Only a **fusion** rule (two
+      distinct steps → one) can. Any future process arm must check this
+      first: an idempotence-only theory is inert, and the inertness is
+      structural, not statistical.
+    - **A fusion target inside the consumed pair rigs the leg.** If
+      `b'' ∈ {b, b'}` every application strictly shrinks distinct demand
+      and the rewriting arm wins by construction — the mirror image of
+      the inertness trap. `rule_theory` refuses to build such a
+      configuration; don't "simplify" that guard away.
+    - **Bit 4 is a permanent fusion void** at `bits = 8`:
+      `(b + b' + 4) mod 8` lands on a consumed bit whenever either
+      operand is 4, so bit 4 appears in no fusion instance and can never
+      be consumed. Wherever it sits between two same-role fusable steps
+      it blocks them from ever becoming adjacent. **Eligibility counts
+      are therefore a LOOSE upper bound** — power claims must cite the
+      measured `demand_moved`, never eligibility.
+    - **Soundness is theory-relative.** BGKSZ Thm 5.6 certifies the
+      optimizer stayed inside the rules it was given; it certifies
+      NOTHING about whether those rules preserve task semantics, and
+      koalisi's rules are hand-authored per experiment. Never write "the
+      rewritten writing does the same job" — the sameness is stipulated,
+      not validated (the gotcha-24 discipline, second instance).
+    - **A cost term that is constant in the coalition CANCELS.** The
+      original valuation-only score `Mag(S) − λ·cost(writing)` was
+      algebraically inert because the writing does not depend on `S`.
+      Any score-space process lever must be checked for this before it
+      is registered; the fix here was to price the **unstaffable
+      residual**, which does depend on `S`.
+    - **A decline is indistinguishable from a zero margin at the
+      `Decision` seam** — the library returns `{ act: false, score: 0.0 }`
+      for both, and exact-zero margins are a LARGE population (EQ3: ~43 %
+      knife-edge). Never infer a decline from the score; detect the
+      evaluation failure independently (Part 9 probes `relevant_masks` +
+      `magnitude_at_t`). Residual: that probe is untyped where a typed
+      arm's couplings are ρ-modulated — no typed probe exists upstream.
+
 ## Reproducers
 
 All assume `cwd = koalisi/`.
@@ -1396,6 +1492,13 @@ timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-tar
 # === with remote feature (#38 gateway, 112 tests) ===
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features remote
 timeout 60s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features remote --example remote_coalition_consumer
+
+# === with process feature (EQ5a #76, 152 tests) ===
+timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features process
+timeout 300s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision,magnitude,process   # 208
+# NOTE: strategy_comparison now requires all THREE features (Part 9), and the
+# battery run takes ~21 min — NO timeout wrapper on battery runs (run protocol).
+cargo run --release --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision,magnitude,process --example strategy_comparison
 
 # === with durable feature (needs Docker; container-backed restart test) ===
 timeout 300s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features durable
