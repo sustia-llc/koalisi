@@ -798,6 +798,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "catgraph-syntax"
+version = "0.8.0"
+source = "git+https://github.com/sustia-llc/catgraph?tag=v0.8.0#5ee51f3d112483fbe8a93c68817cba0e85fb38a0"
+dependencies = [
+ "catgraph",
+ "catgraph-applied",
+ "deep_causality_haft",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "cbor4ii"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1255,6 +1266,24 @@ checksum = "ccc2776f0c61eca1ca32528f85548abd1a4be8fb53d1b21c013e4f18da1e7090"
 dependencies = [
  "data-encoding",
  "syn 2.0.118",
+]
+
+[[package]]
+name = "deep_causality_algebra"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "de1f314e4c7f35b7b5f1efddad90514f46e0b28b4880740c86164d12e9211f8d"
+dependencies = [
+ "deep_causality_num",
+]
+
+[[package]]
+name = "deep_causality_haft"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "61c8dc9b96a2a6df63fc4125fda6d0fdd56b2ee3ccfeead81d6b0d85db3a1c61"
+dependencies = [
+ "deep_causality_algebra",
 ]
 
 [[package]]
@@ -2875,6 +2904,7 @@ dependencies = [
  "anyhow",
  "catgraph-applied",
  "catgraph-magnitude",
+ "catgraph-syntax",
  "ciborium",
  "config",
  "futures",

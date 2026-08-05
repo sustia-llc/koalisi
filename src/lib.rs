@@ -15,6 +15,9 @@
 //!   available), behind feature `decision` an Active Inference
 //!   expected-free-energy policy, and behind feature `magnitude` its categorical
 //!   A/B mirror scoring coalitions by enriched-category magnitude.
+//! - [`process`] *(feature `process`)* — process-structured coalition tasks:
+//!   workflows as colored string diagrams, `(bit, role)` demand extraction, the
+//!   pinned rewrite theory, and the bounded convex-DPO optimize hook (EQ5a).
 //! - [`llm`] — Phase 5/6 LLM provider stub (real backends land later).
 //! - [`subsystems`] — the [`CoalitionService`](subsystems::coalition_actor::CoalitionService)
 //!   policy-gated membership seam (plus, behind feature `durable`, an optional
@@ -32,6 +35,8 @@ pub mod ingest;
 pub mod llm;
 #[cfg(feature = "persistence")]
 pub mod persistence;
+#[cfg(feature = "process")]
+pub mod process;
 pub mod topology;
 
 pub mod subsystems {

@@ -323,3 +323,40 @@ or gate changes.
   fan-out probability is **0.25** per same-role adjacent pair, drawn off
   the appended stream. The degenerate world (X-reduce) sets fan-out to 0
   and consumes zero stream draws, per §2.
+
+## Amendment 2 (pre-run, 2026-08-05 — posted to #76 BEFORE the official run)
+
+Stage-1 implementation surfaced four items: one genuine contradiction
+inside this document, one harmless generalisation, and two upstream
+behaviours worth stating before the harness is written. No bar, seed,
+leg, or gate changes.
+
+- **A2.1 — §4 "3–5 oriented rules" is an ERRATUM; the schema closure
+  governs.** §4 was written before Amendment 1 replaced hand-authored
+  rules with three *schemas* closed over the `(bit, role)` index set.
+  At the registered `bits = 8, roles = 3` that closure is **51 rule
+  instances** (24 idempotence + 3 fusion + 24 spider absorption), not
+  3–5. The count "3–5" refers to **schemas**, and A1.1 is the binding
+  text; §4's numeral is void (the #72 A2.1 precedent, where an erroneous
+  gloss was voided in favour of the named frozen anchor). Every one of
+  the 51 instances constructs through `RewriteRule::new` — no schema
+  instance is rejected for parallelism or mono-interface, so nothing is
+  silently dropped from the theory.
+- **A2.2 — the fusion modulus follows `bits`, not a literal 8**, i.e.
+  `b3(r) = (2r + 4) mod bits`. Identical to A1.1 at the registered
+  `bits = 8` (`r = 0 → 4`, `r = 1 → 6`, `r = 2 → 0`, pinned by a test).
+  The theory builder additionally **refuses** any `(bits, roles)` where
+  `2·roles > bits` or `b3 ∈ {b1, b2}` — a configuration in which the
+  fusion lever would become one-sided is now unconstructible rather than
+  merely unintended (A1.1's rationale, enforced).
+- **A2.3 — `Free::compose` checks widths, not colors.** A same-width
+  wrong-color junction (`s_{b,r0} ; s_{b,r1}`) composes cleanly and is
+  rejected only at `ColoredExpr::new`. The shape draw must therefore pin
+  every diagram through `ColoredExpr::new` and treat that pin as the
+  color gate; a diagram that is never pinned is not role-checked at all.
+- **A2.4 — trace tampering is largely unreachable from outside catgraph**
+  (`RewriteStep` has no public constructor), so S-sound's negative
+  direction is exercised by the reachable tampers — empty rules slice,
+  mismatched `start`, reordered rules — rather than a forged step. The
+  gate's positive direction (`replay` + `content_eq` on every declared
+  writing, every task, every seed) is unchanged and remains mandatory.

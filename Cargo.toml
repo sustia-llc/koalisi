@@ -49,6 +49,15 @@ nalgebra = { version = "0.35", optional = true }
 # tag in lockstep with `catgraph-applied` above.
 catgraph-magnitude = { git = "https://github.com/sustia-llc/catgraph", tag = "v0.8.0", optional = true }
 
+# Optional: the colored-syntax layer over catgraph-applied's free-prop term
+# engine — the `FrobeniusOr` spider family and the textual presentation surface.
+# Consumed by the EQ5a process-structured task surface (`src/process/`, feature
+# `process`, issue #76). Tag in LOCKSTEP with the two catgraph deps above (one
+# repo, one checkout — a tag split duplicates the catgraph/catgraph-applied
+# compile units). Feature-off builds pull NEITHER this nor its transitive
+# `deep_causality_haft`.
+catgraph-syntax = { git = "https://github.com/sustia-llc/catgraph", tag = "v0.8.0", optional = true }
+
 # Optional: durable coalition decision messaging (two-tier SurrealDB bus:
 # CHANGEFEED log + LIVE wake-up + cursor catch-up; at-least-once,
 # restart-durable). Enabled via `--features durable`. Feature-off builds pull
@@ -107,6 +116,13 @@ persistence = ["dep:ciborium", "dep:sha2"]
 # Domain-neutral remote coalition-event gateway over raw libp2p
 # `request-response` (off by default, issue #38).
 remote = ["dep:libp2p"]
+# EQ5a (#76, prereg `docs/prereg-K4-eq5a-process-structured.md` D6/D8):
+# process-structured coalition tasks. Workflows as colored string diagrams over
+# `FrobeniusOr<Step>`, demand extraction, the pinned rewrite theory (Amendment
+# 1), the staffing price, and the bounded convex-DPO `optimize` hook. Implies
+# `magnitude` — the arm the registration's control staffs a workflow with — and
+# gates the `catgraph-syntax` dependency.
+process = ["magnitude", "dep:catgraph-syntax"]
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "test-util"] }
