@@ -182,9 +182,21 @@ mod tests {
 
     #[test]
     fn fusion_moves_distinct_demand_to_a_bit_outside_the_consumed_pair() {
-        // Role 1: b1 = 2, b2 = 3, b3 = (2 + 4) mod 8 = 6.
+        // Amendment A3.2: b'' = (b + b' + 4) mod bits, here (2 + 3 + 4) mod 8 = 1.
+        // Read off the theory's own pair set rather than restated, so the test
+        // cannot drift from the schema it is checking.
         let role = Role::new(1);
-        let (b1, b2, b3) = (Step::new(2, role), Step::new(3, role), Step::new(6, role));
+        let target = super::super::theory::fusion_pairs(BITS)
+            .into_iter()
+            .find(|&(first, second, _)| (first, second) == (2, 3))
+            .expect("the (2, 3) ordered pair survives the two-sidedness skip")
+            .2;
+        assert_eq!(target, 1);
+        let (b1, b2, b3) = (
+            Step::new(2, role),
+            Step::new(3, role),
+            Step::new(target, role),
+        );
         let rules = rule_theory(BITS, ROLES).unwrap();
 
         let start = pin(role, chain(vec![step_expr(b1), step_expr(b2)]).unwrap());

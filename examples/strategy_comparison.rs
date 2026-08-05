@@ -100,8 +100,8 @@ use catgraph_applied::prop::{Free, PropExpr};
 use catgraph_syntax::frobenius::FrobeniusOr;
 use koalisi::process::{
     Demand, LabelledRule, Role, Schema, StaffingTable, Step, Workflow, WorkflowGen, chain,
-    content_matches, demand, optimize_workflow, rule_labels, rule_theory, spider_expr,
-    staffing_price, step_expr, uniform_cost, verify_optimization, workflow_cost,
+    content_matches, demand, fusion_pairs, optimize_workflow, rule_labels, rule_theory,
+    spider_expr, staffing_price, step_expr, uniform_cost, verify_optimization, workflow_cost,
 };
 use koalisi::algorithms::{
     AgentCapabilities, CoalitionStructure, FeedbackCalculator, FeedbackStore, PopulationConfig,
@@ -8118,7 +8118,9 @@ fn part8_eq4_typed_roles() {
 // Governed by `docs/prereg-K4-eq5a-process-structured.md` (registered BEFORE
 // this code; owner design-lock D1–D11 on #76, Amendment 1 pinning the rule
 // theory / fuel / staffing price / λ / draw parameters, Amendment 2 voiding
-// §4's "3–5 rules" numeral in favour of the 51-instance schema closure).
+// §4's "3–5 rules" numeral in favour of the schema closure, Amendment 3
+// re-reading valuation-only as the unstaffable residual (A3.1) and widening the
+// fusion schema to every same-role ordered pair — 174 instances (A3.2)).
 //
 // The world is the **v2w** regime: the Part 8 `v2t` prefix VERBATIM — so the
 // prefix of the stream stays bit-identical to a pure-v2t draw of the same seed
@@ -8176,28 +8178,45 @@ struct WorkflowInstance {
     table: StaffingTable,
 }
 
-/// Whether the pinned FUSION schema can match this task at all.
+/// Whether the pinned FUSION schema can match this task at all — the WIDENED
+/// schema of prereg Amendment A3.2.
 ///
-/// Fusion at role `r` rewrites `s_{2r,r} ; s_{2r+1,r}`, so it needs some role `r`
-/// whose tagged required bits contain BOTH `2r` and `2r+1`. Those two bits are
-/// consecutive integers, so in the ascending-bit chain nothing can sit between
-/// them — eligibility is exactly this predicate, with no shape dependence.
+/// Fusion is instantiated for every role and every ordered pair of distinct bits
+/// `(b, b')` whose target `b'' = (b + b' + 4) mod bits` is neither of them, so a
+/// task is eligible iff some role's tagged required bits contain both members of
+/// one surviving pair. The pair set is read off the library's own
+/// [`fusion_pairs`] rather than re-derived here: a disclosure that restated the
+/// formula could drift from the theory it is reporting on.
 ///
 /// Why it is worth counting: coverage is per DISTINCT `(bit, role)`, and
 /// idempotence and spider absorption change only OCCURRENCE count. Fusion is
 /// therefore the ONLY schema that can move a staffing decision, and this
 /// predicate is the structural ceiling on how many tasks the confirmatory leg can
-/// possibly act on.
-fn p9_fusion_eligible(task: &TypedTask) -> bool {
+/// possibly act on. It is a NECESSARY condition, not a sufficient one — the two
+/// steps must also become adjacent in the diagram for the rule to match convexly
+/// (a fan-out between them has to be absorbed first).
+fn p9_fusion_eligible(pairs: &[(u8, u8, u8)], task: &TypedTask) -> bool {
+    let tagged = |bit: u8, role: usize| {
+        let b = usize::from(bit);
+        b < UNIVERSE && task.required & (1u32 << b) != 0 && task.tags[b] == role
+    };
     (0..P8_ROLES).any(|r| {
-        let (b1, b2) = (2 * r, 2 * r + 1);
-        b2 < UNIVERSE
-            && task.required & (1u32 << b1) != 0
-            && task.required & (1u32 << b2) != 0
-            && task.tags[b1] == r
-            && task.tags[b2] == r
+        pairs
+            .iter()
+            .any(|&(first, second, _)| tagged(first, r) && tagged(second, r))
     })
 }
+
+/// The NARROW schema's eligibility, as measured at Stage 2 and quoted by prereg
+/// Amendment A3.2: **43 of 600 tasks (7.2 %)** on this seed block under
+/// Amendment 1's one-designated-pair-per-role fusion.
+///
+/// Hard-coded as a RECORDED PRIOR MEASUREMENT — the narrow schema no longer
+/// exists in the theory, so the run cannot re-measure it; A3.2 makes the
+/// comparison a mandatory report line because it is the evidence that the
+/// confirmatory leg is now powered.
+const P9_NARROW_ELIGIBLE_PRIOR: usize = 43;
+const P9_NARROW_ELIGIBLE_TOTAL_PRIOR: usize = 600;
 
 /// The `(bit, role)` steps of a task, in ascending bit order.
 ///
@@ -8261,7 +8280,7 @@ fn p9_pin(legs: Vec<(Role, PropExpr<WorkflowGen>)>) -> Workflow {
 /// `δ_r ; (s ⊗ s) ; μ_r` is EXACTLY the left-hand side of the pinned
 /// spider-absorption schema (Amendment A1.1 rule 3). A generic fan-out feeding
 /// two *different* same-role successors would leave that schema dead on drawn
-/// traffic — 24 of the theory's 51 instances would never match anything, and the
+/// traffic — 24 of the theory's 174 instances would never match anything, and the
 /// dependency they justify would be decorative. This is a draw-shape choice the
 /// registration did not spell out; it is made so the registered schema is
 /// reachable, and it is disclosed with the run.
@@ -8417,10 +8436,12 @@ enum P9Mechanism {
 
 /// What one arm declares for one task.
 ///
-/// Per-task optimizer telemetry (`initial_cost`, trace length, `states_explored`,
-/// `fuel_exhausted`, schema fires) is aggregated into [`P9DeclareStats`] as the
-/// writings are declared, so it is not duplicated here; `best_cost` stays because
-/// the valuation term is a function of it.
+/// Per-task optimizer telemetry (`initial_cost`, `best_cost`, trace length,
+/// `states_explored`, `fuel_exhausted`, schema fires) is aggregated into
+/// [`P9DeclareStats`] as the writings are declared, so none of it is duplicated
+/// here. Since Amendment A3.1 the valuation term is a function of the DEMAND and
+/// the coalition rather than of a per-task cost constant, so the cost no longer
+/// needs carrying per declaration either.
 ///
 /// Every writing that is not the as-written one has ALREADY been `replay`-verified
 /// and `content_eq`-checked by the time it lands in this struct (prereg §4
@@ -8434,8 +8455,6 @@ struct P9Declared {
     demand: Demand,
     /// The OR-mask the policy is handed.
     required: u32,
-    /// Cost of this writing under the cell's `per_gen`.
-    best_cost: u64,
     /// The optimizer rejected the task. **Decline-and-count** (prereg §4
     /// placement): the task forms no coalition and scores zero, never a silent
     /// as-written fallback.
@@ -8517,7 +8536,6 @@ fn p9_declare(
                             required: p9_required_mask(&d),
                             writing: written.clone(),
                             demand: d,
-                            best_cost: price,
                             failed: false,
                         }
                     }
@@ -8540,7 +8558,6 @@ fn p9_declare(
                                 required: p9_required_mask(&d),
                                 writing: written.clone(),
                                 demand: d,
-                                best_cost: 0,
                                 failed: true,
                             };
                         };
@@ -8557,7 +8574,6 @@ fn p9_declare(
                                 required: p9_required_mask(&d),
                                 writing: written.clone(),
                                 demand: d,
-                                best_cost: 0,
                                 failed: true,
                             };
                         }
@@ -8590,7 +8606,6 @@ fn p9_declare(
                             required: p9_required_mask(&d),
                             writing: best.clone(),
                             demand: d,
-                            best_cost: outcome.best_cost(),
                             failed: false,
                         }
                     }
@@ -8605,41 +8620,173 @@ fn p9_declare(
 // Arms and the scorer.
 // ---------------------------------------------------------------------------
 
-/// The valuation-only arm (prereg §4 D3b), implemented literally.
+/// The valuation-only arm (prereg §4 D3b as **re-read by Amendment A3.1**): the
+/// unstaffable residual.
 ///
-/// The registration fixes `value(S) = Mag(S) − λ · cost_of(writing, per_gen)`
-/// **and** that valuation-only leaves the declared writing unchanged. `writing`
-/// therefore does not depend on `S`: the term enters `value(with)` and
-/// `value(without)` identically and cancels EXACTLY from every margin, in exact
-/// arithmetic and in IEEE alike. This wrapper is that reading spelled out — it
-/// forwards the decision and carries the term only as a reported quantity, and
-/// the run ASSERTS the resulting bit-identity against the control rather than
-/// assuming it. See the finding printed with the H-P table.
+/// ```text
+/// value(S) = Mag(S) − λ · Σ per_gen(g)   over generator occurrences g of the
+///                          declared writing whose (bit, role) is NOT covered by S
+/// ```
+///
+/// # Why the re-read exists
+///
+/// §4 D3b originally scored `Mag(S) − λ · cost_of(writing, per_gen)` while also
+/// fixing the declared writing to be independent of the coalition. That term is a
+/// per-task CONSTANT, so it cancelled exactly from every join/leave margin and
+/// both valuation cells measured bit-identical to the control at every registered
+/// λ. Amendment A3.1 prices the residual instead: the penalty depends on `S`, so
+/// admitting an agent that covers previously-unstaffable steps improves the score
+/// by `λ` times those steps' price.
+///
+/// # Why it is not a rescaling of the magnitude signal
+///
+/// The penalty is weighted by `per_gen`, so **occurrence multiplicity and step
+/// scarcity enter a decision for the first time** — neither is visible to
+/// magnitude, which sees only the OR-mask of distinct demand. Demand and the
+/// declared writing are unchanged; this is still valuation-only, not rewriting.
+///
+/// # Spiders
+///
+/// `μ`/`η`/`δ`/`ε` occurrences are **excluded from the residual**. They are
+/// priced by `cost_of` (they are hyperedges like any other), but they name no
+/// `(bit, role)`, so "uncovered" is not defined for them and no coalition could
+/// ever discharge them. Counting them would add a constant to every side of every
+/// margin — exactly the cancelling term A3.1 removed.
 struct P9ValuationPolicy {
     inner: MagnitudePolicy,
-    /// `λ · cost_of(the declared writing, per_gen)` for this task. Reported in
-    /// the instrumentation section; never differenced against anything, because
-    /// the registration leaves nothing for it to be differenced against.
-    term: f64,
+    /// The coefficient λ (Amendment A1.4, pinned at [`P9_LAMBDA`]).
+    lambda: f64,
+    /// One entry per step OCCURRENCE of the declared writing, with its `per_gen`
+    /// price under the cell's cost model. Multiplicity is deliberately NOT
+    /// collapsed: two occurrences of an unstaffable step are twice the penalty.
+    residual: Vec<(Step, u64)>,
+    /// Pool worker id → role index (the v2t draw's map, indexed by agent id).
+    /// Coverage is role-MATCHED, so the wrapper needs the same map the typed
+    /// policy carries. Owned rather than borrowed because a
+    /// `Box<dyn CoalitionDecisionPolicy>` is `'static`; the pool is ≤ 16 workers,
+    /// so the per-task clone is noise next to one magnitude evaluation.
+    roles: Vec<u8>,
+}
+
+impl P9ValuationPolicy {
+    /// The `(role, capabilities)` of one participant, or `None` when the harness
+    /// has no role for it — the same condition the library declines on, so the
+    /// wrapper forwards the library's decision rather than inventing one.
+    fn staff_of(&self, agent: &dyn AgentCapabilities) -> Option<(u8, u32)> {
+        Some((
+            *self.roles.get(agent.agent_id())?,
+            agent.capabilities(),
+        ))
+    }
+
+    fn staff(&self, members: &[&dyn AgentCapabilities]) -> Option<Vec<(u8, u32)>> {
+        members.iter().map(|a| self.staff_of(*a)).collect()
+    }
+
+    /// `Σ per_gen(g)` over residual occurrences no member of `staff` can perform.
+    fn uncovered(&self, staff: &[(u8, u32)]) -> u64 {
+        self.residual
+            .iter()
+            .filter(|&&(step, _)| !p9_step_staffed(staff, step))
+            .map(|&(_, price)| price)
+            .sum()
+    }
+
+    /// The full residual at an EMPTY coalition — `λ ·` the price of the whole
+    /// declared writing's step occurrences, i.e. the largest the term can be.
+    /// Reported in the instrumentation section.
+    fn full_term(&self) -> f64 {
+        self.lambda * self.uncovered(&[]) as f64
+    }
+
+    /// Fold a non-negative residual correction into a base decision.
+    ///
+    /// A **zero** correction forwards the base decision VERBATIM, which is not
+    /// merely an optimization: the library signals a decline (upstream error,
+    /// non-finite margin, missing role) as `Decision { act: false, score: 0.0 }`,
+    /// indistinguishable at this seam from a legitimate zero margin. Forwarding
+    /// on zero keeps every decline exactly as the library made it. A decline
+    /// coinciding with a NONZERO correction would still be read as a zero margin
+    /// — an unavoidable ambiguity of the `Decision` surface, bounded here by the
+    /// harness asserting full role-map coverage (`p8_typed_policy`), which is the
+    /// only decline reachable on this world short of an upstream failure that
+    /// would equally break the control arm.
+    fn fold(base: Decision, correction: f64, act: impl Fn(f64) -> bool) -> Decision {
+        if !base.score.is_finite() || correction == 0.0 {
+            return base;
+        }
+        let score = base.score + correction;
+        Decision {
+            act: act(score),
+            score,
+        }
+    }
+}
+
+/// Whether any member of `staff` can perform `step` — role-matched, the same
+/// question [`p9_step_covered`] asks of a member index list.
+fn p9_step_staffed(staff: &[(u8, u32)], step: Step) -> bool {
+    step.capability_mask().is_some_and(|mask| {
+        staff
+            .iter()
+            .any(|&(role, caps)| role == step.role.index() && caps & mask != 0)
+    })
 }
 
 impl CoalitionDecisionPolicy for P9ValuationPolicy {
+    /// `Δvalue = ΔMag + λ · (pen(S) − pen(S ∪ {x}))`.
+    ///
+    /// The correction is non-negative — admitting an agent can only cover more
+    /// steps — so it can turn a declined join into an accepted one, never the
+    /// reverse.
     fn should_join(
         &self,
         agent: &dyn AgentCapabilities,
         coalition: &[&dyn AgentCapabilities],
         ctx: &DecisionContext,
     ) -> Decision {
-        self.inner.should_join(agent, coalition, ctx)
+        let base = self.inner.should_join(agent, coalition, ctx);
+        let (Some(without), Some(joined)) = (self.staff(coalition), self.staff_of(agent)) else {
+            return base;
+        };
+        let mut with = without.clone();
+        with.push(joined);
+        // `saturating_sub` states the monotonicity rather than trusting it: a
+        // larger staff can never leave more uncovered.
+        let correction =
+            self.lambda * self.uncovered(&without).saturating_sub(self.uncovered(&with)) as f64;
+        // The library's own `margin > join_margin` rule, read off the very policy
+        // being wrapped rather than mirrored as a constant — the score changed,
+        // so the predicate has to be restated, but the threshold does not.
+        let margin = self.inner.join_margin;
+        Self::fold(base, correction, |score| score > margin)
     }
 
+    /// `Δvalue = ΔMag + λ · (pen(S \ {x}) − pen(S))`, leaving iff `Δvalue ≤ 0`
+    /// (the library's leave rule, restated over value instead of magnitude).
+    ///
+    /// The correction is again non-negative, so a member holding otherwise
+    /// unstaffable steps becomes LESS likely to be swept out.
     fn should_leave(
         &self,
         agent: &dyn AgentCapabilities,
         coalition: &[&dyn AgentCapabilities],
         ctx: &DecisionContext,
     ) -> Decision {
-        self.inner.should_leave(agent, coalition, ctx)
+        let base = self.inner.should_leave(agent, coalition, ctx);
+        // `coalition` INCLUDES `agent` on the leave path (library convention).
+        let id = agent.agent_id();
+        let remaining: Vec<&dyn AgentCapabilities> = coalition
+            .iter()
+            .filter(|a| a.agent_id() != id)
+            .copied()
+            .collect();
+        let (Some(inside), Some(outside)) = (self.staff(coalition), self.staff(&remaining)) else {
+            return base;
+        };
+        let correction =
+            self.lambda * self.uncovered(&outside).saturating_sub(self.uncovered(&inside)) as f64;
+        Self::fold(base, correction, |score| score <= 0.0)
     }
 }
 
@@ -8836,13 +8983,57 @@ where
     (results, lat)
 }
 
+/// The pool's role map as a `Vec<u8>` indexed by agent id — the same map
+/// [`p8_typed_policy`] hands the library, in the shape the valuation wrapper's
+/// role-matched coverage check wants.
+///
+/// # Panics
+///
+/// Panics if a pool worker carries no role or a role index does not fit a `u8`.
+/// Both are harness bugs: `p8_typed_policy` already asserts full coverage, and
+/// `R = 3`.
+fn p9_role_map(inst: &WorkflowInstance) -> Vec<u8> {
+    inst.base
+        .roles
+        .iter()
+        .map(|&r| {
+            u8::try_from(r).expect("invariant: the v2t draw assigns role indices below R = 3")
+        })
+        .collect()
+}
+
+/// The per-occurrence residual of one declared writing under a cost model: every
+/// step occurrence paired with its `per_gen` price (Amendment A3.1).
+///
+/// Spiders never appear — [`Demand::occurrences`] carries `User` generators only,
+/// which is exactly the exclusion A3.1 requires (a spider names no `(bit, role)`,
+/// so it can never be uncovered).
+fn p9_residual(inst: &WorkflowInstance, decl: &P9Declared, cost: P9Cost) -> Vec<(Step, u64)> {
+    decl.demand
+        .occurrences()
+        .iter()
+        .map(|&step| {
+            let price = match cost {
+                P9Cost::Uniform => 1,
+                P9Cost::Priced => inst.table.price(step),
+            };
+            (step, price)
+        })
+        .collect()
+}
+
 /// The valuation-only battery: a per-task [`P9ValuationPolicy`] carrying that
-/// task's `λ · cost` term over the shared typed control.
+/// task's residual over the shared typed control.
+///
+/// The third return is the per-task **full residual** `λ · Σ per_gen` at an empty
+/// coalition — the largest the term can be, read off the policy the arm actually
+/// carries so the reported figure cannot drift from the one in the score.
 fn p9_valuation_battery(
     insts: &[WorkflowInstance],
     declared: &[Vec<P9Declared>],
     rho: &RoleModulation,
     lambda: f64,
+    cost: P9Cost,
 ) -> (Vec<P9Seed>, Vec<f64>, Vec<f64>) {
     let mut terms: Vec<f64> = Vec::new();
     let mut lat = Vec::new();
@@ -8851,10 +9042,13 @@ fn p9_valuation_battery(
     // latency-comparable even though latency is never gating here.
     if let (Some(first), Some(first_decl)) = (insts.first(), declared.first()) {
         let inner = p8_typed_policy(&first.base, rho);
+        let role_map = p9_role_map(first);
         let make = |t: usize| {
             Box::new(P9ValuationPolicy {
                 inner: inner.clone(),
-                term: lambda * first_decl[t].best_cost as f64,
+                lambda,
+                residual: p9_residual(first, &first_decl[t], cost),
+                roles: role_map.clone(),
             }) as Box<dyn CoalitionDecisionPolicy>
         };
         let mut warm = Vec::new();
@@ -8862,14 +9056,15 @@ fn p9_valuation_battery(
     }
     for (inst, decl) in insts.iter().zip(declared.iter()) {
         let inner = p8_typed_policy(&inst.base, rho);
+        let role_map = p9_role_map(inst);
         let build = |t: usize| P9ValuationPolicy {
             inner: inner.clone(),
-            term: lambda * decl[t].best_cost as f64,
+            lambda,
+            residual: p9_residual(inst, &decl[t], cost),
+            roles: role_map.clone(),
         };
         let make = |t: usize| Box::new(build(t)) as Box<dyn CoalitionDecisionPolicy>;
-        // Read the term off the policy the arm actually carries, so the reported
-        // figure cannot drift from the one the registration puts in the score.
-        terms.extend((0..decl.len()).map(|t| build(t).term));
+        terms.extend((0..decl.len()).map(|t| build(t).full_term()));
         results.push(p9_run_seed(&P9Arm::PerTask(&make), inst, decl, &mut lat));
     }
     (results, lat, terms)
@@ -8984,25 +9179,66 @@ fn p9_bit_identical(a: &[P9Seed], b: &[P9Seed]) -> bool {
         })
 }
 
+/// How far a cell diverges from another: `(seeds with any differing act,
+/// decisions with a differing act, decisions with differing raw score BITS)`.
+///
+/// The A3.1 liveness measurement. A valuation cell that scored identically to the
+/// control on every decision would be the exact defect Amendment A3.1 removed —
+/// a term that cancels out of every margin — so this is reported as a number and
+/// asserted, never assumed.
+fn p9_divergence(cell: &[P9Seed], base: &[P9Seed]) -> (usize, usize, usize) {
+    let mut seeds = 0usize;
+    let mut acts = 0usize;
+    let mut scores = 0usize;
+    for (x, y) in cell.iter().zip(base.iter()) {
+        let act_diff = x
+            .acts
+            .iter()
+            .zip(y.acts.iter())
+            .filter(|(a, b)| a != b)
+            .count()
+            + x.acts.len().abs_diff(y.acts.len());
+        if act_diff > 0 {
+            seeds += 1;
+        }
+        acts += act_diff;
+        scores += x
+            .scores
+            .iter()
+            .zip(y.scores.iter())
+            .filter(|(a, b)| a != b)
+            .count()
+            + x.scores.len().abs_diff(y.scores.len());
+    }
+    (seeds, acts, scores)
+}
+
 // ---------------------------------------------------------------------------
 // The pinned rule theory, printed in full (prereg §4 / §5 instrumentation).
 // ---------------------------------------------------------------------------
 
-/// Print all 51 instances of the pinned schema closure, so a trace's rule index
-/// reports as the schema that fired (Amendment A2.1: §4's "3–5 rules" numeral is
-/// void — the count "3–5" refers to SCHEMAS, and the closure governs).
+/// Print every instance of the pinned schema closure, so a trace's rule index
+/// reports as the rule that fired (Amendment A2.1: §4's "3–5 rules" numeral is
+/// void — the count "3–5" refers to SCHEMAS, and the closure governs; Amendment
+/// A3.2 widens the fusion schema to 174 instances in total).
+///
+/// The consumed steps come from [`LabelledRule::sources`], not from the role:
+/// since A3.2 the fusion instances no longer follow from the role alone, so a
+/// printer that re-derived them would be printing a different theory than the one
+/// the trace indexes into.
 fn p9_print_rule_theory(labels: &[LabelledRule]) {
     println!("| # | schema | rule |");
     println!("|--:|--------|------|");
     for (i, label) in labels.iter().enumerate() {
         let t = label.target;
         let r = t.role.index();
+        let [first, second] = label.sources;
         let rule = match label.schema {
             Schema::Idempotence => format!("`s{b}_r{r} ; s{b}_r{r} ⇒ s{b}_r{r}`", b = t.bit),
             Schema::Fusion => format!(
                 "`s{b1}_r{r} ; s{b2}_r{r} ⇒ s{b3}_r{r}`",
-                b1 = 2 * r,
-                b2 = 2 * r + 1,
+                b1 = first.bit,
+                b2 = second.bit,
                 b3 = t.bit
             ),
             Schema::SpiderAbsorption => format!(
@@ -9157,7 +9393,7 @@ fn part9_eq5a_process_structured() {
     println!("# koalisi #76 — Part 9: EQ5a process-structured battery (REGISTERED)");
     println!();
     println!(
-        "_governed by `docs/prereg-K4-eq5a-process-structured.md` (registered BEFORE this code; owner design-lock D1–D11 on #76, Amendment 1 pinning the rule theory / fuel / staffing price / λ / draw parameters, Amendment 2 voiding §4's \"3–5 rules\" numeral in favour of the schema closure). Report date {P9_REPORT_DATE}. World **v2w** (prereg §2): the Part 8 `v2t` prefix VERBATIM — `draw_prefix_v2`, then `R = {P8_ROLES}` worker roles and per-required-bit role tags with the role-feasibility rejection re-draw — and the workflow SHAPE draw APPENDED off the same SplitMix64 stream. Each tagged required bit `(b, r)` is a step generator `s_{{b,r}} : r → r`; steps chain per role (`Free::compose`), roles combine with `Free::tensor`, and every diagram is pinned through `ColoredExpr::new` (Amendment A2.3 — `Free::compose` checks WIDTHS, not colors, so the pin is the only color gate). Seeds **{P9_SEED_START}..{P9_SEED_END}** (fresh; 90..120 and 150..180 stay reserved). Latency is recorded and NEVER gating (prereg §7)._"
+        "_governed by `docs/prereg-K4-eq5a-process-structured.md` (registered BEFORE this code; owner design-lock D1–D11 on #76, Amendment 1 pinning the rule theory / fuel / staffing price / λ / draw parameters, Amendment 2 voiding §4's \"3–5 rules\" numeral in favour of the schema closure, **Amendment 3** re-reading valuation-only as the unstaffable residual (A3.1) and widening the fusion schema to every same-role ordered pair (A3.2)). Report date {P9_REPORT_DATE}. World **v2w** (prereg §2): the Part 8 `v2t` prefix VERBATIM — `draw_prefix_v2`, then `R = {P8_ROLES}` worker roles and per-required-bit role tags with the role-feasibility rejection re-draw — and the workflow SHAPE draw APPENDED off the same SplitMix64 stream. Each tagged required bit `(b, r)` is a step generator `s_{{b,r}} : r → r`; steps chain per role (`Free::compose`), roles combine with `Free::tensor`, and every diagram is pinned through `ColoredExpr::new` (Amendment A2.3 — `Free::compose` checks WIDTHS, not colors, so the pin is the only color gate). Seeds **{P9_SEED_START}..{P9_SEED_END}** (fresh; 90..120 and 150..180 stay reserved). Latency is recorded and NEVER gating (prereg §7)._"
     );
     println!();
     println!(
@@ -9175,14 +9411,22 @@ fn part9_eq5a_process_structured() {
     let rules = rule_theory(bits, roles).expect("invariant: the registered (8, 3) theory constructs");
     let labels = rule_labels(bits, roles).expect("invariant: labels mirror the theory");
     assert_eq!(rules.len(), labels.len());
+    let pairs = fusion_pairs(bits);
+    let fusion_instances = pairs.len() * P8_ROLES;
+    assert_eq!(
+        rules.len(),
+        2 * UNIVERSE * P8_ROLES + fusion_instances,
+        "the printed theory size must be the schema closure's, not a restated constant"
+    );
 
-    println!("## The pinned rule theory (Amendment A1.1, printed in full)");
+    println!("## The pinned rule theory (Amendment A1.1, widened by A3.2 — printed in full)");
     println!();
     println!(
-        "_Three SCHEMAS closed over the `(bit, role)` index set; at the registered `bits = {UNIVERSE}, roles = {P8_ROLES}` the closure is **{} instances** ({} idempotence + {P8_ROLES} fusion + {} spider absorption). Amendment A2.1: §4's \"3–5 rules\" is an ERRATUM — the numeral refers to schemas and is void; the closure governs, and every instance constructs through `RewriteRule::new` so nothing is silently dropped. Fusion targets a THIRD bit, `b3(r) = (2r + 4) mod bits` (A2.2 — the modulus follows `bits`, not a literal 8), which is the load-bearing choice: had it targeted a consumed bit every application would strictly shrink distinct demand and the rewriting cells would win BY CONSTRUCTION. A trace binds rule INDICES, so this order is part of the registered theory._",
+        "_Three SCHEMAS closed over the `(bit, role)` index set; at the registered `bits = {UNIVERSE}, roles = {P8_ROLES}` the closure is **{} instances** ({} idempotence + {fusion_instances} fusion + {} spider absorption). Amendment A2.1: §4's \"3–5 rules\" is an ERRATUM — the numeral refers to schemas and is void; the closure governs, and every instance constructs through `RewriteRule::new` so nothing is silently dropped. **Amendment A3.2** widened fusion from one designated pair per role to every role × every ordered pair of distinct bits `(b, b')`, target `b'' = (b + b' + 4) mod bits`, the instance NOT built when `b'' ∈ {{b, b'}}` — at `bits = 8` that skip excludes exactly the pairs involving bit 4, leaving {} per role. The skip is the two-sidedness guarantee A1.1 stated as a global condition, now enforced per instance: had a target been a consumed bit, every application would strictly shrink distinct demand and the rewriting cells would win BY CONSTRUCTION. A trace binds rule INDICES, so this order is part of the registered theory._",
         rules.len(),
         UNIVERSE * P8_ROLES,
-        UNIVERSE * P8_ROLES
+        UNIVERSE * P8_ROLES,
+        pairs.len()
     );
     println!();
     p9_print_rule_theory(&labels);
@@ -9202,6 +9446,9 @@ fn part9_eq5a_process_structured() {
         P9Cost::Uniform,
         P9_FUEL,
     );
+    // Wall time of the two confirmatory declares — the A3.2 (ii) search-cost
+    // disclosure reports them next to the full fuel sweep.
+    let t0 = Instant::now();
     let (d_rw_u, s_rw_u) = p9_declare(
         &insts,
         &rules,
@@ -9210,6 +9457,8 @@ fn part9_eq5a_process_structured() {
         P9Cost::Uniform,
         P9_FUEL,
     );
+    let confirm_wall_u = t0.elapsed().as_secs_f64();
+    let t0 = Instant::now();
     let (d_rw_p, s_rw_p) = p9_declare(
         &insts,
         &rules,
@@ -9218,6 +9467,7 @@ fn part9_eq5a_process_structured() {
         P9Cost::Priced,
         P9_FUEL,
     );
+    let confirm_wall_p = t0.elapsed().as_secs_f64();
     let (d_val_u, s_val_u) = p9_declare(
         &insts,
         &rules,
@@ -9246,9 +9496,9 @@ fn part9_eq5a_process_structured() {
         Box::new(p8_typed_policy(&inst.base, &oracle)) as Box<dyn CoalitionDecisionPolicy>
     });
     let (val_u, val_u_lat, val_u_terms) =
-        p9_valuation_battery(&insts, &d_val_u, &oracle, P9_LAMBDA);
+        p9_valuation_battery(&insts, &d_val_u, &oracle, P9_LAMBDA, P9Cost::Uniform);
     let (val_p, val_p_lat, val_p_terms) =
-        p9_valuation_battery(&insts, &d_val_p, &oracle, P9_LAMBDA);
+        p9_valuation_battery(&insts, &d_val_p, &oracle, P9_LAMBDA, P9Cost::Priced);
     let (mag, mag_lat) = p9_battery(&insts, &d_ctl, |_| {
         Box::new(MagnitudePolicy::default()) as Box<dyn CoalitionDecisionPolicy>
     });
@@ -9427,10 +9677,17 @@ fn part9_eq5a_process_structured() {
     );
     let fusion_eligible: usize = insts
         .iter()
-        .map(|i| i.base.tasks.iter().filter(|t| p9_fusion_eligible(t)).count())
+        .map(|i| {
+            i.base
+                .tasks
+                .iter()
+                .filter(|t| p9_fusion_eligible(&pairs, t))
+                .count()
+        })
         .sum();
+    let narrow_rate = 100.0 * P9_NARROW_ELIGIBLE_PRIOR as f64 / P9_NARROW_ELIGIBLE_TOTAL_PRIOR as f64;
     println!(
-        "- **Fusion eligibility — the structural ceiling on the confirmatory lever (disclosure).** Coverage is per DISTINCT `(bit, role)`, so idempotence and spider absorption — {} of the theory's {} instances — change OCCURRENCE count only and are staffing-INVISIBLE by construction: a task they alone touch scores bit-identically to the control. **Fusion is the only schema that can move a decision**, and it needs some role `r` whose tagged required bits contain BOTH `2r` and `2r+1`. That holds for **{fusion_eligible}** of the {} tasks (**{:.1} %**), which bounds from above the fraction of the stream the rewriting cells can act on at all. Read every H-P number below against that bound: it is a property of the registered schema set meeting the registered v2t draw, and it was measured, not assumed.",
+        "- **Fusion eligibility — the structural ceiling on the confirmatory lever (MANDATORY disclosure, Amendment A3.2).** Coverage is per DISTINCT `(bit, role)`, so idempotence and spider absorption — {} of the theory's {} instances — change OCCURRENCE count only and are staffing-INVISIBLE by construction: a task they alone touch scores bit-identically to the control. **Fusion is the only schema that can move a decision.** Under the WIDENED schema (every role × every ordered pair of distinct bits, target `(b + b' + 4) mod bits ∉ {{b, b'}}`) a task is eligible iff some role's tagged bits contain both members of one surviving pair: **{fusion_eligible}** of {} tasks (**{:.1} %**). Under the NARROW Amendment 1 schema (one designated pair per role) the recorded Stage-2 measurement on this same seed block was **{P9_NARROW_ELIGIBLE_PRIOR}/{P9_NARROW_ELIGIBLE_TOTAL_PRIOR} ({narrow_rate:.1} %)** — quoted as a recorded prior, since the narrow schema no longer exists in the theory and this run cannot re-measure it. That comparison is the evidence the leg is now powered: a stream-level bar over a stream where ~93 % of tasks were identical across arms was not reachable on merit. The eligibility figure is a NECESSARY condition and so an upper bound — the two steps must also become adjacent for the rule to match convexly — and every H-P number below should be read against it.",
         2 * UNIVERSE * P8_ROLES,
         rules.len(),
         occurrences.len(),
@@ -9459,44 +9716,57 @@ fn part9_eq5a_process_structured() {
     );
     println!();
 
-    // --- The valuation-only structural finding -------------------------------
-    let val_u_inert = p9_bit_identical(&val_u, &asis);
-    let val_p_inert = p9_bit_identical(&val_p, &asis);
-    println!("### Finding: the valuation-only cells are inert BY CONSTRUCTION");
+    // --- A3.1: the valuation-only cells are LIVE (measured, not assumed) ------
+    let (val_u_seeds, val_u_acts, val_u_scores) = p9_divergence(&val_u, &asis);
+    let (val_p_seeds, val_p_acts, val_p_scores) = p9_divergence(&val_p, &asis);
+    let val_live = !p9_bit_identical(&val_u, &asis) || !p9_bit_identical(&val_p, &asis);
+    println!("### A3.1 liveness: the valuation-only cells price the UNSTAFFABLE RESIDUAL");
     println!();
     println!(
-        "_prereg §4 D3b fixes `value(S) = Mag(S) − λ · cost_of(writing, per_gen)` **and** that valuation-only leaves the declared writing unchanged. `writing` therefore does not depend on the coalition `S`: the term enters `value(with)` and `value(without)` identically and cancels EXACTLY from every margin, in exact arithmetic and in IEEE alike. `wf-val-u` and `wf-val-p` are consequently bit-identical to `wf-asis` and to each other — measured here, not assumed, on the STRONGEST available triple (acts + raw `Decision::score` BIT PATTERNS + PRIMARY bits + churn, all {n_seeds} seeds): {} / {}. The registered λ = {P9_LAMBDA} and its grid `{P9_LAMBDA_GRID:?}` cannot change that, because no value of a cancelling constant survives a difference. The magnitude the term WOULD have had is reported in the instrumentation section below, where it is the one thing about this cell that carries information._",
-        pass(val_u_inert),
-        pass(val_p_inert)
+        "_prereg §4 D3b originally scored `value(S) = Mag(S) − λ · cost_of(writing, per_gen)` while ALSO fixing the declared writing to be independent of `S`. That term is a per-task CONSTANT, so it cancelled exactly from every join/leave margin, and Stage 2 measured both valuation cells bit-identical to the control at every registered λ — two of the four confirmatory cells could not move. **Amendment A3.1** re-reads the mechanism as the residual process the coalition cannot execute:_"
     );
     println!();
-    // The registered λ grid, RUN rather than argued away: three cells that a
-    // proof says must coincide, measured coinciding.
-    let mut grid_ok = true;
+    println!("```");
+    println!(
+        "value(S) = Mag(S) − λ · Σ per_gen(g)   over step occurrences g of the declared"
+    );
+    println!(
+        "                         writing whose (bit, role) is NOT covered by S"
+    );
+    println!("```");
+    println!();
+    println!(
+        "_This depends on `S`, so it no longer cancels: admitting an agent that covers previously-unstaffable steps improves the score by `λ` times those steps' price, and a member holding otherwise-unstaffable steps becomes less likely to be swept out. It is not a rescaling of the magnitude signal either — the penalty is weighted by `per_gen`, so **occurrence multiplicity and step scarcity enter a decision for the first time**, neither of which magnitude can see (it gets only the OR-mask of distinct demand). **Spiders are excluded** from the residual: they are priced by `cost_of` but name no `(bit, role)`, so \"uncovered\" is undefined for them and counting them would re-introduce exactly the cancelling constant A3.1 removed. Demand and the declared writing are unchanged — this is still valuation-only, not rewriting. λ stays {P9_LAMBDA} with the exploratory grid `{P9_LAMBDA_GRID:?}`._"
+    );
+    println!();
+    println!(
+        "- **Liveness, MEASURED against the control** (the regression the original formulation would have failed silently): `wf-val-u` diverges on **{val_u_seeds}/{n_seeds}** seeds, **{val_u_acts}** decisions by ACT and **{val_u_scores}** by raw score bits; `wf-val-p` on **{val_p_seeds}/{n_seeds}** seeds, **{val_p_acts}** acts and **{val_p_scores}** score bits. Cell is live ⇒ **{}**.",
+        pass(val_live)
+    );
+    assert!(
+        val_live,
+        "A3.1: the valuation-only cells must not be bit-identical to the control — a cancelling term is the defect the amendment removed"
+    );
+    println!();
+    // The registered λ grid, RUN: under A3.1 the term no longer cancels, so the
+    // grid is a genuine sensitivity sweep rather than three cells a proof says
+    // must coincide.
     let grid_row = P9_LAMBDA_GRID
         .iter()
         .map(|&lambda| {
-            let (cell, _, terms) = p9_valuation_battery(&insts, &d_val_p, &oracle, lambda);
-            let identical = p9_bit_identical(&cell, &asis);
-            grid_ok &= identical;
+            let (cell, _, terms) =
+                p9_valuation_battery(&insts, &d_val_p, &oracle, lambda, P9Cost::Priced);
+            let (seeds, acts, _) = p9_divergence(&cell, &asis);
             format!(
-                "λ = {lambda} (median term {:.3}) ⇒ {}",
-                median(terms),
-                pass(identical)
+                "λ = {lambda}: median PRIMARY {:.4}, median full term {:.3}, diverging {seeds}/{n_seeds} seeds ({acts} acts)",
+                median(p9_primaries(&cell)),
+                median(terms)
             )
         })
         .collect::<Vec<String>>()
         .join(" · ");
     println!(
-        "_The registered λ grid `{P9_LAMBDA_GRID:?}` (§5, exploratory and non-gating) is RUN rather than argued away — {grid_row}. Every cell reproduces `wf-asis` on acts + score bits + PRIMARY bits + churn. The term's magnitude moves with λ; nothing else does._"
-    );
-    assert!(
-        grid_ok,
-        "the valuation-only λ grid must be inert — a moving cell would mean the term is not cancelling as the registration implies"
-    );
-    println!();
-    println!(
-        "_This is a structural property of the registration as written, surfaced rather than papered over: two of the four H-P cells cannot move. **All four print regardless** (prereg §5 — no cell-shopping), and the two rewriting cells carry whatever the confirmatory leg can carry. Whether §4 D3b should be re-read (for instance as the cost of the coalition-staffable restriction of the writing, which WOULD depend on `S`) is an owner call for a pre-run amendment, not an implementer's._"
+        "- **λ grid** `{P9_LAMBDA_GRID:?}` (§5, exploratory and non-gating), on the priced cell — {grid_row}. A1.4 pinned λ so the process term would be \"a tiebreaker between otherwise close candidates rather than the dominant term\" against O(1) magnitude margins; the sweep is the check on that reasoning."
     );
     println!();
 
@@ -9588,27 +9858,24 @@ fn part9_eq5a_process_structured() {
     );
     println!();
     println!(
-        "| cell | fuel | median PRIMARY | vs `wf-asis` | superior seeds | fuel-exhausted tasks | median `states_explored` | median `best_cost` |"
+        "| cell | fuel | median PRIMARY | vs `wf-asis` | superior seeds | fuel-exhausted tasks | median `states_explored` | median `best_cost` | declare wall s |"
     );
     println!(
-        "|------|-----:|---------------:|-------------:|---------------:|---------------------:|-------------------------:|-------------------:|"
+        "|------|-----:|---------------:|-------------:|---------------:|---------------------:|-------------------------:|-------------------:|---------------:|"
     );
+    let mut sweep_wall = 0.0f64;
     for cost in [P9Cost::Uniform, P9Cost::Priced] {
         for fuel in P9_FUEL_GRID {
-            let (d, s) = p9_declare(
-                &insts,
-                &rules,
-                &labels,
-                P9Mechanism::Rewrite,
-                cost,
-                fuel,
-            );
+            let t0 = Instant::now();
+            let (d, s) = p9_declare(&insts, &rules, &labels, P9Mechanism::Rewrite, cost, fuel);
+            let declare_s = t0.elapsed().as_secs_f64();
+            sweep_wall += declare_s;
             let (rs, _) = p9_battery(&insts, &d, |inst| {
                 Box::new(p8_typed_policy(&inst.base, &oracle)) as Box<dyn CoalitionDecisionPolicy>
             });
             let med = median(p9_primaries(&rs));
             println!(
-                "| `wf-rw-{}` ({}) | {fuel} | {med:.4} | {:.2}× | {}/{n_seeds} | {} | {:.1} | {:.1} |",
+                "| `wf-rw-{}` ({}) | {fuel} | {med:.4} | {:.2}× | {}/{n_seeds} | {} | {:.1} | {:.1} | {declare_s:.1} |",
                 if cost == P9Cost::Uniform { "u" } else { "p" },
                 cost.label(),
                 if asis_med > 0.0 { med / asis_med } else { f64::NAN },
@@ -9619,6 +9886,14 @@ fn part9_eq5a_process_structured() {
             );
         }
     }
+    println!();
+    println!(
+        "- **Search-cost disclosure (Amendment A3.2 (ii), MANDATORY).** `optimize` matches every rule against every state, so widening the theory from 51 to {} instances ({:.1}×) raises search cost directly. Measured on this run: the confirmatory declare (F = {P9_FUEL}, {n_seeds} seeds × {TASKS} tasks) took **{:.1} s** uniform / **{:.1} s** priced, and the whole registered sweep `{P9_FUEL_GRID:?}` × 2 cost models took **{sweep_wall:.1} s**. **The sweep ran IN FULL — no fuel point was dropped, so there is no reduction to disclose.** Had runtime forced one, A3.2 requires it be reported here rather than silently trimmed.",
+        rules.len(),
+        rules.len() as f64 / 51.0,
+        confirm_wall_u,
+        confirm_wall_p
+    );
     println!();
 
     // --- E-conc --------------------------------------------------------------
@@ -9836,7 +10111,7 @@ fn part9_eq5a_process_structured() {
         red_p.last().copied().unwrap_or(0.0)
     );
     println!(
-        "- **The valuation term that cancels** (λ = {P9_LAMBDA}): median `λ · cost_of(writing)` = **{:.3}** uniform-priced, **{:.3}** staffing-priced. A1.4's rationale pins λ so the process term would be \"a tiebreaker between otherwise close candidates rather than the dominant term\" against O(1) magnitude margins — the measured magnitudes are the check on that reasoning, and they are the only information this cell carries.",
+        "- **The residual term** (λ = {P9_LAMBDA}, Amendment A3.1): median FULL residual `λ · Σ per_gen` at an empty coalition — the largest the penalty can be — is **{:.3}** uniform / **{:.3}** staffing-priced; it falls to zero as the coalition covers the writing. A1.4's rationale pins λ so the process term is \"a tiebreaker between otherwise close candidates rather than the dominant term\" against O(1) magnitude margins; these magnitudes plus the liveness divergence counts above are the check on that reasoning.",
         median(val_u_terms.clone()),
         median(val_p_terms.clone())
     );
@@ -11208,16 +11483,20 @@ mod part4c_tests {
 
     /// Part 9 (#76) 2-seed smoke: the whole declare → verify → score pipeline
     /// runs end-to-end on the registered seeds, the rewriting cell is S-sound,
-    /// the empty-rule cell reproduces the control bit-identically (the X-reduce
-    /// property at 2-seed scale), and the valuation cell is inert by
-    /// construction. Does NOT run the 30-seed registered battery.
+    /// and the empty-rule cell reproduces the control bit-identically (the
+    /// X-reduce property at 2-seed scale). Does NOT run the 30-seed registered
+    /// battery. Valuation liveness has its own test below.
     #[test]
     fn part9_two_seed_smoke() {
         let bits = u8::try_from(UNIVERSE).unwrap();
         let roles = u8::try_from(P8_ROLES).unwrap();
         let rules = rule_theory(bits, roles).unwrap();
         let labels = rule_labels(bits, roles).unwrap();
-        assert_eq!(rules.len(), 51);
+        // Amendment A3.2's widened closure: 24 idempotence + 126 fusion + 24
+        // absorption. The battery prints the theory in full, so a drift here
+        // would silently change what every rewriting cell searches over.
+        assert_eq!(rules.len(), 174);
+        assert_eq!(fusion_pairs(bits).len() * P8_ROLES, 126);
 
         let insts: Vec<WorkflowInstance> = (P9_SEED_START..P9_SEED_START + 2)
             .map(|s| p9_draw_instance(s, false))
@@ -11272,7 +11551,8 @@ mod part4c_tests {
         });
         p9_assert_identical(&empty_rs, &asis, "empty-rule rewriting cell");
 
-        // Valuation-only is inert by construction (see the printed finding).
+        // The valuation cell runs end-to-end and reports a finite, non-negative
+        // full residual per task (liveness is asserted separately).
         let (d_val, _) = p9_declare(
             &insts,
             &rules,
@@ -11281,10 +11561,15 @@ mod part4c_tests {
             P9Cost::Priced,
             P9_FUEL,
         );
-        let (val, _, terms) = p9_valuation_battery(&insts, &d_val, &oracle, P9_LAMBDA);
-        p9_assert_identical(&val, &asis, "valuation-only cell");
+        let (val, _, terms) =
+            p9_valuation_battery(&insts, &d_val, &oracle, P9_LAMBDA, P9Cost::Priced);
+        assert_eq!(val.len(), 2);
         assert_eq!(terms.len(), 2 * TASKS);
         assert!(terms.iter().all(|t| t.is_finite() && *t >= 0.0));
+        assert!(
+            terms.iter().any(|&t| t > 0.0),
+            "a declared writing with steps must carry a nonzero residual at an empty coalition"
+        );
 
         // Context arms run over the same declared writings.
         let (mag, _) = p9_battery(&insts, &d_ctl, |_| {
@@ -11300,6 +11585,79 @@ mod part4c_tests {
         assert_eq!(dedup.biconditional_violations, 0, "S-dedup at 2-seed scale");
         assert_eq!(dedup.corpus, 2 * TASKS);
         assert!(dedup.contents <= dedup.writings);
+    }
+
+    /// Part 9 (#76), Amendment **A3.1**: the valuation-only arm must NOT be
+    /// bit-identical to the control.
+    ///
+    /// This is the regression the original D3b formulation would have failed
+    /// silently. `Mag(S) − λ · cost_of(writing)` with a coalition-independent
+    /// writing is a per-task CONSTANT: it cancels exactly from every join/leave
+    /// margin, so the cell reproduced `wf-asis` on acts, raw score bits, PRIMARY
+    /// and churn — every test it had passed, because it was a no-op. The
+    /// unstaffable-residual re-read depends on `S`, and this test proves the
+    /// difference is observable rather than argued.
+    #[test]
+    fn part9_valuation_is_live_a3_1() {
+        let bits = u8::try_from(UNIVERSE).unwrap();
+        let roles = u8::try_from(P8_ROLES).unwrap();
+        let rules = rule_theory(bits, roles).unwrap();
+        let labels = rule_labels(bits, roles).unwrap();
+        let oracle = p8_rho(0.0);
+        let insts: Vec<WorkflowInstance> = (P9_SEED_START..P9_SEED_START + 4)
+            .map(|s| p9_draw_instance(s, false))
+            .collect();
+
+        let (d_ctl, _) = p9_declare(
+            &insts,
+            &rules,
+            &labels,
+            P9Mechanism::AsWritten,
+            P9Cost::Uniform,
+            P9_FUEL,
+        );
+        let (asis, _) = p9_battery(&insts, &d_ctl, |inst| {
+            Box::new(p8_typed_policy(&inst.base, &oracle)) as Box<dyn CoalitionDecisionPolicy>
+        });
+
+        let mut live = false;
+        for cost in [P9Cost::Uniform, P9Cost::Priced] {
+            let (d_val, _) = p9_declare(
+                &insts,
+                &rules,
+                &labels,
+                P9Mechanism::Valuation,
+                cost,
+                P9_FUEL,
+            );
+            let (val, _, _) =
+                p9_valuation_battery(&insts, &d_val, &oracle, P9_LAMBDA, cost);
+            let (_, acts, scores) = p9_divergence(&val, &asis);
+            live |= acts > 0 || scores > 0;
+        }
+        assert!(
+            live,
+            "A3.1: the valuation-only cells must diverge from the control on acts or score bits — \
+             a cell that cannot move is the inert formulation the amendment replaced"
+        );
+
+        // …and the divergence is caused by the residual, not by the wrapper:
+        // λ = 0 zeroes every correction, so the cell must collapse back onto the
+        // control exactly.
+        let (d_zero, _) = p9_declare(
+            &insts,
+            &rules,
+            &labels,
+            P9Mechanism::Valuation,
+            P9Cost::Priced,
+            P9_FUEL,
+        );
+        let (zero, _, terms) = p9_valuation_battery(&insts, &d_zero, &oracle, 0.0, P9Cost::Priced);
+        assert!(terms.iter().all(|&t| t == 0.0));
+        for (a, b) in zero.iter().zip(asis.iter()) {
+            assert_eq!(a.acts, b.acts, "λ = 0 must reproduce the control's acts");
+            assert_eq!(a.scores, b.scores, "λ = 0 must reproduce the control's scores");
+        }
     }
 
     /// Part 9 (#76): X-reduce's first conjunct at 2-seed scale — on the

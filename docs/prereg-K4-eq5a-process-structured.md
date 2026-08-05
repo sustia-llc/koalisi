@@ -436,3 +436,30 @@ raises search cost; if runtime forces any reduction in the fuel sweep,
 that reduction is a disclosure, never a silent trim. (iii) X-reduce is
 unaffected (it runs an empty rule set) and S-sound is unaffected (it
 verifies whatever was declared).
+
+## Amendment 4 (pre-run disclosure, 2026-08-05 — posted to #76)
+
+A registration-hygiene disclosure, recorded so a reader can judge it
+rather than discover it. Nothing about the design, seeds, bars, legs or
+gates changes here.
+
+- **A4.1 — the implementation dry runs executed on the registered seed
+  block (270..300).** X-battery, the fusion-eligibility rate and the
+  runtime measurements all require running the binary, and the harness
+  is hard-wired to the registered seeds. The official run is therefore a
+  **reproduction of an outcome already seen**, not a first look.
+- **A4.2 — Amendment 3 was written after a dry run had shown a verdict
+  line.** Both changes it makes were driven by *mechanism* facts, not by
+  the outcome: the valuation term was proven to cancel algebraically and
+  measured bit-identical to the control, and the fusion schema was
+  measured to reach 7.2 % of tasks. Neither fact is a result, and the
+  bars were not touched. A reader who disagrees with that
+  characterisation has everything needed here to discount the
+  confirmatory leg accordingly.
+- **A4.3 — the family-wise bar does NOT move, whatever the run
+  reports.** It was raised to 1.4× / ≥ 21 of 30 *before* implementation,
+  to pay for four looks, and it stays there. Should a cell land between
+  the lineage's standing 1.25× / 60 % bar and the registered one, that
+  is a `FALSIFIED (process structure)` with the margin reported in full
+  — not a bar renegotiation. Post-hoc bar movement is the one thing this
+  lineage has never done.

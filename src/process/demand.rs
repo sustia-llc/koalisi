@@ -29,7 +29,9 @@ use super::signature::{Step, Workflow};
 /// and leaves distinct demand untouched; a **fusion** rule (`s_b1 ; s_b2 ⇒
 /// s_b3`) moves both. A theory of the first kind alone would be structurally
 /// inert for a staffing contest — which is why the pinned
-/// [theory](super::theory::rule_theory) contains a fusion schema.
+/// [theory](super::theory::rule_theory) contains a fusion schema, widened by
+/// prereg Amendment A3.2 to every same-role ordered pair of distinct bits so that
+/// it is eligible on more than a sliver of drawn traffic.
 ///
 /// # Spiders contribute no demand
 ///

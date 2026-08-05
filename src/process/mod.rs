@@ -24,10 +24,13 @@
 //! all.
 //!
 //! **2. The fusion target is a third bit, on purpose.** The pinned theory's
-//! fusion schema rewrites `s_{b1,r} ; s_{b2,r} ⇒ s_{b3,r}` with `b3 ∉ {b1, b2}`.
+//! fusion schema rewrites `s_{b,r} ; s_{b',r} ⇒ s_{b'',r}` with `b'' ∉ {b, b'}`,
+//! for every role and every ordered pair of distinct bits (Amendment A3.2 —
+//! the narrow one-pair-per-role form was eligible on only 7.2 % of drawn tasks).
 //! Had it targeted one of the consumed bits, every application would strictly
-//! shrink distinct demand and the rewriting arms would win *by construction*. A
-//! fused step instead demands a capability neither consumed step required, so an
+//! shrink distinct demand and the rewriting arms would win *by construction*; a
+//! pair whose target would be consumed is therefore not built at all. A fused
+//! step instead demands a capability neither consumed step required, so an
 //! application may land on a `(bit, role)` no pool worker holds — the lever is
 //! two-sided, which is exactly what makes the confirmatory leg falsifiable. See
 //! [`rule_theory`].
@@ -71,4 +74,4 @@ pub use demand::{Demand, demand};
 pub use errors::ProcessError;
 pub use rewrite::{content_matches, optimize_workflow, verify_optimization, workflow_cost};
 pub use signature::{Role, Step, Workflow, WorkflowGen, chain, spider_expr, step_expr};
-pub use theory::{LabelledRule, Schema, rule_labels, rule_theory};
+pub use theory::{LabelledRule, Schema, fusion_pairs, rule_labels, rule_theory};
