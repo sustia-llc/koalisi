@@ -261,3 +261,65 @@ Latency is never gating in this registration.
 `docs/ab-report-K4-eq5a-process-structured.md` — registered sections
 mirror §5/§6; implementation/deviation ledger mandatory; appended-addendum
 convention applies to any follow-up.
+
+## Amendment 1 (pre-run, 2026-08-05 — posted to #76 BEFORE implementation)
+
+§4 deliberately left four registered variables to be pinned before the
+run. They are pinned here, ahead of any implementation, so they are the
+registration's choices rather than the implementer's. No bar, seed, leg,
+or gate changes.
+
+- **A1.1 — the rule theory (D4).** Three schemas, each closed over the
+  `(bit, role)` index set; the theory is their closure, printed in full
+  with the run. Step generators are `s_{b,r} : r → r` (role-preserving),
+  so every same-role composite is parallel to every other and
+  `RewriteRule::new`'s equal-source-and-target-words condition is met by
+  construction.
+  1. **Idempotence** — `s_{b,r} ; s_{b,r} ⇒ s_{b,r}`, all 8 bits × 3
+     roles. Reduces occurrence count; leaves distinct demand unchanged.
+  2. **Fusion** — one designated rule per role:
+     `s_{b1(r),r} ; s_{b2(r),r} ⇒ s_{b3(r),r}` with
+     `b1(r) = 2r`, `b2(r) = 2r + 1`, `b3(r) = (2r + 4) mod 8`.
+  3. **Spider absorption** — `δ_r ; (s_{b,r} ⊗ s_{b,r}) ; μ_r ⇒ s_{b,r}`,
+     all 8 × 3: a same-step fan-out-and-rejoin collapses. This is the
+     schema that justifies the D6 `catgraph-syntax` dependency; the
+     spiders participate as opaque generators (cg's locked B1 substrate).
+
+  **`b3(r) ∉ {b1(r), b2(r)}` is the load-bearing choice, and it is what
+  keeps the confirmatory leg honest.** Had the fusion target been one of
+  the two consumed bits, every application would strictly shrink distinct
+  demand and the rewriting cells would win *by construction* — the mirror
+  image of the inertness trap §4 already guards against. With
+  `b3 = (2r + 4) mod 8` the fused step demands a capability neither
+  consumed step required, so an application may land on a `(bit, role)`
+  that is scarce or absent in the drawn pool. The lever is therefore
+  two-sided, which is what E-conc (§5) measures.
+
+- **A1.2 — fuel (D4).** Confirmatory cells at **F = 256** applications;
+  the registered sweep is `{32, 128, 512, 2048}` (exploratory,
+  non-gating). `fuel_exhausted()` counts are a mandatory per-cell
+  disclosure.
+
+- **A1.3 — the staffing price (D5).** For the priced cells,
+  `per_gen(s_{b,r}) = 1 + scarcity(b, r)` where
+  `scarcity(b, r) = pool_size − |{workers of role r holding bit b}|`,
+  computed once from the drawn pool **before any decision** and constant
+  for the task. Spiders price at 1. Unstaffable steps therefore cost
+  `1 + pool_size` — expensive but finite, so the optimizer routes away
+  from them without the objective going non-finite.
+
+- **A1.4 — λ, the valuation-only coefficient (D3b).** Pinned at
+  **λ = 0.05**, with the exploratory non-gating grid
+  `{0.01, 0.05, 0.25}`. Rationale, stated plainly because it is a
+  judgment call rather than a derivation: magnitude margins on this
+  world are O(1) while uniform cost is O(3–10), so λ ≈ 0.05 makes the
+  process term a tiebreaker between otherwise close candidates rather
+  than the dominant term — the regime where a valuation-only lever has
+  any chance of moving a decision without simply overriding the
+  magnitude signal. The prior on this cell is low regardless (§4).
+
+- **A1.5 — draw parameters (§2).** Per-role chain length is the count of
+  that role's tagged required bits (no free parameter); the spider
+  fan-out probability is **0.25** per same-role adjacent pair, drawn off
+  the appended stream. The degenerate world (X-reduce) sets fan-out to 0
+  and consumes zero stream draws, per §2.
