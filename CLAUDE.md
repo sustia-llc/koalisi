@@ -12,6 +12,18 @@ When you bump the project's behaviour, also:
   for PR releases) — per-release tagging resumed 2026-07-27, owner call;
   v0.7.0–v0.15.0 were backfilled onto their merges the same day
 
+**Review protocol (standing, owner 2026-08-05): EVERY PR gets the
+reviewer pass before tag/merge — re-pin and deps+docs slices included.**
+Every finding is applied or owner-adjudicated, including ones below the
+review skill's confidence bar. The former carve-out for re-pins ("the
+re-pin protocol's own gates are the review", PR #62 precedent) is
+REVOKED: the first re-pin reviewed under it (PR #77) produced three real
+findings, one of them a miss of the checklist directly above — and
+suites, clippy and a byte-identical battery structurally cannot detect
+stale docs, which is the failure mode a deps-only PR carries most often.
+Reviewer output is evidence, not verdict: check each claim against the
+diff (a PR #77 panel called the lockfile delta clean when it was not).
+
 ## Mission (one paragraph)
 
 **koalisi** — a reference implementation of agentic coalitions in Rust.
