@@ -19,6 +19,50 @@ Planned work — issue-tracked (details in [`CLAUDE.md`](./CLAUDE.md)
 - **[#25]** metrics example, reframed onto the `CoalitionService` decision
   path / topology events.
 
+## [0.27.0] — 2026-08-05
+
+The **EQ5a** registration ([#76](https://github.com/sustia-llc/koalisi/issues/76))
+— process-structured tasks, workflows as string diagrams. Run verdict:
+**`FALSIFIED (process structure)`**
+(`docs/ab-report-K4-eq5a-process-structured.md`; prereg
+`docs/prereg-K4-eq5a-process-structured.md`, Amendments 1–5 all pre-run).
+
+### Added
+- **New gated feature `process = ["magnitude", "dep:catgraph-syntax"]`**
+  and `src/process/` — the library surface a runtime would use for
+  process-structured coalition tasks: `Role`/`Step` (`s_{b,r} : r → r`,
+  role-preserving), `Workflow = ColoredExpr<FrobeniusOr<Step>>`,
+  `demand()`, `rule_theory()`, `uniform_cost`/`StaffingTable` +
+  `staffing_price()`, `optimize_workflow()`, and `verify_optimization()`
+  (replay + `content_eq` — the S-sound helper). Default builds pull
+  neither `catgraph-syntax` nor its transitive `deep_causality_haft`.
+- **`catgraph-syntax v0.8.0`** as an optional dep, in lockstep with the
+  other two catgraph deps (three now — the K6 rule).
+- `examples/strategy_comparison.rs` **Part 9** — the EQ5a battery
+  (v2w world, control + four confirmatory cells, E-fuel / E-conc /
+  E-dedup / E-ceil, gates X-reduce / S-sound / S-dedup). Requires
+  `--features decision,magnitude,process`, so the example — and the
+  frozen Parts 1–8 battery with it — now needs all three.
+
+### Result
+- No H-P cell clears the family-wise bar (≥ 1.4× and ≥ 21/30):
+  `wf-rw-u` 0.2104 (1.06×, 17/30) · `wf-rw-p` 0.2112 (1.06×, 19/30) ·
+  `wf-val-u`/`wf-val-p` 0.2484 (**1.25×, 30/30**) · control 0.1989.
+  Both valuation cells clear the lineage's *standing* 1.25×/60 % bar and
+  miss the registered one; **the bar does not move** (pre-committed,
+  Amendment A4.3).
+- **The signal that converts is valuation, not rewriting** — the
+  valuation cells change no demand at all yet post the strongest paired
+  consistency since v5. The rewriting arm converted **100 %** of its
+  achievable margin (E-ceil identical at 0.2112) and the fuel sweep is
+  flat, so the ceiling is low rather than the optimizer weak. See
+  **gotcha 30**.
+
+### Notes
+- Suites: `process` **152**, `decision,magnitude,process` **208**; all
+  pre-existing suites unchanged (106 / 162 / 135 / 191 / 143 / 126 /
+  156 / 112).
+
 ## [0.26.0] — 2026-08-05
 
 The EQ5a pin-first release: both catgraph deps re-pinned one minor ahead
