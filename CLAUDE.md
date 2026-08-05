@@ -52,10 +52,48 @@ forex domain since removed).
   `surrealdb:surrealql-language` — for K3 (#6) surrealdb-live-message work,
   per the user CLAUDE.md routing rules.
 
-## Current state — 2026-08-03
+## Current state — 2026-08-05
 
 ### Done
 
+- **catgraph re-pin `v0.7.0` ×2 → `v0.8.0` — v0.26.0 (2026-08-05)**: the
+  EQ5a pin-first step — the process-structured registration
+  ([#76](https://github.com/sustia-llc/koalisi/issues/76)) must be born
+  on the final pins. Both catgraph deps bumped in lockstep (K6 rule).
+  **Drift check CLEAN**: eight suites at baseline counts
+  (106/162/135/191/143/126/156 incl. the replay parity gate, 112
+  `remote`), default clippy `--all-targets` clean, frozen K4 battery
+  (Parts 1–8, `--release`) reproduced byte-identical on every
+  quality/ratio/superiority/churn/verdict line vs a fresh v0.7.0
+  baseline — latency-only diffs, per the protocol's standing exclusion.
+  v0.8.0's sole delta over v0.7.0 is cg#214 `prop::presentation::rewrite`
+  (W2 `cost_of` + W3 `RewriteRule`/`optimize`/`replay`/`RewriteOutcome`
+  — the cg#57 a2 engine in optimizer form), purely additive; MSRV stays
+  1.93. **Lockfile nuance worth keeping**: the three catgraph packages
+  moved as usual, but re-resolution ALSO shifted two unrelated
+  transitive edges to already-present siblings (`prost-derive`'s
+  `itertools` 0.14.0 → 0.11.0, `tempfile`'s `getrandom` 0.4.3 → 0.3.4)
+  — so the "exactly three packages" phrasing older re-pin entries use
+  does not hold here; check the lock diff, don't transcribe the claim.
+  **Deferred by design**: the `catgraph-syntax` dep (EQ5a design-lock D6
+  — Frobenius spiders + presentation text surface) lands with its gated
+  feature in the implementation PR, so this PR's drift check keeps its
+  meaning. **Pin STOPS at v0.8.0** (owner, 2026-08-04): a prereg keeps
+  the tag its design targeted; catgraph `v0.9.0` waits for a later
+  re-pin koalisi wants for its own reasons. ⚠ **MSRV re-test owed at
+  that next re-pin** — the 1.93 floor is `deep_causality_num =0.4.1`
+  propagating through catgraph, and v0.9.0 (not v0.8.0) removes it.
+  **EQ5a IS IN FLIGHT**: #76 carries the owner design-lock (posted
+  2026-08-05 BEFORE prereg): D1 workflow-as-task staffing semantics; D2
+  a2 confirmatory / a1 dedup exploratory; D3 BOTH mechanism cells
+  (requirement rewriting + valuation-only); D4 hand-authored rule theory
+  with fuel SWEPT (confirmatory at one pinned fuel); D5 BOTH cost models
+  ⇒ a 2×2 with a **family-wise bar (≥1.4×, ≥21/30, any cell may carry)**;
+  D6 take the `catgraph-syntax` dep; D7 build the typed-aif arm — but as
+  **EQ5b**, a separate registration on its own seeds; D8 library behind
+  a new feature; D9 seeds 270..300; D10 gates X-battery / X-reduce /
+  S-sound / S-dedup; D11 pin-first stopping at v0.8.0. Next: prereg doc
+  → implementation → 3-lens review → official run.
 - **#38 remote coalition-event gateway — v0.25.0 (2026-08-03)**: the
   gap-filler slice (owner pick while catgraph runs the EQ5 design
   round). Re-introduces the off-process publish boundary deleted with
@@ -714,7 +752,7 @@ forex domain since removed).
 
 ```
 koalisi/
-├── Cargo.toml                              git tag deps: catgraph-applied + catgraph-magnitude v0.7.0 in lockstep (one checkout — K6); aif, surrealdb-live-message, libp2p 0.56 (optional); no path deps since K3; MSRV 1.93
+├── Cargo.toml                              git tag deps: catgraph-applied + catgraph-magnitude v0.8.0 in lockstep (one checkout — K6); aif, surrealdb-live-message, libp2p 0.56 (optional); no path deps since K3; MSRV 1.93
 ├── README.md                               user-facing
 ├── CLAUDE.md                               THIS FILE
 ├── config/{default,development,test}.toml  coalition threshold, history capacity; [sdb]+[docker] for the durable feature's upstream SETTINGS (cwd-resolved)
@@ -1660,7 +1698,8 @@ The categorical A/B mirror of the AIF arm, behind feature `magnitude`
   `v0.1.1` for the catgraph#29 triangle-tolerance fix; **K6 (#14) bumped
   again to `v0.2.0`** for the catgraph#31 `CoalitionEvaluator`; re-pinned
   `v0.5.0` 2026-07-30, EQ1 pin-first; re-pinned `v0.6.0` 2026-08-02, EQ3
-  pin-first; re-pinned `v0.7.0` 2026-08-03, EQ4 pin-first, all
+  pin-first; re-pinned `v0.7.0` 2026-08-03, EQ4 pin-first; re-pinned
+  `v0.8.0` 2026-08-05, EQ5a pin-first, all
   drift-free — see Current state). Originally
   an SSH URL (catgraph was private then; cargo's libgit2 can't authenticate
   HTTPS) — re-pinned to HTTPS in the 2026-07-27 release sweep after catgraph

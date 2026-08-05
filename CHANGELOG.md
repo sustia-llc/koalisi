@@ -19,6 +19,56 @@ Planned work — issue-tracked (details in [`CLAUDE.md`](./CLAUDE.md)
 - **[#25]** metrics example, reframed onto the `CoalitionService` decision
   path / topology events.
 
+## [0.26.0] — 2026-08-05
+
+The EQ5a pin-first release: both catgraph deps re-pinned one minor ahead
+with a clean drift check, so the EQ5a process-structured registration
+([#76](https://github.com/sustia-llc/koalisi/issues/76)) is born on the
+final pins. The `v0.8.0` surface koalisi will consume in EQ5a is cg#214
+`prop::presentation::rewrite` — the W2 process cost functional
+(`cost_of`, defined on content so it is a function of the morphism) and
+the W3 bounded convex-DPO engine (`RewriteRule`, `optimize`, `replay`,
+`RewriteOutcome`) — the sole delta over `v0.7.0`, purely additive
+(a new module plus one example; no existing signature changed).
+
+**The pin stops at `v0.8.0`** by owner decision (2026-08-04): a
+pre-registration keeps the tag its design targeted, so catgraph `v0.9.0`
+waits for a later re-pin koalisi wants for its own reasons.
+
+### Changed
+- **`catgraph-applied` + `catgraph-magnitude` deps re-pinned `v0.7.0` →
+  `v0.8.0` in lockstep** (one checkout — the K6 rule). Drift check
+  CLEAN: all eight feature suites at baseline counts
+  (106/162/135/191/143/126/156 incl. the #18/#30 replay parity gate, and
+  112 `remote`), default clippy `--all-targets` clean, and the frozen K4
+  battery (`strategy_comparison` Parts 1–8, `--release`) reproduced
+  against a fresh `v0.7.0` baseline with every quality median, ratio,
+  superiority count, churn column, seed table and verdict
+  byte-identical — the only differing lines are latency measurements,
+  the column the K4 protocol has always excluded from determinism.
+- Lockfile: the three catgraph workspace packages moved (`catgraph`,
+  `catgraph-applied`, `catgraph-magnitude` 0.7.0 → 0.8.0, commit
+  `9eae951b` → `5ee51f3d`) plus koalisi's own version line. Re-resolution
+  also shifted **two unrelated transitive edges** to already-present
+  sibling versions — `prost-derive`'s `itertools` 0.14.0 → 0.11.0 and
+  `tempfile`'s `getrandom` 0.4.3 → 0.3.4. Both are ordinary resolver
+  churn (no package added or removed, all suites green); recorded because
+  prior re-pin entries in this file claim an *exactly-three-packages*
+  lockfile delta and this one is not that.
+- README catgraph tag citations updated `v0.7.0` → `v0.8.0` (checked on
+  every re-pin since the v0.21.0 and v0.25.0 misses).
+
+### Notes
+- MSRV stays **1.93**: catgraph `v0.8.0` still carries the
+  `deep_causality_num =0.4.1` pin that forces the floor. That crate is
+  removed in catgraph `v0.9.0`, so the floor is re-testable at the *next*
+  re-pin, not this one.
+- The `catgraph-syntax` dependency EQ5a's design-lock calls for (D6 —
+  Frobenius spiders + the presentation text surface) does **not** land
+  here: it arrives with the gated feature it belongs to, in the
+  implementation PR, so this PR's drift check keeps meaning what it
+  means.
+
 ## [0.25.0] — 2026-08-03
 
 The [#38] gap-filler release: the domain-neutral remote coalition-event
