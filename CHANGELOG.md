@@ -19,6 +19,46 @@ Planned work — issue-tracked (details in [`CLAUDE.md`](./CLAUDE.md)
 - **[#25]** metrics example, reframed onto the `CoalitionService` decision
   path / topology events.
 
+## [0.28.0] — 2026-08-05
+
+The residual process-specificity registration
+([#80](https://github.com/sustia-llc/koalisi/issues/80)) — the EQ5a
+follow-up. Verdict: **`FALSIFIED (coverage proxy)`**
+(`docs/ab-report-K4-residual-process-specificity.md`; prereg
+`docs/prereg-K4-residual-process-specificity.md` + Amendment 1, pre-run).
+
+### Added
+- **`src/process/residual.rs`** — `ResidualPolicy` (feature `process`):
+  the unstaffable-residual valuation lever promoted out of EQ5a's
+  example-side `P9ValuationPolicy` into a reusable
+  `CoalitionDecisionPolicy` wrapper. Spiders excluded from the residual;
+  upstream declines detected **independently** rather than inferred from
+  a zero score; λ = 0 reproduces the inner policy bit-identically.
+  **Shipping it is not adopting it** — the koa#54 default is untouched
+  and this run gives no reason to change it.
+- `examples/strategy_comparison.rs` **Part 10** — two worlds off one
+  stream prefix per seed, five arms, S-repl / H-PS / E-mult / E-price /
+  E-λ, and the gates.
+
+### Result
+- The lever **replicated** (`r_wf` **1.3355×** ≥ 1.25, stronger than
+  EQ5a's 1.25×) and then **failed to be process-specific**: `lift_wf`
+  and `lift_flat` are **equal to four decimals** (+0.3355 both),
+  conjunct 1 FAIL against a contested bar of 0.4194, conjunct 2 0/30.
+- **Mechanism:** the worlds differ on 178/600 tasks repeating a step
+  (1.11× multiplicity), and `res-wf` vs `res-flat` differ on **355 raw
+  score bits and 0 acts** — the weighting reaches the margin and never
+  crosses a threshold. Every E-price and E-λ cell has `r_wf` exactly
+  equal to `r_flat`, so the finding is not "the weighting is inert" but
+  **"whatever it does, it does identically with or without the process
+  structure"**. See **gotcha 31**.
+- Settles EQ5a's most promising open lead: that valuation result was a
+  coverage penalty, not a process signal.
+
+### Notes
+- Suites: `process` **159**, `decision,magnitude,process` **215**; all
+  pre-existing suites unchanged.
+
 ## [0.27.0] — 2026-08-05
 
 The **EQ5a** registration ([#76](https://github.com/sustia-llc/koalisi/issues/76))

@@ -68,6 +68,31 @@ forex domain since removed).
 
 ### Done
 
+- **Residual process-specificity RUN — v0.28.0 (2026-08-05, #80):
+  `FALSIFIED (coverage proxy)`**. The EQ5a follow-up, a koalisi-side
+  K4-lineage registration (no E-queue number — #56/#63 precedent). Full
+  discipline (owner lock D1–D8 + a formalism pin on #80 BEFORE prereg;
+  prereg fcb27b7 BEFORE implementation; 3-lens review — 0 blocking / 0
+  important / 3 minor, ALL applied as Amendment 1 — BEFORE the run).
+  Official run seeds 300..330: **the lever REPLICATED** (`r_wf` 1.3355×
+  ≥ 1.25, stronger than EQ5a's 1.25×) **and then failed to be
+  process-specific** — `lift_wf` and `lift_flat` are equal to four
+  decimals (+0.3355 both), conjunct 1 FAIL vs a contested bar 0.4194,
+  conjunct 2 0/30. Gates X-pair (30/30 prefixes, 600/600 identical
+  distinct demand) / X-identity / S-live / S-probe / X-battery all PASS.
+  **Mechanism:** the worlds differ on 178/600 tasks repeating a step
+  (1.11× multiplicity), and `res-wf` vs `res-flat` differ on **355 raw
+  score bits and 0 acts** — the weighting reaches the margin and never
+  crosses a threshold. Every E-price/E-λ cell has `r_wf` exactly equal
+  to `r_flat`, so the finding is the STRONG form: whatever the weighting
+  does, it does identically with or without the process structure.
+  **This settles EQ5a's most promising open lead — that valuation
+  result was a coverage penalty, not a process signal.** Library:
+  `src/process/residual.rs` (`ResidualPolicy`, feature `process`);
+  shipping it is NOT adopting it, and koa#54 stays FINAL. Report
+  `docs/ab-report-K4-residual-process-specificity.md` (8-item ledger).
+  See **gotcha 31**. Suites: `process` 159 / `decision,magnitude,process`
+  215. Seeds consumed: 300..330.
 - **EQ5a process-structured RUN — v0.27.0 (2026-08-05, #76):
   `FALSIFIED (process structure)`**. Full discipline (owner design-lock
   D1–D11 on #76 BEFORE prereg; prereg 185a9a4 BEFORE implementation;
@@ -785,8 +810,8 @@ forex domain since removed).
   | `--features persistence` | 126 | `cargo test --features persistence` |
   | `--features persistence,magnitude` | 156 (incl. the #18/#30 replay parity gate) | `cargo test --features persistence,magnitude` |
   | `--features remote` | 112 (gateway buffer + loopback round-trip) | `cargo test --features remote` |
-  | `--features process` | 152 (EQ5a library surface, #76) | `cargo test --features process` |
-  | `--features decision,magnitude,process` | 208 (the Part 9 battery's build) | `cargo test --features decision,magnitude,process` |
+  | `--features process` | 159 (EQ5a surface + #80 ResidualPolicy) | `cargo test --features process` |
+  | `--features decision,magnitude,process` | 215 (the Part 9 + Part 10 batteries) | `cargo test --features decision,magnitude,process` |
   | `--features durable` | +1 container-backed restart test; needs Docker | `cargo test --features durable` |
 
   (All non-remote suites are the pre-v0.25.0 baselines +3 — the
@@ -839,6 +864,7 @@ koalisi/
 │   │   ├── theory.rs                       rule_theory() — the 3 schemas closed over (bit, role), 174 instances; Schema/LabelledRule/fusion_pairs
 │   │   ├── cost.rs                         uniform_cost + StaffingTable + staffing_price (Amendment A1.3)
 │   │   ├── rewrite.rs                      optimize_workflow + verify_optimization (replay + content_eq — the S-sound helper)
+│   │   ├── residual.rs                     #80 (v0.28.0): ResidualPolicy — the unstaffable-residual valuation lever, promoted out of EQ5a's example side (gotcha 31)
 │   │   └── errors.rs                       ProcessError
 │   ├── ingest/                             K5 (#8): domain-neutral ingestion layer (always compiled, no new deps)
 │   │   ├── mod.rs                          re-exports
@@ -899,7 +925,9 @@ koalisi/
 │   ├── prereg-K4-eq4-typed-roles.md        #72 EQ4 pre-registration (+ pre-run Amendments 1–2: typed Scope-A, E-ρq-inv cell, E-T3 counters; result appended)
 │   ├── ab-report-K4-eq4-typed-roles.md     #72 run — VALIDATED (typed roles), first since v5; 43.5% conversion; E-ρq anti-alignment + inverse cell; 15-item ledger (gotcha 28)
 │   ├── prereg-K4-eq5a-process-structured.md #76 EQ5a pre-registration (+ FIVE pre-run amendments: pinned constants, erratum, two inert-leg fixes, the 3-lens review)
-│   └── ab-report-K4-eq5a-process-structured.md #76 run — FALSIFIED (process structure); valuation converts where rewriting does not; 100% of a low ceiling; 15-item ledger (gotcha 30)
+│   ├── ab-report-K4-eq5a-process-structured.md #76 run — FALSIFIED (process structure); valuation converts where rewriting does not; 100% of a low ceiling; 15-item ledger (gotcha 30)
+│   ├── prereg-K4-residual-process-specificity.md #80 pre-registration (+ pre-run Amendment 1: probe declines gated, floor-condition disclosure)
+│   └── ab-report-K4-residual-process-specificity.md #80 run — FALSIFIED (coverage proxy); the lever replicates 1.34x but lift_wf == lift_flat; 355 score bits, 0 acts; 8-item ledger (gotcha 31)
 └── tests/
     ├── topology_test.rs                    12 tests
     ├── algorithms_test.rs                  18 tests (incl. 3 feedback-loop/seeding tests, #41)
@@ -1464,6 +1492,40 @@ These cost time during the build; future-me should not relearn them.
       evaluation failure independently (Part 9 probes `relevant_masks` +
       `magnitude_at_t`). Residual: that probe is untyped where a typed
       arm's couplings are ρ-modulated — no typed probe exists upstream.
+
+31. **Residual-lever contracts (#80, v0.28.0) — rely on these.**
+    - **A term can be LIVE in the score and dead at the decision.** The
+      residual's multiplicity weighting moved **355 raw score bits** and
+      **0 acts** across 30 seeds. `S-live` (does the cell diverge at
+      all?) and "does the cell change an outcome?" are DIFFERENT
+      questions, and a confirmatory leg reading only PRIMARY sees a flat
+      null where the real answer is "it reached the margin and never
+      crossed a threshold". **Always report act-vs-score-bit divergence
+      alongside any score-space lever** — without that line #80 would
+      have read as a nothing-happened result.
+    - **Design a discrimination so the controls are bit-identical.**
+      Because v2w and v2t carry identical distinct demand (the shape
+      draw repeats steps but never introduces a new `(bit, role)`),
+      `ctl-wf` ≡ `ctl-flat` bit-for-bit — so every `res-wf` − `res-flat`
+      gap is attributable to the lever alone. That structural property,
+      not the arm count, is what made the decomposition clean. Any
+      future two-world contrast should be built for it and should
+      ASSERT it (X-pair), not hope for it.
+    - **"The weighting is inert" and "the weighting is not the
+      mechanism" are different claims.** EQ5a saw λ and cost model not
+      move the v2w median and inferred inertness; on seeds 300..330 both
+      DO move it (priced 1.3869× vs uniform 1.3355×; λ = 0.25 1.3682×)
+      — yet `r_wf == r_flat` in every cell. The durable form is the
+      second claim. Don't generalise a flat sweep from one seed block.
+    - **The evaluation probe is UNTYPED while typed arms are what it
+      guards** (`src/process/residual.rs`). A typed-only failure would
+      fold a correction onto a genuine decline. Measured 0 in both EQ5a
+      and #80, and gated RUN-INVALID since A1.1 — but the gap is real
+      and closing it needs a typed-evaluation probe that does not exist
+      upstream (a catgraph-side surface).
+    - `ResidualPolicy` is **shipped, not adopted**. Two registrations
+      have now measured it and neither licenses making it a default;
+      koa#54 (mag = demonstrated default) stays FINAL.
 
 ## Reproducers
 
