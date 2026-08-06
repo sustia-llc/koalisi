@@ -186,3 +186,58 @@ scorers, tables) stays example-side.
 `docs/ab-report-K4-residual-process-specificity.md` — registered
 sections mirror §4/§5; implementation/deviation ledger mandatory;
 appended-addendum convention applies to any follow-up.
+
+## Amendment 1 (pre-run, 2026-08-05 — the 3-lens review, posted to #80)
+
+The registered 3-lens review ran BEFORE the official run: **0 blocking,
+0 important, 3 minor**, all applied per the house rule. No bar, seed,
+arm, or leg changes. One item promotes a reported number to a gate; the
+other two are disclosure clauses that keep a passing result honest.
+
+### A1.1 — probe declines become a RUN-INVALID condition (was: reported only)
+
+The evaluation probe (EQ5a A5.3, inherited verbatim) runs the **untyped**
+`relevant_masks` + `magnitude_or_zero` path, while **every** Part 10
+inner policy is **typed** (`p8_typed_policy`, oracle ρ = δ). If a typed
+evaluation errors where the untyped probe on the same member sets
+succeeds, the wrapper receives `Decision { act: false, score: 0.0 }` —
+indistinguishable from a legitimate exact-zero margin — and folds a
+correction onto a genuine decline. EQ5a measured **0/0** probe declines
+and disclosed the gap; Part 10 exercises it across **three** `res-*`
+cells × 30 fresh seeds, and merely *reporting* the count would let a
+nonzero value corrupt PRIMARY and act counts without tripping any §5
+gate.
+
+**Registered change:** a nonzero probe-decline count on any `res-*` cell
+is **RUN-INVALID**. The count is printed per cell either way. This is
+the honest treatment — the alternative is a number nobody can trust and
+no gate refuses. Closing the gap properly needs a typed-evaluation probe
+that does not exist upstream; that is a catgraph-side surface, not
+something to improvise here.
+
+### A1.2 — an undefined flat ratio is a distinct condition, not a zero
+
+`r_flat` is undefined when `median PRIMARY(ctl-flat) ≤ 0`. The
+implementation floors `lift_flat` to 0 in that case, which makes
+conjunct 1 trivially satisfiable — but §4's justification for the floor
+argued only the **measured-zero** case ("if the lever does nothing on
+flat…"), never the undefined one.
+
+**Registered reading:** an undefined `r_flat` is reported as its own
+condition, distinctly from a measured `lift_flat ≤ 0`, and a conjunct-1
+pass resting on it carries no process-specificity weight. Expected never
+to fire — the typed control's PRIMARY has run in the 0.15–0.30 band
+throughout this lineage — but it must not pass silently if it does.
+
+### A1.3 — a trivial conjunct-1 pass must announce itself
+
+S-repl already forces `lift_wf ≥ 0.25`, so whenever `lift_flat ≤ 0` the
+floor makes `bar_c1 = 0` and conjunct 1 passes **for free**. That is the
+correct behaviour (flat inert ⇒ the effect is process-specific), and
+conjunct 2 then carries all the discriminating weight — but a reader
+should not have to notice a `0.0000` bar for themselves.
+
+**Registered change:** where the run prints `bar_c1`, it states
+explicitly whether the conjunct-1 pass was **trivial** (`bar_c1 = 0`,
+flat lift non-positive) or **contested** (`bar_c1 > 0`), and says which
+conjunct is doing the work in that case.

@@ -52,6 +52,17 @@
 //! [`ProcessError`]. A task whose optimization or verification fails is a
 //! decline-and-count, never a panic and never a silent as-written fallback.
 //!
+//! ## Staffing a process: the residual policy
+//!
+//! [`ResidualPolicy`] (added by the `#80` registration, prereg §7 / lock D6) is
+//! the decision-side counterpart: a [`MagnitudePolicy`](crate::decision::MagnitudePolicy)
+//! wrapper that charges `λ ·` the price of the demand a coalition **cannot
+//! cover**, so occurrence multiplicity and step scarcity reach a decision for the
+//! first time. Its four load-bearing properties — the penalty depends on the
+//! coalition (so it does not cancel), spiders are excluded, an upstream decline is
+//! detected independently rather than inferred from a zero score, and λ = 0
+//! reproduces the inner policy bit for bit — are documented on [`residual`].
+//!
 //! ## Shape
 //!
 //! ```text
@@ -70,6 +81,7 @@
 pub mod cost;
 pub mod demand;
 pub mod errors;
+pub mod residual;
 pub mod rewrite;
 pub mod signature;
 pub mod theory;
@@ -77,6 +89,7 @@ pub mod theory;
 pub use cost::{StaffingTable, staffing_price, uniform_cost};
 pub use demand::{Demand, demand};
 pub use errors::ProcessError;
+pub use residual::{DeclineCounter, Residual, ResidualBasis, ResidualPolicy};
 pub use rewrite::{content_matches, optimize_workflow, verify_optimization, workflow_cost};
 pub use signature::{Role, Step, Workflow, WorkflowGen, chain, spider_expr, step_expr};
 pub use theory::{LabelledRule, Schema, fusion_pairs, rule_labels, rule_theory};

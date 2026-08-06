@@ -99,9 +99,10 @@ use catgraph_applied::prop::presentation::rewrite::RewriteRule;
 use catgraph_applied::prop::{Free, PropExpr};
 use catgraph_syntax::frobenius::FrobeniusOr;
 use koalisi::process::{
-    Demand, LabelledRule, Role, Schema, StaffingTable, Step, Workflow, WorkflowGen, chain,
-    content_matches, demand, fusion_pairs, optimize_workflow, rule_labels, rule_theory,
-    spider_expr, staffing_price, step_expr, uniform_cost, verify_optimization, workflow_cost,
+    DeclineCounter, Demand, LabelledRule, Residual, ResidualBasis, ResidualPolicy, Role, Schema,
+    StaffingTable, Step, Workflow, WorkflowGen, chain, content_matches, demand, fusion_pairs,
+    optimize_workflow, rule_labels, rule_theory, spider_expr, staffing_price, step_expr,
+    uniform_cost, verify_optimization, workflow_cost,
 };
 use koalisi::algorithms::{
     AgentCapabilities, CoalitionStructure, FeedbackCalculator, FeedbackStore, PopulationConfig,
@@ -271,6 +272,10 @@ fn main() {
     println!("{}", "=".repeat(72));
     println!();
     part9_eq5a_process_structured();
+    println!();
+    println!("{}", "=".repeat(72));
+    println!();
+    part10_residual_process_specificity();
 }
 
 // ===========================================================================
@@ -8659,231 +8664,23 @@ fn p9_declare(
 // Arms and the scorer.
 // ---------------------------------------------------------------------------
 
-/// The valuation-only arm (prereg §4 D3b as **re-read by Amendment A3.1**): the
-/// unstaffable residual.
-///
-/// ```text
-/// value(S) = Mag(S) − λ · Σ per_gen(g)   over generator occurrences g of the
-///                          declared writing whose (bit, role) is NOT covered by S
-/// ```
-///
-/// # Why the re-read exists
-///
-/// §4 D3b originally scored `Mag(S) − λ · cost_of(writing, per_gen)` while also
-/// fixing the declared writing to be independent of the coalition. That term is a
-/// per-task CONSTANT, so it cancelled exactly from every join/leave margin and
-/// both valuation cells measured bit-identical to the control at every registered
-/// λ. Amendment A3.1 prices the residual instead: the penalty depends on `S`, so
-/// admitting an agent that covers previously-unstaffable steps improves the score
-/// by `λ` times those steps' price.
-///
-/// # Why it is not a rescaling of the magnitude signal
-///
-/// The penalty is weighted by `per_gen`, so **occurrence multiplicity and step
-/// scarcity enter a decision for the first time** — neither is visible to
-/// magnitude, which sees only the OR-mask of distinct demand. Demand and the
-/// declared writing are unchanged; this is still valuation-only, not rewriting.
-///
-/// # Spiders
-///
-/// `μ`/`η`/`δ`/`ε` occurrences are **excluded from the residual**. They are
-/// priced by `cost_of` (they are hyperedges like any other), but they name no
-/// `(bit, role)`, so "uncovered" is not defined for them and no coalition could
-/// ever discharge them. Counting them would add a constant to every side of every
-/// margin — exactly the cancelling term A3.1 removed.
-struct P9ValuationPolicy {
-    inner: MagnitudePolicy,
-    /// The coefficient λ (Amendment A1.4, pinned at [`P9_LAMBDA`]).
-    lambda: f64,
-    /// One entry per step OCCURRENCE of the declared writing, with its `per_gen`
-    /// price under the cell's cost model. Multiplicity is deliberately NOT
-    /// collapsed: two occurrences of an unstaffable step are twice the penalty.
-    residual: Vec<(Step, u64)>,
-    /// Pool worker id → role index (the v2t draw's map, indexed by agent id).
-    /// Coverage is role-MATCHED, so the wrapper needs the same map the typed
-    /// policy carries. Owned rather than borrowed because a
-    /// `Box<dyn CoalitionDecisionPolicy>` is `'static`; the pool is ≤ 16 workers,
-    /// so the per-task clone is noise next to one magnitude evaluation.
-    roles: Vec<u8>,
-    /// Decisions declined because the independent evaluation probe reported an
-    /// upstream failure (Amendment A5.3). Shared across the whole cell so the run
-    /// can report ONE number; reported, never asserted on.
-    declines: Arc<AtomicUsize>,
-}
-
-impl P9ValuationPolicy {
-    /// The `(role, capabilities)` of one participant, or `None` when the harness
-    /// has no role for it — the same condition the library declines on, so the
-    /// wrapper forwards the library's decision rather than inventing one.
-    fn staff_of(&self, agent: &dyn AgentCapabilities) -> Option<(u8, u32)> {
-        Some((*self.roles.get(agent.agent_id())?, agent.capabilities()))
-    }
-
-    fn staff(&self, members: &[&dyn AgentCapabilities]) -> Option<Vec<(u8, u32)>> {
-        members.iter().map(|a| self.staff_of(*a)).collect()
-    }
-
-    /// `Σ per_gen(g)` over residual occurrences no member of `staff` can perform.
-    fn uncovered(&self, staff: &[(u8, u32)]) -> u64 {
-        self.residual
-            .iter()
-            .filter(|&&(step, _)| !p9_step_staffed(staff, step))
-            .map(|&(_, price)| price)
-            .sum()
-    }
-
-    /// The full residual at an EMPTY coalition — `λ ·` the price of the whole
-    /// declared writing's step occurrences, i.e. the largest the term can be.
-    /// Reported in the instrumentation section.
-    fn full_term(&self) -> f64 {
-        self.lambda * self.uncovered(&[]) as f64
-    }
-
-    /// A decline in the library's own shape, counted.
-    fn decline(&self) -> Decision {
-        self.declines.fetch_add(1, Ordering::Relaxed);
-        Decision {
-            act: false,
-            score: 0.0,
-        }
-    }
-
-    /// Fold a non-negative residual correction into a base decision.
-    ///
-    /// The act predicate is re-derived from the corrected score unconditionally.
-    /// That is safe **because** [`p9_evaluation_failed`] has
-    /// already ruled out a decline: every base score reaching here is a genuine
-    /// margin, so at `correction == 0` the re-derivation reproduces the library's
-    /// own decision exactly (`margin > join_margin` / `delta <= 0` over an
-    /// unchanged score), and at `correction > 0` it applies the registered value
-    /// rule. The non-finite guard stays — a non-finite base has no correction that
-    /// means anything.
-    fn fold(base: Decision, correction: f64, act: impl Fn(f64) -> bool) -> Decision {
-        if !base.score.is_finite() {
-            return base;
-        }
-        let score = base.score + correction;
-        Decision {
-            act: act(score),
-            score,
-        }
-    }
-}
-
-/// Independently detect an upstream evaluation failure over the two member sets a
-/// decision compares (Amendment A5.3).
-///
-/// # Why this exists, and why inferring it from the score is wrong
-///
-/// The library reports an upstream decline as `Decision { act: false, score: 0.0 }`
-/// — **the same value a legitimate exact-zero margin carries**. Treating a zero
-/// score as a decline would suppress corrections on a population this lineage
-/// knows to be large (EQ3 measured knife-edge decisions at ~43 % of the stream);
-/// treating a decline as a margin could flip it into an accept. The ambiguity
-/// cannot be resolved from the returned `Decision`, so it is resolved BEFORE the
-/// fold: the harness runs its own evaluation of both sides and, on `Err`, the
-/// caller declines and counts.
-///
-/// # What the probe does and does not reproduce
-///
-/// It is the harness's own [`relevant_masks`] + [`magnitude_at_t`] (`t = 1`) path
-/// — the same dedup-and-relevance filter, the same member sets, the same
-/// restrict-then-close Möbius pipeline the arm runs on. It differs in ONE respect:
-/// its couplings are UNTYPED, where the arm's are ρ-modulated. So it detects the
-/// structural failure modes (a member set the upstream metric space rejects)
-/// exactly, and a hypothetical failure that only the ρ-modulated coupling matrix
-/// could trigger would slip past it. That residual is disclosed rather than
-/// assumed away; the library exposes no typed-evaluation probe to close it.
-///
-/// Free rather than a method: it reads nothing off the policy, and saying so in
-/// the signature is worth more than the call-site brevity.
-fn p9_evaluation_failed(
-    left: &[&dyn AgentCapabilities],
-    right: &[&dyn AgentCapabilities],
-    required: u32,
-) -> bool {
-    let probe = |members: &[&dyn AgentCapabilities]| {
-        magnitude_at_t(&relevant_masks(members, required), required, 1.0).is_err()
-    };
-    probe(left) || probe(right)
-}
-
-/// Whether any member of `staff` can perform `step` — role-matched, the same
-/// question [`p9_step_covered`] asks of a member index list.
-fn p9_step_staffed(staff: &[(u8, u32)], step: Step) -> bool {
-    step.capability_mask().is_some_and(|mask| {
-        staff
-            .iter()
-            .any(|&(role, caps)| role == step.role.index() && caps & mask != 0)
-    })
-}
-
-impl CoalitionDecisionPolicy for P9ValuationPolicy {
-    /// `Δvalue = ΔMag + λ · (pen(S) − pen(S ∪ {x}))`.
-    ///
-    /// The correction is non-negative — admitting an agent can only cover more
-    /// steps — so it can turn a declined join into an accepted one, never the
-    /// reverse.
-    fn should_join(
-        &self,
-        agent: &dyn AgentCapabilities,
-        coalition: &[&dyn AgentCapabilities],
-        ctx: &DecisionContext,
-    ) -> Decision {
-        let (Some(without), Some(joined)) = (self.staff(coalition), self.staff_of(agent)) else {
-            // No role for a participant: the library declines for exactly this
-            // reason, so forward ITS decision rather than inventing one.
-            return self.inner.should_join(agent, coalition, ctx);
-        };
-        let mut with_view: Vec<&dyn AgentCapabilities> = coalition.to_vec();
-        with_view.push(agent);
-        if p9_evaluation_failed(coalition, &with_view, ctx.required_capabilities) {
-            return self.decline();
-        }
-        let base = self.inner.should_join(agent, coalition, ctx);
-        let mut with = without.clone();
-        with.push(joined);
-        // `saturating_sub` states the monotonicity rather than trusting it: a
-        // larger staff can never leave more uncovered.
-        let correction =
-            self.lambda * self.uncovered(&without).saturating_sub(self.uncovered(&with)) as f64;
-        // The library's own `margin > join_margin` rule, read off the very policy
-        // being wrapped rather than mirrored as a constant — the score changed,
-        // so the predicate has to be restated, but the threshold does not.
-        let margin = self.inner.join_margin;
-        Self::fold(base, correction, |score| score > margin)
-    }
-
-    /// `Δvalue = ΔMag + λ · (pen(S \ {x}) − pen(S))`, leaving iff `Δvalue ≤ 0`
-    /// (the library's leave rule, restated over value instead of magnitude).
-    ///
-    /// The correction is again non-negative, so a member holding otherwise
-    /// unstaffable steps becomes LESS likely to be swept out.
-    fn should_leave(
-        &self,
-        agent: &dyn AgentCapabilities,
-        coalition: &[&dyn AgentCapabilities],
-        ctx: &DecisionContext,
-    ) -> Decision {
-        // `coalition` INCLUDES `agent` on the leave path (library convention).
-        let id = agent.agent_id();
-        let remaining: Vec<&dyn AgentCapabilities> = coalition
-            .iter()
-            .filter(|a| a.agent_id() != id)
-            .copied()
-            .collect();
-        let (Some(inside), Some(outside)) = (self.staff(coalition), self.staff(&remaining)) else {
-            return self.inner.should_leave(agent, coalition, ctx);
-        };
-        if p9_evaluation_failed(coalition, &remaining, ctx.required_capabilities) {
-            return self.decline();
-        }
-        let base = self.inner.should_leave(agent, coalition, ctx);
-        let correction =
-            self.lambda * self.uncovered(&outside).saturating_sub(self.uncovered(&inside)) as f64;
-        Self::fold(base, correction, |score| score <= 0.0)
-    }
-}
+// The valuation-only arm (prereg §4 D3b as re-read by EQ5a Amendment A3.1 — the
+// unstaffable residual) USED to live here as an example-side `P9ValuationPolicy`.
+// The #80 registration (prereg §7, lock D6) promotes it to the library as
+// `koalisi::process::ResidualPolicy`, and this harness consumes the library type:
+// there is no second copy example-side. Everything the example-side struct
+// carried — the coalition-dependent penalty, the spider exclusion, the
+// independent evaluation probe (a zero score is NOT a decline), the λ = 0
+// identity, and the role-matched coverage check — moved with it and is documented
+// on `koalisi::process::residual`. X-battery is the regression gate on the move:
+// Part 9's output must be byte-identical across it.
+//
+// The one behavioural detail worth restating where it is used: the library's
+// probe evaluates through `magnitude_or_zero` (upstream `coalition_value`) where
+// the example's `p9_evaluation_failed` used `magnitude_at_t(.., 1.0)` (upstream
+// `coalition_magnitude_from_couplings(.., 1.0)`). Those are the SAME function —
+// `coalition_value` is defined as the `t = 1.0` call — so the promotion is
+// behaviour-preserving by construction and not merely by measurement.
 
 /// How a Part 9 arm supplies its policy for a seed — the [`P8Arm`] shape, with
 /// the per-task variant keyed by task index (the valuation term is a task
@@ -9103,43 +8900,39 @@ where
     (results, lat)
 }
 
-/// The pool's role map as a `Vec<u8>` indexed by agent id — the same map
-/// [`p8_typed_policy`] hands the library, in the shape the valuation wrapper's
-/// role-matched coverage check wants.
+/// The pool's `agent_id → RoleId` map — **the same map** [`p8_typed_policy`]
+/// hands the library's typed magnitude policy, which is exactly what
+/// [`ResidualPolicy`]'s role-matched coverage check wants.
 ///
-/// # Panics
-///
-/// Panics if a pool worker carries no role or a role index does not fit a `u8`.
-/// Both are harness bugs: `p8_typed_policy` already asserts full coverage, and
-/// `R = 3`.
-fn p9_role_map(inst: &WorkflowInstance) -> Vec<u8> {
+/// Built from the same source (`inst.base.roles`, indexed by `Worker.id`, which
+/// is the pool index) rather than converted from the typed policy, because
+/// `with_role_modulation` consumes its map.
+fn p9_role_map(inst: &WorkflowInstance) -> HashMap<usize, RoleId> {
     inst.base
         .roles
         .iter()
-        .map(|&r| {
-            u8::try_from(r).expect("invariant: the v2t draw assigns role indices below R = 3")
-        })
+        .enumerate()
+        .map(|(id, &role)| (id, role))
         .collect()
 }
 
-/// The per-occurrence residual of one declared writing under a cost model: every
-/// step occurrence paired with its `per_gen` price (Amendment A3.1).
+/// The residual of one declared writing under a cost model: every priced element
+/// the coalition may fail to cover (`EQ5a` Amendment A3.1, `basis` added by #80).
 ///
-/// Spiders never appear — [`Demand::occurrences`] carries `User` generators only,
-/// which is exactly the exclusion A3.1 requires (a spider names no `(bit, role)`,
-/// so it can never be uncovered).
-fn p9_residual(inst: &WorkflowInstance, decl: &P9Declared, cost: P9Cost) -> Vec<(Step, u64)> {
-    decl.demand
-        .occurrences()
-        .iter()
-        .map(|&step| {
-            let price = match cost {
-                P9Cost::Uniform => 1,
-                P9Cost::Priced => inst.table.price(step),
-            };
-            (step, price)
-        })
-        .collect()
+/// Spiders never appear — [`Demand`] carries `User` generators only, which is
+/// exactly the exclusion A3.1 requires (a spider names no `(bit, role)`, so it can
+/// never be uncovered), and the library builds the residual off that same
+/// [`Demand`] rather than off the raw content.
+fn p9_residual(
+    inst: &WorkflowInstance,
+    decl: &P9Declared,
+    cost: P9Cost,
+    basis: ResidualBasis,
+) -> Residual {
+    match cost {
+        P9Cost::Uniform => Residual::new(&decl.demand, basis, uniform_cost()),
+        P9Cost::Priced => Residual::new(&decl.demand, basis, staffing_price(&inst.table)),
+    }
 }
 
 /// One cell of the E-fuel sweep, declared BEFORE the gates so S-sound can cover
@@ -9166,35 +8959,44 @@ struct P9ValuationRun {
     probe_declines: usize,
 }
 
-/// The valuation-only battery: a per-task [`P9ValuationPolicy`] carrying that
-/// task's residual over the shared typed control.
+/// The valuation-only battery: a per-task library [`ResidualPolicy`] carrying
+/// that task's residual over the shared typed control.
+///
+/// `basis` is [`ResidualBasis::Occurrences`] for every `EQ5a` (#76) cell — the
+/// registered A3.1 form. Part 10 (#80) passes
+/// [`Distinct`](ResidualBasis::Distinct) for its `res-distinct` arm, which is the
+/// only reason the parameter exists; the `EQ5a` call sites pass `Occurrences` and
+/// are unchanged in behaviour.
 fn p9_valuation_battery(
     insts: &[WorkflowInstance],
     declared: &[Vec<P9Declared>],
     rho: &RoleModulation,
     lambda: f64,
     cost: P9Cost,
+    basis: ResidualBasis,
 ) -> P9ValuationRun {
     let mut terms: Vec<f64> = Vec::new();
     let mut lat = Vec::new();
     let mut results = Vec::with_capacity(insts.len());
     // One counter for the whole cell. The warm-up gets its own throw-away counter
     // so a discarded pass cannot inflate the reported number.
-    let declines = Arc::new(AtomicUsize::new(0));
+    let declines = DeclineCounter::new();
     // Discarded warm-up on the first instance, as in `p9_battery` — the arms stay
     // latency-comparable even though latency is never gating here.
     if let (Some(first), Some(first_decl)) = (insts.first(), declared.first()) {
         let inner = p8_typed_policy(&first.base, rho);
         let role_map = p9_role_map(first);
-        let warm_declines = Arc::new(AtomicUsize::new(0));
+        let warm_declines = DeclineCounter::new();
         let make = |t: usize| {
-            Box::new(P9ValuationPolicy {
-                inner: inner.clone(),
-                lambda,
-                residual: p9_residual(first, &first_decl[t], cost),
-                roles: role_map.clone(),
-                declines: Arc::clone(&warm_declines),
-            }) as Box<dyn CoalitionDecisionPolicy>
+            Box::new(
+                ResidualPolicy::new(
+                    inner.clone(),
+                    role_map.clone(),
+                    lambda,
+                    p9_residual(first, &first_decl[t], cost, basis),
+                )
+                .with_declines(warm_declines.clone()),
+            ) as Box<dyn CoalitionDecisionPolicy>
         };
         let mut warm = Vec::new();
         let _ = p9_run_seed(&P9Arm::PerTask(&make), first, first_decl, &mut warm);
@@ -9202,12 +9004,14 @@ fn p9_valuation_battery(
     for (inst, decl) in insts.iter().zip(declared.iter()) {
         let inner = p8_typed_policy(&inst.base, rho);
         let role_map = p9_role_map(inst);
-        let build = |t: usize| P9ValuationPolicy {
-            inner: inner.clone(),
-            lambda,
-            residual: p9_residual(inst, &decl[t], cost),
-            roles: role_map.clone(),
-            declines: Arc::clone(&declines),
+        let build = |t: usize| {
+            ResidualPolicy::new(
+                inner.clone(),
+                role_map.clone(),
+                lambda,
+                p9_residual(inst, &decl[t], cost, basis),
+            )
+            .with_declines(declines.clone())
         };
         let make = |t: usize| Box::new(build(t)) as Box<dyn CoalitionDecisionPolicy>;
         terms.extend((0..decl.len()).map(|t| build(t).full_term()));
@@ -9217,7 +9021,7 @@ fn p9_valuation_battery(
         seeds: results,
         latencies: lat,
         terms,
-        probe_declines: declines.load(Ordering::Relaxed),
+        probe_declines: declines.get(),
     }
 }
 
@@ -9679,8 +9483,22 @@ fn part9_eq5a_process_structured() {
     let (rw_p, rw_p_lat) = p9_battery(&insts, &d_rw_p, |inst| {
         Box::new(p8_typed_policy(&inst.base, &oracle)) as Box<dyn CoalitionDecisionPolicy>
     });
-    let val_u_run = p9_valuation_battery(&insts, &d_val_u, &oracle, P9_LAMBDA, P9Cost::Uniform);
-    let val_p_run = p9_valuation_battery(&insts, &d_val_p, &oracle, P9_LAMBDA, P9Cost::Priced);
+    let val_u_run = p9_valuation_battery(
+        &insts,
+        &d_val_u,
+        &oracle,
+        P9_LAMBDA,
+        P9Cost::Uniform,
+        ResidualBasis::Occurrences,
+    );
+    let val_p_run = p9_valuation_battery(
+        &insts,
+        &d_val_p,
+        &oracle,
+        P9_LAMBDA,
+        P9Cost::Priced,
+        ResidualBasis::Occurrences,
+    );
     let (val_u, val_u_lat, val_u_terms) =
         (&val_u_run.seeds, &val_u_run.latencies, &val_u_run.terms);
     let (val_p, val_p_lat, val_p_terms) =
@@ -9975,7 +9793,14 @@ fn part9_eq5a_process_structured() {
     let grid_row = P9_LAMBDA_GRID
         .iter()
         .map(|&lambda| {
-            let run = p9_valuation_battery(&insts, &d_val_p, &oracle, lambda, P9Cost::Priced);
+            let run = p9_valuation_battery(
+                &insts,
+                &d_val_p,
+                &oracle,
+                lambda,
+                P9Cost::Priced,
+                ResidualBasis::Occurrences,
+            );
             let (seeds, acts, _) = p9_divergence(&run.seeds, &asis);
             format!(
                 "λ = {lambda}: median PRIMARY {:.4}, median full term {:.3}, diverging {seeds}/{n_seeds} seeds ({acts} acts), probe declines {}",
@@ -10339,6 +10164,815 @@ fn part9_eq5a_process_structured() {
         median(val_p_terms.clone())
     );
     println!();
+}
+
+// ===========================================================================
+// Part 10 — #80: is the unstaffable-residual lever process-specific, or a
+// coverage proxy? REGISTERED.
+//
+// Governed by `docs/prereg-K4-residual-process-specificity.md` (committed BEFORE
+// this code; design-lock of record koalisi #80). EQ5a measured the lever at
+// 1.25× on 30/30 seeds and could not explain it. This part asks whether the
+// advantage needs the PROCESS at all, by running the same lever on two worlds
+// drawn from the SAME seed and the SAME stream prefix:
+//
+//   v2w — the EQ5a workflow world (chains, fan-out p = 0.25, spiders)
+//   v2t — the EQ4 flat world (multiplicity ≡ 1, no fan-out, no spiders)
+//
+// The prereg §2 finding that makes the decomposition sharp: the v2w shape draw
+// repeats and fans steps but NEVER introduces a new `(bit, role)`, so the two
+// worlds carry IDENTICAL distinct demand. They pose the same coverage problem
+// and differ only in occurrence multiplicity — which is exactly what the null
+// (B), "the residual is a coverage proxy in process clothing", predicts is
+// irrelevant.
+//
+// Everything here is ADDITIVE — Parts 1–9 above are the byte-identity gate
+// (§5 X-battery), so no frozen draw, runner, arm, or print statement is touched.
+// The one exception is deliberate and mandated by prereg §7: EQ5a's example-side
+// `P9ValuationPolicy` was PROMOTED to `koalisi::process::ResidualPolicy` and both
+// parts now consume the library type. X-battery is the regression gate on that
+// move.
+// ===========================================================================
+
+/// Part 10 seed range (prereg §1) — fresh seeds; 90..120 and 150..180 stay
+/// reserved.
+const P10_SEED_START: u64 = 300;
+const P10_SEED_END: u64 = 330;
+/// The confirmatory coefficient λ (prereg §3 — the `EQ5a` pin, carried over).
+const P10_LAMBDA: f64 = 0.05;
+/// The registered E-λ grid (prereg §4; exploratory, non-gating).
+const P10_LAMBDA_GRID: [f64; 3] = [0.01, 0.05, 0.25];
+/// S-repl (prereg §4): the lever must first replicate `EQ5a`'s margin
+/// out-of-sample — `r_wf ≥ 1.25`.
+const P10_SREPL_FACTOR: f64 = 1.25;
+/// H-PS conjunct 1 (prereg §4): `lift_wf ≥ 1.25 × max(lift_flat, 0)`.
+const P10_HPS_FACTOR: f64 = 1.25;
+/// H-PS conjunct 2 (prereg §4): paired `margin_wf > margin_flat` on at least this
+/// many of the 30 seeds (the lineage's standing 60 % consistency bar).
+const P10_HPS_SUPERIOR_MIN: usize = 18;
+/// Report date for the Part 10 battery, stamped per committed run.
+const P10_REPORT_DATE: &str = "2026-08-05";
+
+/// The **v2w** world: the `EQ5a` workflow draw on the Part 10 seeds.
+fn p10_workflow_instances() -> Vec<WorkflowInstance> {
+    (P10_SEED_START..P10_SEED_END)
+        .map(|s| p9_draw_instance(s, false))
+        .collect()
+}
+
+/// One **v2t** (flat) instance: Part 8's [`draw_typed_instance`] VERBATIM,
+/// dressed with the all-parallel degenerate shape.
+///
+/// The shape is `p9_degenerate_shape` — the tensor of the task's distinct steps —
+/// which consumes ZERO stream draws and carries multiplicity ≡ 1, no fan-out and
+/// no spiders: prereg §3's flat world exactly. So this instance's prefix is
+/// bit-for-bit the v2w instance's prefix of the same seed (asserted by X-pair),
+/// and every difference between the two worlds is the shape.
+///
+/// It re-derives the staffing table rather than calling `p9_draw_instance(s,
+/// true)` so that the registered "reuse `draw_typed_instance` verbatim" is
+/// literal in the code and not merely equivalent; X-pair then checks the two
+/// routes agree.
+///
+/// # Panics
+///
+/// Panics if the draw ever leaves a pool worker without a role, which would be a
+/// harness bug (`draw_prefix_v2t` assigns one role per worker).
+fn p10_flat_instance(seed: u64) -> WorkflowInstance {
+    let base = draw_typed_instance(seed, P8_ROLES);
+    let written: Vec<Workflow> = base.tasks.iter().map(p9_degenerate_shape).collect();
+    let table = StaffingTable::from_pool(base.agents.iter().map(|a| {
+        let role = *base
+            .roles
+            .get(a.id)
+            .expect("invariant: the v2t draw assigns one role per pool worker");
+        (a.caps, Role::new(role as u8))
+    }));
+    WorkflowInstance {
+        base,
+        written,
+        table,
+    }
+}
+
+fn p10_flat_instances() -> Vec<WorkflowInstance> {
+    (P10_SEED_START..P10_SEED_END).map(p10_flat_instance).collect()
+}
+
+/// What X-pair measured (prereg §5).
+struct P10PairReport {
+    /// Seeds whose v2w and v2t instances share the v2t prefix bit-for-bit.
+    prefix_matches: usize,
+    /// Tasks whose two worlds carry the identical DISTINCT `(bit, role)` demand.
+    demand_matches: usize,
+    /// Tasks compared.
+    tasks: usize,
+    /// Tasks where the v2w writing repeats at least one step (`total > distinct`)
+    /// — the ONLY axis on which the two worlds differ, so the size of this number
+    /// bounds how much conjunct 2 can possibly separate them.
+    fanned: usize,
+    /// Total step occurrences, v2w and v2t.
+    occurrences_wf: usize,
+    occurrences_flat: usize,
+}
+
+/// Whether two v2t prefixes are bit-for-bit identical.
+///
+/// `Worker` is not `PartialEq`, and neither is `TypedTask`, so the comparison is
+/// spelled out field by field rather than derived — a derive that silently
+/// stopped covering a new field would make the gate vacuous.
+fn p10_prefix_eq(a: &TypedInstance, b: &TypedInstance) -> bool {
+    a.redraws == b.redraws
+        && a.max_attempts == b.max_attempts
+        && a.roles == b.roles
+        && a.agents.len() == b.agents.len()
+        && a.agents
+            .iter()
+            .zip(b.agents.iter())
+            .all(|(x, y)| x.id == y.id && x.caps == y.caps && x.trust == y.trust)
+        && a.tasks.len() == b.tasks.len()
+        && a.tasks
+            .iter()
+            .zip(b.tasks.iter())
+            .all(|(x, y)| x.required == y.required && x.tags == y.tags && x.order == y.order)
+}
+
+/// X-pair (prereg §5): the two worlds share the v2t prefix bit-for-bit per seed,
+/// and — the §2 finding the whole decomposition rests on — carry identical
+/// distinct demand per task.
+///
+/// Without the first, H-PS conjunct 2's pairing is meaningless. Without the
+/// second, `res-flat` is not a control for `res-wf` at all: the worlds would pose
+/// different coverage problems and any margin difference could be demand rather
+/// than process.
+fn p10_x_pair(wf: &[WorkflowInstance], flat: &[WorkflowInstance]) -> P10PairReport {
+    let mut prefix_matches = 0usize;
+    let mut demand_matches = 0usize;
+    let mut tasks = 0usize;
+    let mut fanned = 0usize;
+    let mut occurrences_wf = 0usize;
+    let mut occurrences_flat = 0usize;
+    for (w, f) in wf.iter().zip(flat.iter()) {
+        if p10_prefix_eq(&w.base, &f.base) {
+            prefix_matches += 1;
+        }
+        for (ww, fw) in w.written.iter().zip(f.written.iter()) {
+            tasks += 1;
+            let dw = demand(ww);
+            let df = demand(fw);
+            if dw.distinct().collect::<Vec<_>>() == df.distinct().collect::<Vec<_>>() {
+                demand_matches += 1;
+            }
+            if dw.total() > dw.distinct_len() {
+                fanned += 1;
+            }
+            occurrences_wf += dw.total();
+            occurrences_flat += df.total();
+        }
+    }
+    P10PairReport {
+        prefix_matches,
+        demand_matches,
+        tasks,
+        fanned,
+        occurrences_wf,
+        occurrences_flat,
+    }
+}
+
+/// Per-seed `margin_w = PRIMARY(res-w) − PRIMARY(ctl-w)` — a **difference, not a
+/// ratio** (prereg §4 conjunct 2: differences are well-behaved at zero).
+fn p10_margins(res: &[P9Seed], ctl: &[P9Seed]) -> Vec<f64> {
+    res.iter()
+        .zip(ctl.iter())
+        .map(|(r, c)| r.primary - c.primary)
+        .collect()
+}
+
+/// `r_w` = median PRIMARY(`res-w`) / median PRIMARY(`ctl-w`), or `None` when the
+/// control's median is not strictly positive (no ratio is defined then, and
+/// printing one would invent a number).
+fn p10_ratio(res: &[P9Seed], ctl: &[P9Seed]) -> Option<f64> {
+    let base = median(p9_primaries(ctl));
+    (base > 0.0).then(|| median(p9_primaries(res)) / base)
+}
+
+/// How the conjunct-1 floor `max(lift_flat, 0)` came about (prereg Amendment 1,
+/// A1.2 + A1.3).
+///
+/// The three cases are arithmetically two — the bar is `0` in the first two — but
+/// they are epistemically three, and collapsing them is exactly what A1.2 forbids.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum P10Floor {
+    /// `r_flat` is **undefined**: median PRIMARY(`ctl-flat`) ≤ 0, so no ratio
+    /// exists to take a lift of. **A1.2**: this is its OWN condition, not a
+    /// measured zero — §4's justification for the floor argued the measured case
+    /// only ("if the lever does nothing on flat…"), and a conjunct-1 pass resting
+    /// on an undefined denominator carries **no process-specificity weight**.
+    Undefined,
+    /// Measured and non-positive: the lever genuinely does nothing, or hurts, on
+    /// the flat world. The floor is doing what §4 justified, and conjunct 1
+    /// passes for free — **A1.3**: say so.
+    MeasuredNonPositive,
+    /// Measured and positive: `bar_c1 > 0` and conjunct 1 is a contested test.
+    MeasuredPositive,
+}
+
+impl P10Floor {
+    fn classify(lift_flat: Option<f64>) -> Self {
+        match lift_flat {
+            None => Self::Undefined,
+            Some(l) if l > 0.0 => Self::MeasuredPositive,
+            Some(_) => Self::MeasuredNonPositive,
+        }
+    }
+
+    /// A short label for a table cell.
+    fn label(self) -> &'static str {
+        match self {
+            Self::Undefined => "UNDEFINED (r_flat)",
+            Self::MeasuredNonPositive => "trivial (flat lift ≤ 0)",
+            Self::MeasuredPositive => "contested",
+        }
+    }
+
+    /// Whether a conjunct-1 pass under this floor is a free pass (`bar_c1 = 0`).
+    fn is_trivial(self) -> bool {
+        !matches!(self, Self::MeasuredPositive)
+    }
+}
+
+fn p10_table_head(base_label: &str) {
+    println!(
+        "| arm | world | median PRIMARY | vs `{base_label}` | superior seeds | median churn | median µs/decision |"
+    );
+    println!(
+        "|-----|-------|---------------:|-------------:|---------------:|-------------:|-------------------:|"
+    );
+}
+
+fn p10_row(label: &str, world: &str, rs: &[P9Seed], base: &[P9Seed], lat: &[f64]) {
+    let med = median(p9_primaries(rs));
+    let base_med = median(p9_primaries(base));
+    let ratio = if base_med > 0.0 {
+        format!("{:.2}×", med / base_med)
+    } else {
+        "n/a".to_owned()
+    };
+    println!(
+        "| `{label}` | {world} | {med:.4} | {ratio} | {}/{} | {:.2} | {:.3} |",
+        p9_superior_count(rs, base),
+        rs.len(),
+        median(p9_churns(rs)),
+        median(lat.to_vec())
+    );
+}
+
+/// The four pre-committed verdict labels (prereg §6), printed verbatim.
+///
+/// Order matters and is registered: a failed gate is `RUN-INVALID` regardless of
+/// anything else; a failed S-repl produces NO process-specificity verdict; only
+/// then does H-PS decide.
+fn p10_verdict(gates_ok: bool, srepl_ok: bool, hps_ok: bool) -> &'static str {
+    if !gates_ok {
+        "RUN-INVALID"
+    } else if !srepl_ok {
+        "NOT REPLICATED"
+    } else if hps_ok {
+        "VALIDATED (process-specific)"
+    } else {
+        "FALSIFIED (coverage proxy)"
+    }
+}
+
+#[allow(clippy::too_many_lines)]
+fn part10_residual_process_specificity() {
+    println!(
+        "# koalisi #80 — Part 10: is the unstaffable residual process-specific? (REGISTERED)"
+    );
+    println!();
+    println!(
+        "_governed by `docs/prereg-K4-residual-process-specificity.md` (committed BEFORE this code; design-lock of record [koalisi #80](https://github.com/sustia-llc/koalisi/issues/80)). Report date {P10_REPORT_DATE}. Seeds **{P10_SEED_START}..{P10_SEED_END}** (fresh; 90..120 and 150..180 stay reserved). EQ5a measured the unstaffable-residual lever at median PRIMARY 0.2484 vs control 0.1989 (**1.25×, strictly superior on 30/30 seeds**) — the strongest paired consistency in this lineage since v5 — under a family-wise bar raised to 1.4× for four looks, so it carried **no verdict**. EQ5a measured the margin and cannot explain it. **H-PS (confirmatory):** the advantage is process-specific — materially larger on the workflow world than on a structurally flat world carrying the same coverage demand. **The null is (B), and it is the favourite:** the residual is a monotone penalty on uncovered demand, i.e. a coverage proxy in process clothing, which would work identically on flat tasks._"
+    );
+    println!();
+    println!(
+        "_**The sharpened question** (prereg §2). The v2w shape draw repeats and fans steps but NEVER introduces a new `(bit, role)`, so v2w and v2t carry **identical distinct demand per task** (asserted below as X-pair's second conjunct). The two worlds pose the same coverage problem and differ only in **occurrence multiplicity**. So (A) is not \"workflows help\" in some diffuse sense; it reduces to: occurrence multiplicity and/or scarcity weighting carry decision-relevant signal beyond the distinct uncovered set. (B) is its exact negation — the lever reads only how much distinct demand is uncovered, which magnitude's own coverage term already tracks._"
+    );
+    println!();
+    println!(
+        "_**Falsifiability posture** (prereg §1). Two independent EQ5a measurements already point at (B): λ across a 25× range and BOTH cost models all produced the identical median 0.2484 while act counts differed. If the weight of a scarcity-weighted term does not move the outcome, the weighting is probably not the mechanism. This registration is built so the unglamorous answer can win, and `FALSIFIED (coverage proxy)` is a **real finding to be stated plainly** (prereg §6), not a lever failure to be dressed up._"
+    );
+    println!();
+    println!(
+        "_**The lever, unchanged from EQ5a Amendment A3.1 and now a library type** (prereg §7, lock D6 — `koalisi::process::ResidualPolicy`, feature `process`; the harness consumes it and no second copy lives example-side):_"
+    );
+    println!();
+    println!("```");
+    println!("value(S) = Mag(S) − λ · Σ per_gen(g)   over demand elements g of the declared");
+    println!("                         writing whose (bit, role) is NOT covered by S");
+    println!("```");
+    println!();
+    println!(
+        "_**Spiders are excluded**: they name no `(bit, role)`, so \"uncovered\" is undefined for them and counting them would re-introduce the cancelling constant A3.1 removed. **A zero score is NOT inferred to be a decline**: the library reports an upstream evaluation failure as `Decision {{ act: false, score: 0.0 }}`, the same value a legitimate exact-zero margin carries — a population EQ3 measured at ~43 % of the stream — so `ResidualPolicy` detects evaluation failure INDEPENDENTLY (its own `relevant_masks` + pinned-`t = 1` magnitude over both member sets) before folding, and declines-and-counts on `Err`. λ = {P10_LAMBDA}, cost model **uniform** for the confirmatory cells (metric-blind, EQ5a A1.4's reasoning)._"
+    );
+    println!();
+
+    // --- Worlds (drawn once, shared by every arm) ---------------------------
+    let wf = p10_workflow_instances();
+    let flat = p10_flat_instances();
+    let n_seeds = wf.len();
+    let oracle = p8_rho(0.0);
+
+    // Part 10 declares the AS-WRITTEN writing on both worlds — no rewriting arm
+    // here — so one declare per world serves the control and every residual cell.
+    let bits = u8::try_from(UNIVERSE).expect("invariant: the universe is 8 bits");
+    let roles = u8::try_from(P8_ROLES).expect("invariant: R = 3");
+    let rules =
+        rule_theory(bits, roles).expect("invariant: the registered (8, 3) theory constructs");
+    let labels = rule_labels(bits, roles).expect("invariant: labels mirror the theory");
+    let (d_wf, _) = p9_declare(
+        &wf,
+        &rules,
+        &labels,
+        P9Mechanism::AsWritten,
+        P9Cost::Uniform,
+        P9_FUEL,
+    );
+    let (d_flat, _) = p9_declare(
+        &flat,
+        &rules,
+        &labels,
+        P9Mechanism::AsWritten,
+        P9Cost::Uniform,
+        P9_FUEL,
+    );
+
+    // --- The five registered arms -------------------------------------------
+    let typed = |inst: &WorkflowInstance| {
+        Box::new(p8_typed_policy(&inst.base, &oracle)) as Box<dyn CoalitionDecisionPolicy>
+    };
+    let (ctl_wf, ctl_wf_lat) = p9_battery(&wf, &d_wf, typed);
+    let (ctl_flat, ctl_flat_lat) = p9_battery(&flat, &d_flat, typed);
+    let residual_cell = |insts: &[WorkflowInstance],
+                         decl: &[Vec<P9Declared>],
+                         lambda: f64,
+                         cost: P9Cost,
+                         basis: ResidualBasis| {
+        p9_valuation_battery(insts, decl, &oracle, lambda, cost, basis)
+    };
+    let res_wf = residual_cell(
+        &wf,
+        &d_wf,
+        P10_LAMBDA,
+        P9Cost::Uniform,
+        ResidualBasis::Occurrences,
+    );
+    let res_flat = residual_cell(
+        &flat,
+        &d_flat,
+        P10_LAMBDA,
+        P9Cost::Uniform,
+        ResidualBasis::Occurrences,
+    );
+    let res_distinct = residual_cell(
+        &wf,
+        &d_wf,
+        P10_LAMBDA,
+        P9Cost::Uniform,
+        ResidualBasis::Distinct,
+    );
+
+    // --- §5 gates (run and reported BEFORE any leg is read) ------------------
+    println!("## Gates (prereg §5 — any failure ⇒ `RUN-INVALID`)");
+    println!();
+
+    // X-pair.
+    let pair = p10_x_pair(&wf, &flat);
+    let pair_ok = pair.prefix_matches == n_seeds && pair.demand_matches == pair.tasks;
+    println!(
+        "- **X-pair — {}.** The two worlds' instances share the v2t prefix **bit-for-bit** on **{}/{n_seeds}** seeds (pool masks, trust, worker roles, per-task `required` + tags + arrival order, and the rejection-re-draw bookkeeping, compared field by field rather than by a derive that could silently stop covering a new field), and carry **identical distinct `(bit, role)` demand** on **{}/{}** tasks. Both halves are load-bearing: without the first, H-PS conjunct 2's pairing is meaningless; without the second, `res-flat` is not a control for `res-wf` at all — the worlds would pose different coverage problems and any margin difference could be demand rather than process. The flat world is drawn by calling Part 8's `draw_typed_instance` verbatim and dressing it with the all-parallel degenerate shape (zero stream draws), so the agreement is structural; it is asserted anyway.",
+        pass(pair_ok),
+        pair.prefix_matches,
+        pair.demand_matches,
+        pair.tasks
+    );
+    println!(
+        "  - **The one axis the worlds differ on, quantified:** **{}** of {} v2w tasks ({:.1} %) repeat at least one step, and the corpus carries **{}** step occurrences on v2w against **{}** on v2t ({:.2}× multiplicity). That excess IS the process signal on offer — H-PS conjunct 2 can only separate the worlds on seeds where it is nonzero.",
+        pair.fanned,
+        pair.tasks,
+        100.0 * pair.fanned as f64 / pair.tasks as f64,
+        pair.occurrences_wf,
+        pair.occurrences_flat,
+        pair.occurrences_wf as f64 / pair.occurrences_flat as f64
+    );
+
+    // X-identity: at λ = 0 every res-* cell reproduces its own control.
+    let zero_wf = residual_cell(&wf, &d_wf, 0.0, P9Cost::Uniform, ResidualBasis::Occurrences);
+    let zero_flat = residual_cell(
+        &flat,
+        &d_flat,
+        0.0,
+        P9Cost::Uniform,
+        ResidualBasis::Occurrences,
+    );
+    let zero_distinct = residual_cell(&wf, &d_wf, 0.0, P9Cost::Uniform, ResidualBasis::Distinct);
+    let identity_cells = [
+        ("res-wf", &zero_wf.seeds, &ctl_wf),
+        ("res-flat", &zero_flat.seeds, &ctl_flat),
+        ("res-distinct", &zero_distinct.seeds, &ctl_wf),
+    ];
+    let identity_ok = identity_cells
+        .iter()
+        .all(|(_, cell, ctl)| p9_bit_identical(cell, ctl));
+    println!(
+        "- **X-identity (λ = 0) — {}.** Each `res-*` arm at λ = 0 reproduces its own control **bit-identically on acts and raw score bits** (and on per-seed PRIMARY bits and churn), all {n_seeds} seeds: {}. This is the causality pin for the entire lever, promoted from EQ5a's `part9_valuation_is_live_a3_1` test to a run gate. It is what makes every divergence below attributable to the residual rather than to the wrapper — the exact defect EQ5a's original formulation hid, where a per-task constant cancelled out of every margin and the cell passed every test it had by being a no-op.",
+        pass(identity_ok),
+        identity_cells
+            .iter()
+            .map(|(label, cell, ctl)| format!("`{label}` {}", pass(p9_bit_identical(cell, ctl))))
+            .collect::<Vec<_>>()
+            .join(" · ")
+    );
+
+    // S-live: each cell at the confirmatory λ must be able to move.
+    let live_cells = [
+        ("res-wf", &res_wf, &ctl_wf),
+        ("res-flat", &res_flat, &ctl_flat),
+        ("res-distinct", &res_distinct, &ctl_wf),
+    ];
+    let live_ok = live_cells
+        .iter()
+        .all(|(_, cell, ctl)| p9_divergence(&cell.seeds, ctl).0 >= 1);
+    println!(
+        "- **S-live — {}.** Each `res-*` arm at λ = {P10_LAMBDA} diverges from its control on at least one seed: {}. **A cell that cannot move is `RUN-INVALID`, not a null result** — that is the regression EQ5a's inert formulation passed silently, and a flat-world cell that is algebraically incapable of moving would make conjunct 1 pass for the wrong reason.",
+        pass(live_ok),
+        live_cells
+            .iter()
+            .map(|(label, cell, ctl)| {
+                let (seeds, acts, scores) = p9_divergence(&cell.seeds, ctl);
+                format!("`{label}` {seeds}/{n_seeds} seeds, {acts} acts, {scores} score bits")
+            })
+            .collect::<Vec<_>>()
+            .join(" · ")
+    );
+    // S-probe (Amendment A1.1): probe declines are RUN-INVALID, not a report.
+    let probe_cells = [
+        ("res-wf", res_wf.probe_declines),
+        ("res-flat", res_flat.probe_declines),
+        ("res-distinct", res_distinct.probe_declines),
+    ];
+    let probe_ok = probe_cells.iter().all(|&(_, n)| n == 0);
+    println!(
+        "- **S-probe (Amendment A1.1) — {}.** Decisions declined by the wrapper's independent evaluation probe, per registered `res-*` cell: {}. **Nonzero is `RUN-INVALID`, not a footnote.** The probe runs the **untyped** `relevant_masks` + `magnitude_or_zero` path while every Part 10 inner policy is **typed** (oracle `ρ = δ`), so a typed evaluation that errors where the untyped probe succeeds hands the wrapper `Decision {{ act: false, score: 0.0 }}` — indistinguishable from a legitimate exact-zero margin — and a correction folds onto a genuine decline, corrupting PRIMARY and act counts **without tripping any other §5 gate**. EQ5a measured 0/0 and disclosed the gap; Part 10 exercises it across three cells × {n_seeds} fresh seeds, so it is gated here. Closing the gap properly needs a typed-evaluation probe that does not exist upstream — a catgraph-side surface, deliberately not improvised here.",
+        pass(probe_ok),
+        probe_cells
+            .iter()
+            .map(|(label, n)| format!("`{label}` {n}"))
+            .collect::<Vec<_>>()
+            .join(" · ")
+    );
+    println!(
+        "  - The λ = 0 identity cells are covered TRANSITIVELY rather than separately: a probe decline there returns `{{ act: false, score: 0.0 }}` where the inner policy would return its genuine margin, so **X-identity would already fail**. Measured there anyway: `res-wf` {} · `res-flat` {} · `res-distinct` {}. The exploratory E-price / E-λ cells report their counts in their own sections and are **not** gated — §4 makes those legs non-gating, and gating them here would quietly promote a leg the registration fixed as exploratory.",
+        zero_wf.probe_declines, zero_flat.probe_declines, zero_distinct.probe_declines
+    );
+    println!(
+        "- **X-battery** (frozen Parts 1–9 byte-identical on every quality/ratio/superiority/churn/verdict line) is checked OUTSIDE this binary, by diffing this run's Parts 1–9 against a pre-change baseline; latency-only diffs are the standing exclusion. It is also the regression gate on the prereg §7 promotion: EQ5a's example-side `P9ValuationPolicy` is gone and Part 9 now runs the library's `ResidualPolicy`, so Part 9 reproducing byte-identically is what certifies the move changed no decision."
+    );
+    let gates_ok = pair_ok && identity_ok && live_ok && probe_ok;
+    println!();
+
+    // --- Arms ---------------------------------------------------------------
+    println!("## Arms (pooled over {n_seeds} seeds; λ = {P10_LAMBDA}, uniform cost)");
+    println!();
+    p10_table_head("ctl-wf");
+    p10_row("ctl-wf", "v2w", &ctl_wf, &ctl_wf, &ctl_wf_lat);
+    p10_row("ctl-flat", "v2t", &ctl_flat, &ctl_wf, &ctl_flat_lat);
+    p10_row("res-wf", "v2w", &res_wf.seeds, &ctl_wf, &res_wf.latencies);
+    p10_row(
+        "res-flat",
+        "v2t",
+        &res_flat.seeds,
+        &ctl_wf,
+        &res_flat.latencies,
+    );
+    p10_row(
+        "res-distinct",
+        "v2w",
+        &res_distinct.seeds,
+        &ctl_wf,
+        &res_distinct.latencies,
+    );
+    println!();
+    let controls_identical = p9_bit_identical(&ctl_wf, &ctl_flat);
+    println!(
+        "_`ctl-wf` and `ctl-flat` are the SAME policy — the EQ4-validated typed arm (`with_role_modulation`, oracle `ρ = δ`) — on the two worlds. **Measured: they are bit-identical ⇒ {}.** That is expected and worth stating, because it is what makes the decomposition clean: the policy sees only the OR-mask of distinct demand (identical by X-pair) and the scorer counts only distinct `(bit, role)` coverage (identical by X-pair), so multiplicity is invisible to BOTH. The controls therefore contribute no world difference of their own, and every `res-wf` − `res-flat` gap is the residual weighting alone. `res-*` rows are shown against `ctl-wf` so the whole table shares one denominator; the per-world ratios `r_wf` / `r_flat` below are each computed against that world's OWN control, as registered._",
+        pass(controls_identical)
+    );
+    println!();
+
+    // --- S-repl (registered sanity leg, must hold) ---------------------------
+    println!("## S-repl (registered sanity leg — must hold, prereg §4)");
+    println!();
+    let r_wf = p10_ratio(&res_wf.seeds, &ctl_wf);
+    let r_flat = p10_ratio(&res_flat.seeds, &ctl_flat);
+    let srepl_ok = r_wf.is_some_and(|r| r >= P10_SREPL_FACTOR);
+    println!(
+        "- `r_wf` = median PRIMARY(`res-wf`) / median PRIMARY(`ctl-wf`) = **{}** against the bar **{P10_SREPL_FACTOR:.2}×** ⇒ **{}**. The lever must first replicate EQ5a's margin out-of-sample on seeds {P10_SEED_START}..{P10_SEED_END}; if it does not, the discrimination is moot and the run reports `NOT REPLICATED` and produces **no** process-specificity verdict. (This is where #80's D2 replication option lands — as a precondition, not a parallel leg.) EQ5a's in-sample figure was 1.25× on seeds 270..300.",
+        r_wf.map_or_else(|| "n/a".to_owned(), |r| format!("{r:.4}×")),
+        pass(srepl_ok)
+    );
+    println!();
+
+    // --- H-PS (confirmatory, both conjuncts) ---------------------------------
+    println!("## H-PS (confirmatory — BOTH conjuncts required, prereg §4)");
+    println!();
+    let lift_wf = r_wf.map(|r| r - 1.0);
+    let lift_flat = r_flat.map(|r| r - 1.0);
+    let floor = lift_flat.unwrap_or(0.0).max(0.0);
+    let bar_c1 = P10_HPS_FACTOR * floor;
+    let c1 = lift_wf.is_some_and(|l| l >= bar_c1);
+    let floor_kind = P10Floor::classify(lift_flat);
+    let margins_wf = p10_margins(&res_wf.seeds, &ctl_wf);
+    let margins_flat = p10_margins(&res_flat.seeds, &ctl_flat);
+    let superior = margins_wf
+        .iter()
+        .zip(margins_flat.iter())
+        .filter(|(w, f)| w > f)
+        .count();
+    let ties = margins_wf
+        .iter()
+        .zip(margins_flat.iter())
+        .filter(|(w, f)| w.to_bits() == f.to_bits())
+        .count();
+    let c2 = superior >= P10_HPS_SUPERIOR_MIN;
+    let hps_ok = c1 && c2;
+    println!(
+        "- **Conjunct 1 — {}.** `lift_w = r_w − 1`: `lift_wf` **{}**, `lift_flat` **{}** (`r_flat` {}). Bar: `lift_wf ≥ {P10_HPS_FACTOR:.2} × max(lift_flat, 0)` = **{bar_c1:.4}**. **The floor is load-bearing** (#80 formalism pin): a raw `lift_wf / lift_flat` blows up as `lift_flat → 0` and FLIPS SIGN when the lever hurts on flat, which would let a mediocre `res-wf` pass on a negative denominator. Flooring at 0 also means that if the lever does nothing on flat, any positive workflow lift satisfies this conjunct — which is *correct* (no flat lift ⇒ process-specific) and is exactly why S-repl carries the \"and the effect is real\" half.",
+        pass(c1),
+        lift_wf.map_or_else(|| "n/a".to_owned(), |l| format!("{l:+.4}")),
+        lift_flat.map_or_else(|| "n/a".to_owned(), |l| format!("{l:+.4}")),
+        r_flat.map_or_else(|| "n/a".to_owned(), |r| format!("{r:.4}×"))
+    );
+    // A1.2 + A1.3: name the floor's condition, and say who is carrying the
+    // discriminating weight when conjunct 1 costs nothing to pass.
+    println!(
+        "  - **Floor condition (Amendment A1.2/A1.3): {}.** {}",
+        floor_kind.label(),
+        match floor_kind {
+            P10Floor::Undefined => format!(
+                "`r_flat` is **UNDEFINED** — median PRIMARY(`ctl-flat`) is {:.4}, not strictly positive, so there is no ratio to take a lift of. **A1.2:** this is its own condition, NOT a measured zero; §4 justified the floor for the case where the lever measurably does nothing on flat, and said nothing about an absent denominator. **A conjunct-1 pass resting on this carries NO process-specificity weight** and must be read as an instrument failure of the flat control, not as evidence. Expected never to fire — the typed control's PRIMARY has run in the 0.15–0.30 band throughout this lineage.",
+                median(p9_primaries(&ctl_flat))
+            ),
+            P10Floor::MeasuredNonPositive => format!(
+                "`lift_flat` is measured and non-positive ({}), so the floor clamps `bar_c1` to **0** and conjunct 1 passes **for free** — S-repl already forces `lift_wf ≥ {:.2}`. **A1.3:** that is the CORRECT behaviour (flat inert ⇒ the effect is process-specific), but it is a **trivial** pass, and **conjunct 2 is carrying all of the discriminating weight**. Read the verdict accordingly.",
+                lift_flat.map_or_else(|| "n/a".to_owned(), |l| format!("{l:+.4}")),
+                P10_SREPL_FACTOR - 1.0
+            ),
+            P10Floor::MeasuredPositive => format!(
+                "`lift_flat` is measured and positive ({}), so `bar_c1` = **{bar_c1:.4}** is a real bar and conjunct 1 is a **contested** test — both conjuncts are doing discriminating work.",
+                lift_flat.map_or_else(|| "n/a".to_owned(), |l| format!("{l:+.4}"))
+            ),
+        }
+    );
+    println!(
+        "- **Conjunct 2 — {}.** Paired per-seed `margin_wf > margin_flat` on **{superior}/{n_seeds}** seeds against the bar **{P10_HPS_SUPERIOR_MIN}**, where `margin_w` = per-seed PRIMARY(`res-w`) − PRIMARY(`ctl-w`) — a **difference, not a ratio**, because differences are well-behaved at zero. Exact ties (`margin_wf == margin_flat`, i.e. the residual weighting made no difference at all on that seed): **{ties}**; a tie is not a win and counts against the bar, which is the honest reading on a seed whose writing repeats nothing.",
+        pass(c2)
+    );
+    let mut sorted_wf = margins_wf.clone();
+    sorted_wf.sort_by(f64::total_cmp);
+    let mut sorted_flat = margins_flat.clone();
+    sorted_flat.sort_by(f64::total_cmp);
+    println!(
+        "- Margin distributions (per seed): `margin_wf` p25 {:+.4} / median {:+.4} / p75 {:+.4}; `margin_flat` p25 {:+.4} / median {:+.4} / p75 {:+.4}.",
+        percentile(&sorted_wf, 0.25),
+        percentile(&sorted_wf, 0.5),
+        percentile(&sorted_wf, 0.75),
+        percentile(&sorted_flat, 0.25),
+        percentile(&sorted_flat, 0.5),
+        percentile(&sorted_flat, 0.75)
+    );
+    println!();
+
+    // --- E-mult (registered exploratory, non-gating) -------------------------
+    println!("## E-mult (registered exploratory, NON-GATING — prereg §4)");
+    println!();
+    let distinct_vs_flat = p9_bit_identical(&res_distinct.seeds, &res_flat.seeds);
+    let (dm_seeds, dm_acts, dm_scores) = p9_divergence(&res_distinct.seeds, &res_wf.seeds);
+    let (wf_seeds, wf_acts, wf_scores) = p9_divergence(&res_wf.seeds, &res_flat.seeds);
+    println!(
+        "- **`res-distinct` vs `res-wf` on v2w — the multiplicity-only contrast.** Same world, same declared writings, same λ and cost model; the ONLY difference is that `res-distinct` prices each uncovered `(bit, role)` once instead of once per occurrence. Medians **{:.4}** vs **{:.4}**; they differ on **{dm_acts}** decisions by ACT and **{dm_scores}** by raw score bits, with **{dm_seeds}/{n_seeds}** seeds carrying any act difference at all. Whatever multiplicity is worth, it is worth exactly this.",
+        median(p9_primaries(&res_distinct.seeds)),
+        median(p9_primaries(&res_wf.seeds))
+    );
+    println!(
+        "- **`res-wf` vs `res-flat` — the same contrast by the other route, and the number the verdict turns on.** They differ on **{wf_acts}** decisions by ACT and **{wf_scores}** by raw score bits, **{wf_seeds}/{n_seeds}** seeds carrying any act difference. **Read the two columns against each other:** a nonzero score-bit count with a zero ACT count says the multiplicity weighting genuinely reaches the margin and genuinely never crosses a threshold. That is a mechanism statement, not a null — the term is live (S-live), it is simply too small at these λ to change what anyone decides, so it cannot produce a per-seed PRIMARY difference for H-PS conjunct 2 to detect. Reported here because the confirmatory legs above see only PRIMARY, where this distinction is invisible."
+    );
+    println!(
+        "- **Internal consistency check (prereg §3): `res-distinct` vs `res-flat` — measured bit-identical ⇒ {}.** The registration expects them to land \"near\" each other; on this world the coincidence is **exact, and structural**. By X-pair the two worlds carry the same distinct demand and the same pool, so `res-distinct`'s residual (each distinct step once, uniform price) IS `res-flat`'s residual element for element, over an identical control. Reported either way, as registered: an inequality here would have meant one of X-pair's conjuncts was doing less work than it claims.",
+        pass(distinct_vs_flat)
+    );
+    println!();
+
+    // --- E-price (registered exploratory, non-gating) ------------------------
+    println!("## E-price (registered exploratory, NON-GATING — prereg §4)");
+    println!();
+    let price_wf = residual_cell(
+        &wf,
+        &d_wf,
+        P10_LAMBDA,
+        P9Cost::Priced,
+        ResidualBasis::Occurrences,
+    );
+    let price_flat = residual_cell(
+        &flat,
+        &d_flat,
+        P10_LAMBDA,
+        P9Cost::Priced,
+        ResidualBasis::Occurrences,
+    );
+    let r_price_wf = p10_ratio(&price_wf.seeds, &ctl_wf);
+    let r_price_flat = p10_ratio(&price_flat.seeds, &ctl_flat);
+    println!(
+        "| cost model | `r_wf` | `r_flat` | `lift_wf` | `lift_flat` | conjunct-1 bar | floor condition | conjunct 1 |"
+    );
+    println!("|---|---:|---:|---:|---:|---:|---|---|");
+    for (label, rw, rf) in [
+        ("uniform (confirmatory)", r_wf, r_flat),
+        ("staffing-priced", r_price_wf, r_price_flat),
+    ] {
+        let lw = rw.map(|r| r - 1.0);
+        let lf = rf.map(|r| r - 1.0);
+        let bar = P10_HPS_FACTOR * lf.unwrap_or(0.0).max(0.0);
+        println!(
+            "| {label} | {} | {} | {} | {} | {bar:.4} | {} | {} |",
+            rw.map_or_else(|| "n/a".to_owned(), |r| format!("{r:.4}×")),
+            rf.map_or_else(|| "n/a".to_owned(), |r| format!("{r:.4}×")),
+            lw.map_or_else(|| "n/a".to_owned(), |l| format!("{l:+.4}")),
+            lf.map_or_else(|| "n/a".to_owned(), |l| format!("{l:+.4}")),
+            P10Floor::classify(lf).label(),
+            pass(lw.is_some_and(|l| l >= bar))
+        );
+    }
+    println!();
+    println!(
+        "_EQ5a measured uniform and priced as median-identical on v2w; whether that survives the flat world is the question this leg asks. Non-gating: the confirmatory cells are the uniform row, fixed before the run, and a priced row that behaved differently would be mechanism evidence, not a second look at the bar. The `floor condition` column carries Amendment A1.2/A1.3 through this table too — a `trivial` or `UNDEFINED` row's conjunct-1 PASS costs nothing. **Probe declines (A1.1, reported here, NOT gated — §4 fixes this leg as exploratory): `res-wf` priced {} · `res-flat` priced {}.** Median full residual `λ · Σ per_gen` at an empty coalition — the largest the penalty can be — is {:.3} (v2w uniform) / {:.3} (v2t uniform) / {:.3} (v2w priced) / {:.3} (v2t priced)._",
+        price_wf.probe_declines,
+        price_flat.probe_declines,
+        median(res_wf.terms.clone()),
+        median(res_flat.terms.clone()),
+        median(price_wf.terms.clone()),
+        median(price_flat.terms.clone())
+    );
+    println!();
+
+    // --- E-λ (registered exploratory, non-gating) ----------------------------
+    println!("## E-λ (registered exploratory, NON-GATING — prereg §4)");
+    println!();
+    let mut lambda_declines: Vec<String> = Vec::new();
+    println!(
+        "| λ | `r_wf` | `r_flat` | `lift_wf` | `lift_flat` | conjunct-1 bar | floor condition | conjunct 1 | conjunct 2 |"
+    );
+    println!("|---:|---:|---:|---:|---:|---:|---|---|---|");
+    for lambda in P10_LAMBDA_GRID {
+        let (cell_wf, cell_flat) = if lambda.to_bits() == P10_LAMBDA.to_bits() {
+            // The confirmatory cells verbatim — re-running them would burn time to
+            // reproduce numbers already printed, and a grid row that silently
+            // differed from the confirmatory cell would be a bug, not a finding.
+            (None, None)
+        } else {
+            (
+                Some(residual_cell(
+                    &wf,
+                    &d_wf,
+                    lambda,
+                    P9Cost::Uniform,
+                    ResidualBasis::Occurrences,
+                )),
+                Some(residual_cell(
+                    &flat,
+                    &d_flat,
+                    lambda,
+                    P9Cost::Uniform,
+                    ResidualBasis::Occurrences,
+                )),
+            )
+        };
+        let seeds_wf = cell_wf.as_ref().map_or(&res_wf.seeds, |c| &c.seeds);
+        let seeds_flat = cell_flat.as_ref().map_or(&res_flat.seeds, |c| &c.seeds);
+        lambda_declines.push(format!(
+            "λ = {lambda}: {} / {}",
+            cell_wf
+                .as_ref()
+                .map_or(res_wf.probe_declines, |c| c.probe_declines),
+            cell_flat
+                .as_ref()
+                .map_or(res_flat.probe_declines, |c| c.probe_declines)
+        ));
+        let rw = p10_ratio(seeds_wf, &ctl_wf);
+        let rf = p10_ratio(seeds_flat, &ctl_flat);
+        let lw = rw.map(|r| r - 1.0);
+        let lf = rf.map(|r| r - 1.0);
+        let bar = P10_HPS_FACTOR * lf.unwrap_or(0.0).max(0.0);
+        let mw = p10_margins(seeds_wf, &ctl_wf);
+        let mf = p10_margins(seeds_flat, &ctl_flat);
+        let sup = mw.iter().zip(mf.iter()).filter(|(a, b)| a > b).count();
+        println!(
+            "| {lambda} | {} | {} | {} | {} | {bar:.4} | {} | {} | {sup}/{n_seeds} |",
+            rw.map_or_else(|| "n/a".to_owned(), |r| format!("{r:.4}×")),
+            rf.map_or_else(|| "n/a".to_owned(), |r| format!("{r:.4}×")),
+            lw.map_or_else(|| "n/a".to_owned(), |l| format!("{l:+.4}")),
+            lf.map_or_else(|| "n/a".to_owned(), |l| format!("{l:+.4}")),
+            P10Floor::classify(lf).label(),
+            pass(lw.is_some_and(|l| l >= bar))
+        );
+    }
+    println!();
+    println!(
+        "_EQ5a found the median flat across this 25× λ range on v2w. If it is flat on v2t too, that is further (B) evidence — a weighting whose weight does not matter is probably not the mechanism. Non-gating: no row here can move the verdict, which reads the λ = {P10_LAMBDA} cells fixed before the run; the `floor condition` column carries A1.2/A1.3 through this table too. **Probe declines (A1.1, reported here, NOT gated — v2w / v2t): {}.**_",
+        lambda_declines.join(" · ")
+    );
+    println!();
+
+    // --- Context (non-gating) ------------------------------------------------
+    println!("## Context (non-gating — prereg §4)");
+    println!();
+    let (mag_wf, mag_wf_lat) = p9_battery(&wf, &d_wf, |_| {
+        Box::new(MagnitudePolicy::default()) as Box<dyn CoalitionDecisionPolicy>
+    });
+    let (mag_flat, mag_flat_lat) = p9_battery(&flat, &d_flat, |_| {
+        Box::new(MagnitudePolicy::default()) as Box<dyn CoalitionDecisionPolicy>
+    });
+    let (scalar_wf, scalar_wf_lat) = p9_battery(&wf, &d_wf, |_| {
+        Box::new(AifDecisionPolicy::default()) as Box<dyn CoalitionDecisionPolicy>
+    });
+    let (scalar_flat, scalar_flat_lat) = p9_battery(&flat, &d_flat, |_| {
+        Box::new(AifDecisionPolicy::default()) as Box<dyn CoalitionDecisionPolicy>
+    });
+    let (e1_wf, e1_wf_lat) = p9_e1_battery(&wf, &d_wf, e1_config());
+    let (e1_flat, e1_flat_lat) = p9_e1_battery(&flat, &d_flat, e1_config());
+    p10_table_head("ctl-wf");
+    p10_row("mag", "v2w", &mag_wf, &ctl_wf, &mag_wf_lat);
+    p10_row("mag", "v2t", &mag_flat, &ctl_wf, &mag_flat_lat);
+    p10_row("scalar", "v2w", &scalar_wf, &ctl_wf, &scalar_wf_lat);
+    p10_row("scalar", "v2t", &scalar_flat, &ctl_wf, &scalar_flat_lat);
+    p10_row("arm-E1", "v2w", &e1_wf, &ctl_wf, &e1_wf_lat);
+    p10_row("arm-E1", "v2t", &e1_flat, &ctl_wf, &e1_flat_lat);
+    println!();
+    println!(
+        "_The untyped `mag`, the scalar AIF arm and the persistent `arm-E1` staff the same declared writings; all three are context and none can move the verdict (prereg §4). **Churn** (D4): control {:.2} · `res-wf` {:.2} · `res-flat` {:.2} · `res-distinct` {:.2} — EQ5a measured the lever's churn at 10.5 vs 6.5, a 1.6× cost, and whether that cost is world-dependent is worth a line. **Latency** (D5) is report-only and NEVER gating: the ~2× the residual cells carry is the independent evaluation probe (two extra magnitude evaluations per decision — a harness safety device, not intrinsic to the lever). **Upstream-evaluation declines** (reported, never asserted): `res-wf` {} · `res-flat` {} · `res-distinct` {}._",
+        median(p9_churns(&ctl_wf)),
+        median(p9_churns(&res_wf.seeds)),
+        median(p9_churns(&res_flat.seeds)),
+        median(p9_churns(&res_distinct.seeds)),
+        res_wf.probe_declines,
+        res_flat.probe_declines,
+        res_distinct.probe_declines
+    );
+    println!();
+
+    // --- Verdict -------------------------------------------------------------
+    let verdict = p10_verdict(gates_ok, srepl_ok, hps_ok);
+    println!("## Verdict (prereg §6 — pre-committed labels)");
+    println!();
+    println!("**VERDICT: `{verdict}`**");
+    println!();
+    println!(
+        "- `VALIDATED (process-specific)` — S-repl holds, H-PS passes both conjuncts, all §5 gates hold."
+    );
+    println!(
+        "- `FALSIFIED (coverage proxy)` — S-repl holds, gates hold, H-PS fails either conjunct. **This is the (B) outcome and it is a REAL FINDING**: it says EQ5a's valuation result was a coverage penalty, not a process signal, and it is to be stated plainly rather than presented as a lever failure."
+    );
+    println!("- `NOT REPLICATED` — S-repl fails; no process-specificity verdict is produced.");
+    println!(
+        "- `RUN-INVALID` — any §5 gate fails, **including a nonzero probe-decline count on any registered `res-*` cell** (Amendment A1.1)."
+    );
+    println!();
+    println!(
+        "_Gates {} (X-pair {} · X-identity {} · S-live {} · S-probe {}) · S-repl {} · H-PS conjunct 1 {} ({}) · conjunct 2 {}. Pre-committed interpretations (prereg §6): the v1/v2 K4 verdicts, EQ3's, EQ4's and EQ5a's verdicts, and the **koa#54 arm question (mag = demonstrated default, FINAL)** are UNTOUCHED regardless of outcome. **Shipping the policy to the library (D6) is not adopting it** — adoption would be a separate decision this registration does not license in either direction. No post-hoc bar movement. Latency is never gating._",
+        pass(gates_ok),
+        pass(pair_ok),
+        pass(identity_ok),
+        pass(live_ok),
+        pass(probe_ok),
+        pass(srepl_ok),
+        pass(c1),
+        if c1 && floor_kind.is_trivial() {
+            "TRIVIAL pass — conjunct 2 carries the discriminating weight"
+        } else if c1 {
+            "contested pass"
+        } else {
+            floor_kind.label()
+        },
+        pass(c2)
+    );
+
+    // Asserted LAST, deliberately: a failing gate should leave the full
+    // diagnostic table on stdout before the process exits nonzero, rather than
+    // aborting the run at the gate and printing nothing a reader could act on.
+    assert!(
+        gates_ok,
+        "RUN-INVALID: a prereg §5 gate failed (X-pair {pair_ok}, X-identity {identity_ok}, S-live {live_ok}, S-probe {probe_ok})"
+    );
 }
 
 #[cfg(test)]
@@ -11784,7 +12418,14 @@ mod part4c_tests {
             P9Cost::Priced,
             P9_FUEL,
         );
-        let run = p9_valuation_battery(&insts, &d_val, &oracle, P9_LAMBDA, P9Cost::Priced);
+        let run = p9_valuation_battery(
+            &insts,
+            &d_val,
+            &oracle,
+            P9_LAMBDA,
+            P9Cost::Priced,
+            ResidualBasis::Occurrences,
+        );
         let (val, terms) = (&run.seeds, &run.terms);
         assert_eq!(val.len(), 2);
         assert_eq!(terms.len(), 2 * TASKS);
@@ -11853,7 +12494,14 @@ mod part4c_tests {
                 cost,
                 P9_FUEL,
             );
-            let run = p9_valuation_battery(&insts, &d_val, &oracle, P9_LAMBDA, cost);
+            let run = p9_valuation_battery(
+                &insts,
+                &d_val,
+                &oracle,
+                P9_LAMBDA,
+                cost,
+                ResidualBasis::Occurrences,
+            );
             let (_, acts, scores) = p9_divergence(&run.seeds, &asis);
             live |= acts > 0 || scores > 0;
         }
@@ -11874,7 +12522,14 @@ mod part4c_tests {
             P9Cost::Priced,
             P9_FUEL,
         );
-        let zero_run = p9_valuation_battery(&insts, &d_zero, &oracle, 0.0, P9Cost::Priced);
+        let zero_run = p9_valuation_battery(
+            &insts,
+            &d_zero,
+            &oracle,
+            0.0,
+            P9Cost::Priced,
+            ResidualBasis::Occurrences,
+        );
         assert!(zero_run.terms.iter().all(|&t| t == 0.0));
         for (a, b) in zero_run.seeds.iter().zip(asis.iter()) {
             assert_eq!(a.acts, b.acts, "λ = 0 must reproduce the control's acts");
@@ -11926,5 +12581,291 @@ mod part4c_tests {
             assert_eq!(a.primary.to_bits(), b.primary.to_bits(), "X-reduce PRIMARY");
             assert_eq!(a.churn, b.churn, "X-reduce churn");
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Part 10 (#80) — the residual process-specificity battery.
+    // -----------------------------------------------------------------------
+
+    /// The Part 10 worlds and declared writings at 2-seed scale, so the tests
+    /// below share one setup instead of three near-copies.
+    fn p10_two_seed_worlds() -> (
+        Vec<WorkflowInstance>,
+        Vec<WorkflowInstance>,
+        Vec<Vec<P9Declared>>,
+        Vec<Vec<P9Declared>>,
+    ) {
+        let bits = u8::try_from(UNIVERSE).unwrap();
+        let roles = u8::try_from(P8_ROLES).unwrap();
+        let rules = rule_theory(bits, roles).unwrap();
+        let labels = rule_labels(bits, roles).unwrap();
+        let wf: Vec<WorkflowInstance> = (P10_SEED_START..P10_SEED_START + 2)
+            .map(|s| p9_draw_instance(s, false))
+            .collect();
+        let flat: Vec<WorkflowInstance> = (P10_SEED_START..P10_SEED_START + 2)
+            .map(p10_flat_instance)
+            .collect();
+        let (d_wf, _) = p9_declare(
+            &wf,
+            &rules,
+            &labels,
+            P9Mechanism::AsWritten,
+            P9Cost::Uniform,
+            P9_FUEL,
+        );
+        let (d_flat, _) = p9_declare(
+            &flat,
+            &rules,
+            &labels,
+            P9Mechanism::AsWritten,
+            P9Cost::Uniform,
+            P9_FUEL,
+        );
+        (wf, flat, d_wf, d_flat)
+    }
+
+    /// Part 10 (#80) 2-seed smoke: both worlds draw, both controls and all three
+    /// `res-*` cells run end-to-end and produce finite metrics, and the
+    /// registered constants are what the battery says they are. Does NOT run the
+    /// 30-seed registered battery.
+    #[test]
+    fn part10_two_seed_smoke() {
+        assert_eq!(P10_SEED_END - P10_SEED_START, SEEDS, "30 registered seeds");
+        assert!((P10_LAMBDA - 0.05).abs() < f64::EPSILON);
+        assert!(P10_LAMBDA_GRID.contains(&P10_LAMBDA));
+
+        let (wf, flat, d_wf, d_flat) = p10_two_seed_worlds();
+        let oracle = p8_rho(0.0);
+        let typed = |inst: &WorkflowInstance| {
+            Box::new(p8_typed_policy(&inst.base, &oracle)) as Box<dyn CoalitionDecisionPolicy>
+        };
+        let (ctl_wf, lat) = p9_battery(&wf, &d_wf, typed);
+        let (ctl_flat, _) = p9_battery(&flat, &d_flat, typed);
+        assert_eq!(ctl_wf.len(), 2);
+        assert!(!lat.is_empty(), "latencies recorded");
+
+        // The two controls are the same policy over the same distinct demand, so
+        // they must coincide bit for bit — the fact that makes `r_wf` and
+        // `r_flat` share a denominator and the decomposition clean.
+        assert!(
+            p9_bit_identical(&ctl_wf, &ctl_flat),
+            "the typed control cannot see multiplicity, so the two worlds' controls must coincide"
+        );
+
+        for (insts, decl, basis) in [
+            (&wf, &d_wf, ResidualBasis::Occurrences),
+            (&flat, &d_flat, ResidualBasis::Occurrences),
+            (&wf, &d_wf, ResidualBasis::Distinct),
+        ] {
+            let run = p9_valuation_battery(
+                insts,
+                decl,
+                &oracle,
+                P10_LAMBDA,
+                P9Cost::Uniform,
+                basis,
+            );
+            assert_eq!(run.seeds.len(), 2);
+            assert_eq!(run.terms.len(), 2 * TASKS);
+            assert!(run.terms.iter().all(|t| t.is_finite() && *t >= 0.0));
+            assert_eq!(
+                run.probe_declines, 0,
+                "S-probe (Amendment A1.1): a probe decline is RUN-INVALID, not a report"
+            );
+            for r in &run.seeds {
+                assert!(r.primary.is_finite() && (0.0..=1.0).contains(&r.primary));
+                assert!(!r.acts.is_empty(), "some join/leave decisions must have run");
+            }
+        }
+
+        // The verdict ladder is registered: gates dominate S-repl, which
+        // dominates H-PS.
+        assert_eq!(p10_verdict(false, true, true), "RUN-INVALID");
+        assert_eq!(p10_verdict(true, false, true), "NOT REPLICATED");
+        assert_eq!(p10_verdict(true, true, true), "VALIDATED (process-specific)");
+        assert_eq!(p10_verdict(true, true, false), "FALSIFIED (coverage proxy)");
+    }
+
+    /// Part 10 (#80) Amendment **A1.2 / A1.3**: an UNDEFINED `r_flat` is a
+    /// distinct condition from a measured non-positive lift, and both are
+    /// trivial conjunct-1 passes that must announce themselves.
+    ///
+    /// The three cases are arithmetically two — `bar_c1 = 0` in the first two —
+    /// which is precisely why collapsing them in the report would hide the one
+    /// that carries no evidential weight at all.
+    #[test]
+    fn part10_floor_classification_a1_2() {
+        assert_eq!(P10Floor::classify(None), P10Floor::Undefined);
+        assert_eq!(
+            P10Floor::classify(Some(-0.4)),
+            P10Floor::MeasuredNonPositive
+        );
+        assert_eq!(P10Floor::classify(Some(0.0)), P10Floor::MeasuredNonPositive);
+        assert_eq!(P10Floor::classify(Some(0.3355)), P10Floor::MeasuredPositive);
+
+        // Undefined and measured-zero must NOT share a label — that is the whole
+        // of A1.2.
+        assert_ne!(
+            P10Floor::Undefined.label(),
+            P10Floor::MeasuredNonPositive.label()
+        );
+
+        // A1.3: only a measured-positive flat lift makes conjunct 1 contested.
+        assert!(P10Floor::Undefined.is_trivial());
+        assert!(P10Floor::MeasuredNonPositive.is_trivial());
+        assert!(!P10Floor::MeasuredPositive.is_trivial());
+
+        // And the arithmetic the classification describes: the floor clamps to 0
+        // in both trivial cases, so S-repl's own bar already carries conjunct 1.
+        for lift_flat in [None, Some(-0.4f64), Some(0.0f64)] {
+            let bar = P10_HPS_FACTOR * lift_flat.unwrap_or(0.0).max(0.0);
+            assert_eq!(bar.to_bits(), 0.0f64.to_bits());
+            assert!(
+                P10_SREPL_FACTOR - 1.0 >= bar,
+                "S-repl already forces lift_wf over a zero bar"
+            );
+        }
+    }
+
+    /// Part 10 (#80) **X-pair** at 2-seed scale: the two worlds share the v2t
+    /// prefix bit-for-bit, carry identical distinct demand, and the flat world is
+    /// genuinely flat (multiplicity ≡ 1, no spiders) while the workflow world is
+    /// not.
+    #[test]
+    fn part10_x_pair_two_seed() {
+        let wf: Vec<WorkflowInstance> = (P10_SEED_START..P10_SEED_START + 2)
+            .map(|s| p9_draw_instance(s, false))
+            .collect();
+        let flat: Vec<WorkflowInstance> = (P10_SEED_START..P10_SEED_START + 2)
+            .map(p10_flat_instance)
+            .collect();
+
+        let report = p10_x_pair(&wf, &flat);
+        assert_eq!(report.prefix_matches, 2, "v2w and v2t share the v2t prefix");
+        assert_eq!(
+            report.demand_matches, report.tasks,
+            "the shape draw never introduces a new (bit, role)"
+        );
+        assert_eq!(report.tasks, 2 * TASKS);
+
+        // The flat world is flat: every task's occurrence count equals its
+        // distinct count. (Whether the workflow world fans out on these two seeds
+        // is a draw fact, not an invariant, so it is asserted as an inequality
+        // over the corpus rather than per task.)
+        for inst in &flat {
+            for w in &inst.written {
+                let d = demand(w);
+                assert_eq!(d.total(), d.distinct_len(), "no multiplicity on v2t");
+            }
+        }
+        assert!(
+            report.occurrences_wf >= report.occurrences_flat,
+            "fan-out can only add occurrences"
+        );
+
+        // …and the flat route agrees with Part 9's degenerate world, which is
+        // what lets X-reduce's EQ4 equivalence carry over to `ctl-flat`.
+        for (seed, f) in (P10_SEED_START..P10_SEED_START + 2).zip(flat.iter()) {
+            assert!(p10_prefix_eq(&f.base, &p9_draw_instance(seed, true).base));
+            assert!(p10_prefix_eq(&f.base, &draw_typed_instance(seed, P8_ROLES)));
+        }
+    }
+
+    /// Part 10 (#80) **X-identity** and **S-live** at 2-seed scale: at λ = 0 every
+    /// `res-*` cell reproduces its own control bit-identically (acts AND raw score
+    /// bits), and at the confirmatory λ every cell can actually move.
+    ///
+    /// Both directions matter. Without X-identity a divergence could be the
+    /// wrapper rather than the residual; without S-live a cell that is
+    /// algebraically incapable of moving would report a null instead of the
+    /// `RUN-INVALID` it is — the exact regression `EQ5a`'s inert formulation passed
+    /// silently.
+    #[test]
+    fn part10_x_identity_and_s_live_two_seed() {
+        let (wf, flat, d_wf, d_flat) = p10_two_seed_worlds();
+        let oracle = p8_rho(0.0);
+        let typed = |inst: &WorkflowInstance| {
+            Box::new(p8_typed_policy(&inst.base, &oracle)) as Box<dyn CoalitionDecisionPolicy>
+        };
+        let (ctl_wf, _) = p9_battery(&wf, &d_wf, typed);
+        let (ctl_flat, _) = p9_battery(&flat, &d_flat, typed);
+
+        let cells: [(&str, &Vec<WorkflowInstance>, &Vec<Vec<P9Declared>>, ResidualBasis, &Vec<P9Seed>); 3] = [
+            ("res-wf", &wf, &d_wf, ResidualBasis::Occurrences, &ctl_wf),
+            (
+                "res-flat",
+                &flat,
+                &d_flat,
+                ResidualBasis::Occurrences,
+                &ctl_flat,
+            ),
+            (
+                "res-distinct",
+                &wf,
+                &d_wf,
+                ResidualBasis::Distinct,
+                &ctl_wf,
+            ),
+        ];
+
+        let mut live_anywhere = false;
+        for (label, insts, decl, basis, ctl) in cells {
+            let zero =
+                p9_valuation_battery(insts, decl, &oracle, 0.0, P9Cost::Uniform, basis);
+            assert!(zero.terms.iter().all(|&t| t == 0.0), "{label}: λ = 0 term");
+            assert!(
+                p9_bit_identical(&zero.seeds, ctl),
+                "{label}: λ = 0 must reproduce its control on acts and score bits"
+            );
+            // A1.1's transitive coverage, made explicit: a probe decline in a
+            // λ = 0 cell returns `{ act: false, score: 0.0 }` where the inner
+            // policy would return its genuine margin, so X-identity above would
+            // already have failed. Asserted directly too, so the claim is a
+            // measurement rather than an argument.
+            assert_eq!(zero.probe_declines, 0, "{label}: λ = 0 probe declines");
+
+            let run = p9_valuation_battery(
+                insts,
+                decl,
+                &oracle,
+                P10_LAMBDA,
+                P9Cost::Uniform,
+                basis,
+            );
+            let (_, acts, scores) = p9_divergence(&run.seeds, ctl);
+            live_anywhere |= acts > 0 || scores > 0;
+            assert_eq!(
+                run.probe_declines, 0,
+                "{label}: S-probe (A1.1) at the confirmatory λ"
+            );
+        }
+        assert!(
+            live_anywhere,
+            "S-live: at 2-seed scale at least one res-* cell must move against its control"
+        );
+
+        // The registered internal consistency check (prereg §3): `res-distinct`
+        // on v2w and `res-flat` on v2t price the SAME distinct set over the same
+        // pool against the same control, so they coincide exactly.
+        let distinct = p9_valuation_battery(
+            &wf,
+            &d_wf,
+            &oracle,
+            P10_LAMBDA,
+            P9Cost::Uniform,
+            ResidualBasis::Distinct,
+        );
+        let flat_run = p9_valuation_battery(
+            &flat,
+            &d_flat,
+            &oracle,
+            P10_LAMBDA,
+            P9Cost::Uniform,
+            ResidualBasis::Occurrences,
+        );
+        assert!(
+            p9_bit_identical(&distinct.seeds, &flat_run.seeds),
+            "res-distinct and res-flat price the identical distinct set (prereg §2/§3)"
+        );
     }
 }
