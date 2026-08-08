@@ -384,3 +384,116 @@ under the scoped-claim language), D6 (**1.25× / ≥ 18-of-30**, 2 confirmatory
 cells), D7 (seeds **330..360**), D8 (Part 11, library behind `decision` +
 `process`), D10. SP1, SP2, SP3 unchanged. X-battery / X-identity /
 S-determinism / S-live unchanged. koa#54 stays FINAL.
+
+## Amendment 2 (pre-run, 2026-08-08) — coverage masks, the tie rule, and what SP2 actually moves
+
+Posted to #78 before the affected code is committed. The library half was
+implemented against Amendment 1 and surfaced three things the registration did
+not pin. Two are arm-defining and went to the owner; one is a mechanism
+disclosure that sharpens what SP2 tests.
+
+### A2.1 (owner) — the query's coverage masks are role-matched, plus a role-blind reference
+
+SP1 pinned `required_r` and was **silent on `cfg0`/`cfg1`**, the query's
+per-candidate coverage masks. That silence is arm-defining.
+
+**Registered: role-matched.** Internal `r`'s coverage masks count **only
+role-`r` members**. Two reasons, the first verified against the world:
+
+1. The world's own coverage predicate is role-matched —
+   `p9_step_covered` requires the member's role to equal the step's role
+   **and** the member to hold the bit. Role-blind masks would have the query
+   scoring against a different notion of coverage than the world it is
+   evaluated in.
+2. With role-blind masks the three internals would differ **only** in
+   `required_r` — specialists in name only, which is not the arm #78
+   describes.
+
+**New registered reference leg, non-gating: `grp-role-blind`** — role-blind
+masks at the `RoleRestricted` channel. It isolates how much of any margin
+comes from **role-matched coverage** versus **role-restricted demand alone**.
+
+*Scoping, disclosed rather than silent:* one blind leg, not two. The coverage
+masks are SP1 query-construction machinery **shared by both channels**, so a
+single probe at the base channel isolates the mechanism; the multiplicity
+channel's scaling (A2.3) is downstream of it. This is deliberately less
+symmetric than the fresh-legs decision, where the axis was world-model
+topology and interacted directly with what each model learns. If channel
+symmetry is wanted here too, it is one more arm — say so before the run.
+
+**Cell accounting unchanged:** still **2 confirmatory cells** (`grp-role`,
+`grp-mult`), so D6's cell-count rule still gives **1.25× / ≥ 18-of-30**.
+References — `grp-role-fresh`, `grp-mult-fresh`, `grp-role-blind`,
+`wf-val-p` — are non-gating and do not enter the count.
+
+### A2.2 (owner) — SP3 applies uniformly to join and leave
+
+arm-E1 **acts on a tie** on its leave path (`p1 >= 0.5`); SP3 pins
+`p(act) > 0.5` with **ties declining**. SP3 is applied **uniformly to both
+paths**.
+
+Registered because it is what makes "EQ5b changes the *engine*, not the
+criterion" checkable — one rule governs the whole arm. **Disclosed cost:** on
+the leave path this is a visible difference from arm-E1's behaviour, so the
+engine-shape comparison against that arm is exact on joins and off by the tie
+convention on leaves. On the record now rather than discovered in the report.
+
+### A2.3 (disclosure) — SP2 moves concentration only, i.e. the novelty term
+
+Measured, not assumed. The multiplicity scale multiplies the **whole modality
+block** of the query's pA counts, and `A ≡ column_normalize(pA)` is
+**invariant under a positive uniform scale**. So SP2 leaves the observation
+model `A` untouched and moves only the **Dirichlet concentration** — which
+reaches the decision purely through the **novelty / parameter-information-gain**
+term.
+
+Three consequences, all registered:
+
+- SP2 is **structurally inert with learning off**, because no counts are
+  injected then. The registered base (v5 E1) has learning on.
+- The channel therefore tests multiplicity **through v5's own validated
+  mechanism** — X1 measured that novelty-off collapses arm-E1 to ≈ scalar, so
+  novelty is half of what makes E1 work. That is a narrower and more
+  interesting claim than "multiplicity weighting helps".
+- **Liveness is measured, not assumed** — a test pins that repeated steps
+  actually move the multiplicity channel while unit multiplicity is
+  bit-identical to `RoleRestricted`. This is the EQ5a A3.1 lesson applied in
+  advance: that registration's valuation term was algebraically inert and
+  passed every test it had because it was a no-op.
+
+### A2.4 — implementation ledger (non-arm-defining, recorded for the report)
+
+1. The scalar `group_distribution` observation is **inert** — A1.2's wrapper
+   carries the real multi-modality observation, so a named constant is passed
+   and members ignore it.
+2. Per-role model seeds are distinct (`battery_seed ^ splitmix64(r+1)`).
+   Hygiene only: the world model is single-control, has no precision dynamics,
+   and never samples.
+3. koalisi carries **no `thiserror` dependency**; the house style is
+   hand-rolled `Display`/`Error`/`From` (`process::errors`,
+   `topology::errors`, `persistence::errors`). Followed rather than adding a
+   dependency to a registered arm.
+4. Bits outside the world model's `n_bits` universe are dropped from
+   `required_r` (arm-E1 masks `required` identically); if that empties a role,
+   the role leaves the roster per A1.3.
+5. `n_roles` clamped to `1..=255` at construction (`Role` is `u8`-indexed).
+6. **X-battery is still owed** and is the one gate the arm-E1 edits could
+   disturb. Structural argument that they cannot: on the `count_scale: None`
+   path the change is an `if let Some(scale)` that never fires plus a `mut`
+   binding, and `observe_outcome` became pure delegation with an identical
+   body. arm-E1's four identity/frozen-stream tests pass. The byte-identity
+   run against a pre-change baseline belongs to the Part 11 step and is **not
+   discharged here**.
+7. **E-seed is not blocked** (checked upstream): under `CertaintyWeighted`,
+   `GroupAgent::act` polls members via `action_probabilities` and samples with
+   the group RNG — it never calls a member's `Agent::act`. The exploratory
+   seeded-sampling cell is constructible battery-side even though the
+   wrapper's `act` deliberately refuses.
+
+### Unchanged
+
+D1, D2, D3, D5, D6 (**1.25× / ≥ 18-of-30**), D7 (seeds **330..360**), D8, D10,
+SP1's `required_r` substitution, SP2's `m(b, r)` scale, SP3's threshold, and
+Amendment 1 in full (A1.1 topology contrast, D4a struck, A1.2 wrapper, A1.3
+roster drop, A1.4 S-learn re-scope). Gates X-battery / X-identity /
+S-determinism / S-live / S-learn unchanged. koa#54 stays FINAL.
