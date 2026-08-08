@@ -266,8 +266,9 @@ pub use aif_persistent_policy::{
 mod group_policy;
 #[cfg(all(feature = "decision", feature = "process"))]
 pub use group_policy::{
-    DEFAULT_N_ROLES, GROUP_N_ACTIONS, GroupAifConfig, GroupAifCounters, GroupAifError,
-    GroupAifPolicy, ModelLabel, ModelUpdateAudit, PrecisionChannel, WorldModelTopology, v5_e1_base,
+    AgreementSample, CoverageMasks, DEFAULT_N_ROLES, DecisionRead, GROUP_N_ACTIONS, GroupAifConfig,
+    GroupAifCounters, GroupAifError, GroupAifPolicy, ModelLabel, ModelUpdateAudit, PrecisionChannel,
+    WorldModelTopology, v5_e1_base,
 };
 
 #[cfg(feature = "decision")]

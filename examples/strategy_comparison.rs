@@ -110,8 +110,13 @@ use koalisi::algorithms::{
 };
 use koalisi::decision::{
     AifDecisionPolicy, AifMmDecisionPolicy, CoalitionDecisionPolicy, CouplingModel, Decision,
-    DecisionContext, MagnitudePolicy, PersistentAifArm, PersistentAifConfig, RoleId,
-    RoleModulation, ThresholdPolicy, TrialBoundary,
+    DecisionContext, MagnitudePolicy, PersistentAifArm, PersistentAifConfig, PersistentAifState,
+    RoleId, RoleModulation, ThresholdPolicy, TrialBoundary,
+};
+// Part 11 (koalisi #78) EQ5b: the role-slotted group arm and its instrumentation.
+use koalisi::decision::{
+    AgreementSample, CoverageMasks, DecisionRead, GroupAifConfig, GroupAifCounters, GroupAifPolicy,
+    ModelLabel, PrecisionChannel, WorldModelTopology,
 };
 // Part 7 (koalisi #69) EQ3 instrumentation surface + the upstream certificate /
 // factorization enums it reports. Feature-gated exactly like the `mag-eq3` arm.
@@ -276,6 +281,10 @@ fn main() {
     println!("{}", "=".repeat(72));
     println!();
     part10_residual_process_specificity();
+    println!();
+    println!("{}", "=".repeat(72));
+    println!();
+    part11_eq5b_typed_two_engine();
 }
 
 // ===========================================================================
@@ -10973,6 +10982,904 @@ fn part10_residual_process_specificity() {
         gates_ok,
         "RUN-INVALID: a prereg §5 gate failed (X-pair {pair_ok}, X-identity {identity_ok}, S-live {live_ok}, S-probe {probe_ok})"
     );
+}
+
+// ===========================================================================
+// Part 11 — EQ5b: the typed two-engine contest (koalisi #78). REGISTERED.
+//
+// Governed by `docs/prereg-K4-eq5b-typed-two-engine.md` — committed BEFORE this
+// code, **including Amendments 1 and 2**, which are the spec of record wherever
+// they conflict with §3/§4. Design-lock of record: koalisi #78.
+//
+// The question: on the v2w workflow world EQ5a defines, does an ACTIVE-INFERENCE
+// engine deciding as a group of role specialists beat the ENRICHED-MAGNITUDE
+// engine staffing the same workflows? EQ4 validated the typed magnitude arm; that
+// arm is the control here, so EQ5b cannot re-harvest EQ4's margin.
+//
+// Everything is ADDITIVE — Parts 1–10 are the byte-identity gate (§5 X-battery),
+// so no frozen draw, runner, arm, or print statement above is touched. The world
+// is EQ5a's Part 9 draw called VERBATIM on fresh seeds (§2: EQ5a's world is a
+// fixed, reported quantity, and holding it constant is what makes the two
+// documents comparable).
+// ===========================================================================
+
+/// Part 11 seed range (D7) — fresh; 90..120 and 150..180 stay reserved.
+const P11_SEED_START: u64 = 330;
+const P11_SEED_END: u64 = 360;
+/// H-G conjunct 1 (D6, cell-count rule at 2 confirmatory cells).
+const P11_HG_FACTOR: f64 = 1.25;
+/// H-G conjunct 2 (D6).
+const P11_HG_SUPERIOR_MIN: usize = 18;
+/// S-learn (i)'s pinned non-vacuity tolerance: a world model must differ from its
+/// initialization by more than this on some Dirichlet count. **Necessary, and
+/// explicitly not sufficient** — the counted ledger is the gate.
+const P11_VACUITY_TOL: f64 = 1e-9;
+/// Report date for the Part 11 battery, stamped per committed run.
+const P11_REPORT_DATE: &str = "2026-08-08";
+
+/// The **v2w** world on the Part 11 seeds — `p9_draw_instance` verbatim (§2).
+fn p11_instances_range(start: u64, end: u64) -> Vec<WorkflowInstance> {
+    (start..end).map(|s| p9_draw_instance(s, false)).collect()
+}
+
+/// The **unit-multiplicity** world for X-identity: the all-parallel degenerate
+/// shape, which carries `m ≡ 1` everywhere and consumes ZERO extra stream draws,
+/// so its base prefix is bit-for-bit the v2w instance of the same seed.
+///
+/// X-identity's registered claim is "at the identity configuration the arm
+/// reproduces its reference bit-for-bit", and SP2's identity configuration is
+/// `m ≡ 1`. On v2w multiplicity is emphatically not 1 — that is the whole point of
+/// the channel — so the gate has to be asked on a world where it is.
+fn p11_unit_instances_range(start: u64, end: u64) -> Vec<WorkflowInstance> {
+    (start..end).map(|s| p9_draw_instance(s, true)).collect()
+}
+
+/// The pool's `agent_id → process::Role` map — the group arm's role table.
+///
+/// Built from `inst.base.roles` (indexed by `Worker.id`, the pool index), the same
+/// source [`p9_role_map`] and [`p8_typed_policy`] read, so the arm and its control
+/// agree on who is what.
+///
+/// # Panics
+///
+/// Panics if the draw ever leaves a pool worker without a role, or names a role
+/// outside `u8`. The library declines-and-counts for an unmapped participant,
+/// which would silently freeze membership rather than fail, so full coverage is
+/// asserted here where a gap is a harness bug.
+fn p11_role_map(inst: &WorkflowInstance) -> HashMap<usize, Role> {
+    let roles: HashMap<usize, Role> = inst
+        .base
+        .agents
+        .iter()
+        .map(|a| {
+            let role = *inst
+                .base
+                .roles
+                .get(a.id)
+                .expect("invariant: the v2t draw assigns one role per pool worker");
+            (
+                a.id,
+                Role::new(u8::try_from(role).expect("invariant: R = 3 fits in a u8")),
+            )
+        })
+        .collect();
+    assert_eq!(
+        roles.len(),
+        inst.base.agents.len(),
+        "the group arm's role map must cover every pool worker"
+    );
+    roles
+}
+
+/// An owning handle onto one seed's [`GroupAifPolicy`], so the per-task
+/// [`P9Arm::PerTask`] factory can hand the runner a `'static` boxed policy while
+/// every task keeps decidING through the SAME persistent instance.
+///
+/// A borrowing wrapper would be the obvious shape and does not typecheck:
+/// `P9Arm::PerTask` yields `Box<dyn CoalitionDecisionPolicy>`, i.e. `+ 'static`.
+/// Widening that bound would edit frozen Part 9 code, which X-battery forbids, so
+/// the handle refcounts instead.
+struct P11Handle(Arc<GroupAifPolicy>);
+
+impl CoalitionDecisionPolicy for P11Handle {
+    fn should_join(
+        &self,
+        agent: &dyn AgentCapabilities,
+        coalition: &[&dyn AgentCapabilities],
+        ctx: &DecisionContext,
+    ) -> Decision {
+        self.0.should_join(agent, coalition, ctx)
+    }
+
+    fn should_leave(
+        &self,
+        agent: &dyn AgentCapabilities,
+        coalition: &[&dyn AgentCapabilities],
+        ctx: &DecisionContext,
+    ) -> Decision {
+        self.0.should_leave(agent, coalition, ctx)
+    }
+}
+
+/// What one group-arm cell produced.
+struct P11GroupRun {
+    seeds: Vec<P9Seed>,
+    latencies: Vec<f64>,
+    /// Per-seed counters — the S-learn ledger and the A1.3 / E-agree disclosures.
+    counters: Vec<GroupAifCounters>,
+    /// Per-seed non-vacuity: did any world model move off its initialization?
+    moved: Vec<bool>,
+    /// `begin_task` rejections. Nonzero means the world and the arm disagree about
+    /// roles or the universe — a harness fault, gated rather than reported.
+    begin_failures: usize,
+}
+
+/// Whether any world model moved off a freshly-constructed one by more than
+/// [`P11_VACUITY_TOL`] on some pA count — S-learn (i)'s non-vacuity guard.
+fn p11_models_moved(
+    after: &[(ModelLabel, PersistentAifState)],
+    before: &[(ModelLabel, PersistentAifState)],
+) -> bool {
+    after
+        .iter()
+        .zip(before.iter())
+        .any(|((_, a), (_, b))| match (a.pa.as_ref(), b.pa.as_ref()) {
+            (Some(x), Some(y)) => x
+                .iter()
+                .zip(y.iter())
+                .any(|(p, q)| (p - q).iter().any(|d| d.abs() > P11_VACUITY_TOL)),
+            _ => false,
+        })
+}
+
+/// Run one group-arm cell over the shared instances, honouring the harness
+/// contract the library specifies: `begin_task` once per task **before** its
+/// decisions, `observe_outcome` once **after** the leave sweep.
+///
+/// The per-task factory is what fires `begin_task` — it is called exactly once per
+/// task by the frozen runner, immediately before that task's join pass. A
+/// declined task (`decl.failed`) short-circuits before the factory, so it opens no
+/// task and observes no outcome; the two counts stay consistent by construction.
+fn p11_group_battery(
+    insts: &[WorkflowInstance],
+    declared: &[Vec<P9Declared>],
+    config: GroupAifConfig,
+    seed_start: u64,
+) -> P11GroupRun {
+    // Discarded warm-up on the first instance, as everywhere else in this file.
+    if let (Some(first), Some(first_decl)) = (insts.first(), declared.first()) {
+        let policy = Arc::new(
+            GroupAifPolicy::new(seed_start, config, p11_role_map(first))
+                .expect("group arm construction"),
+        );
+        let make = |t: usize| {
+            let _ = policy.begin_task(&first_decl[t].demand);
+            Box::new(P11Handle(Arc::clone(&policy))) as Box<dyn CoalitionDecisionPolicy>
+        };
+        let mut warm = Vec::new();
+        let _ = p9_run_seed_hooked(
+            &P9Arm::PerTask(&make),
+            first,
+            first_decl,
+            &mut warm,
+            &mut |_req, bits| {
+                policy.observe_outcome(bits);
+            },
+        );
+    }
+
+    let mut lat = Vec::new();
+    let mut seeds = Vec::with_capacity(insts.len());
+    let mut counters = Vec::with_capacity(insts.len());
+    let mut moved = Vec::with_capacity(insts.len());
+    let mut begin_failures = 0usize;
+
+    for (i, (inst, decl)) in insts.iter().zip(declared.iter()).enumerate() {
+        let seed = seed_start + i as u64;
+        let roles = p11_role_map(inst);
+        let policy = Arc::new(
+            GroupAifPolicy::new(seed, config, roles.clone()).expect("group arm construction"),
+        );
+        // The initialization reference for S-learn (i)'s non-vacuity guard.
+        let fresh =
+            GroupAifPolicy::new(seed, config, roles).expect("group arm construction (reference)");
+
+        // `Cell` because `P9Arm::PerTask` takes `&dyn Fn`, not `&dyn FnMut`.
+        let failures = std::cell::Cell::new(0usize);
+        let make = |t: usize| {
+            if policy.begin_task(&decl[t].demand).is_err() {
+                failures.set(failures.get() + 1);
+            }
+            Box::new(P11Handle(Arc::clone(&policy))) as Box<dyn CoalitionDecisionPolicy>
+        };
+        let result = p9_run_seed_hooked(
+            &P9Arm::PerTask(&make),
+            inst,
+            decl,
+            &mut lat,
+            &mut |_req, bits| {
+                policy.observe_outcome(bits);
+            },
+        );
+        begin_failures += failures.get();
+        counters.push(policy.counters());
+        moved.push(p11_models_moved(
+            &policy.model_snapshots(),
+            &fresh.model_snapshots(),
+        ));
+        seeds.push(result);
+    }
+
+    P11GroupRun {
+        seeds,
+        latencies: lat,
+        counters,
+        moved,
+        begin_failures,
+    }
+}
+
+/// One confirmatory cell's H-G reading (D6) — both conjuncts, always computed.
+struct P11Hg {
+    ratio: Option<f64>,
+    superior: usize,
+    c1: bool,
+    c2: bool,
+    ok: bool,
+}
+
+fn p11_hg(cell: &[P9Seed], ctl: &[P9Seed]) -> P11Hg {
+    let base = median(p9_primaries(ctl));
+    let ratio = (base > 0.0).then(|| median(p9_primaries(cell)) / base);
+    let superior = p9_superior_count(cell, ctl);
+    let c1 = ratio.is_some_and(|r| r >= P11_HG_FACTOR);
+    let c2 = superior >= P11_HG_SUPERIOR_MIN;
+    P11Hg {
+        ratio,
+        superior,
+        c1,
+        c2,
+        ok: c1 && c2,
+    }
+}
+
+/// Seeds on which two runs of the same cell agree bit-for-bit — S-determinism.
+fn p11_identical_seeds(a: &[P9Seed], b: &[P9Seed]) -> usize {
+    a.iter()
+        .zip(b.iter())
+        .filter(|(x, y)| {
+            x.acts == y.acts
+                && x.scores == y.scores
+                && x.primary.to_bits() == y.primary.to_bits()
+                && x.churn == y.churn
+        })
+        .count()
+}
+
+/// S-learn (i) over one cell: every world model of every seed advanced exactly its
+/// expected number of times, and the end-of-stream state is non-vacuously moved.
+fn p11_s_learn(run: &P11GroupRun) -> (bool, usize, usize) {
+    let exact = run.counters.iter().filter(|c| c.s_learn_exact()).count();
+    let moved = run.moved.iter().filter(|&&m| m).count();
+    let ok = exact == run.counters.len()
+        && moved == run.moved.len()
+        && run.begin_failures == 0;
+    (ok, exact, moved)
+}
+
+/// The realised-roster disclosure (A1.3) pooled over a cell's seeds:
+/// `(histogram over 1..=3, empty role-slots, tasks)`.
+fn p11_roster_histogram(run: &P11GroupRun) -> ([usize; 4], u64, usize) {
+    let mut hist = [0usize; 4];
+    let mut empty = 0u64;
+    let mut tasks = 0usize;
+    for c in &run.counters {
+        for &s in &c.roster_sizes {
+            if s < hist.len() {
+                hist[s] += 1;
+            }
+            tasks += 1;
+        }
+        empty += c.empty_role_slots;
+    }
+    (hist, empty, tasks)
+}
+
+/// E-agree over a cell: `(unanimity rate, margin p25/median/p75)`.
+fn p11_agreement(run: &P11GroupRun) -> (f64, [f64; 3], usize) {
+    let samples: Vec<AgreementSample> = run
+        .counters
+        .iter()
+        .flat_map(|c| c.agreement.iter().copied())
+        .collect();
+    if samples.is_empty() {
+        return (0.0, [0.0; 3], 0);
+    }
+    let unanimous = samples.iter().filter(|s| s.unanimous()).count();
+    let mut margins: Vec<f64> = samples.iter().map(|s| s.margin).collect();
+    margins.sort_by(f64::total_cmp);
+    (
+        unanimous as f64 / samples.len() as f64,
+        [
+            percentile(&margins, 0.25),
+            percentile(&margins, 0.5),
+            percentile(&margins, 0.75),
+        ],
+        samples.len(),
+    )
+}
+
+fn p11_table_head() {
+    println!(
+        "| arm | role | median PRIMARY | vs `wf-asis` | superior seeds | median churn | median µs/decision |"
+    );
+    println!(
+        "|-----|------|---------------:|-------------:|---------------:|-------------:|-------------------:|"
+    );
+}
+
+fn p11_row(label: &str, role: &str, rs: &[P9Seed], base: &[P9Seed], lat: &[f64]) {
+    let med = median(p9_primaries(rs));
+    let base_med = median(p9_primaries(base));
+    let ratio = if base_med > 0.0 {
+        format!("{:.2}×", med / base_med)
+    } else {
+        "n/a".to_owned()
+    };
+    println!(
+        "| `{label}` | {role} | {med:.4} | {ratio} | {}/{} | {:.2} | {:.3} |",
+        p9_superior_count(rs, base),
+        rs.len(),
+        median(p9_churns(rs)),
+        median(lat.to_vec())
+    );
+}
+
+/// The three pre-committed verdict labels (§6), printed verbatim.
+fn p11_verdict(gates_ok: bool, hg_ok: bool) -> &'static str {
+    if !gates_ok {
+        "RUN-INVALID"
+    } else if hg_ok {
+        "VALIDATED (two-engine)"
+    } else {
+        "FALSIFIED (two-engine)"
+    }
+}
+
+/// The six registered group cells, in report order.
+fn p11_cells() -> [(&'static str, &'static str, GroupAifConfig); 6] {
+    let base = GroupAifConfig {
+        base: e1_config(),
+        ..GroupAifConfig::default()
+    };
+    [
+        ("grp-role", "confirmatory", base),
+        (
+            "grp-mult",
+            "confirmatory",
+            GroupAifConfig {
+                channel: PrecisionChannel::MultiplicityWeighted,
+                ..base
+            },
+        ),
+        (
+            "grp-role-fresh",
+            "reference",
+            GroupAifConfig {
+                topology: WorldModelTopology::Shared,
+                ..base
+            },
+        ),
+        (
+            "grp-mult-fresh",
+            "reference",
+            GroupAifConfig {
+                topology: WorldModelTopology::Shared,
+                channel: PrecisionChannel::MultiplicityWeighted,
+                ..base
+            },
+        ),
+        (
+            "grp-role-blind",
+            "reference",
+            GroupAifConfig {
+                masks: CoverageMasks::RoleBlind,
+                ..base
+            },
+        ),
+        ("grp-seed", "exploratory", GroupAifConfig {
+            read: DecisionRead::SeededSampling,
+            ..base
+        }),
+    ]
+}
+
+#[allow(clippy::too_many_lines)]
+fn part11_eq5b_typed_two_engine() {
+    println!("# koalisi #78 — Part 11: the typed two-engine contest (REGISTERED)");
+    println!();
+    println!(
+        "_governed by `docs/prereg-K4-eq5b-typed-two-engine.md` **including Amendments 1 and 2** (committed BEFORE this code; design-lock of record [koalisi #78](https://github.com/sustia-llc/koalisi/issues/78)). Report date {P11_REPORT_DATE}. Seeds **{P11_SEED_START}..{P11_SEED_END}** (fresh; 90..120 and 150..180 stay reserved). **H-G (confirmatory):** an active-inference engine deciding as a group of role specialists — `aif::GroupAgent`, R = 3 role internals over arm-E1's persistent world model, `CertaintyWeighted` active slot, `n_actions = 2` — beats the EQ4-validated typed magnitude arm staffing the same workflows. The control is that validated arm, so EQ5b cannot re-harvest EQ4's margin; the decision criterion is identical in FORM to arm-E1's (SP3), so a win is attributable to the engine SHAPE and not to a re-tuned threshold._"
+    );
+    println!();
+    println!(
+        "_**What Amendment 1 changed, and why it matters for reading this table.** The arm as first registered was unbuildable: SP1's arm-E1 query construction bakes the per-decision candidate into each member's matrices, while `POMDPAgent` exposes no setter for `A`/`B`/`C`/`D` and `GroupAgent` no way to replace a member — so D2a's \"persistent internals\" and SP1 were mutually exclusive. A1.1 relocates D2a's contrast from member continuity to **world-model topology**: confirmatory cells own **R = 3 role-specialised** persistent models, the reference cells read **one shared** model through three role-restricted views. Members are single-use on every leg, **D4a is struck** (there is nothing for a commit to advance), and the MMP double-update hazard of gotcha 32 is thereby DESIGNED OUT rather than gated — which is why S-learn below is thinner than the 2026-08-08 correction described, and that is recorded rather than quietly shipped._"
+    );
+    println!();
+    println!(
+        "_**Amendment 2**: the query's coverage masks are registered **role-matched** (the world's own `p9_step_covered` is role-matched, and role-blind masks would leave the three internals differing only in `required_r` — specialists in name only), with `grp-role-blind` as a single non-gating reference isolating that mechanism. SP3 applies **uniformly to join and leave**, so this arm declines on a tie where arm-E1 leaves on one — disclosed, not discovered. And SP2 moves **concentration only**: the scale multiplies the whole modality pA block and `A ≡ column_normalize(pA)` is invariant under a positive uniform scale, so multiplicity reaches the decision purely through the **novelty / parameter-information-gain** term — v5's own validated mechanism (X1: novelty-off collapses E1 to ≈ scalar)._"
+    );
+    println!();
+
+    // --- World (drawn once, shared by every arm) -----------------------------
+    let insts = p11_instances_range(P11_SEED_START, P11_SEED_END);
+    let n_seeds = insts.len();
+    let oracle = p8_rho(0.0);
+    let bits = u8::try_from(UNIVERSE).expect("invariant: the universe is 8 bits");
+    let roles = u8::try_from(P8_ROLES).expect("invariant: R = 3");
+    let rules =
+        rule_theory(bits, roles).expect("invariant: the registered (8, 3) theory constructs");
+    let labels = rule_labels(bits, roles).expect("invariant: labels mirror the theory");
+    // No rewriting arm here, so one AS-WRITTEN declare serves the control, every
+    // group cell, and `wf-val-p` (whose cost model prices the RESIDUAL, not the
+    // declaration).
+    let (declared, _) = p9_declare(
+        &insts,
+        &rules,
+        &labels,
+        P9Mechanism::AsWritten,
+        P9Cost::Uniform,
+        P9_FUEL,
+    );
+
+    // --- Arms ----------------------------------------------------------------
+    let typed = |inst: &WorkflowInstance| {
+        Box::new(p8_typed_policy(&inst.base, &oracle)) as Box<dyn CoalitionDecisionPolicy>
+    };
+    let (ctl, ctl_lat) = p9_battery(&insts, &declared, typed);
+
+    let cells = p11_cells();
+    let runs: Vec<P11GroupRun> = cells
+        .iter()
+        .map(|(_, _, cfg)| p11_group_battery(&insts, &declared, *cfg, P11_SEED_START))
+        .collect();
+    let named = |label: &str| -> &P11GroupRun {
+        let i = cells
+            .iter()
+            .position(|(l, _, _)| *l == label)
+            .expect("invariant: every cell read back by name is in `p11_cells`");
+        &runs[i]
+    };
+    let grp_role = named("grp-role");
+    let grp_mult = named("grp-mult");
+    let grp_role_fresh = named("grp-role-fresh");
+    let grp_mult_fresh = named("grp-mult-fresh");
+    let grp_blind = named("grp-role-blind");
+    let grp_seed = named("grp-seed");
+
+    // `wf-val-p` — EQ5a's strongest cell, at EQ5a's pinned λ and priced cost.
+    let val_p = p9_valuation_battery(
+        &insts,
+        &declared,
+        &oracle,
+        P9_LAMBDA,
+        P9Cost::Priced,
+        ResidualBasis::Occurrences,
+    );
+
+    // --- §5 gates (run and reported BEFORE any leg is read) ------------------
+    println!("## Gates (prereg §5 — any failure ⇒ `RUN-INVALID`)");
+    println!();
+
+    // X-identity: on a unit-multiplicity world, `grp-mult` == `grp-role`.
+    let unit = p11_unit_instances_range(P11_SEED_START, P11_SEED_END);
+    let (unit_decl, _) = p9_declare(
+        &unit,
+        &rules,
+        &labels,
+        P9Mechanism::AsWritten,
+        P9Cost::Uniform,
+        P9_FUEL,
+    );
+    let unit_role = p11_group_battery(&unit, &unit_decl, cells[0].2, P11_SEED_START);
+    let unit_mult = p11_group_battery(&unit, &unit_decl, cells[1].2, P11_SEED_START);
+    let identity_ok = p9_bit_identical(&unit_mult.seeds, &unit_role.seeds);
+    println!(
+        "- **X-identity — {}.** At the identity configuration `m ≡ 1`, `grp-mult` reproduces `grp-role` **bit-identically on acts and raw score bits** (and on per-seed PRIMARY bits and churn), all {n_seeds} seeds. Asked on the all-parallel degenerate world, which carries `m ≡ 1` everywhere and consumes ZERO extra stream draws, so its base prefix is bit-for-bit the v2w instance of the same seed: on v2w itself multiplicity is emphatically not 1, which is the entire point of the channel, so the identity has to be asked where the identity exists. This is what keeps SP2 from being a free parameter — the scale is `m(b, r)` or it is nothing.",
+        pass(identity_ok)
+    );
+
+    // S-determinism: re-run both confirmatory cells and compare bit-for-bit.
+    let redo_role = p11_group_battery(&insts, &declared, cells[0].2, P11_SEED_START);
+    let redo_mult = p11_group_battery(&insts, &declared, cells[1].2, P11_SEED_START);
+    let det_role = p11_identical_seeds(&grp_role.seeds, &redo_role.seeds);
+    let det_mult = p11_identical_seeds(&grp_mult.seeds, &redo_mult.seeds);
+    let determinism_ok = det_role == n_seeds && det_mult == n_seeds;
+    println!(
+        "- **S-determinism — {}.** Both confirmatory cells re-run from scratch and compared per seed on acts, raw score bits, PRIMARY bits and churn: `grp-role` **{det_role}/{n_seeds}** · `grp-mult` **{det_mult}/{n_seeds}**. Load-bearing here in a way it has not been for any prior arm: `group_distribution` is the ONLY RNG-free path into a group's action distribution and every other entry point samples, so a single slip to `act` or to a nested slot would show up here and nowhere else.",
+        pass(determinism_ok)
+    );
+
+    // S-learn (i): counted per-model updates + the non-vacuity guard.
+    let learn: Vec<(bool, usize, usize)> = runs.iter().map(p11_s_learn).collect();
+    // The exploratory `grp-seed` cell is REPORTED, not gated (§5 fixes E-seed as
+    // exploratory; gating it here would quietly promote it).
+    let learn_ok = cells
+        .iter()
+        .zip(learn.iter())
+        .filter(|((_, kind, _), _)| *kind != "exploratory")
+        .all(|(_, &(ok, _, _))| ok);
+    println!(
+        "- **S-learn (i) — {}.** Per seed, each world model must record **exactly one** update per task in which its role had demand — **counted, not inferred from state movement**, because under MMP a missing commit makes an update apply TWICE rather than not at all, so \"did the state move?\" passes a double-updating arm. Deficit and surplus are both `RUN-INVALID`. Seeds with an exact ledger, and seeds whose end-of-stream state moved off initialization by more than {P11_VACUITY_TOL:e} (the non-vacuity guard — necessary, explicitly NOT sufficient): {}.",
+        pass(learn_ok),
+        cells
+            .iter()
+            .zip(learn.iter())
+            .map(|((label, kind, _), &(_, exact, moved))| format!(
+                "`{label}`{} {exact}/{n_seeds} exact, {moved}/{n_seeds} moved",
+                if *kind == "exploratory" { " (reported, not gated)" } else { "" }
+            ))
+            .collect::<Vec<_>>()
+            .join(" · ")
+    );
+    let begin_failures: usize = runs.iter().map(|r| r.begin_failures).sum();
+    println!(
+        "  - `begin_task` rejections across every cell: **{begin_failures}** (gated with S-learn — a rejection would mean the world names a role or a bit the arm is not configured for, which is a harness fault, not a finding). **S-learn (ii) and the member-advance conjunct are STRUCK as vacuous** by Amendment A1.4: members are single-use on every leg and there is no commit on the decision path, so neither has a referent. Counting them would be ceremony that reads as a gate."
+    );
+
+    // S-live: act-vs-score-bit divergence from the control, per cell.
+    let live: Vec<(usize, usize, usize)> = runs
+        .iter()
+        .map(|r| p9_divergence(&r.seeds, &ctl))
+        .collect();
+    let live_ok = cells
+        .iter()
+        .zip(live.iter())
+        .filter(|((_, kind, _), _)| *kind != "exploratory")
+        .all(|(_, &(seeds, _, _))| seeds >= 1);
+    println!(
+        "- **S-live — {}.** Divergence from `wf-asis`, reported as **acts AND raw score bits separately**: {}. This is the #80 lesson (gotcha 31) applied in advance — a term can be live in the score and dead at the decision, and a leg reading only PRIMARY sees a flat null where the truth is \"it reached the margin and never crossed a threshold\". Read the two columns against each other before reading any median.",
+        pass(live_ok),
+        cells
+            .iter()
+            .zip(live.iter())
+            .map(|((label, _, _), &(s, a, b))| format!(
+                "`{label}` {s}/{n_seeds} seeds, {a} acts, {b} score bits"
+            ))
+            .collect::<Vec<_>>()
+            .join(" · ")
+    );
+    println!(
+        "- **X-battery** (frozen Parts 1–10 byte-identical on every quality/ratio/superiority/churn/verdict line) is checked OUTSIDE this binary, by diffing this run's Parts 1–10 against a pre-change baseline; latency-only diffs are the standing exclusion. Part 11 is purely additive, and the one thing that could disturb it is the arm-E1 seam the group arm reuses: `build_query` gained an `Option<&[f64]>` count scale that is `None` on every pre-existing call site (the scaling block is skipped, not multiplied by one), and `observe_outcome` became a delegation to a flag-returning twin with an identical body. Structural, and still owed as a measurement."
+    );
+    let gates_ok = identity_ok && determinism_ok && learn_ok && live_ok;
+    println!();
+
+    // --- Arms ----------------------------------------------------------------
+    println!("## Arms (pooled over {n_seeds} seeds)");
+    println!();
+    p11_table_head();
+    p11_row("wf-asis", "**control**", &ctl, &ctl, &ctl_lat);
+    for ((label, kind, _), run) in cells.iter().zip(runs.iter()) {
+        p11_row(label, kind, &run.seeds, &ctl, &run.latencies);
+    }
+    p11_row("wf-val-p", "reference", &val_p.seeds, &ctl, &val_p.latencies);
+    println!();
+    println!(
+        "_`wf-asis` is the EQ4-validated typed magnitude arm (`with_role_modulation`, oracle `ρ = δ`) staffing the as-written workflow — EQ5a's own control. `wf-val-p` is EQ5a's strongest cell, the library `ResidualPolicy` at EQ5a's pinned λ = {P9_LAMBDA} and the staffing-priced cost model; it is a **mandatory non-gating disclosure**, and the pre-committed interpretation binds: a PASS that does not also exceed its median is reported as **\"beats the typed control, not the strongest process cell\"**. `grp-seed` is the exploratory seeded-sampling cell (E-seed) and reports **no margin** — its score encodes the draw, so read its `act` column only._"
+    );
+    println!();
+
+    // --- H-G (confirmatory) --------------------------------------------------
+    println!("## H-G (confirmatory — BOTH conjuncts in the SAME cell, prereg §5)");
+    println!();
+    println!("| cell | median PRIMARY | ratio vs `wf-asis` | conjunct 1 (≥ {P11_HG_FACTOR:.2}×) | superior seeds | conjunct 2 (≥ {P11_HG_SUPERIOR_MIN}) | H-G |");
+    println!("|---|---:|---:|---|---:|---|---|");
+    let hgs: Vec<P11Hg> = cells
+        .iter()
+        .zip(runs.iter())
+        .filter(|((_, kind, _), _)| *kind == "confirmatory")
+        .map(|(_, run)| p11_hg(&run.seeds, &ctl))
+        .collect();
+    for ((label, _, _), hg) in cells
+        .iter()
+        .filter(|(_, kind, _)| *kind == "confirmatory")
+        .zip(hgs.iter())
+    {
+        let run = named(label);
+        println!(
+            "| `{label}` | {:.4} | {} | {} | {}/{n_seeds} | {} | {} |",
+            median(p9_primaries(&run.seeds)),
+            hg.ratio
+                .map_or_else(|| "n/a".to_owned(), |r| format!("{r:.4}×")),
+            pass(hg.c1),
+            hg.superior,
+            pass(hg.c2),
+            pass(hg.ok)
+        );
+    }
+    let hg_ok = hgs.iter().any(|h| h.ok);
+    println!();
+    let (ms, ma, mb) = p9_divergence(&grp_mult.seeds, &grp_role.seeds);
+    println!(
+        "- **SP2 liveness against its own base — the A2.3 line, reported here because H-G cannot see it.** `grp-mult` vs `grp-role` differ on **{ma}** decisions by ACT and **{mb}** by raw score bits, across **{ms}/{n_seeds}** seeds. **Read the two numbers against each other**: equal medians with a nonzero score-bit count and a zero act count would say the multiplicity weighting reaches the margin and never crosses a threshold — live in the score, dead at the decision, which is #80's 355-bits/0-acts result in a new costume and a mechanism statement rather than a null. Equal medians with BOTH counts zero would instead mean the channel is inert on this world, which X-identity alone cannot distinguish (it only pins that `m ≡ 1` reproduces the base).",
+    );
+    println!();
+    let val_p_med = median(p9_primaries(&val_p.seeds));
+    println!(
+        "_Both cells report regardless of outcome — no cell-shopping, no post-hoc bar movement. The bar follows D6's cell-count rule, pinned at lock time before the cells were fixed: ≤ 2 confirmatory cells ⇒ the lineage's standing **{P11_HG_FACTOR:.2}× / ≥ {P11_HG_SUPERIOR_MIN}-of-{n_seeds}**. The bar is computed against `wf-asis` and **only** `wf-asis`. For the pre-committed scoped claim: `wf-val-p`'s median is **{val_p_med:.4}**._"
+    );
+    println!();
+
+    // --- E-life (registered exploratory, non-gating) --------------------------
+    println!("## E-life (registered exploratory, NON-GATING — prereg §5)");
+    println!();
+    for (persistent, shared, label) in [
+        (grp_role, grp_role_fresh, "role-restricted"),
+        (grp_mult, grp_mult_fresh, "multiplicity-weighted"),
+    ] {
+        let (s, a, b) = p9_divergence(&persistent.seeds, &shared.seeds);
+        println!(
+            "- **{label} channel.** R = 3 role-specialised models **{:.4}** vs one shared model **{:.4}**; they differ on **{a}** decisions by ACT and **{b}** by raw score bits, with **{s}/{n_seeds}** seeds carrying any act difference, and the specialised cell is superior on **{}/{n_seeds}** seeds. This is how much comes from each role learning ONLY its own bits, rather than from three role-restricted views of one model — \"a group of role specialists\" versus \"three views of one model, aggregated\".",
+            median(p9_primaries(&persistent.seeds)),
+            median(p9_primaries(&shared.seeds)),
+            p9_superior_count(&persistent.seeds, &shared.seeds)
+        );
+    }
+    let (bs, ba, bb) = p9_divergence(&grp_blind.seeds, &grp_role.seeds);
+    println!(
+        "- **`grp-role-blind` (Amendment A2.1 reference).** Role-blind coverage masks at the role-restricted channel: median **{:.4}** against `grp-role`'s **{:.4}**, differing on **{ba}** acts and **{bb}** score bits across **{bs}/{n_seeds}** seeds. It isolates **role-matched coverage** from **role-restricted demand alone**; under blind masks the three internals differ only in `required_r`. One blind leg, not two — disclosed scoping, since the masks are SP1 machinery shared by both channels.",
+        median(p9_primaries(&grp_blind.seeds)),
+        median(p9_primaries(&grp_role.seeds))
+    );
+    println!();
+
+    // --- E-agree + A1.3 roster disclosure ------------------------------------
+    println!("## E-agree and the realised roster (registered disclosures — prereg §5, A1.3)");
+    println!();
+    println!("| cell | roster 1 / 2 / 3 | empty role-slots | unanimous reads | margin p25 / median / p75 |");
+    println!("|---|---|---:|---:|---|");
+    for ((label, _, _), run) in cells.iter().zip(runs.iter()) {
+        let (hist, empty, tasks) = p11_roster_histogram(run);
+        let (unan, m, samples) = p11_agreement(run);
+        println!(
+            "| `{label}` | {} / {} / {} | {empty} of {} | {} | {} |",
+            hist[1],
+            hist[2],
+            hist[3],
+            tasks * P8_ROLES,
+            if samples == 0 {
+                "n/a (no mixture)".to_owned()
+            } else {
+                format!("{:.1} % of {samples}", 100.0 * unan)
+            },
+            if samples == 0 {
+                "n/a".to_owned()
+            } else {
+                format!("{:.4} / {:.4} / {:.4}", m[0], m[1], m[2])
+            }
+        );
+    }
+    println!();
+    println!(
+        "_**A1.3**: a role with no `(bit, role)` demand in a task does not vote in it — it leaves the roster, so the realised `R` varies 3 → 2 → 1. The alternative, an abstaining member at `[0.5, 0.5]`, is not neutral under `CertaintyWeighted`: it still carries weight `exp(−ln 2) = 0.5` and would drag `p(act)` toward the SP3 threshold on every affected slot. A task where EVERY role is empty cannot occur (`|required| ≥ 2`). **E-agree** reads each internal's own argmax back off the roster after the read — a disclosure, never a decision input — and the margin column is `|p(act) − 0.5|`, the CW mixture's distance from the threshold. The seeded-sampling cell exposes no mixture and so records no sample._"
+    );
+    println!();
+
+    // --- E-seed (registered exploratory, non-gating) --------------------------
+    println!("## E-seed (registered exploratory, NON-GATING — prereg §5)");
+    println!();
+    let (ss, sa, _) = p9_divergence(&grp_seed.seeds, &grp_role.seeds);
+    let (seed_ok, seed_exact, seed_moved) = p11_s_learn(grp_seed);
+    println!(
+        "- Deciding by the shipped `act()` draw instead of the deterministic read: median **{:.4}** against `grp-role`'s **{:.4}** ({} superior seeds), differing on **{sa}** decisions by ACT across **{ss}/{n_seeds}** seeds. **That difference IS what the draw costs against argmax.** Constructible because under `CertaintyWeighted` upstream's `Agent::act` polls members through `action_probabilities` and samples with the GROUP's seeded RNG — it never calls a member's own `act`, which the read-only wrapper deliberately refuses. Score bits are not compared: this cell reports no margin.",
+        median(p9_primaries(&grp_seed.seeds)),
+        median(p9_primaries(&grp_role.seeds)),
+        p9_superior_count(&grp_seed.seeds, &grp_role.seeds)
+    );
+    println!(
+        "- S-learn for this cell, reported and **not gated**: {seed_exact}/{n_seeds} exact ledgers, {seed_moved}/{n_seeds} moved (overall {}). §5 fixes E-seed as exploratory, and gating it here would quietly promote a leg the registration made non-gating.",
+        pass(seed_ok)
+    );
+    println!();
+
+    // --- Context (non-gating) ------------------------------------------------
+    println!("## Context (non-gating — prereg §3)");
+    println!();
+    let (mag, mag_lat) = p9_battery(&insts, &declared, |_| {
+        Box::new(MagnitudePolicy::default()) as Box<dyn CoalitionDecisionPolicy>
+    });
+    let (scalar, scalar_lat) = p9_battery(&insts, &declared, |_| {
+        Box::new(AifDecisionPolicy::default()) as Box<dyn CoalitionDecisionPolicy>
+    });
+    let (e1, e1_lat) = p9_e1_battery(&insts, &declared, e1_config());
+    p11_table_head();
+    p11_row("mag", "context", &mag, &ctl, &mag_lat);
+    p11_row("scalar", "context", &scalar, &ctl, &scalar_lat);
+    p11_row("arm-E1", "context", &e1, &ctl, &e1_lat);
+    println!();
+    println!(
+        "_The untyped `mag`, the scalar AIF bridge and the single-agent persistent `arm-E1` staff the same declared writings; all three are context and none can move the verdict. **`arm-E1` is the single-agent shape of the very engine the group cells wrap** — the same v5 E1 configuration (learned per-bit precisions, MeanField queries at fixed γ = 16, novelty on), which is what makes \"EQ5b changes the engine SHAPE\" a comparison and not a slogan. **Latency** (E-lat, D10) is record-only and NEVER gating: a group decision builds up to R = 3 arm-E1 queries where the single-agent arm builds one, and that ratio is the visible cost of the shape. Inherited quirk, disclosed: `p9_e1_battery` derives its per-seed arm seed from `P9_SEED_START`, not this part's range — frozen Part 9/10 behaviour, and inert, because the persistent world model is single-control with no precision dynamics and never samples. **Upstream-evaluation declines** across the group cells: {}._",
+        cells
+            .iter()
+            .zip(runs.iter())
+            .map(|((label, _, _), run)| format!(
+                "`{label}` {}",
+                run.counters
+                    .iter()
+                    .map(|c| c.declines_upstream + c.declines_missing_role + c.declines_no_demand)
+                    .sum::<u64>()
+            ))
+            .collect::<Vec<_>>()
+            .join(" · ")
+    );
+    println!();
+
+    // --- Verdict --------------------------------------------------------------
+    let verdict = p11_verdict(gates_ok, hg_ok);
+    println!("## Verdict (prereg §6 — pre-committed labels)");
+    println!();
+    println!("**VERDICT: `{verdict}`**");
+    println!();
+    println!(
+        "- `VALIDATED (two-engine)` — H-G passes both conjuncts in at least one confirmatory cell, all §5 gates hold."
+    );
+    println!("- `FALSIFIED (two-engine)` — gates hold, no confirmatory cell passes both conjuncts.");
+    println!("- `RUN-INVALID` — any gate fails.");
+    println!();
+    let beats_val_p = hgs
+        .iter()
+        .zip(
+            cells
+                .iter()
+                .filter(|(_, kind, _)| *kind == "confirmatory")
+                .map(|(label, _, _)| named(label)),
+        )
+        .any(|(hg, run)| hg.ok && median(p9_primaries(&run.seeds)) > val_p_med);
+    println!(
+        "_Gates {} (X-identity {} · S-determinism {} · S-learn {} · S-live {}). {} Pre-committed interpretations (§6/§7), binding: a `VALIDATED` here means **\"on this world, a role-structured active-inference group outperforms the typed magnitude arm\"** — NOT that aif beats magnitude generally, and NOT anything about **koa#54 (mag = demonstrated default, FINAL)**, which no EQ5b outcome reopens. The v1/v2 K4 verdicts, EQ3's, EQ4's, EQ5a's and #80's are all untouched. Whether any advantage transfers off the v2w world is unsettled — one world, one draw family, {n_seeds} seeds — and whether the deterministic read is the RIGHT group decision rule is likewise unsettled; it is the one that preserves this lineage's determinism discipline, and E-seed carries no verdict._",
+        pass(gates_ok),
+        pass(identity_ok),
+        pass(determinism_ok),
+        pass(learn_ok),
+        pass(live_ok),
+        if !hg_ok {
+            "No confirmatory cell carried.".to_owned()
+        } else if beats_val_p {
+            "A confirmatory cell carried AND exceeded `wf-val-p`'s median.".to_owned()
+        } else {
+            format!("A confirmatory cell carried but did NOT exceed `wf-val-p`'s median ({val_p_med:.4}) — reported, as pre-committed, as **\"beats the typed control, not the strongest process cell\"**.")
+        }
+    );
+
+    // Asserted LAST, deliberately: a failing gate should leave the full diagnostic
+    // table on stdout before the process exits nonzero.
+    assert!(
+        gates_ok,
+        "RUN-INVALID: a prereg §5 gate failed (X-identity {identity_ok}, S-determinism {determinism_ok}, S-learn {learn_ok}, S-live {live_ok})"
+    );
+}
+
+#[cfg(test)]
+mod part11_tests {
+    use super::*;
+
+    /// 2-seed SMOKE off the registered block (seeds 900..902 — **not** 330..360,
+    /// which stay unconsumed for the official run).
+    ///
+    /// Exercises the whole Part 11 pipeline end to end — world draw, declares, the
+    /// group battery's `begin_task` / decisions / `observe_outcome` contract, the
+    /// S-learn ledger, determinism, X-identity, and H-G's arithmetic — and prints
+    /// its numbers so a smoke run is readable with `--nocapture`. It does NOT run
+    /// the registered battery.
+    #[test]
+    fn part11_two_seed_smoke() {
+        const A: u64 = 900;
+        const B: u64 = 902;
+        let insts = p11_instances_range(A, B);
+        assert_eq!(insts.len(), 2);
+        let bits = u8::try_from(UNIVERSE).expect("8-bit universe");
+        let roles = u8::try_from(P8_ROLES).expect("R = 3");
+        let rules = rule_theory(bits, roles).expect("theory");
+        let labels = rule_labels(bits, roles).expect("labels");
+        let (declared, _) = p9_declare(
+            &insts,
+            &rules,
+            &labels,
+            P9Mechanism::AsWritten,
+            P9Cost::Uniform,
+            P9_FUEL,
+        );
+
+        let oracle = p8_rho(0.0);
+        let (ctl, _) = p9_battery(&insts, &declared, |inst: &WorkflowInstance| {
+            Box::new(p8_typed_policy(&inst.base, &oracle)) as Box<dyn CoalitionDecisionPolicy>
+        });
+
+        println!("--- Part 11 SMOKE (seeds {A}..{B}, NOT the registered block) ---");
+        println!("wf-asis median PRIMARY = {:.4}", median(p9_primaries(&ctl)));
+
+        let mut runs: Vec<(&str, P11GroupRun)> = Vec::new();
+        for (label, _, cfg) in p11_cells() {
+            let run = p11_group_battery(&insts, &declared, cfg, A);
+            let (learn_ok, exact, moved) = p11_s_learn(&run);
+            let hg = p11_hg(&run.seeds, &ctl);
+            let (hist, empty, tasks) = p11_roster_histogram(&run);
+            let (unan, m, samples) = p11_agreement(&run);
+            let (ds, da, db) = p9_divergence(&run.seeds, &ctl);
+            println!(
+                "{label:<15} PRIMARY {:.4}  ratio {}  superior {}/2  churn {:.1}  µs {:.1}  \
+                 S-learn {learn_ok} ({exact}/2 exact, {moved}/2 moved)  \
+                 S-live {ds} seeds/{da} acts/{db} bits  roster {}/{}/{} ({empty} empty of {})  \
+                 agree {}",
+                median(p9_primaries(&run.seeds)),
+                hg.ratio.map_or_else(|| "n/a".to_owned(), |r| format!("{r:.3}×")),
+                hg.superior,
+                median(p9_churns(&run.seeds)),
+                median(run.latencies.clone()),
+                hist[1],
+                hist[2],
+                hist[3],
+                tasks * P8_ROLES,
+                if samples == 0 {
+                    "n/a".to_owned()
+                } else {
+                    format!("{:.0}% unanimous, margin med {:.4}", 100.0 * unan, m[1])
+                }
+            );
+
+            // Every seed's metrics are finite and in range, and the contract held.
+            assert_eq!(run.seeds.len(), 2);
+            assert_eq!(run.begin_failures, 0, "{label}: begin_task must not reject");
+            for s in &run.seeds {
+                assert!(s.primary.is_finite() && (0.0..=1.0).contains(&s.primary));
+                assert!(!s.acts.is_empty(), "{label}: decisions must have run");
+            }
+            // S-learn is a gate for every non-exploratory cell.
+            if label != "grp-seed" {
+                assert!(learn_ok, "{label}: S-learn (i) must hold");
+            }
+            // Every task opened a roster of 1..=3 roles (A1.3).
+            assert_eq!(hist[0], 0, "{label}: an empty roster cannot occur");
+            runs.push((label, run));
+        }
+
+        // The A2.3 liveness line, measured rather than inferred: does SP2 reach
+        // the score at all on this world, and does it reach a decision?
+        let by = |name: &str| {
+            &runs
+                .iter()
+                .find(|(l, _)| *l == name)
+                .expect("cell present")
+                .1
+        };
+        let (ms, ma, mb) = p9_divergence(&by("grp-mult").seeds, &by("grp-role").seeds);
+        println!("grp-mult vs grp-role: {ms} seeds / {ma} acts / {mb} score bits");
+
+        // X-identity on the unit-multiplicity world.
+        let unit = p11_unit_instances_range(A, B);
+        let (unit_decl, _) = p9_declare(
+            &unit,
+            &rules,
+            &labels,
+            P9Mechanism::AsWritten,
+            P9Cost::Uniform,
+            P9_FUEL,
+        );
+        let cells = p11_cells();
+        let u_role = p11_group_battery(&unit, &unit_decl, cells[0].2, A);
+        let u_mult = p11_group_battery(&unit, &unit_decl, cells[1].2, A);
+        let identity = p9_bit_identical(&u_mult.seeds, &u_role.seeds);
+        println!("X-identity (m == 1): {}", pass(identity));
+        assert!(identity, "X-identity must hold at m == 1");
+
+        // S-determinism on the confirmatory cell.
+        let a = p11_group_battery(&insts, &declared, cells[0].2, A);
+        let b = p11_group_battery(&insts, &declared, cells[0].2, A);
+        let same = p11_identical_seeds(&a.seeds, &b.seeds);
+        println!("S-determinism (grp-role): {same}/2");
+        assert_eq!(same, 2, "same seed ⇒ same result");
+    }
 }
 
 #[cfg(test)]
