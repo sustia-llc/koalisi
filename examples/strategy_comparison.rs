@@ -116,7 +116,7 @@ use koalisi::decision::{
 // Part 11 (koalisi #78) EQ5b: the role-slotted group arm and its instrumentation.
 use koalisi::decision::{
     AgreementSample, CoverageMasks, DecisionRead, GroupAifConfig, GroupAifCounters, GroupAifPolicy,
-    ModelLabel, PrecisionChannel, WorldModelTopology,
+    GroupVote, ModelLabel, PrecisionChannel, WorldModelTopology,
 };
 // Part 7 (koalisi #69) EQ3 instrumentation surface + the upstream certificate /
 // factorization enums it reports. Feature-gated exactly like the `mag-eq3` arm.
@@ -11346,8 +11346,18 @@ fn p11_verdict(gates_ok: bool, hg_ok: bool) -> &'static str {
     }
 }
 
-/// The six registered group cells, in report order.
-fn p11_cells() -> [(&'static str, &'static str, GroupAifConfig); 6] {
+/// A cell that varies the READ rather than the model is reported, never gated.
+///
+/// The line is principled, not per-cell taste: `grp-seed` (sampled draw) and
+/// `grp-role-det` (discrete tally) both replace D4's registered
+/// `group_distribution`-under-CW surface, so gating the arm's behaviour on them
+/// would gate an instrument the registration did not fix. Cells that vary the
+/// *model* — topology, precision channel, coverage masks — decide through the
+/// registered surface and are gated like the confirmatory pair.
+const P11_READ_PROBE: &str = "read-probe";
+
+/// The seven registered group cells, in report order.
+fn p11_cells() -> [(&'static str, &'static str, GroupAifConfig); 7] {
     let base = GroupAifConfig {
         base: e1_config(),
         ..GroupAifConfig::default()
@@ -11387,10 +11397,22 @@ fn p11_cells() -> [(&'static str, &'static str, GroupAifConfig); 6] {
                 ..base
             },
         ),
-        ("grp-seed", "exploratory", GroupAifConfig {
-            read: DecisionRead::SeededSampling,
-            ..base
-        }),
+        (
+            "grp-role-det",
+            P11_READ_PROBE,
+            GroupAifConfig {
+                vote: GroupVote::Deterministic,
+                ..base
+            },
+        ),
+        (
+            "grp-seed",
+            P11_READ_PROBE,
+            GroupAifConfig {
+                read: DecisionRead::SeededSampling,
+                ..base
+            },
+        ),
     ]
 }
 
@@ -11404,6 +11426,10 @@ fn part11_eq5b_typed_two_engine() {
     println!();
     println!(
         "_**What Amendment 1 changed, and why it matters for reading this table.** The arm as first registered was unbuildable: SP1's arm-E1 query construction bakes the per-decision candidate into each member's matrices, while `POMDPAgent` exposes no setter for `A`/`B`/`C`/`D` and `GroupAgent` no way to replace a member — so D2a's \"persistent internals\" and SP1 were mutually exclusive. A1.1 relocates D2a's contrast from member continuity to **world-model topology**: confirmatory cells own **R = 3 role-specialised** persistent models, the reference cells read **one shared** model through three role-restricted views. Members are single-use on every leg, **D4a is struck** (there is nothing for a commit to advance), and the MMP double-update hazard of gotcha 32 is thereby DESIGNED OUT rather than gated — which is why S-learn below is thinner than the 2026-08-08 correction described, and that is recorded rather than quietly shipped._"
+    );
+    println!();
+    println!(
+        "_**Amendment 3**, made with off-block smoke visible and recorded as such: D2 pinned `CertaintyWeighted` as **forced** because only it was thought to carry a continuous margin at R ≤ 3 over 2 actions. **That premise is measured false on this world** — the E-agree margin median sits at 0.5, so the mixture is itself a delta and SP3's threshold is never contested. The mechanism is gotcha 25's saturation one level up: arm-E1's query posteriors saturate at ±0.5, the internals inherit it, and a confidence-weighted mixture of near-deterministic members is near-deterministic. **The confirmatory cells are NOT re-specified** — that would be post-hoc instrument re-targeting on smoke data, refused at EQ5a A5.2. Instead the cost of the error is MEASURED, by the non-gating `grp-role-det` leg. A3.2 additionally promotes a `grp-mult` vs `grp-role` act-and-score-bit line to a mandatory disclosure: if the two cells agree on acts and differ only on score bits, `grp-mult` carries no independent look, and a 2-cell bar over one effective look is conservative — so the bar does not move._"
     );
     println!();
     println!(
@@ -11455,6 +11481,7 @@ fn part11_eq5b_typed_two_engine() {
     let grp_role_fresh = named("grp-role-fresh");
     let grp_mult_fresh = named("grp-mult-fresh");
     let grp_blind = named("grp-role-blind");
+    let grp_det = named("grp-role-det");
     let grp_seed = named("grp-seed");
 
     // `wf-val-p` — EQ5a's strongest cell, at EQ5a's pinned λ and priced cost.
@@ -11502,12 +11529,12 @@ fn part11_eq5b_typed_two_engine() {
 
     // S-learn (i): counted per-model updates + the non-vacuity guard.
     let learn: Vec<(bool, usize, usize)> = runs.iter().map(p11_s_learn).collect();
-    // The exploratory `grp-seed` cell is REPORTED, not gated (§5 fixes E-seed as
-    // exploratory; gating it here would quietly promote it).
+    // The read-probe cells (`grp-seed`, `grp-role-det`) are REPORTED, not gated —
+    // see `P11_READ_PROBE`.
     let learn_ok = cells
         .iter()
         .zip(learn.iter())
-        .filter(|((_, kind, _), _)| *kind != "exploratory")
+        .filter(|((_, kind, _), _)| *kind != P11_READ_PROBE)
         .all(|(_, &(ok, _, _))| ok);
     println!(
         "- **S-learn (i) — {}.** Per seed, each world model must record **exactly one** update per task in which its role had demand — **counted, not inferred from state movement**, because under MMP a missing commit makes an update apply TWICE rather than not at all, so \"did the state move?\" passes a double-updating arm. Deficit and surplus are both `RUN-INVALID`. Seeds with an exact ledger, and seeds whose end-of-stream state moved off initialization by more than {P11_VACUITY_TOL:e} (the non-vacuity guard — necessary, explicitly NOT sufficient): {}.",
@@ -11517,7 +11544,7 @@ fn part11_eq5b_typed_two_engine() {
             .zip(learn.iter())
             .map(|((label, kind, _), &(_, exact, moved))| format!(
                 "`{label}`{} {exact}/{n_seeds} exact, {moved}/{n_seeds} moved",
-                if *kind == "exploratory" { " (reported, not gated)" } else { "" }
+                if *kind == P11_READ_PROBE { " (reported, not gated)" } else { "" }
             ))
             .collect::<Vec<_>>()
             .join(" · ")
@@ -11535,10 +11562,10 @@ fn part11_eq5b_typed_two_engine() {
     let live_ok = cells
         .iter()
         .zip(live.iter())
-        .filter(|((_, kind, _), _)| *kind != "exploratory")
+        .filter(|((_, kind, _), _)| *kind != P11_READ_PROBE)
         .all(|(_, &(seeds, _, _))| seeds >= 1);
     println!(
-        "- **S-live — {}.** Divergence from `wf-asis`, reported as **acts AND raw score bits separately**: {}. This is the #80 lesson (gotcha 31) applied in advance — a term can be live in the score and dead at the decision, and a leg reading only PRIMARY sees a flat null where the truth is \"it reached the margin and never crossed a threshold\". Read the two columns against each other before reading any median.",
+        "- **S-live — {}.** Divergence from `wf-asis`, reported as **acts AND raw score bits separately**: {}. This is the #80 lesson (gotcha 31) applied in advance — a term can be live in the score and dead at the decision, and a leg reading only PRIMARY sees a flat null where the truth is \"it reached the margin and never crossed a threshold\". Read the two columns against each other before reading any median. The two **read-probe** cells (`grp-seed`, `grp-role-det`) are reported but NOT gated: each replaces D4's registered `group_distribution`-under-CW surface, and their score bits are not commensurable with it — `grp-role-det`'s especially, whose read is a vote tally.",
         pass(live_ok),
         cells
             .iter()
@@ -11632,6 +11659,16 @@ fn part11_eq5b_typed_two_engine() {
         median(p9_primaries(&grp_blind.seeds)),
         median(p9_primaries(&grp_role.seeds))
     );
+    // A3.1: acts and PRIMARY only. NOT a margin comparison — the discrete read is
+    // a tally over member argmaxes, not a policy, so the two scores are not
+    // commensurable and no score-bit count is printed for this leg.
+    let (dts, dta, _) = p9_divergence(&grp_det.seeds, &grp_role.seeds);
+    let det_med = median(p9_primaries(&grp_det.seeds));
+    let role_med = median(p9_primaries(&grp_role.seeds));
+    println!(
+        "- **`grp-role-det` (Amendment A3.1 reference) — what `CertaintyWeighted` actually bought.** D2 pinned CW as *forced* on the argument that only it carries a continuous margin at R ≤ 3 over 2 actions. The E-agree margins above measure that premise: a median at 0.5 means the CW mixture is itself a delta, because arm-E1's query posteriors saturate (gotcha 25) and the internals inherit it — the group propagated the saturation, it did not create it. This leg swaps the active slot to `Deterministic` and changes nothing else. Median PRIMARY **{det_med:.4}** against `grp-role`'s **{role_med:.4}** (Δ **{:+.4}**), differing on **{dta}** decisions by ACT across **{dts}/{n_seeds}** seeds. **Reported as acts and PRIMARY only, never as margins:** under a discrete mode the read is the normalized **tally over member argmaxes** (`k/R`, so `{{0, ⅓, ⅔, 1}}` at R = 3), which makes SP3 a majority rule and its score a tally distance — not commensurable with a CW margin, so no score-bit count is printed here. **The confirmatory cells are NOT switched**: re-specifying a registered arm on smoke data is the post-hoc instrument re-targeting refused at EQ5a A5.2. D2 stands; its rationale is corrected in public and its cost is measured.",
+        det_med - role_med
+    );
     println!();
 
     // --- E-agree + A1.3 roster disclosure ------------------------------------
@@ -11655,6 +11692,10 @@ fn part11_eq5b_typed_two_engine() {
             },
             if samples == 0 {
                 "n/a".to_owned()
+            } else if *label == "grp-role-det" {
+                // A3.1: a tally distance, not a mixture margin. Printed, labelled,
+                // and never compared against a CW row.
+                format!("{:.4} / {:.4} / {:.4} (tally)", m[0], m[1], m[2])
             } else {
                 format!("{:.4} / {:.4} / {:.4}", m[0], m[1], m[2])
             }
@@ -11662,7 +11703,7 @@ fn part11_eq5b_typed_two_engine() {
     }
     println!();
     println!(
-        "_**A1.3**: a role with no `(bit, role)` demand in a task does not vote in it — it leaves the roster, so the realised `R` varies 3 → 2 → 1. The alternative, an abstaining member at `[0.5, 0.5]`, is not neutral under `CertaintyWeighted`: it still carries weight `exp(−ln 2) = 0.5` and would drag `p(act)` toward the SP3 threshold on every affected slot. A task where EVERY role is empty cannot occur (`|required| ≥ 2`). **E-agree** reads each internal's own argmax back off the roster after the read — a disclosure, never a decision input — and the margin column is `|p(act) − 0.5|`, the CW mixture's distance from the threshold. The seeded-sampling cell exposes no mixture and so records no sample._"
+        "_**A1.3**: a role with no `(bit, role)` demand in a task does not vote in it — it leaves the roster, so the realised `R` varies 3 → 2 → 1. The alternative, an abstaining member at `[0.5, 0.5]`, is not neutral under `CertaintyWeighted`: it still carries weight `exp(−ln 2) = 0.5` and would drag `p(act)` toward the SP3 threshold on every affected slot. A task where EVERY role is empty cannot occur (`|required| ≥ 2`). **E-agree** reads each internal's own argmax back off the roster after the read — a disclosure, never a decision input. The **votes and roster columns are commensurable across every cell**; the **margin column is not**: it is `|p(act) − 0.5|`, the CW mixture's distance from the threshold on CW cells and a **vote-tally distance** on `grp-role-det` (marked `(tally)`, A3.1). The seeded-sampling cell exposes no distribution and so records no sample at all._"
     );
     println!();
 
@@ -11677,9 +11718,11 @@ fn part11_eq5b_typed_two_engine() {
         median(p9_primaries(&grp_role.seeds)),
         p9_superior_count(&grp_seed.seeds, &grp_role.seeds)
     );
+    let (det_ok, det_exact, det_moved) = p11_s_learn(grp_det);
     println!(
-        "- S-learn for this cell, reported and **not gated**: {seed_exact}/{n_seeds} exact ledgers, {seed_moved}/{n_seeds} moved (overall {}). §5 fixes E-seed as exploratory, and gating it here would quietly promote a leg the registration made non-gating.",
-        pass(seed_ok)
+        "- S-learn for the two **read-probe** cells, reported and **not gated**: `grp-seed` {seed_exact}/{n_seeds} exact ledgers, {seed_moved}/{n_seeds} moved (overall {}) · `grp-role-det` {det_exact}/{n_seeds}, {det_moved}/{n_seeds} (overall {}). Both replace D4's registered `group_distribution`-under-CW surface, so gating the arm's behaviour on them would gate an instrument the registration did not fix; cells that vary the *model* — topology, precision channel, coverage masks — decide through the registered surface and ARE gated.",
+        pass(seed_ok),
+        pass(det_ok)
     );
     println!();
 
@@ -11855,6 +11898,13 @@ mod part11_tests {
         };
         let (ms, ma, mb) = p9_divergence(&by("grp-mult").seeds, &by("grp-role").seeds);
         println!("grp-mult vs grp-role: {ms} seeds / {ma} acts / {mb} score bits");
+        // A3.1's registered quantity: acts and PRIMARY, never margins.
+        let (ds, da, _) = p9_divergence(&by("grp-role-det").seeds, &by("grp-role").seeds);
+        println!(
+            "grp-role-det vs grp-role: {ds} seeds / {da} acts / PRIMARY {:.4} vs {:.4} (score bits deliberately not compared — tally, not margin)",
+            median(p9_primaries(&by("grp-role-det").seeds)),
+            median(p9_primaries(&by("grp-role").seeds))
+        );
 
         // X-identity on the unit-multiplicity world.
         let unit = p11_unit_instances_range(A, B);

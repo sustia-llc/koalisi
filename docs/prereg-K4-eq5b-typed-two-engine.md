@@ -589,3 +589,97 @@ for A2.1's registered choice — noted, and equally not evidence.
 D1, D2 (**including CW itself**), D3, D5, D6, D7 (seeds **330..360**), D8, D10,
 SP1–SP3, and Amendments 1–2 in full. Gates X-battery / X-identity /
 S-determinism / S-live / S-learn unchanged. koa#54 stays FINAL.
+
+## Amendment 4 (pre-run, 2026-08-08) — A3.1 erratum: its prediction was wrong, and its leg is what shows that
+
+Posted to #78 before the run. A4.1 corrects a statement in Amendment 3;
+A4.2 registers a gate-scope criterion so it is not an implementer's private
+taxonomy.
+
+### A4.1 — ERRATUM to A3.1's expectation
+
+A3.1 registered this expectation for the `grp-role-det` leg:
+
+> *"if the mixture really is a delta, that cell's **acts** should be
+> near-identical to `grp-role`'s."*
+
+**That inference does not go through, and the sentence is withdrawn.**
+
+Saturation of the *aggregate* says each rule answers **confidently**. It says
+nothing about whether two rules answer the **same way** — they can both be
+confident and disagree. The two aggregators differ in *how they combine
+members*, not in how sharp each member is:
+
+- **CW** weights member `i` by `exp(−H_i)`, so one very confident member can
+  outweigh two less confident ones.
+- **The tally** is one-member-one-vote, read against SP3's `> 0.5` with ties
+  declining. At **R = 3** that is a *majority* rule (`2/3 > 0.5`). At
+  **R = 2** it is a **unanimity** rule — `1/2 = 0.5` is not `> 0.5`, so a
+  split declines.
+- The realised roster is **R = 2 on 21 of 40 tasks** (R = 1 on 14, R = 3 on 5),
+  so the unanimity case **dominates**, and it is strictly stricter than CW.
+  Fewer joins, lower churn, lower PRIMARY follow directly.
+
+Off-block smoke (900..902) is consistent throughout: **101 differing acts** of
+roughly 800 decisions, PRIMARY 0.4411 → 0.3386, churn 66.0 → 59.0, with 78 %
+unanimous reads leaving ~22 % of decisions where the rules *can* differ and
+13 % where they do.
+
+**Replacement expectation, registered:** the divergence between `grp-role-det`
+and `grp-role` is **unknown a priori, and measuring it is the leg's entire
+purpose.** A large divergence is as informative as a small one.
+
+**Pre-committed reading, fixed now so it cannot be claimed afterwards.** A
+large `grp-role-det` divergence means **D2's *conclusion* (use CW) is
+load-bearing after all — but not for the reason D2 gave.** D2's stated
+rationale ("only CW carries a continuous margin") stays **measured false** per
+A3.1; what would be established instead is that the aggregation *rule* matters
+because it changes the decision threshold's effective arity — majority at
+R = 3, unanimity at R = 2 — on a world whose rosters are mostly R = 2.
+
+This is recorded **before the run** precisely so a vindication of D2's choice
+cannot be presented as though it had been anticipated. It was not. A3.1
+demolished D2's rationale and then predicted the choice was nearly free; the
+first half stands and **the second half is this erratum**.
+
+*Why an erratum rather than leaving the text and pre-committing only the
+reading:* leaving a known-false prediction inside a registered document, on the
+grounds that the report will explain it later, is the failure mode this lineage
+has refused four times already (EQ5a A2.1's void rule-count, A5.1's BGKSZ
+overclaim, #80's contested bar, A3.1's own correction of D2). The text is
+corrected in public, and the correction is dated.
+
+### A4.2 — gate scope: read-probes are reported, model-variations are gated
+
+Registered as a **criterion** rather than a per-cell exception:
+
+> **A cell that varies the READ is reported, never gated. A cell that varies
+> the MODEL is gated.**
+
+- **Read-probes — reported, never gated:** `grp-seed` (samples instead of
+  reading deterministically) and `grp-role-det` (tallies instead of mixing).
+  Both replace **D4's registered decision surface** —
+  `group_distribution` under `CertaintyWeighted` — so gating the arm's
+  behaviour on them would gate an instrument the registration did not fix.
+- **Model-variations — gated like the confirmatory pair:** world-model
+  topology, precision channel, coverage masks. Each decides *through* the
+  registered surface, so the surface is held constant and the gates mean what
+  they say.
+
+No behaviour changes: `grp-seed` was already excluded, and `grp-role-det` is
+non-gating under A3.1. What is new is the stated reason, which is now
+registered rather than inferable only from the code, and printed in the S-live
+and E-seed sections.
+
+### Unchanged
+
+Confirmatory cells remain **`grp-role` and `grp-mult`** — two cells, so D6
+still gives **1.25× / ≥ 18-of-30** against `wf-asis` only. D2 stands as
+registered (CW is the arm). D1, D3, D5, D7 (seeds **330..360**, still
+unconsumed), D8, D10, SP1–SP3, and Amendments 1–3 otherwise in full. Gates
+X-battery / X-identity / S-determinism / S-live / S-learn unchanged.
+A3.2's `grp-mult` vs `grp-role` disclosure stands and held on smoke
+(0 acts, 23 score bits). koa#54 stays FINAL.
+
+Smoke figures remain smoke: 2 seeds, off-block, reported only because they
+drive this amendment.

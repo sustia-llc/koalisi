@@ -186,6 +186,40 @@ pub enum DecisionRead {
     SeededSampling,
 }
 
+/// The active slot's voting mode (D2 + its registered `A3.1` contrast).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GroupVote {
+    /// **Registered (D2).** The confidence-weighted mixture. `score` is a real
+    /// margin `p(act) − 0.5`.
+    CertaintyWeighted,
+    /// **`grp-role-det` reference leg only, non-gating (Amendment A3.1).**
+    ///
+    /// D2 pinned CW as *forced* on the argument that only it carries a continuous
+    /// margin at R ≤ 3 over 2 actions. Off-block smoke measured that premise
+    /// **false on this world** — the CW mixture's margin median is 0.5, i.e. the
+    /// mixture is itself a delta, because arm-E1's query posteriors saturate at
+    /// ±0.5 (gotcha 25) and the internals inherit it. This leg measures what CW
+    /// actually bought rather than conceding the point.
+    ///
+    /// **Its read is not a margin.** Under a discrete mode
+    /// [`group_distribution`](aif::GroupAgent::group_distribution) returns the
+    /// normalized **tally over member argmaxes** — `k/R`, so `{0, ⅓, ⅔, 1}` at
+    /// R = 3 — which is "the vote the group would deterministically cast", not the
+    /// group's policy. SP3 applied to it is therefore a **majority rule**, and its
+    /// `score` is a tally distance that is **not commensurable** with a CW margin.
+    /// Compare this cell on **acts and PRIMARY**, never on score bits.
+    Deterministic,
+}
+
+impl GroupVote {
+    fn upstream(self) -> aif::VotingMode {
+        match self {
+            Self::CertaintyWeighted => aif::VotingMode::CertaintyWeighted,
+            Self::Deterministic => aif::VotingMode::Deterministic,
+        }
+    }
+}
+
 /// Registered configuration of the group arm. The [`Default`] is the
 /// **confirmatory `grp-role`** cell over arm-E1's registered **v5 E1** base.
 #[derive(Debug, Clone, Copy)]
@@ -202,6 +236,10 @@ pub struct GroupAifConfig {
     /// How the group's action is read (D4). Every gating cell runs
     /// [`DecisionRead::Deterministic`]; only the exploratory `E-seed` cell differs.
     pub read: DecisionRead,
+    /// The active slot's voting mode (D2). Every gating cell runs
+    /// [`GroupVote::CertaintyWeighted`]; only the `grp-role-det` reference leg
+    /// differs (Amendment A3.1).
+    pub vote: GroupVote,
     /// The role count `R` the arm is configured for (D2: 3). Roles are indexed
     /// `0..n_roles`; a demand step naming a role outside that range is a
     /// [`GroupAifError::RoleOutOfRange`] at [`begin_task`](GroupAifPolicy::begin_task).
@@ -235,6 +273,7 @@ impl Default for GroupAifConfig {
             channel: PrecisionChannel::RoleRestricted,
             masks: CoverageMasks::RoleMatched,
             read: DecisionRead::Deterministic,
+            vote: GroupVote::CertaintyWeighted,
             n_roles: DEFAULT_N_ROLES,
             base: v5_e1_base(),
         }
@@ -348,9 +387,12 @@ pub struct AgreementSample {
     pub roster: usize,
     /// How many internals' own argmax was "act".
     pub votes_for_act: usize,
-    /// `|p(act) − 0.5|` — the CW mixture's distance from the SP3 threshold.
-    /// Meaningless under [`DecisionRead::SeededSampling`], which reports no
-    /// margin; that cell records `None`-shaped samples by simply not recording.
+    /// `|p(act) − 0.5|` — the read's distance from the SP3 threshold.
+    ///
+    /// A genuine CW mixture margin under [`GroupVote::CertaintyWeighted`]; under
+    /// [`GroupVote::Deterministic`] it is a **vote-tally distance** and is not
+    /// commensurable with one (Amendment A3.1). Nothing is recorded at all under
+    /// [`DecisionRead::SeededSampling`], which exposes no distribution.
     pub margin: f64,
 }
 
@@ -911,15 +953,17 @@ impl GroupAifPolicy {
             }
         }
 
-        // D2: `CertaintyWeighted` is forced, not chosen — with ≤ 3 voters over 2
-        // actions `Deterministic` is always a delta and `Probabilistic` is
-        // supported on {0, ⅓, ⅔, 1}; neither carries a usable margin. The seeds are
-        // hygiene: `group_distribution` draws nothing.
+        // D2 registered `CertaintyWeighted` on the argument that only it carries a
+        // continuous margin at this shape. Amendment A3.1 records that argument as
+        // measured FALSE on this world — the mixture is itself a delta, because
+        // arm-E1's query posteriors saturate (gotcha 25) and the internals inherit
+        // it — and adds `GroupVote::Deterministic` as a non-gating reference leg.
+        // D2 itself stands. The seeds are hygiene: neither mode's read draws.
         let roster = internals.len();
         let mut group = aif::GroupAgent::with_slots_seeded(
             aif::CopyAgent,
             internals,
-            aif::VotingAgent::with_seed(GROUP_N_ACTIONS, aif::VotingMode::CertaintyWeighted, seed),
+            aif::VotingAgent::with_seed(GROUP_N_ACTIONS, self.config.vote.upstream(), seed),
             GROUP_N_ACTIONS,
             seed,
         );
@@ -1738,6 +1782,59 @@ mod tests {
             "the sampling cell exposes no mixture, so it records no E-agree sample"
         );
         assert_eq!(ca.reads, 3);
+    }
+
+    /// Amendment A3.1: the `grp-role-det` reference leg runs, stays RNG-free, and
+    /// reads a **vote tally** rather than a mixture — so SP3 over it is a majority
+    /// rule and its score is not commensurable with a CW margin.
+    #[test]
+    fn deterministic_vote_reads_a_tally_not_a_mixture() {
+        let a0 = TestAgent { id: 0, caps: 0b001, trust: 50 };
+        let a1 = TestAgent { id: 1, caps: 0b010, trust: 50 };
+        let a2 = TestAgent { id: 2, caps: 0b100, trust: 50 };
+        let coalition: [&dyn AgentCapabilities; 2] = [&a1, &a2];
+        let ctx = DecisionContext { required_capabilities: 0b111 };
+        let map = [(0usize, 0u8), (1, 1), (2, 2)];
+        let cfg = GroupAifConfig {
+            vote: GroupVote::Deterministic,
+            ..GroupAifConfig::default()
+        };
+
+        let run = |c: GroupAifConfig| {
+            let p = policy(c, &map);
+            let mut out = Vec::new();
+            for _ in 0..3 {
+                p.begin_task(&three_role_demand()).unwrap();
+                let d = p.should_join(&a0, &coalition, &ctx);
+                out.push((d.act, d.score.to_bits()));
+                p.observe_outcome(&[true, false, true, false, false, false, false, false]);
+            }
+            (out, p.counters())
+        };
+        let (a, ca) = run(cfg);
+        let (b, _) = run(cfg);
+        assert_eq!(a, b, "the discrete read must be RNG-free too");
+        assert_eq!(ca.declines_upstream, 0, "the discrete read must not error");
+
+        // Every score is a tally distance `|k/R − 0.5|` over the realised roster,
+        // NOT a continuous margin. At R = 3 the tally lives on {0, ⅓, ⅔, 1}.
+        for (sample, (_, bits)) in ca.agreement.iter().zip(a.iter()) {
+            let p_act = f64::from_bits(*bits) + 0.5;
+            #[allow(clippy::cast_precision_loss)]
+            let expected = sample.votes_for_act as f64 / sample.roster as f64;
+            assert!(
+                (p_act - expected).abs() < 1e-12,
+                "the discrete read is the vote tally: got {p_act}, votes {}/{}",
+                sample.votes_for_act,
+                sample.roster
+            );
+        }
+
+        // …and the registered default is still `CertaintyWeighted` (D2 stands).
+        assert_eq!(
+            GroupAifConfig::default().vote,
+            GroupVote::CertaintyWeighted
+        );
     }
 
     /// Object-safety: the arm is usable behind the decision trait object, like

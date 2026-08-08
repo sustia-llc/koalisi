@@ -267,8 +267,8 @@ mod group_policy;
 #[cfg(all(feature = "decision", feature = "process"))]
 pub use group_policy::{
     AgreementSample, CoverageMasks, DEFAULT_N_ROLES, DecisionRead, GROUP_N_ACTIONS, GroupAifConfig,
-    GroupAifCounters, GroupAifError, GroupAifPolicy, ModelLabel, ModelUpdateAudit, PrecisionChannel,
-    WorldModelTopology, v5_e1_base,
+    GroupAifCounters, GroupAifError, GroupAifPolicy, GroupVote, ModelLabel, ModelUpdateAudit,
+    PrecisionChannel, WorldModelTopology, v5_e1_base,
 };
 
 #[cfg(feature = "decision")]
