@@ -683,3 +683,226 @@ A3.2's `grp-mult` vs `grp-role` disclosure stands and held on smoke
 
 Smoke figures remain smoke: 2 seeds, off-block, reported only because they
 drive this amendment.
+
+## Amendment 5 (pre-run, 2026-08-08) — the 3-lens review
+
+Three independent reviewers (correctness / registration-conformance /
+modeling-semantics) ran against the committed tree before any official data
+point. **Five blocking findings, ~15 important, ~30 minor. Every one is
+dispositioned below — applied, or adjudicated with a reason. None is skipped.**
+
+Owner direction: **minimum fixes, run as registered, report heavily scoped.**
+Nothing here re-specifies the arm and nothing touches seeds 330..360.
+
+---
+
+### A5.1 (BLOCKING, lenses 1+3) — the group does not deliberate about the candidate
+
+**Measured.** `coverage_masks` (`group_policy.rs:1027-1052`) sets `own = 0`
+whenever `role != agent_role` under the registered `RoleMatched`. Therefore:
+
+- **leave:** `(member_union | 0, member_union)` ⇒ **`cfg0 == cfg1` exactly** —
+  the query carries *zero* information about the candidate;
+- **join:** `(0, member_union)` — the candidate appears nowhere; two candidates
+  of a non-rostered role with different capabilities produced **bit-identical
+  scores** (`0x3fe0000000000000`).
+
+So **only the candidate's own role internal is ever candidate-sensitive.** With
+A1.3's realised roster (R = 1 on 14/40, R = 2 on 21, R = 3 on 5) and the
+uniform role draw, `P(candidate's role ∈ roster) = E[R]/3 ≈ 0.59` — **≈ 41 % of
+decisions have no candidate-sensitive internal at all**, and the mean is ≈ 1.18
+blind of ≈ 1.78 voters.
+
+**And the blind internals do not abstain — they vote maximum-confidence ACT.**
+`run_replay` records control 0 before every observation, so `update_a` adds
+`η·joint` only to the **membership-0** columns of `pA`; the membership-1 half
+stays permanently less observed and `a_novelty` rewards switching. Indifference
+therefore resolves as *act*, with α = 8 sharpening it to a delta. Measured:
+
+| read | `p(act)` |
+|---|---|
+| indifferent internal (`cfg0 == cfg1`, covered) | **1.000000** |
+| same, uncovered | 0.997751 |
+| same, `query_novelty: false` | **0.5** |
+
+A zero-entropy delta carries `confidence_weight = exp(0) = 1.0` — the
+**maximum** — so the blind members outweigh a hesitant informed one.
+
+**A1.3's rationale is WITHDRAWN as measurably false.** It read: *"under
+`CertaintyWeighted` an abstaining member at `[0.5, 0.5]` still carries weight
+`exp(−ln 2) = 0.5` and would systematically drag `p(act)` toward the SP3
+threshold."* A member with no candidate-discriminating coverage does not read
+`[0.5, 0.5]`; it reads ≈ 1.0 at weight 1.0, and the bias is toward **act**, not
+toward the threshold. A1.3's *decision* (drop empty-demand roles) stands — the
+hazard was real and the drop is still right; only its stated size and **sign**
+were wrong.
+
+**A3.1's saturation diagnosis is CORRECTED.** It attributed the 0.5000 margin
+median wholly to gotcha-25 propagation from arm-E1. The larger contributor on
+this arm is structural indifference resolving to a delta. Corrected text: *"the
+group propagates arm-E1's inherited saturation **and adds a second source** —
+an internal whose two coverage configurations are identical is not undecided
+but maximally confident for 'act'. On this roster the second source is the
+larger one."*
+
+**Every "group of role specialists deciding about a candidate" gloss is
+corrected**, in §1, §6, A1.1, and `group_policy.rs:6-12`, to: *"a group of
+role-restricted coverage queries, of which only the candidate's own role
+internal is candidate-sensitive; the remainder vote on their role's coalition
+coverage."*
+
+**New mandatory disclosures, per cell:** the rate of decisions with **zero**
+candidate-sensitive internals; the mean count of candidate-blind internals per
+decision; the **CW weight share** they carry; and the `cfg0 == cfg1` rate on the
+leave path. E-agree is split into candidate-role vs role-mismatched internals.
+
+**Adjudicated, not fixed:** the arm is **not** re-specified. Restricting the
+roster to candidate-sensitive internals would force R = 1 on every decision —
+under role-matched masks a "group deliberating about one candidate" is
+structurally impossible, which is itself the finding. Switching to role-blind
+masks would reverse owner-locked A2.1, contradict the world's own
+`p9_step_covered`, and be smoke-informed. **This is registered as a known
+structural property of the arm, disclosed and measured, not as a defect
+repaired mid-flight.**
+
+### A5.2 (BLOCKING, lens 3) — a pre-committed scoped claim against `arm-E1`
+
+The registration forecloses re-harvesting **EQ4's** margin (the control is the
+EQ4-validated arm) but says nothing about re-harvesting **v5's**: K4-v5 recorded
+`arm-E1` at **1.62× magnitude**, and Part 11 already runs it on the same
+instances and the same declared writings — wired to no reading. §6 pre-commits
+scoped language for `wf-val-p` and none for the single-agent shape of the very
+engine EQ5b wraps, which is the confound the title makes salient.
+
+**Added to §6, symmetric with the existing clause:** *"A PASS whose median does
+not also exceed `arm-E1`'s is reported as **'the persistent AIF engine beats the
+typed control; the group shape adds nothing measurable here'**. `arm-E1` remains
+non-gating — this is a reading constraint, not a second conjunct."*
+
+### A5.3 (BLOCKING, all three lenses) — S-learn (iii) is implemented
+
+Registered in §5 and explicitly retained by A1.4, absent from the harness.
+**Added as a non-gating cell:** `grp-role` at `query_novelty: false`, reported
+not gated. It is the only registered instrument tying EQ5b to the v5 mechanism
+it claims to inherit, and A5.1 makes it sharper still — novelty-off collapses
+the indifferent read 1.0 → 0.5, so the ablation directly prices the
+candidate-blind bias.
+
+### A5.4 (BLOCKING + IMPORTANT) — S-learn (i) is repaired
+
+- **The tolerance is pinned: `1e-9`**, compared on pA counts. §5 twice claimed
+  it was "prereg-pinned" when it existed only at `strategy_comparison.rs:11016`.
+  A RUN-INVALID gate may not carry an unregistered parameter.
+- **Surplus becomes reachable.** `expected` was incremented unconditionally
+  immediately before the guarded `updates` on the same path, so `updates >
+  expected` was impossible and a double-`observe_outcome` advanced both counters
+  and read exact. `expected` is re-derived **independently** from the task
+  stream (`roster_sizes` already records one entry per opened task), plus
+  `tasks_observed == roster_sizes.len()`.
+- **The non-vacuity guard becomes per-model `all`, not `any`** — under
+  `RoleSpecialised` a role model that never moved passed because a sibling did.
+- Tests must construct an actual deficit and an actual surplus; the current test
+  claims both are detectable and constructs neither.
+
+### A5.5 (IMPORTANT, lens 3) — S-live is relabelled a disclosure
+
+Implemented as "≥ 1 of 30 seeds shows ≥ 1 differing act versus a *different
+engine*" — not falsifiable in any realistic world. The #80 lesson it cites is
+about a lever versus **its own base**; the only such comparison here (A3.2's
+`grp-mult` vs `grp-role`) is explicitly non-gating. **S-live moves from the
+gate list to the disclosure list.** It is not presented under "any failure ⇒
+RUN-INVALID" when it cannot fail.
+
+### A5.6 (IMPORTANT, lenses 1+3) — the `Deterministic` read is uniform-over-winners
+
+`VotingAgent::vote_distribution`'s **first branch** returns uniform mass over
+the max-count winner set; `counts/total` is the `Probabilistic` branch. So the
+read lives on `{0, 0.5, 1}`, never `{0, ⅓, ⅔, 1}`. Three places say otherwise —
+`GroupVote::Deterministic`'s rustdoc, the Part 11 printed line, and **A4.1's
+parenthetical `(2/3 > 0.5)`** — all corrected. **A4.1's conclusions stand**:
+act ⇔ `winners = {act}` ⇔ majority at R = 3, unanimity at R = 2, and acts and
+PRIMARY are unaffected.
+
+**The test was vacuous.** `deterministic_vote_reads_a_tally_not_a_mixture`
+asserts `p_act == votes_for_act / roster`, which holds *iff* the read is
+unanimous — and smoke shows 23 % are not. It must assert the `{0, 0.5, 1}`
+support and cover a non-unanimous read.
+
+### A5.7 (IMPORTANT) — A2.3's "purely" is withdrawn
+
+Measured with novelty **off** and learning on, the read still moves under SP2
+(`0.500000000 → 0.500002287`). `update_a` re-derives `A = normalize(pA)` after
+adding an **unscaled** `η·joint`, so a scaled block is a damped learning rate
+and perturbs `A` at read time — feeding the pragmatic and exact-epistemic terms,
+not only novelty. Separately, the invariance is exact in ℝ and only
+ulp-accurate in `f64`.
+
+Corrected to **"predominantly"**, with both channels stated and the novelty
+channel noted as dominant by ~5 orders of magnitude. A2.3's third consequence —
+**inert with learning off — is CONFIRMED bit-identical.** Consequence for A3.2:
+some fraction of its 23 score bits may be renormalisation ulp noise, and the
+disclosure must say so.
+
+### A5.8 (IMPORTANT, lens 3) — SP2's registered sign is backwards
+
+Registered as *"a step occurring three times carries three observations' worth
+of **evidence demand**"*, and §2 as multiplicity *"pricing"* a process. But
+concentration is **evidence already held**, so higher `m` means **less**
+epistemic pull. Measured: `p(act)` `0.999999991 → 0.501759150` as `m` goes
+1 → 3 — **a repeated step makes the arm markedly *less* willing to staff it.**
+
+The word "demand" is **withdrawn**. Corrected: *"the mechanism is evidence
+**possessed**, not evidence **wanted**; higher multiplicity lowers the step's
+parameter-information-gain contribution."* Also disclosed: the scale multiplies
+the **whole** modality block including the *uncovered* configuration's flat
+`[1,1,1]` prior — asserting pseudo-observations never made, in precisely the
+block whose novelty drives v5's mechanism. The measured sign is reported per
+cell. SP2 itself is **unchanged**; only its justification was wrong.
+
+### A5.9 (IMPORTANT, lens 3) — "changes the engine, not the criterion" is narrowed
+
+Three things differ from arm-E1, not one: the tie rule (A2.2); the **object
+thresholded** (a CW mixture of R posteriors, not one); and the **question
+asked** (per-role, and candidate-free for R−1 internals, per A5.1). And the tie
+is not marginal — exact `p(act) = 0.5` reads are a large, structurally
+identified class.
+
+Corrected: *"SP3 keeps arm-E1's **threshold form**. It is not the same criterion
+in a stronger sense: it thresholds a confidence-weighted mixture of R posteriors
+rather than one, and declines on ties where arm-E1 leaves. EQ5b changes the
+engine **and the aggregation**; only the threshold is held fixed."*
+
+### A5.10 — remaining findings, all dispositioned
+
+| # | finding | disposition |
+|---|---|---|
+| L2-3 | S-determinism re-runs only the confirmatory pair, contradicting A4.2's "model-variations are gated" | **Applied** — extended to all five model cells |
+| L2-4 | printed S-determinism rationale ("a slip to `act` would show up here") is refuted by the harness's own seeded `grp-seed` cell | **Applied** — sentence corrected; a seed-invariance check added, valid because `seed` reaches the engine only as `AgentParams { seed }` |
+| L2-5 | "gating" means two things across A3.1/A4.2; the collision lands on the bar | **Applied** — §6 defines **verdict-gating** vs **validity-gating**; the bar cannot be relitigated post-hoc |
+| L2-6 | Amendment 4 invisible in the generated report; three "Amendments 1 and 2" citations stale | **Applied** — A4 paragraph added; A4.1's replacement expectation and pre-committed reading printed in the `grp-role-det` block |
+| L2-8 | A1.3's roster disclosure is pooled, not per-seed as registered | **Applied** — per-seed |
+| L2-11 | `begin_failures == 0` is an unregistered RUN-INVALID condition, and its printed total spans cells it does not gate | **Applied** — registered here, and the total scoped to the gated cells |
+| L2-12 | S-learn `expected` anchored to the arm's own call count, not the task stream | **Applied** — subsumed by A5.4 |
+| L2-14 / L1-19 | two definitions of the v5 E1 base; the battery uses the example's | **Applied** — battery uses the library's `v5_e1_base()`; the duplicate is removed |
+| L2-15 | A3.3's "~37 µs/decision" does not reproduce (measured 98–106) | **Applied** — figure **withdrawn** and corrected; the conclusion (no leg trimmed) is unaffected, and the run reports measured latency |
+| L2-16 / L2-19 / L3-13 | X-identity cannot catch an SP2 modality misalignment; covers only the confirmatory pair; no identity anchors the group to arm-E1 | **Applied** — alignment test added; X-identity extended to `grp-mult-shared`; a `grp-role` at R = 1 ≈ arm-E1 identity leg added (non-gating) |
+| L2-17 / L3-9 | `grp-role-fresh` names member-freshness, a **superseded** referent; §3's rows were never struck | **Applied** — legs renamed **`grp-role-shared` / `grp-mult-shared`**; §3's rows struck explicitly; a consolidated arms table goes in the report (gotcha-24 discipline) |
+| L2-18 | `arm-E1` context row seeded off Part 9's block; inertness asserted, not measured | **Adjudicated — disclosed, not fixed.** Fixing edits frozen Part 9 code. Non-gating context row |
+| L2-20 | A3.3 records the 1.379× smoke ratio as an aside, though it is above conjunct 1's bar | **Applied** — stated plainly: Amendments 3–5 were written with the confirmatory cell apparently passing |
+| L3-11 | §4's "a tie is arithmetically impossible" is false under A1.3's variable roster | **Applied** — struck |
+| L3-12 | "`group_distribution` is the only RNG-free path" — `group_distribution_recording` is equally RNG-free | **Applied** — corrected; the real reason for avoiding it is D4a/gotcha-32, not RNG |
+| L3-14 | "restricted to that role's outcomes" holds only because the as-written world gives each bit one role tag | **Applied** — scope note, so it is not transcribed into a future rewriting arm |
+| L1-5, L1-6, L1-7, L1-12, L1-13 | vacuous tests: `sp3_ties_decline` re-asserts its own expression; `count_upstream_decline()` never reached; the "RNG-free" test shows only reproducibility; the multiplicity test lacks its `RoleRestricted` control; two `AgreementSample` assertions compare a function to itself | **All applied** — each made discriminating, or renamed to what it actually shows |
+| L1-14 | `SeededSampling` + `Deterministic` is constructible and silently all-declines | **Applied** — rejected at construction |
+| L1-15 | argmax fold comment claims parity with the engine's `argmax_index`, which skips NaN where the fold adopts it | **Applied** — comment corrected; behaviour unreachable, left as-is |
+| L1-16 | two `.expect("group arm construction")` state no invariant and the branch is genuinely reachable | **Applied** — propagate instead |
+| L1-17 | `wf-val-p`'s `probe_declines` discarded | **Applied** — printed; #80 A1.1 made it gated for the residual lever and it must not vanish here |
+| L2-9 / L2-10 | A4 landed with code in one commit; A2's header overstates "before the affected code" for 2 of its 3 items | **Adjudicated — recorded, not rewritten.** Both are accurate about registration order (A2.2/A2.3 ratify code conforming to the *base* prereg); the commit boundary is noted so a reader need not reconstruct it |
+
+### Unchanged
+
+D1, D2, D3, D5, D6 (**1.25× / ≥ 18-of-30**, two confirmatory cells), D7 (seeds
+**330..360**, unconsumed), D8, D10; SP1, SP2 and SP3 as mechanisms; Amendments
+1–4 except where corrected above. **X-battery remains owed** and is measured
+outside the binary against a `main` baseline captured before HEAD is run.
+koa#54 stays FINAL.
