@@ -265,3 +265,122 @@ generally, and **not** anything about koa#54, which stays FINAL.
 implementation/deviation ledger. This document is immutable after the official
 run; follow-ups land as an appended addendum, never as edits to registered
 sections.
+## Amendment 1 (pre-run, 2026-08-08) — the registered arm was unimplementable
+
+Posted to #78 **before** any implementation code exists. The prereg
+(`a2ca328`) was committed first, the implementation dispatch read it as the
+spec, and it **stopped without writing code** because three structural facts
+about `aif-v0.13.0` make the arm as registered unbuildable. All three verified
+against the pinned rev `74c8b12`. Owner resolutions below; the prereg is
+amended to match before re-dispatch.
+
+This is the process working as designed — the same shape as EQ5a's five
+pre-run amendments. Recording it in full because two registered elements
+**weaken** as a result, and that must not read as an oversight later.
+
+### The three blockers (verified, not asserted)
+
+- **B1 — fatal.** SP1 pins each internal as an arm-E1 query POMDP, but that
+  construction bakes the **per-decision candidate** into the member's
+  matrices: `aif_persistent_policy.rs:613`'s `pa_counts` builder selects
+  `cover_mask` from `cfg0`/`cfg1`, the *this-candidate* coverage masks, and the
+  model shape (`r` modalities, `r+1` factors) comes from `required`. Meanwhile
+  `POMDPAgent` exposes **no setter** for `a`/`b`/`c`/`d`, and `GroupAgent`
+  exposes only `internal_agents(&self) -> &[I]` (`group.rs:718`) — no mut
+  accessor, no consuming accessor, no member swap. An SP1-built member is
+  therefore candidate-specific, cannot be re-parameterized, and cannot be
+  extracted. **D2a-persistent and SP1 were mutually exclusive.**
+- **B2.** `group_distribution(&mut self, observation: usize)` (`group.rs:838`)
+  is single-modality all the way down, while an SP1 member carries
+  `|required_r|` modalities. Belief updates and `update_a` iterate
+  `obs.iter().enumerate()`, so **only modality 0 would ever learn**, and an
+  out-of-range observation panics rather than erroring.
+- **B3.** `required_r` is frequently **empty** — `draw_tags` assigns each
+  required bit one of 3 roles independently, so P(a given role draws nothing)
+  = `(2/3)^|required|`, which at `|required| = 2` is ~44 %. But the group
+  rejects any member not returning a length-2 distribution
+  (`InvalidLength`, `group.rs:930`).
+
+### A1.1 (B1) — role-specialised world models, fresh query members
+
+**The confirmatory legs are rebuilt as:** each of the R = 3 roles owns its own
+**persistent world model** (arm-E1's persistent agent, restricted to that
+role's outcomes); the group's internals are **fresh SP1 queries per decision**
+built from those per-role models.
+
+**D2a's contrast is not lost — it relocates.** It is no longer
+member-continuity but **world-model topology**:
+
+| leg | world models | role |
+|---|---|---|
+| `grp-role`, `grp-mult` | **R = 3 role-specialised** persistent models | **confirmatory** |
+| `grp-role-fresh`, `grp-mult-fresh` | **one shared** persistent model, three role-restricted views | registered reference, non-gating |
+
+That is a more faithful reading of the prereg's own gloss — "a group of role
+specialists" versus "three views of one model, aggregated" — than member
+continuity ever was. The specialisation now lives where learning lives.
+
+**D4a is STRUCK.** With members discarded after each decision,
+`record_group_action` advances nothing. The arm uses the pure read
+(`group_distribution`) only, and commits nothing. Retaining the commit would
+be ceremony that reads as meaningful and is not.
+
+### A1.2 (B2) — a koalisi `InternalAgent` wrapper carrying the replay vector
+
+Members are a koalisi-side `InternalAgent` wrapper over `POMDPAgent` holding a
+per-decision **multi-modality** observation vector and calling
+`action_probabilities_multi`. Legal — `GroupAgent<S, I, X>` is generic in `I` —
+and RNG-free, since gotcha 32's carve-out concerns nested `GroupAgent`s and
+sampling sensory slots, not custom leaf wrappers.
+
+This preserves arm-E1's **A1.4 two-task replay**, which the scalar
+`group_distribution` observation would have silently discarded. Since EQ5b's
+whole premise is carrying v5's validated mechanism into the workflow world,
+dropping the replay would have hollowed out the claim while leaving it
+superficially intact.
+
+### A1.3 (B3) — empty-demand roles leave the roster
+
+A role with no `(bit, role)` demand in a task **does not vote in that task**:
+it is dropped from the roster, so R varies 3 → 2 → 1 per task. Semantically
+right — a role with no stake has no opinion — and it avoids the alternative's
+bias, since under `CertaintyWeighted` an abstaining member at `[0.5, 0.5]`
+still carries weight `exp(−ln 2) = 0.5` and would systematically drag `p(act)`
+toward the SP3 threshold on every affected slot.
+
+**Mandatory disclosure:** the per-seed distribution of realised roster size,
+and the rate of empty-demand role-slots. A task where **every** role is empty
+cannot occur (`|required| ≥ 2`, so some role holds demand).
+
+### A1.4 — S-learn is re-scoped, and two conjuncts weaken
+
+Stated plainly rather than quietly edited, because S-learn was strengthened
+two days' worth of decisions ago and now gives ground:
+
+- **S-learn (i) — retained, re-targeted.** Each of the R per-role persistent
+  world models records **exactly one** update per task **in which that role
+  had demand** (tasks where the role was dropped per A1.3 are excluded from
+  its expected count). Deficit or surplus is **RUN-INVALID**. The non-vacuity
+  guard is retained.
+- **S-learn (i)'s member-advance conjunct — STRUCK as vacuous.** Members are
+  single-use on every leg now, so no member-advance count exists to check.
+- **S-learn (ii) — STRUCK as vacuous.** There is no commit on the decision
+  path, so "every scored read is committed" has no referent.
+- **S-learn (iii) — unchanged.**
+
+**The MMP double-update hazard is now designed out, not gated.** It required a
+member read twice without a commit between; single-use members cannot be read
+twice. That is a strictly better outcome than gating it — but the reasoning is
+recorded here so that a future reader finding a thinner S-learn than the
+2026-08-08 correction described does not mistake it for drift. The hazard and
+its mechanism remain documented in koalisi **gotcha 32** and still apply to any
+future arm that gives its members continuity.
+
+### Unchanged
+
+D1 (v2w world verbatim), D2 (`GroupAgent`, R = 3, CW forced), D3 (both
+precision channels), D5 (control `wf-asis`, `wf-val-p` non-gating reference
+under the scoped-claim language), D6 (**1.25× / ≥ 18-of-30**, 2 confirmatory
+cells), D7 (seeds **330..360**), D8 (Part 11, library behind `decision` +
+`process`), D10. SP1, SP2, SP3 unchanged. X-battery / X-identity /
+S-determinism / S-live unchanged. koa#54 stays FINAL.
