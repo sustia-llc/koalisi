@@ -378,7 +378,20 @@ impl PersistentAifArm {
         let mut applied = true;
         if let Err(e) = inner.agent.action_probabilities_multi(&obs) {
             // Structurally impossible (obs has n_modalities entries), but never
-            // panic inside a battery: log and skip the update.
+            // panic inside a battery: log, and report that the INFERENCE update
+            // did not apply.
+            //
+            // Scope of `applied = false`, precisely (code-review finding, v0.30.0):
+            // it means the engine rejected the belief/Dirichlet update, and
+            // nothing more. It is NOT a rollback. `record_action(0)` above has
+            // already run, and the replay push and `tasks_observed` increment
+            // below still run — so the world model HAS advanced, and the next
+            // `build_query` replays one sequence more. An earlier version of this
+            // comment said the update was "skipped as before", which overstated
+            // it. The S-learn ledger consequence is conservative (the group's
+            // `updates` does not advance, so the seed reads as a deficit and the
+            // run is RUN-INVALID), which is the safe direction — but do not read
+            // `applied == false` as "this call left no trace".
             tracing::warn!(error = %e, "persistent observe_outcome failed");
             applied = false;
         }

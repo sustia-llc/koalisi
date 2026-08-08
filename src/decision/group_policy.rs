@@ -909,6 +909,22 @@ impl Models {
 /// properties. (A plain code span, not an intra-doc link: the module is private
 /// behind a re-export, like every other `decision` arm, so a `self` link would
 /// point at an undocumented item.)
+///
+/// # Battery-scoped, NOT for a long-lived service
+///
+/// The registered disclosures are **unbounded histories**: `roster_sizes` grows
+/// by one `usize` per [`begin_task`](Self::begin_task) and `agreement` by one
+/// [`AgreementSample`] per successful deterministic read, neither ever trimmed,
+/// and [`counters`](Self::counters) deep-clones both on every call. That is
+/// deliberate — the per-seed distributions are what prereg A1.3 and the A5.1
+/// table report, and a 30-seed battery is bounded by construction.
+///
+/// It is the wrong shape for a long-lived instance behind `CoalitionService`,
+/// which would accumulate one sample per decision for the process lifetime.
+/// A service use wants a bounded window instead, in the spirit of the remote
+/// gateway's `EventBuffer` (gotcha 29) — deliberately not built here, because a
+/// cap would silently truncate a **registered** disclosure and change what the
+/// report measures. Construct one arm per seed and drop it, as the battery does.
 pub struct GroupAifPolicy {
     models: Models,
     config: GroupAifConfig,
@@ -1253,6 +1269,7 @@ impl GroupAifPolicy {
 
             let Some(model) = self.models.view(role) else {
                 self.count_upstream_decline();
+                self.record_leave_masks(leave_queries, leave_identical);
                 tracing::warn!(role = role.index(), "group arm has no world model for the role");
                 return Self::declined();
             };
@@ -1269,6 +1286,7 @@ impl GroupAifPolicy {
                 Err(e) => {
                     tracing::warn!(error = %e, role = role.index(), "group role query construction failed");
                     self.count_upstream_decline();
+                    self.record_leave_masks(leave_queries, leave_identical);
                     return Self::declined();
                 }
             }
@@ -1302,6 +1320,7 @@ impl GroupAifPolicy {
             Err(e) => {
                 tracing::warn!(error = %e, "group distribution read failed");
                 self.count_upstream_decline();
+                self.record_leave_masks(leave_queries, leave_identical);
                 return Self::declined();
             }
         };
@@ -1310,6 +1329,7 @@ impl GroupAifPolicy {
         if !p_act.is_finite() {
             tracing::warn!(p_act, "group distribution returned a non-finite p(act)");
             self.count_upstream_decline();
+            self.record_leave_masks(leave_queries, leave_identical);
             return Self::declined();
         }
 
