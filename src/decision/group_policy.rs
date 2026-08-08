@@ -1,15 +1,47 @@
 //! Role-slotted Active Inference **group** coalition-decision policy (features
 //! `decision` + `process`) — the `grp-*` arm of pre-registration K4-EQ5b
-//! (`docs/prereg-K4-eq5b-typed-two-engine.md`, **including Amendment 1**, which is
-//! the spec of record wherever it conflicts with §3/§4).
+//! (`docs/prereg-K4-eq5b-typed-two-engine.md`, **including Amendments 1–5**,
+//! which are the spec of record wherever they conflict with §3/§4).
 //!
 //! Where [`PersistentAifArm`] decides as *one* agent reading a *flat* capability
-//! mask, this arm decides as a **group of role specialists** reading a
-//! **workflow's** `(bit, role)` [`Demand`]: an [`aif::GroupAgent`] with a
-//! [`CopyAgent`](aif::CopyAgent) sensory slot, one internal agent per demanding
-//! role, and a [`VotingAgent`](aif::VotingAgent) active slot in
-//! [`CertaintyWeighted`](aif::VotingMode::CertaintyWeighted) mode over
-//! `n_actions = 2` (`0` = decline, `1` = act).
+//! mask, this arm decides over a **workflow's** `(bit, role)` [`Demand`]: an
+//! [`aif::GroupAgent`] with a [`CopyAgent`](aif::CopyAgent) sensory slot, one
+//! internal agent per demanding role, and a [`VotingAgent`](aif::VotingAgent)
+//! active slot in [`CertaintyWeighted`](aif::VotingMode::CertaintyWeighted) mode
+//! over `n_actions = 2` (`0` = decline, `1` = act).
+//!
+//! # What this arm actually is (Amendment A5.1 — read this first)
+//!
+//! It is **not** "a group of role specialists deliberating about a candidate".
+//! It is **a group of role-restricted coverage queries, of which only the
+//! candidate's own role internal is candidate-sensitive; the remainder vote on
+//! their role's coalition coverage.**
+//!
+//! That follows from A2.1's registered role-matched masks and is measured, not
+//! inferred. [`coverage_masks`](GroupAifPolicy::coverage_masks) contributes the
+//! candidate's capabilities only to the internal whose role the candidate holds,
+//! so for every other internal:
+//!
+//! - on **leave**, `cfg0 == cfg1` exactly — that query carries *zero* information
+//!   about the candidate;
+//! - on **join**, the candidate appears nowhere in either mask.
+//!
+//! **And the candidate-blind internals do not abstain — they vote
+//! maximum-confidence "act".** [`run_replay`] records control 0 before every
+//! observation, so `update_a` accumulates only into the **membership-0** columns
+//! of `pA`; the membership-1 half stays permanently less observed and A-novelty
+//! rewards switching. Indifference therefore resolves as *act*, sharpened by
+//! `α = 8` into a delta — and a zero-entropy delta carries
+//! `confidence_weight = exp(0) = 1.0`, the **maximum** CW weight, so a blind
+//! member outweighs a hesitant informed one.
+//!
+//! This is a **registered structural property, disclosed and measured** — not a
+//! defect repaired mid-flight. Restricting the roster to candidate-sensitive
+//! internals would force `R = 1` on every decision, i.e. under role-matched masks
+//! a group deliberating about one candidate is structurally impossible, and that
+//! is itself the finding. [`GroupAifCounters`] carries the four mandatory
+//! disclosures: the zero-candidate-sensitive rate, the mean candidate-blind
+//! count, **their CW weight share**, and the leave-path `cfg0 == cfg1` rate.
 //!
 //! # The five things worth knowing before using it
 //!
@@ -29,8 +61,13 @@
 //! confirmatory cells from the reference cells is instead
 //! [`WorldModelTopology`]: `R` role-specialised persistent world models (each
 //! learning only from its own role's bits) versus **one shared** model read
-//! through three role-restricted views. "A group of role specialists" versus
-//! "three views of one model, aggregated".
+//! through three role-restricted views.
+//!
+//! *Scope note (A5.10 L3-14):* "each learning only from its own role's bits" holds
+//! because the as-written v2w world gives every required bit exactly **one** role
+//! tag, so the role models observe disjoint bit sets. A rewriting arm that let one
+//! bit carry two roles would break the disjointness, and this sentence must not be
+//! transcribed into one.
 //!
 //! **3. There is no commit.** D4a is **struck** (Amendment A1.1): with members
 //! discarded after each decision,
@@ -42,12 +79,17 @@
 //! future arm that gives its members continuity.
 //!
 //! **4. A role with no demand does not vote** (Amendment A1.3). It leaves the
-//! roster for that task, so the realised `R` varies 3 → 2 → 1. The alternative —
-//! an abstaining member at `[0.5, 0.5]` — is not neutral under
-//! `CertaintyWeighted`: it still carries weight `exp(−ln 2) = 0.5` and would drag
-//! `p(act)` toward the decision threshold on every affected slot. Realised roster
+//! roster for that task, so the realised `R` varies 3 → 2 → 1. Realised roster
 //! sizes and the empty-slot rate are a **mandatory disclosure**
 //! ([`GroupAifCounters`]).
+//!
+//! A1.3's original *rationale* — "an abstaining member reads `[0.5, 0.5]` and
+//! carries weight `exp(−ln 2) = 0.5`, dragging `p(act)` toward the threshold" —
+//! is **WITHDRAWN as measurably false** (A5.1). A member with no
+//! candidate-discriminating coverage reads ≈ 1.0 at weight 1.0, and its bias is
+//! toward **act**, not toward the threshold. The *decision* to drop empty-demand
+//! roles stands: the hazard was real and dropping is still right; only its stated
+//! size and its **sign** were wrong.
 //!
 //! **5. Upstream errors are outcomes, not panics.** An [`aif::AifError`] anywhere
 //! on the decision path is a decline **and a count**
@@ -65,18 +107,27 @@
 //! notion of coverage than the world it is evaluated in, and would leave the three
 //! internals differing only in `required_r` — specialists in name only.
 //!
+//! Its cost is the A5.1 property above, and it is a cost the registration accepts
+//! with its eyes open rather than one it failed to notice.
+//!
 //! [`CoverageMasks::RoleBlind`] exists as exactly that contrast, and is the
 //! non-gating `grp-role-blind` reference leg: it isolates how much of a margin
 //! comes from role-matched coverage versus role-restricted demand alone.
 //!
 //! # Determinism
 //!
-//! [`group_distribution`](aif::GroupAgent::group_distribution) is the **only**
-//! RNG-free path into a group's action distribution; every other entry point
-//! samples. This arm calls that one and no other, its members are
-//! [`POMDPAgent`](aif::POMDPAgent)s behind a deterministic wrapper, and its
-//! sensory slot is a `CopyAgent` — the three conditions gotcha 32 pins RNG-freedom
-//! on. Seeds are threaded for hygiene only; nothing draws from them.
+//! [`group_distribution`](aif::GroupAgent::group_distribution) draws no
+//! randomness: members are [`POMDPAgent`](aif::POMDPAgent)s behind a deterministic
+//! wrapper and the sensory slot is a `CopyAgent`, which are the conditions gotcha
+//! 32 pins RNG-freedom on. Seeds are threaded for hygiene only; nothing draws from
+//! them.
+//!
+//! *Correction (A5.10 L3-12):* it is **not** the only RNG-free path —
+//! `group_distribution_recording` is equally RNG-free. The reason this arm avoids
+//! that one is **D4a and gotcha 32**: it advances each member to its own argmax,
+//! which is a per-member surrogate rather than the group's resolved action. Only
+//! [`Agent::act`](aif::Agent::act) samples, and only the exploratory
+//! [`DecisionRead::SeededSampling`] cell calls it.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -102,6 +153,45 @@ const ACTION_ACT: usize = 1;
 
 /// The registered role count `R` (D2).
 pub const DEFAULT_N_ROLES: usize = 3;
+
+/// S-learn (i)'s **prereg-pinned** non-vacuity tolerance (Amendment A5.4),
+/// compared on Dirichlet pA counts.
+///
+/// §5 twice described this as prereg-pinned while it existed only as a harness
+/// local — a RUN-INVALID gate may not carry an unregistered parameter, so it lives
+/// here, beside the state it measures, and [`models_moved`] is the only
+/// implementation of the comparison.
+pub const S_LEARN_VACUITY_TOL: f64 = 1e-9;
+
+/// S-learn (i)'s non-vacuity guard: **every** world model's pA counts differ from
+/// the reference by more than [`S_LEARN_VACUITY_TOL`] somewhere.
+///
+/// `all`, not `any` (Amendment A5.4): under
+/// [`WorldModelTopology::RoleSpecialised`] a role model that never moved used to
+/// pass because a sibling did. Necessary, and explicitly **not sufficient** — the
+/// counted ledger in [`GroupAifCounters::model_updates`] is the gate.
+///
+/// Learning-off configurations carry no pA at all; those are reported as *not
+/// moved* rather than silently skipped, which is the honest reading for a guard
+/// that exists to catch a frozen model.
+#[must_use]
+pub fn models_moved(
+    after: &[(ModelLabel, PersistentAifState)],
+    before: &[(ModelLabel, PersistentAifState)],
+) -> bool {
+    !after.is_empty()
+        && after.len() == before.len()
+        && after
+            .iter()
+            .zip(before.iter())
+            .all(|((_, a), (_, b))| match (a.pa.as_ref(), b.pa.as_ref()) {
+                (Some(x), Some(y)) => x
+                    .iter()
+                    .zip(y.iter())
+                    .any(|(p, q)| (p - q).iter().any(|d| d.abs() > S_LEARN_VACUITY_TOL)),
+                _ => false,
+            })
+}
 
 /// The scalar handed to [`aif::GroupAgent::group_distribution`].
 ///
@@ -135,13 +225,35 @@ pub enum PrecisionChannel {
     /// SP1 **plus** SP2: each modality's injected Dirichlet counts are scaled by
     /// the occurrence multiplicity `m(b, r)` of that step in the declared writing.
     ///
-    /// Dirichlet counts *are* observation counts, so a step occurring three times
-    /// carries three observations' worth of evidence demand — no tuned
-    /// coefficient. Because `A = column_normalize(pA)` is invariant under a
-    /// positive uniform scale, this moves the **concentration** and nothing else:
-    /// the channel acts through the novelty / parameter-info-gain term, which is
-    /// exactly v5's validated mechanism. It is consequently inert when learning is
-    /// off (no counts are injected then) — the registered base has it on.
+    /// # The sign, corrected (Amendment A5.8)
+    ///
+    /// SP2's registered justification — "three occurrences carry three
+    /// observations' worth of evidence **demand**" — has the sign **backwards**,
+    /// and the word "demand" is **withdrawn**. Dirichlet concentration is evidence
+    /// **possessed**, not evidence **wanted**, so a higher `m` means *less*
+    /// parameter-information-gain left to collect and therefore **less** epistemic
+    /// pull: measured, `p(act)` falls `0.999999991 → 0.501759150` as `m` goes
+    /// 1 → 3. **A repeated step makes the arm markedly less willing to staff it.**
+    /// The mechanism is unchanged; only its justification was wrong.
+    ///
+    /// Also disclosed: the scale multiplies the **whole** modality block, including
+    /// the *uncovered* configuration's flat `[1, 1, 1]` prior — asserting
+    /// pseudo-observations never made, in precisely the block whose novelty drives
+    /// v5's mechanism.
+    ///
+    /// # Which channel it moves (Amendment A5.7)
+    ///
+    /// `A = column_normalize(pA)` is invariant under a positive uniform scale in
+    /// ℝ, so SP2 moves the **concentration** — the novelty /
+    /// parameter-information-gain term, v5's validated mechanism —
+    /// **predominantly**, not *purely*. Two caveats, both measured: `update_a`
+    /// re-derives `A` after adding an **unscaled** `η·joint`, so a scaled block is
+    /// a damped learning rate and perturbs `A` at read time (novelty off, learning
+    /// on: `0.500000000 → 0.500002287`, i.e. the novelty channel dominates by ~5
+    /// orders of magnitude); and the invariance is only ulp-accurate in `f64`.
+    ///
+    /// Inert with **learning** off is confirmed bit-identical — no counts are
+    /// injected then. The registered base has learning on.
     MultiplicityWeighted,
 }
 
@@ -201,13 +313,18 @@ pub enum GroupVote {
     /// ±0.5 (gotcha 25) and the internals inherit it. This leg measures what CW
     /// actually bought rather than conceding the point.
     ///
-    /// **Its read is not a margin.** Under a discrete mode
-    /// [`group_distribution`](aif::GroupAgent::group_distribution) returns the
-    /// normalized **tally over member argmaxes** — `k/R`, so `{0, ⅓, ⅔, 1}` at
-    /// R = 3 — which is "the vote the group would deterministically cast", not the
-    /// group's policy. SP3 applied to it is therefore a **majority rule**, and its
-    /// `score` is a tally distance that is **not commensurable** with a CW margin.
-    /// Compare this cell on **acts and PRIMARY**, never on score bits.
+    /// **Its read is not a margin** — and it is not `k/R` either
+    /// (**Amendment A5.6**). `VotingAgent::vote_distribution`'s *first* branch,
+    /// which is the one a `Deterministic` slot takes, returns **uniform mass over
+    /// the max-count winner set**; `counts/total` is the `Probabilistic` branch.
+    /// So at `n_actions = 2` the read lives on **`{0, 0.5, 1}`** — never
+    /// `{0, ⅓, ⅔, 1}` — with `0.5` reachable only on an exact vote tie.
+    ///
+    /// SP3 over that support therefore acts **iff `winners == {act}`**, i.e. a
+    /// strict majority of the realised roster: majority at `R = 3`, unanimity at
+    /// `R = 2`, and the single voter's own argmax at `R = 1`. The `score` is a
+    /// winner-set indicator, **not commensurable** with a CW margin — compare this
+    /// cell on **acts and PRIMARY**, never on score bits.
     Deterministic,
 }
 
@@ -302,6 +419,14 @@ pub enum GroupAifError {
         /// The world model's capability-bit width.
         n_bits: usize,
     },
+    /// [`DecisionRead::SeededSampling`] combined with a discrete
+    /// [`GroupVote`] — constructible, and silently all-declining, so it is
+    /// refused (Amendment A5.10 L1-14).
+    ///
+    /// `Agent::act` routes a discrete mode through `VotingAgent::aggregate`, whose
+    /// winner resolution does not agree with the sampled-mixture contract E-seed
+    /// registers, and the pairing is not a registered cell in any case.
+    UnsupportedReadVote,
     /// The engine rejected a model.
     Aif(aif::AifError),
 }
@@ -317,6 +442,11 @@ impl std::fmt::Display for GroupAifError {
                 f,
                 "group arm: no demanded (bit, role) lies inside the {n_bits}-bit universe"
             ),
+            Self::UnsupportedReadVote => write!(
+                f,
+                "group arm: seeded sampling is registered only against the \
+                 CertaintyWeighted active slot"
+            ),
             Self::Aif(inner) => write!(f, "group arm: engine rejection: {inner}"),
         }
     }
@@ -326,7 +456,9 @@ impl std::error::Error for GroupAifError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Aif(inner) => Some(inner),
-            Self::RoleOutOfRange { .. } | Self::EmptyDemand { .. } => None,
+            Self::RoleOutOfRange { .. }
+            | Self::EmptyDemand { .. }
+            | Self::UnsupportedReadVote => None,
         }
     }
 }
@@ -387,6 +519,19 @@ pub struct AgreementSample {
     pub roster: usize,
     /// How many internals' own argmax was "act".
     pub votes_for_act: usize,
+    /// Internals whose coverage masks carry the candidate's capabilities — under
+    /// the registered [`CoverageMasks::RoleMatched`] this is `1` when the
+    /// candidate's role is on the roster and **`0` otherwise** (A5.1).
+    pub candidate_sensitive: usize,
+    /// Of [`candidate_sensitive`](Self::candidate_sensitive), how many voted act.
+    pub votes_for_act_sensitive: usize,
+    /// Of the candidate-**blind** internals (`roster − candidate_sensitive`), how
+    /// many voted act. A5.1 predicts nearly all of them.
+    pub votes_for_act_blind: usize,
+    /// Share of the CW mixture's total weight `Σ exp(−H)` carried by the
+    /// candidate-blind internals. A5.1's headline: a blind internal resolves its
+    /// indifference to a zero-entropy delta, which is the **maximum** weight.
+    pub blind_weight_share: f64,
     /// `|p(act) − 0.5|` — the read's distance from the SP3 threshold.
     ///
     /// A genuine CW mixture margin under [`GroupVote::CertaintyWeighted`]; under
@@ -401,6 +546,12 @@ impl AgreementSample {
     #[must_use]
     pub fn unanimous(&self) -> bool {
         self.votes_for_act == 0 || self.votes_for_act == self.roster
+    }
+
+    /// Internals carrying no information about the candidate (A5.1).
+    #[must_use]
+    pub fn candidate_blind(&self) -> usize {
+        self.roster.saturating_sub(self.candidate_sensitive)
     }
 }
 
@@ -427,7 +578,15 @@ pub struct GroupAifCounters {
     /// Declines caused by there being no task in force, or no demanding role.
     pub declines_no_demand: u64,
     /// Realised roster size per task, in task order (Amendment A1.3 disclosure).
+    /// Also the **independent** expected-update source for S-learn (i): one entry
+    /// per opened task, written by `begin_task`, never by `observe_outcome`.
     pub roster_sizes: Vec<usize>,
+    /// Internal queries built on the **leave** path, and how many of them had
+    /// `cfg0 == cfg1` — the A5.1 mandatory disclosure. A query with identical
+    /// masks carries zero information about the candidate.
+    pub leave_queries: u64,
+    /// Of [`leave_queries`](Self::leave_queries), those with `cfg0 == cfg1`.
+    pub leave_queries_identical: u64,
     /// `(task, role)` slots where the role had no demand and did not vote.
     pub empty_role_slots: u64,
     /// Per-model update ledger — the S-learn (i) gate.
@@ -438,10 +597,17 @@ pub struct GroupAifCounters {
 }
 
 impl GroupAifCounters {
-    /// Whether every world model advanced exactly its expected number of times.
+    /// Whether every world model advanced exactly its expected number of times,
+    /// **and** the task stream itself is consistent (Amendment A5.4).
+    ///
+    /// The second conjunct — one observed task per opened task — is what keeps the
+    /// ledger anchored: `expected` is written by `begin_task` and `updates` by
+    /// `observe_outcome`, so a skipped or doubled observation shows up as a
+    /// deficit or a surplus instead of advancing both counters together.
     #[must_use]
     pub fn s_learn_exact(&self) -> bool {
         self.model_updates.iter().all(ModelUpdateAudit::is_exact)
+            && u64::try_from(self.roster_sizes.len()).is_ok_and(|n| n == self.tasks_observed)
     }
 }
 
@@ -469,6 +635,83 @@ struct RoleMember {
     /// back through [`aif::GroupAgent::internal_agents`] after the group read; a
     /// disclosure only, never a decision input.
     last_vote: Option<usize>,
+    /// `exp(−H)` of its last read — the weight the CW aggregator gave it. Recorded
+    /// so A5.1's "the blind members carry the maximum weight" is a measurement.
+    last_weight: f64,
+    /// Whether this internal's coverage masks carry the candidate's capabilities
+    /// (A5.1). Set at construction from the mask computation, not inferred.
+    candidate_sensitive: bool,
+}
+
+/// One coalition participant as the mask builder needs it: `(role, agent id,
+/// capability mask)`.
+type Participant = (Role, usize, u32);
+
+/// One internal's coverage configuration, plus whether the candidate reached it
+/// at all (Amendment A5.1).
+struct MaskPair {
+    cfg0: u32,
+    cfg1: u32,
+    /// `false` ⇒ this query is candidate-blind: on leave `cfg0 == cfg1` exactly,
+    /// on join the candidate appears in neither mask.
+    candidate_sensitive: bool,
+}
+
+/// Build one decision's [`AgreementSample`] by reading the members' own argmaxes
+/// and confidence weights back off the roster, split by candidate-sensitivity
+/// (Amendment A5.1). Purely a disclosure — nothing on the decision path consults
+/// any of it.
+fn agreement_sample(members: &[RoleMember], roster: usize, p_act: f64) -> AgreementSample {
+    let mut votes_for_act = 0usize;
+    let mut votes_sensitive = 0usize;
+    let mut votes_blind = 0usize;
+    let mut candidate_sensitive = 0usize;
+    let mut blind_weight = 0.0f64;
+    let mut total_weight = 0.0f64;
+    for m in members {
+        let acted = m.last_vote == Some(ACTION_ACT);
+        total_weight += m.last_weight;
+        if m.candidate_sensitive {
+            candidate_sensitive += 1;
+            votes_sensitive += usize::from(acted);
+        } else {
+            blind_weight += m.last_weight;
+            votes_blind += usize::from(acted);
+        }
+        votes_for_act += usize::from(acted);
+    }
+    // A roster of all-zero weights is not reachable through a successful read
+    // (every accepted distribution is normalized, so `exp(−H) ≥ 1/n_actions`), but
+    // a zero denominator would be reported as a share rather than caught.
+    let blind_weight_share = if total_weight > 0.0 {
+        blind_weight / total_weight
+    } else {
+        0.0
+    };
+    AgreementSample {
+        roster,
+        votes_for_act,
+        candidate_sensitive,
+        votes_for_act_sensitive: votes_sensitive,
+        votes_for_act_blind: votes_blind,
+        blind_weight_share,
+        margin: (p_act - 0.5).abs(),
+    }
+}
+
+/// `exp(−H)` of a distribution — the confidence weight `VotingAgent` assigns it.
+///
+/// Mirrors upstream's `confidence_weight`: entropy over the entries above a small
+/// floor, so a zero entry contributes nothing and a delta scores exactly `1.0`.
+/// Recomputed here rather than read back because upstream exposes no accessor;
+/// any drift would show up as a weight share outside `[0, 1]`.
+fn confidence_weight(dist: &DVector<f64>) -> f64 {
+    let h: f64 = dist
+        .iter()
+        .filter(|&&p| p > 1e-15)
+        .map(|&p| -p * p.ln())
+        .sum();
+    (-h).exp()
 }
 
 impl aif::Agent for RoleMember {
@@ -500,9 +743,12 @@ impl aif::InternalAgent for RoleMember {
     fn action_probabilities(&mut self, _observation: usize) -> DVector<f64> {
         match run_replay(&mut self.query, &self.replay, self.modalities) {
             Ok(dist) => {
-                // Ties to the lowest index, matching the engine's own
-                // `argmax_index` so the recorded vote is the one the group would
-                // have tallied.
+                // Ties to the lowest index. This matches the engine's
+                // `argmax_index` on every distribution the group will accept —
+                // `validate_sampleable` rejects a non-finite entry before the vote
+                // is used — but the two differ on NaN, which upstream skips and
+                // this fold would adopt. Unreachable, and stated rather than
+                // claimed away (A5.10 L1-15).
                 self.last_vote = dist
                     .iter()
                     .enumerate()
@@ -511,11 +757,13 @@ impl aif::InternalAgent for RoleMember {
                         _ => Some((i, p)),
                     })
                     .map(|(i, _)| i);
+                self.last_weight = confidence_weight(&dist);
                 dist
             }
             Err(e) => {
                 tracing::warn!(error = %e, "group role member replay failed; declining the read");
                 self.last_vote = None;
+                self.last_weight = 0.0;
                 DVector::zeros(0)
             }
         }
@@ -636,17 +884,25 @@ impl GroupAifPolicy {
     ///
     /// # Errors
     ///
-    /// [`GroupAifError::Aif`] if the engine rejects a world model.
+    /// [`GroupAifError::Aif`] if the engine rejects a world model, and
+    /// [`GroupAifError::UnsupportedReadVote`] for the seeded-sampling /
+    /// discrete-vote pairing, which is constructible upstream and silently
+    /// all-declines (Amendment A5.10 L1-14).
     ///
     /// # Panics
     ///
-    /// Never in practice: the only `expect` here asserts that a topology built at
-    /// least one model, which both arms of the match above do unconditionally.
+    /// Never in practice: the only `expect` asserts that a topology built at least
+    /// one model, which both arms of the match below do unconditionally (`n_roles`
+    /// is clamped to at least 1).
     pub fn new(
         battery_seed: u64,
         config: GroupAifConfig,
         agent_roles: HashMap<usize, Role>,
     ) -> Result<Self, GroupAifError> {
+        if config.read == DecisionRead::SeededSampling && config.vote != GroupVote::CertaintyWeighted
+        {
+            return Err(GroupAifError::UnsupportedReadVote);
+        }
         let n_roles = config.n_roles.clamp(1, usize::from(u8::MAX));
         let config = GroupAifConfig { n_roles, ..config };
 
@@ -752,6 +1008,25 @@ impl GroupAifPolicy {
         let size = roster.len();
         shared.counters.roster_sizes.push(size);
         shared.counters.empty_role_slots += (n_roles - size) as u64;
+        // S-learn (i), Amendment A5.4: `expected` is derived HERE, from the task
+        // stream, and never on the `observe_outcome` path. Incrementing it beside
+        // the guarded `updates` made `updates > expected` unreachable, so the
+        // RUN-INVALID surplus condition was near-tautological — a double
+        // `observe_outcome` advanced both counters and read exact.
+        match &self.models {
+            Models::RoleSpecialised(_) => {
+                for r in &roster {
+                    if let Some(slot) = shared.expected.get_mut(usize::from(r.index())) {
+                        *slot += 1;
+                    }
+                }
+            }
+            Models::Shared(_) => {
+                if let Some(slot) = shared.expected.get_mut(0) {
+                    *slot += 1;
+                }
+            }
+        }
         shared.task = Some(TaskState {
             required,
             multiplicity,
@@ -801,7 +1076,7 @@ impl GroupAifPolicy {
                     let Some(model) = models.get(index) else {
                         continue;
                     };
-                    shared.expected[index] += 1;
+                    // `expected` is NOT touched here — see `begin_task` (A5.4).
                     if model.observe_outcome_checked(task.required[index], per_bit_success) {
                         shared.updates[index] += 1;
                         applied += 1;
@@ -809,7 +1084,6 @@ impl GroupAifPolicy {
                 }
             }
             Models::Shared(model) => {
-                shared.expected[0] += 1;
                 if model.observe_outcome_checked(task.union_required, per_bit_success) {
                     shared.updates[0] += 1;
                     applied = 1;
@@ -897,18 +1171,10 @@ impl GroupAifPolicy {
         // Role resolution first: an unmapped participant is a decline, never a
         // guess (gotcha 28). The candidate is resolved even on the leave path,
         // where it is also a coalition member, so a partial map cannot slip through.
-        let Some(agent_role) = self.role_of(agent) else {
+        let Some((agent_role, members)) = self.resolve_participants(agent, coalition) else {
             shared.counters.declines_missing_role += 1;
             return Self::declined();
         };
-        let mut members: Vec<(Role, usize, u32)> = Vec::with_capacity(coalition.len());
-        for m in coalition {
-            let Some(role) = self.role_of(*m) else {
-                shared.counters.declines_missing_role += 1;
-                return Self::declined();
-            };
-            members.push((role, m.agent_id(), m.capabilities()));
-        }
 
         shared.decision_counter = shared.decision_counter.wrapping_add(1);
         let seed = self.battery_seed ^ splitmix64(shared.decision_counter);
@@ -918,14 +1184,21 @@ impl GroupAifPolicy {
         let agent_caps = agent.capabilities();
 
         let mut internals: Vec<RoleMember> = Vec::with_capacity(task.roster.len());
+        // A5.1 disclosure, accumulated as the queries are built rather than
+        // reconstructed afterwards.
+        let mut leave_queries = 0u64;
+        let mut leave_identical = 0u64;
         for &role in &task.roster {
             let required_r = task.required[usize::from(role.index())] & low_mask(self.n_bits);
-            let (cfg0, cfg1) = self.coverage_masks(
-                role,
-                (agent_role, agent_id, agent_caps),
-                &members,
-                leave,
-            );
+            let masks =
+                self.coverage_masks(role, (agent_role, agent_id, agent_caps), &members, leave);
+            let (cfg0, cfg1) = (masks.cfg0, masks.cfg1);
+            if leave {
+                leave_queries += 1;
+                if cfg0 == cfg1 {
+                    leave_identical += 1;
+                }
+            }
 
             let scale = match self.config.channel {
                 PrecisionChannel::RoleRestricted => None,
@@ -944,6 +1217,8 @@ impl GroupAifPolicy {
                     replay,
                     modalities: required_r.count_ones() as usize,
                     last_vote: None,
+                    last_weight: 0.0,
+                    candidate_sensitive: masks.candidate_sensitive,
                 }),
                 Err(e) => {
                     tracing::warn!(error = %e, role = role.index(), "group role query construction failed");
@@ -969,7 +1244,9 @@ impl GroupAifPolicy {
         );
 
         if self.config.read == DecisionRead::SeededSampling {
-            return self.sampled_decision(&mut group);
+            let d = self.sampled_decision(&mut group);
+            self.record_leave_masks(leave_queries, leave_identical);
+            return d;
         }
 
         // D4/D4a-as-amended: the pure read, and NOTHING else. No
@@ -990,21 +1267,12 @@ impl GroupAifPolicy {
             return Self::declined();
         }
 
-        // E-agree: read the members' own argmaxes back off the roster. Purely a
-        // disclosure — nothing above consulted them.
-        let votes_for_act = group
-            .internal_agents()
-            .iter()
-            .filter(|m| m.last_vote == Some(ACTION_ACT))
-            .count();
-
+        let sample = agreement_sample(group.internal_agents(), roster, p_act);
         let mut shared = self.shared.lock().expect("group arm mutex poisoned");
         shared.counters.reads += 1;
-        shared.counters.agreement.push(AgreementSample {
-            roster,
-            votes_for_act,
-            margin: (p_act - 0.5).abs(),
-        });
+        shared.counters.leave_queries += leave_queries;
+        shared.counters.leave_queries_identical += leave_identical;
+        shared.counters.agreement.push(sample);
         drop(shared);
 
         // SP3: act iff p(act) > 0.5; ties decline.
@@ -1012,6 +1280,25 @@ impl GroupAifPolicy {
             act: p_act > 0.5,
             score: p_act - 0.5,
         }
+    }
+
+    /// The candidate's role and the coalition as `(role, id, capabilities)`, or
+    /// `None` if the role map is missing **any** participant.
+    ///
+    /// All-or-nothing on purpose: a partial map would let some internals see a
+    /// candidate the others cannot, which is a silently different arm rather than a
+    /// degraded one (gotcha 28).
+    fn resolve_participants(
+        &self,
+        agent: &dyn AgentCapabilities,
+        coalition: &[&dyn AgentCapabilities],
+    ) -> Option<(Role, Vec<Participant>)> {
+        let agent_role = self.role_of(agent)?;
+        let mut members = Vec::with_capacity(coalition.len());
+        for m in coalition {
+            members.push((self.role_of(*m)?, m.agent_id(), m.capabilities()));
+        }
+        Some((agent_role, members))
     }
 
     /// Internal `role`'s coverage masks `(cfg0, cfg1)` for one decision
@@ -1027,27 +1314,32 @@ impl GroupAifPolicy {
     fn coverage_masks(
         &self,
         role: Role,
-        candidate: (Role, usize, u32),
-        members: &[(Role, usize, u32)],
+        candidate: Participant,
+        members: &[Participant],
         leave: bool,
-    ) -> (u32, u32) {
+    ) -> MaskPair {
         let (agent_role, agent_id, agent_caps) = candidate;
         let role_matched = self.config.masks == CoverageMasks::RoleMatched;
         let member_union = members
             .iter()
             .filter(|&&(r, id, _)| (!role_matched || r == role) && !(leave && id == agent_id))
             .fold(0u32, |acc, &(_, _, caps)| acc | caps);
-        let own = if role_matched && agent_role != role {
-            0
-        } else {
-            agent_caps
-        };
-        if leave {
+        // A5.1: structural, not value-dependent. Under role-matched masks the
+        // candidate reaches only its own role's internal — for every other one it
+        // contributes nothing, whatever its capabilities are.
+        let candidate_sensitive = !role_matched || agent_role == role;
+        let own = if candidate_sensitive { agent_caps } else { 0 };
+        let (cfg0, cfg1) = if leave {
             // cfg0 = the coalition WITH the member, cfg1 = without it.
             (member_union | own, member_union)
         } else {
             // cfg0 = the candidate alone, cfg1 = coalition ∪ {candidate}.
             (own, own | member_union)
+        };
+        MaskPair {
+            cfg0,
+            cfg1,
+            candidate_sensitive,
         }
     }
 
@@ -1104,6 +1396,17 @@ impl GroupAifPolicy {
     fn count_upstream_decline(&self) {
         let mut shared = self.shared.lock().expect("group arm mutex poisoned");
         shared.counters.declines_upstream += 1;
+    }
+
+    /// Fold one decision's leave-path mask tally into the counters (A5.1). Split
+    /// out because the sampling path returns before the E-agree block.
+    fn record_leave_masks(&self, queries: u64, identical: u64) {
+        if queries == 0 {
+            return;
+        }
+        let mut shared = self.shared.lock().expect("group arm mutex poisoned");
+        shared.counters.leave_queries += queries;
+        shared.counters.leave_queries_identical += identical;
     }
 }
 
@@ -1217,6 +1520,24 @@ mod tests {
         GroupAifPolicy::new(11, config, roles_map(roles)).unwrap()
     }
 
+    /// The registered cell with **novelty off** — the S-learn (iii) ablation.
+    ///
+    /// Several tests need a mixture that is *not* a delta, and A5.1's measurement
+    /// is exactly why: with novelty on, an internal with no candidate-discriminating
+    /// coverage resolves its indifference to `p(act) = 1.0` at zero entropy, so
+    /// unanimity and saturation are the norm. Novelty off collapses that read to
+    /// `0.5`, which is the only way to reach a split vote, a non-degenerate
+    /// mixture, or a live tie on this world.
+    fn novelty_off() -> GroupAifConfig {
+        GroupAifConfig {
+            base: PersistentAifConfig {
+                query_novelty: false,
+                ..v5_e1_base()
+            },
+            ..GroupAifConfig::default()
+        }
+    }
+
     /// The default config is the **v5 E1** base, not the FALSIFIED v4 default
     /// (gotcha 24's relabelling discipline), and the registered `grp-role` cell.
     #[test]
@@ -1234,36 +1555,26 @@ mod tests {
         assert!(c.base.query_gamma.is_none(), "engine-default gamma = 16");
     }
 
-    /// The `CertaintyWeighted` read is RNG-free: two reads from identical state
-    /// agree bit-for-bit, and a whole decision stream is a pure function of the
-    /// seed (the S-determinism gate, library half).
+    /// The read consumes **no randomness** — shown by seed INVARIANCE, not by
+    /// reproducibility (Amendment A5.10 L1-7 / L2-4).
+    ///
+    /// The previous version ran the same seed twice, which a seeded sampler would
+    /// also pass. `battery_seed` reaches the engine only as `AgentParams { seed }`
+    /// (the world models, the per-decision query seed, the `VotingAgent` and the
+    /// group RNG), so if anything drew from it, two different seeds would diverge.
+    /// They must not.
     #[test]
-    fn read_is_rng_free_and_the_stream_is_deterministic() {
+    fn read_is_rng_free_shown_by_seed_invariance() {
         let a0 = TestAgent { id: 0, caps: 0b001, trust: 50 };
         let a1 = TestAgent { id: 1, caps: 0b010, trust: 50 };
         let a2 = TestAgent { id: 2, caps: 0b100, trust: 50 };
         let coalition: [&dyn AgentCapabilities; 2] = [&a1, &a2];
         let full: [&dyn AgentCapabilities; 3] = [&a0, &a1, &a2];
         let ctx = DecisionContext { required_capabilities: 0b111 };
-        let map = [(0usize, 0u8), (1, 1), (2, 2)];
+        let map = roles_map(&[(0, 0), (1, 1), (2, 2)]);
 
-        // Two reads from identical state: build two arms, run one read each.
-        let one = policy(GroupAifConfig::default(), &map);
-        let two = policy(GroupAifConfig::default(), &map);
-        one.begin_task(&three_role_demand()).unwrap();
-        two.begin_task(&three_role_demand()).unwrap();
-        let d1 = one.should_join(&a0, &coalition, &ctx);
-        let d2 = two.should_join(&a0, &coalition, &ctx);
-        assert_eq!(
-            d1.score.to_bits(),
-            d2.score.to_bits(),
-            "identical state must produce an identical mixture"
-        );
-        assert_eq!(d1.act, d2.act);
-
-        // A whole stream, twice.
-        let run = || {
-            let p = policy(GroupAifConfig::default(), &map);
+        let run = |seed: u64| {
+            let p = GroupAifPolicy::new(seed, GroupAifConfig::default(), map.clone()).unwrap();
             let mut out = Vec::new();
             for _ in 0..3 {
                 p.begin_task(&three_role_demand()).unwrap();
@@ -1275,36 +1586,96 @@ mod tests {
             }
             out
         };
-        assert_eq!(run(), run(), "same seed ⇒ same result");
+        assert_eq!(
+            run(11),
+            run(4_242_424_242),
+            "the deterministic read must be invariant to the seed; a divergence here \
+             means something drew from it"
+        );
+        // Reproducibility too, since S-determinism is stated per seed.
+        assert_eq!(run(11), run(11));
+
+        // …and the seeded-sampling cell is NOT seed-invariant, which is what makes
+        // the assertion above a real test rather than a property of the world.
+        //
+        // It has to run with **novelty off**: A5.1 measures that with novelty on
+        // every indifferent internal reads a zero-entropy delta, and sampling from
+        // a delta is deterministic — so the registered cell would show invariance
+        // too, for a reason that has nothing to do with RNG. That is itself the
+        // A3.1/A5.1 finding, and it is why the control needs the ablation.
+        let sampled = GroupAifConfig {
+            read: DecisionRead::SeededSampling,
+            ..novelty_off()
+        };
+        let sample = |seed: u64| {
+            let p = GroupAifPolicy::new(seed, sampled, map.clone()).unwrap();
+            let mut out = Vec::new();
+            for _ in 0..6 {
+                p.begin_task(&three_role_demand()).unwrap();
+                out.push(p.should_join(&a0, &coalition, &ctx).act);
+                p.observe_outcome(&[true, false, true, false, false, false, false, false]);
+            }
+            out
+        };
+        assert_ne!(
+            sample(1),
+            sample(999),
+            "the sampling cell DOES consume randomness, so the invariance above is \
+             a property of the read and not of this world"
+        );
     }
 
-    /// SP3: `act` iff `p(act) > 0.5`, **ties decline**. Exercised directly on the
-    /// rule, because a tie is not reachable on demand through the engine.
+    /// SP3 declines an exact tie, exercised on a **live tie** rather than on a
+    /// restatement of the predicate (Amendment A5.10 L1-5).
+    ///
+    /// A tie is reachable: under [`GroupVote::Deterministic`] the read is uniform
+    /// over the winner set, so a split vote at `R = 2` reads exactly `0.5`. The
+    /// test searches for one and **fails if it cannot find one**, rather than
+    /// passing vacuously.
     #[test]
-    fn sp3_ties_decline() {
-        for (p_act, expected) in [(0.5_f64, false), (0.5 + f64::EPSILON, true), (0.49, false)] {
-            let d = Decision {
-                act: p_act > 0.5,
-                score: p_act - 0.5,
-            };
-            assert_eq!(d.act, expected, "p(act) = {p_act} must act = {expected}");
-        }
+    fn sp3_declines_a_live_tie() {
+        let ctx = DecisionContext { required_capabilities: 0b111 };
+        // Novelty off, for the reason `novelty_off` documents: with it on, every
+        // indifferent internal votes act at maximum confidence and a split never
+        // occurs — the tie would be untestable, which is A5.1's finding and not a
+        // reason to skip the tie rule.
+        let cfg = GroupAifConfig {
+            vote: GroupVote::Deterministic,
+            ..novelty_off()
+        };
+        // A two-role task, so a split vote is an exact 1-1 tie.
+        let two_role = demand(&workflow(&[(Role::new(0), &[0]), (Role::new(1), &[1])]));
 
-        // And the live arm never acts on an exact-0.0 score.
-        let a0 = TestAgent { id: 0, caps: 0b001, trust: 50 };
-        let a1 = TestAgent { id: 1, caps: 0b010, trust: 50 };
-        let coalition: [&dyn AgentCapabilities; 1] = [&a1];
-        let ctx = DecisionContext::default();
-        let p = policy(GroupAifConfig::default(), &[(0, 0), (1, 1)]);
-        p.begin_task(&demand(&workflow(&[
-            (Role::new(0), &[0]),
-            (Role::new(1), &[1]),
-        ])))
-        .unwrap();
-        let d = p.should_join(&a0, &coalition, &ctx);
+        let mut found = false;
+        'outer: for seed in 0..24u64 {
+            let map = roles_map(&[(0, 0), (1, 1), (2, 1)]);
+            let p = GroupAifPolicy::new(seed, cfg, map).unwrap();
+            let a0 = TestAgent { id: 0, caps: 0b001, trust: 50 };
+            let a1 = TestAgent { id: 1, caps: 0b010, trust: 50 };
+            let a2 = TestAgent { id: 2, caps: 0b100, trust: 50 };
+            let coalition: [&dyn AgentCapabilities; 2] = [&a1, &a2];
+            for t in 0..6 {
+                p.begin_task(&two_role).unwrap();
+                let d = p.should_join(&a0, &coalition, &ctx);
+                let s = *p.counters().agreement.last().unwrap();
+                if s.roster == 2 && s.votes_for_act == 1 {
+                    assert_eq!(
+                        d.score.to_bits(),
+                        0.0f64.to_bits(),
+                        "a 1-1 winner-set tie reads p(act) = 0.5 exactly"
+                    );
+                    assert!(!d.act, "SP3 must DECLINE the tie, not act on it");
+                    found = true;
+                    break 'outer;
+                }
+                let succ = [t % 2 == 0, t % 3 == 0, true, false, false, false, false, false];
+                p.observe_outcome(&succ);
+            }
+        }
         assert!(
-            !(d.score == 0.0 && d.act),
-            "a zero margin must never act (SP3 ties decline)"
+            found,
+            "no split vote occurred in the search space — the tie rule went untested, \
+             which is a vacuous pass and must fail instead"
         );
     }
 
@@ -1433,22 +1804,42 @@ mod tests {
         assert_eq!(once.distinct_len(), thrice.distinct_len());
         assert_eq!(thrice.multiplicity(Step::new(0, Role::new(0))), 3);
 
-        let run = |d: &Demand| {
+        let run = |channel, d: &Demand| {
             let p = policy(
                 GroupAifConfig {
-                    channel: PrecisionChannel::MultiplicityWeighted,
+                    channel,
                     ..GroupAifConfig::default()
                 },
                 &map,
             );
             p.begin_task(d).unwrap();
-            p.should_join(&a0, &coalition, &ctx).score.to_bits()
+            p.should_join(&a0, &coalition, &ctx).score
         };
+
+        // The CONTROL the previous version lacked (Amendment A5.10 L1-12): the two
+        // demands carry identical DISTINCT demand, so the base channel — which
+        // never reads multiplicity — must not distinguish them. Without this, the
+        // assertion below would also pass if the difference came from the demand.
+        assert_eq!(
+            run(PrecisionChannel::RoleRestricted, &once).to_bits(),
+            run(PrecisionChannel::RoleRestricted, &thrice).to_bits(),
+            "the role-restricted channel must be blind to occurrence multiplicity"
+        );
+
+        let m1 = run(PrecisionChannel::MultiplicityWeighted, &once);
+        let m3 = run(PrecisionChannel::MultiplicityWeighted, &thrice);
         assert_ne!(
-            run(&once),
-            run(&thrice),
+            m1.to_bits(),
+            m3.to_bits(),
             "multiplicity must reach the score; an inert channel is the failure \
              class this lineage keeps shipping"
+        );
+        // Amendment A5.8: and the SIGN is LESS willing, not more — concentration is
+        // evidence possessed, so a repeated step has less epistemic pull left.
+        assert!(
+            m3 < m1,
+            "SP2's measured sign: a repeated step must make the arm LESS willing to \
+             staff it (got {m3} at m = 3 vs {m1} at m = 1)"
         );
     }
 
@@ -1522,29 +1913,77 @@ mod tests {
             "r1 demanded twice, r0 and r2 once each"
         );
 
-        // A width-mismatched outcome is skipped WHOLE — it can neither inflate the
-        // ledger (surplus) nor be silently absorbed.
-        p.begin_task(&three_role_demand()).unwrap();
-        assert_eq!(p.observe_outcome(&[true; 3]), 0);
-        let c = p.counters();
-        assert_eq!(c.tasks_observed, 2, "a skipped task is not observed");
-        assert!(c.s_learn_exact());
-
-        // Non-vacuity guard: end-of-stream state differs from initialization.
+        // Non-vacuity guard: end-of-stream state differs from initialization, on
+        // EVERY model (Amendment A5.4 — `all`, not `any`).
         let fresh = policy(GroupAifConfig::default(), &[(0, 0), (1, 1), (2, 2)]);
-        let moved = p
-            .model_snapshots()
-            .into_iter()
-            .zip(fresh.model_snapshots())
-            .any(|((_, after), (_, before))| {
-                let (Some(a), Some(b)) = (after.pa, before.pa) else {
-                    return false;
-                };
-                a.iter()
-                    .zip(&b)
-                    .any(|(x, y)| (x - y).iter().any(|d| d.abs() > 1e-9))
-            });
-        assert!(moved, "the world models must actually have learned");
+        assert!(
+            models_moved(&p.model_snapshots(), &fresh.model_snapshots()),
+            "every world model must actually have learned"
+        );
+        assert!(
+            !models_moved(&fresh.model_snapshots(), &fresh.model_snapshots()),
+            "…and an unmoved model must NOT pass the guard"
+        );
+    }
+
+    /// S-learn (i) catches a real **deficit** — a task opened and never observed
+    /// (Amendment A5.4). The previous test claimed detectability and constructed
+    /// neither failure.
+    #[test]
+    fn s_learn_detects_a_deficit() {
+        let p = policy(GroupAifConfig::default(), &[(0, 0), (1, 1), (2, 2)]);
+        let succ = [true, true, true, false, false, false, false, false];
+
+        p.begin_task(&three_role_demand()).unwrap();
+        assert_eq!(p.observe_outcome(&succ), 3);
+        assert!(p.counters().s_learn_exact());
+
+        // Open a second task and observe it with the WRONG width, so the engine
+        // update is skipped whole while the task stream has already advanced.
+        p.begin_task(&three_role_demand()).unwrap();
+        assert_eq!(p.observe_outcome(&[true; 3]), 0, "a width mismatch applies nothing");
+
+        let c = p.counters();
+        assert!(
+            !c.s_learn_exact(),
+            "a task opened but not advanced is a DEFICIT and must be RUN-INVALID"
+        );
+        assert!(
+            c.model_updates.iter().all(|a| a.updates < a.expected),
+            "every model is short by exactly one: {:?}",
+            c.model_updates
+        );
+        assert_eq!(c.tasks_observed, 1, "the skipped task is not observed");
+        assert_eq!(c.roster_sizes.len(), 2, "…but it WAS opened");
+    }
+
+    /// S-learn (i) catches a real **surplus** — the MMP double-apply shape
+    /// (Amendment A5.4).
+    ///
+    /// This is the case the pre-A5.4 ledger could not see: `expected` was
+    /// incremented on the `observe_outcome` path immediately beside `updates`, so a
+    /// doubled observation advanced both and read exact. `expected` now comes from
+    /// `begin_task` alone.
+    #[test]
+    fn s_learn_detects_a_surplus() {
+        let p = policy(GroupAifConfig::default(), &[(0, 0), (1, 1), (2, 2)]);
+        let succ = [true, true, true, false, false, false, false, false];
+
+        p.begin_task(&three_role_demand()).unwrap();
+        assert_eq!(p.observe_outcome(&succ), 3);
+        // One task, observed twice — exactly the double-apply the gate exists for.
+        assert_eq!(p.observe_outcome(&succ), 3);
+
+        let c = p.counters();
+        assert!(
+            !c.s_learn_exact(),
+            "a doubled observation is a SURPLUS and must be RUN-INVALID"
+        );
+        for a in &c.model_updates {
+            assert_eq!((a.updates, a.expected), (2, 1), "{:?} advanced twice", a.label);
+        }
+        assert_eq!(c.tasks_observed, 2);
+        assert_eq!(c.roster_sizes.len(), 1, "only one task was ever opened");
     }
 
     /// The shared topology's ledger is per-task, not per-role — stated as a test so
@@ -1572,12 +2011,22 @@ mod tests {
         assert_eq!(c.model_updates[0].updates, 2);
     }
 
-    /// An `AifError` on the decision path declines and increments the upstream
-    /// decline counter — never a panic, never a silent fallback. Provoked by a
-    /// member whose replay window is the wrong width for its query, the one
-    /// engine rejection reachable without mutating upstream state.
+    /// A failing member yields an `AifError` at the group instead of a plausible
+    /// answer, and the read-only slot refuses to act.
+    ///
+    /// **Renamed from `upstream_error_declines_and_counts` (Amendment A5.10
+    /// L1-6).** That name promised something the test did not do: it never drove
+    /// the *policy*, so `count_upstream_decline` was never reached and
+    /// `declines_upstream` was never asserted. It is renamed rather than extended
+    /// because the policy-level path is **unreachable under every registered
+    /// configuration** — `begin_task` rejects out-of-range roles, `models.view`
+    /// therefore always resolves, `role_query`'s model is well-formed by
+    /// construction (normalized `A`/`B`/`D`, `C` in `(0, 1]`), and the replay
+    /// width always equals the modality count. The counter guards a real defect
+    /// class and stays; it simply cannot be provoked from outside, and saying so
+    /// beats a test that pretends otherwise.
     #[test]
-    fn upstream_error_declines_and_counts() {
+    fn a_failing_member_surfaces_as_an_engine_error_not_an_answer() {
         let mut member = {
             let arm = PersistentAifArm::new(3, v5_e1_base()).unwrap();
             let (query, _) = arm.role_query(0b011, 0b001, 0b011, 7, None).unwrap();
@@ -1587,6 +2036,8 @@ mod tests {
                 replay: vec![vec![NO_OBS; 5]],
                 modalities: 2,
                 last_vote: None,
+                last_weight: 0.0,
+                candidate_sensitive: true,
             }
         };
         let probs = <RoleMember as aif::InternalAgent>::action_probabilities(&mut member, 0);
@@ -1617,10 +2068,27 @@ mod tests {
             replay,
             modalities: 2,
             last_vote: None,
+            last_weight: 0.0,
+            candidate_sensitive: true,
         };
         assert!(matches!(
             <RoleMember as aif::Agent>::act(&mut ok, 0),
             Err(aif::AifError::Unsupported(_))
+        ));
+
+        // A5.10 L1-14: the one construction that IS rejected, so the arm cannot be
+        // built into a silently all-declining shape.
+        assert!(matches!(
+            GroupAifPolicy::new(
+                0,
+                GroupAifConfig {
+                    read: DecisionRead::SeededSampling,
+                    vote: GroupVote::Deterministic,
+                    ..GroupAifConfig::default()
+                },
+                roles_map(&[(0, 0)]),
+            ),
+            Err(GroupAifError::UnsupportedReadVote)
         ));
     }
 
@@ -1709,37 +2177,160 @@ mod tests {
         assert_eq!(GroupAifConfig::default().masks, CoverageMasks::RoleMatched);
     }
 
-    /// E-agree: one sample per successful deterministic read, carrying the
-    /// realised roster, the internals' own votes, and the mixture margin.
+    /// E-agree records one sample per read, and the sample carries the **A5.1**
+    /// measurement: how many internals the candidate reached, and what weight the
+    /// blind ones took.
+    ///
+    /// Rebuilt from `agreement_samples_track_every_read` (Amendment A5.10 L1-13),
+    /// whose two headline assertions compared a function to its own definition
+    /// (`unanimous()` against its body) or were trivially true (`votes ≤ roster`).
+    /// Every assertion below can fail on a real regression.
     #[test]
-    fn agreement_samples_track_every_read() {
+    fn agreement_samples_measure_candidate_reach() {
         let a0 = TestAgent { id: 0, caps: 0b001, trust: 50 };
         let a1 = TestAgent { id: 1, caps: 0b010, trust: 50 };
         let a2 = TestAgent { id: 2, caps: 0b100, trust: 50 };
         let coalition: [&dyn AgentCapabilities; 2] = [&a1, &a2];
         let ctx = DecisionContext { required_capabilities: 0b111 };
 
-        let p = policy(GroupAifConfig::default(), &[(0, 0), (1, 1), (2, 2)]);
-        p.begin_task(&three_role_demand()).unwrap();
-        let d = p.should_join(&a0, &coalition, &ctx);
+        // The candidate is role 0, and all three roles demand ⇒ exactly ONE
+        // candidate-sensitive internal out of three (A5.1's central claim).
+        let arm = policy(GroupAifConfig::default(), &[(0, 0), (1, 1), (2, 2)]);
+        arm.begin_task(&three_role_demand()).unwrap();
+        let decision = arm.should_join(&a0, &coalition, &ctx);
 
-        let c = p.counters();
-        assert_eq!(c.agreement.len(), 1, "one sample per successful read");
-        assert_eq!(c.agreement.len() as u64, c.reads);
-        let s = c.agreement[0];
+        let counters = arm.counters();
+        assert_eq!(counters.agreement.len(), 1, "one sample per successful read");
+        assert_eq!(
+            u64::try_from(counters.agreement.len()).unwrap(),
+            counters.reads
+        );
+        let s = counters.agreement[0];
         assert_eq!(s.roster, 3, "all three roles demanded");
-        assert!(s.votes_for_act <= s.roster);
+        assert_eq!(
+            s.candidate_sensitive, 1,
+            "under role-matched masks only the candidate's own role internal sees it"
+        );
+        assert_eq!(s.candidate_blind(), 2);
+        assert_eq!(
+            s.votes_for_act_sensitive + s.votes_for_act_blind,
+            s.votes_for_act,
+            "the split must partition the votes"
+        );
         assert!(
-            (s.margin - d.score.abs()).abs() < 1e-15,
+            (s.margin - decision.score.abs()).abs() < 1e-15,
             "the sample's margin is |p(act) − 0.5|"
         );
-        assert_eq!(s.unanimous(), s.votes_for_act == 0 || s.votes_for_act == 3);
+        // A5.1: the blind internals are not a rounding error in the mixture. Two of
+        // three maximally-confident members carry the majority of the weight.
+        assert!(
+            s.blind_weight_share > 0.5,
+            "the candidate-blind internals carry {:.3} of the CW weight — A5.1 \
+             predicts a majority, and a share near 0 would mean the hazard is not real",
+            s.blind_weight_share
+        );
+        assert!((0.0..=1.0).contains(&s.blind_weight_share));
+
+        // Move the candidate to a role NOT on the roster ⇒ ZERO candidate-sensitive
+        // internals, which is A5.1's ~41 % case.
+        let off_roster = policy(GroupAifConfig::default(), &[(0, 2), (1, 1), (2, 1)]);
+        off_roster
+            .begin_task(&demand(&workflow(&[
+                (Role::new(0), &[0]),
+                (Role::new(1), &[1]),
+            ])))
+            .unwrap();
+        let _ = off_roster.should_join(&a0, &coalition, &ctx);
+        let s = off_roster.counters().agreement[0];
+        assert_eq!(
+            s.candidate_sensitive, 0,
+            "a candidate of a non-rostered role reaches no internal at all"
+        );
+        assert!(
+            (s.blind_weight_share - 1.0).abs() < 1e-12,
+            "…and then the blind internals carry ALL of the weight"
+        );
 
         // A single-role task shrinks the roster, and the sample says so.
-        p.begin_task(&demand(&workflow(&[(Role::new(1), &[1])])))
+        arm.begin_task(&demand(&workflow(&[(Role::new(1), &[1])])))
             .unwrap();
+        let _ = arm.should_join(&a0, &coalition, &ctx);
+        assert_eq!(arm.counters().agreement[1].roster, 1);
+    }
+
+    /// **A5.1, the measurement itself:** with the candidate's role off the roster,
+    /// two candidates with *different capabilities* produce **bit-identical**
+    /// scores — the query carries no information about the candidate at all.
+    ///
+    /// This is the finding, not a defect: it is what "a group deliberating about
+    /// one candidate is structurally impossible under role-matched masks" means in
+    /// code, and it must stay visible if the mask rule is ever touched.
+    #[test]
+    fn a_non_rostered_candidate_is_invisible_to_the_group() {
+        let ctx = DecisionContext { required_capabilities: 0b111 };
+        // Roster is roles 0 and 1; both candidates are role 2, so neither reaches
+        // an internal under the registered masks. The coalition deliberately leaves
+        // bit 1 UNCOVERED, so a candidate holding it is decision-relevant to
+        // internal r1 the moment the masks stop filtering by role — without that
+        // the role-blind contrast below would be swamped by saturation.
+        let two_role = demand(&workflow(&[(Role::new(0), &[0]), (Role::new(1), &[1])]));
+        let anchor_a = TestAgent { id: 1, caps: 0b001, trust: 50 };
+        let anchor_b = TestAgent { id: 2, caps: 0b001, trust: 50 };
+        let coalition: [&dyn AgentCapabilities; 2] = [&anchor_a, &anchor_b];
+        let roles = [(0usize, 2u8), (1, 0), (2, 1)];
+
+        let run = |masks, caps: u32| {
+            let p = policy(
+                GroupAifConfig {
+                    masks,
+                    ..GroupAifConfig::default()
+                },
+                &roles,
+            );
+            p.begin_task(&two_role).unwrap();
+            let cand = TestAgent { id: 0, caps, trust: 50 };
+            p.should_join(&cand, &coalition, &ctx).score.to_bits()
+        };
+        assert_eq!(
+            run(CoverageMasks::RoleMatched, 0b010),
+            run(CoverageMasks::RoleMatched, 0b000),
+            "two candidates of a non-rostered role must read identically even when \
+             one of them covers a bit nobody else does — that IS A5.1"
+        );
+
+        // The contrast that makes it a measurement: role-BLIND masks do see them.
+        assert_ne!(
+            run(CoverageMasks::RoleBlind, 0b010),
+            run(CoverageMasks::RoleBlind, 0b000),
+            "role-blind masks DO carry the candidate, so the identity above is a \
+             property of the registered mask rule and not of this world"
+        );
+    }
+
+    /// The leave path's `cfg0 == cfg1` disclosure counts what A5.1 says it counts.
+    #[test]
+    fn leave_path_identical_masks_are_counted() {
+        let ctx = DecisionContext { required_capabilities: 0b111 };
+        let a0 = TestAgent { id: 0, caps: 0b001, trust: 50 };
+        let a1 = TestAgent { id: 1, caps: 0b010, trust: 50 };
+        let a2 = TestAgent { id: 2, caps: 0b100, trust: 50 };
+        let full: [&dyn AgentCapabilities; 3] = [&a0, &a1, &a2];
+
+        let p = policy(GroupAifConfig::default(), &[(0, 0), (1, 1), (2, 2)]);
+        p.begin_task(&three_role_demand()).unwrap();
+        let _ = p.should_leave(&a0, &full, &ctx);
+        let c = p.counters();
+        assert_eq!(c.leave_queries, 3, "one query per rostered role");
+        assert_eq!(
+            c.leave_queries_identical, 2,
+            "the two internals whose role is not the candidate's see cfg0 == cfg1"
+        );
+
+        // The join path contributes nothing to this counter.
+        p.begin_task(&three_role_demand()).unwrap();
+        let coalition: [&dyn AgentCapabilities; 2] = [&a1, &a2];
         let _ = p.should_join(&a0, &coalition, &ctx);
-        assert_eq!(p.counters().agreement[1].roster, 1);
+        assert_eq!(p.counters().leave_queries, 3, "joins are not leave queries");
     }
 
     /// `E-seed`: the seeded-sampling cell runs (upstream never calls a member's
@@ -1784,56 +2375,138 @@ mod tests {
         assert_eq!(ca.reads, 3);
     }
 
-    /// Amendment A3.1: the `grp-role-det` reference leg runs, stays RNG-free, and
-    /// reads a **vote tally** rather than a mixture — so SP3 over it is a majority
-    /// rule and its score is not commensurable with a CW margin.
+    /// Amendment A3.1 + **A5.6**: the `grp-role-det` reference leg runs, stays
+    /// RNG-free, and reads **uniform-over-winners** — support `{0, 0.5, 1}`, not
+    /// `k/R`.
+    ///
+    /// The previous assertion (`p_act == votes / roster`) was **vacuous**: it holds
+    /// *iff* the read is unanimous, and ~23 % are not. This version asserts the
+    /// support directly and **fails if it never sees a non-unanimous read**, so it
+    /// cannot pass by only exercising the easy case.
     #[test]
-    fn deterministic_vote_reads_a_tally_not_a_mixture() {
+    fn deterministic_vote_reads_uniform_over_winners() {
         let a0 = TestAgent { id: 0, caps: 0b001, trust: 50 };
         let a1 = TestAgent { id: 1, caps: 0b010, trust: 50 };
         let a2 = TestAgent { id: 2, caps: 0b100, trust: 50 };
         let coalition: [&dyn AgentCapabilities; 2] = [&a1, &a2];
         let ctx = DecisionContext { required_capabilities: 0b111 };
         let map = [(0usize, 0u8), (1, 1), (2, 2)];
+        // Novelty off so a non-unanimous read is reachable at all — see
+        // `novelty_off`. The winner-set arithmetic under test is independent of it.
         let cfg = GroupAifConfig {
             vote: GroupVote::Deterministic,
-            ..GroupAifConfig::default()
+            ..novelty_off()
         };
 
-        let run = |c: GroupAifConfig| {
-            let p = policy(c, &map);
+        let run = |seed: u64| {
+            let p = GroupAifPolicy::new(seed, cfg, roles_map(&map)).unwrap();
             let mut out = Vec::new();
-            for _ in 0..3 {
+            for t in 0..8 {
                 p.begin_task(&three_role_demand()).unwrap();
                 let d = p.should_join(&a0, &coalition, &ctx);
                 out.push((d.act, d.score.to_bits()));
-                p.observe_outcome(&[true, false, true, false, false, false, false, false]);
+                let succ = [t % 2 == 0, t % 3 == 0, true, false, false, false, false, false];
+                p.observe_outcome(&succ);
             }
             (out, p.counters())
         };
-        let (a, ca) = run(cfg);
-        let (b, _) = run(cfg);
-        assert_eq!(a, b, "the discrete read must be RNG-free too");
+        let (a, ca) = run(11);
+        let (b, _) = run(4_242_424_242);
+        assert_eq!(
+            a, b,
+            "the discrete read is RNG-free too — shown by seed invariance"
+        );
         assert_eq!(ca.declines_upstream, 0, "the discrete read must not error");
 
-        // Every score is a tally distance `|k/R − 0.5|` over the realised roster,
-        // NOT a continuous margin. At R = 3 the tally lives on {0, ⅓, ⅔, 1}.
-        for (sample, (_, bits)) in ca.agreement.iter().zip(a.iter()) {
+        // A5.6: `vote_distribution`'s Deterministic branch is uniform mass over the
+        // max-count winner set, so at n_actions = 2 the read is exactly one of
+        // {0, 0.5, 1} — never k/R.
+        let mut saw_split = false;
+        for (sample, (act, bits)) in ca.agreement.iter().zip(a.iter()) {
             let p_act = f64::from_bits(*bits) + 0.5;
-            #[allow(clippy::cast_precision_loss)]
-            let expected = sample.votes_for_act as f64 / sample.roster as f64;
             assert!(
-                (p_act - expected).abs() < 1e-12,
-                "the discrete read is the vote tally: got {p_act}, votes {}/{}",
-                sample.votes_for_act,
-                sample.roster
+                [0.0f64, 0.5, 1.0].iter().any(|v| (p_act - v).abs() < 1e-12),
+                "the discrete read must land on {{0, 0.5, 1}}, got {p_act}"
             );
+            // …and SP3 over that support is "winners == {act}", i.e. strict majority.
+            let majority = sample.votes_for_act * 2 > sample.roster;
+            assert_eq!(
+                *act, majority,
+                "act ⇔ strict majority: {} of {} voted act, read {p_act}",
+                sample.votes_for_act, sample.roster
+            );
+            if !sample.unanimous() {
+                saw_split = true;
+                // The case the old assertion silently skipped: k/R would be ⅓ or ⅔
+                // here, and the read is not.
+                assert!(
+                    (p_act - 0.0).abs() < 1e-12
+                        || (p_act - 0.5).abs() < 1e-12
+                        || (p_act - 1.0).abs() < 1e-12,
+                    "non-unanimous read must still be uniform-over-winners, got {p_act}"
+                );
+            }
         }
+        assert!(
+            saw_split,
+            "every read was unanimous, so the k/R-versus-winner-set distinction went \
+             untested — the exact vacuity A5.6 flagged"
+        );
 
         // …and the registered default is still `CertaintyWeighted` (D2 stands).
         assert_eq!(
             GroupAifConfig::default().vote,
             GroupVote::CertaintyWeighted
+        );
+    }
+
+    /// **X-identity's alignment conjunct (Amendment A5.10 L2-16).** SP2's scale
+    /// vector must be indexed by the query's modality order — `set_bits(required_r)`
+    /// — and the `m ≡ 1` identity structurally cannot see a permutation, because
+    /// every entry is 1 there.
+    ///
+    /// Asked directly: one internal carrying two modalities whose multiplicities
+    /// **differ**, with the assignment swapped between them. A scale indexed by
+    /// anything else reads the two identically.
+    #[test]
+    fn sp2_scale_is_indexed_by_modality_order() {
+        let ctx = DecisionContext { required_capabilities: 0b111 };
+        let cfg = GroupAifConfig {
+            channel: PrecisionChannel::MultiplicityWeighted,
+            ..GroupAifConfig::default()
+        };
+        // Role 0 carries bits 0 and 2 with multiplicities (1, 3) then (3, 1);
+        // role 1 carries bit 1 throughout.
+        let a = demand(&workflow(&[
+            (Role::new(0), &[0, 2, 2, 2]),
+            (Role::new(1), &[1]),
+        ]));
+        let b = demand(&workflow(&[
+            (Role::new(0), &[0, 0, 0, 2]),
+            (Role::new(1), &[1]),
+        ]));
+        assert_eq!(a.multiplicity(Step::new(0, Role::new(0))), 1);
+        assert_eq!(a.multiplicity(Step::new(2, Role::new(0))), 3);
+        assert_eq!(b.multiplicity(Step::new(0, Role::new(0))), 3);
+        assert_eq!(b.multiplicity(Step::new(2, Role::new(0))), 1);
+
+        // The candidate covers only ONE of role 0's two bits. Full coverage would
+        // saturate the read to `p(act) = 1.0` in both arrangements (A5.1) and the
+        // probe would report a false FAIL — measured, not guessed: with
+        // `caps = 0b101` both reads are exactly `0.5` score bits.
+        let cand = TestAgent { id: 0, caps: 0b001, trust: 50 };
+        let other = TestAgent { id: 1, caps: 0b010, trust: 50 };
+        let coalition: [&dyn AgentCapabilities; 1] = [&other];
+        let read = |d: &Demand| {
+            let p = policy(cfg, &[(0, 0), (1, 1)]);
+            p.begin_task(d).expect("the demand is inside the universe");
+            p.should_join(&cand, &coalition, &ctx).score.to_bits()
+        };
+        assert_ne!(
+            read(&a),
+            read(&b),
+            "permuting which bit carries which multiplicity must move the read; if it \
+             does not, the scale is not aligned with `set_bits(required_r)` order"
         );
     }
 

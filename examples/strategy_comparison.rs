@@ -110,13 +110,14 @@ use koalisi::algorithms::{
 };
 use koalisi::decision::{
     AifDecisionPolicy, AifMmDecisionPolicy, CoalitionDecisionPolicy, CouplingModel, Decision,
-    DecisionContext, MagnitudePolicy, PersistentAifArm, PersistentAifConfig, PersistentAifState,
-    RoleId, RoleModulation, ThresholdPolicy, TrialBoundary,
+    DecisionContext, MagnitudePolicy, PersistentAifArm, PersistentAifConfig, RoleId, RoleModulation,
+    ThresholdPolicy, TrialBoundary,
 };
 // Part 11 (koalisi #78) EQ5b: the role-slotted group arm and its instrumentation.
 use koalisi::decision::{
-    AgreementSample, CoverageMasks, DecisionRead, GroupAifConfig, GroupAifCounters, GroupAifPolicy,
-    GroupVote, ModelLabel, PrecisionChannel, WorldModelTopology,
+    AgreementSample, CoverageMasks, DecisionRead, GroupAifConfig, GroupAifCounters, GroupAifError,
+    GroupAifPolicy, GroupVote, PrecisionChannel, S_LEARN_VACUITY_TOL, WorldModelTopology,
+    models_moved, v5_e1_base,
 };
 // Part 7 (koalisi #69) EQ3 instrumentation surface + the upstream certificate /
 // factorization enums it reports. Feature-gated exactly like the `mag-eq3` arm.
@@ -11010,10 +11011,6 @@ const P11_SEED_END: u64 = 360;
 const P11_HG_FACTOR: f64 = 1.25;
 /// H-G conjunct 2 (D6).
 const P11_HG_SUPERIOR_MIN: usize = 18;
-/// S-learn (i)'s pinned non-vacuity tolerance: a world model must differ from its
-/// initialization by more than this on some Dirichlet count. **Necessary, and
-/// explicitly not sufficient** — the counted ledger is the gate.
-const P11_VACUITY_TOL: f64 = 1e-9;
 /// Report date for the Part 11 battery, stamped per committed run.
 const P11_REPORT_DATE: &str = "2026-08-08";
 
@@ -11107,29 +11104,15 @@ struct P11GroupRun {
     latencies: Vec<f64>,
     /// Per-seed counters — the S-learn ledger and the A1.3 / E-agree disclosures.
     counters: Vec<GroupAifCounters>,
-    /// Per-seed non-vacuity: did any world model move off its initialization?
+    /// Per-seed non-vacuity: did **every** world model move off its
+    /// initialization? `all`, not `any` (Amendment A5.4), and evaluated by the
+    /// library's own [`models_moved`] at the prereg-pinned
+    /// [`S_LEARN_VACUITY_TOL`] — there is no second implementation.
     moved: Vec<bool>,
     /// `begin_task` rejections. Nonzero means the world and the arm disagree about
-    /// roles or the universe — a harness fault, gated rather than reported.
+    /// roles or the universe — a harness fault, and a **registered** RUN-INVALID
+    /// condition since Amendment A5.10 L2-11.
     begin_failures: usize,
-}
-
-/// Whether any world model moved off a freshly-constructed one by more than
-/// [`P11_VACUITY_TOL`] on some pA count — S-learn (i)'s non-vacuity guard.
-fn p11_models_moved(
-    after: &[(ModelLabel, PersistentAifState)],
-    before: &[(ModelLabel, PersistentAifState)],
-) -> bool {
-    after
-        .iter()
-        .zip(before.iter())
-        .any(|((_, a), (_, b))| match (a.pa.as_ref(), b.pa.as_ref()) {
-            (Some(x), Some(y)) => x
-                .iter()
-                .zip(y.iter())
-                .any(|(p, q)| (p - q).iter().any(|d| d.abs() > P11_VACUITY_TOL)),
-            _ => false,
-        })
 }
 
 /// Run one group-arm cell over the shared instances, honouring the harness
@@ -11140,18 +11123,25 @@ fn p11_models_moved(
 /// task by the frozen runner, immediately before that task's join pass. A
 /// declined task (`decl.failed`) short-circuits before the factory, so it opens no
 /// task and observes no outcome; the two counts stay consistent by construction.
+///
+/// # Errors
+///
+/// Propagates a [`GroupAifError`] from arm construction (Amendment A5.10 L1-16 —
+/// the branch is genuinely reachable, so it is returned rather than `expect`ed
+/// behind a message that states no invariant).
 fn p11_group_battery(
     insts: &[WorkflowInstance],
     declared: &[Vec<P9Declared>],
     config: GroupAifConfig,
     seed_start: u64,
-) -> P11GroupRun {
+) -> Result<P11GroupRun, GroupAifError> {
     // Discarded warm-up on the first instance, as everywhere else in this file.
     if let (Some(first), Some(first_decl)) = (insts.first(), declared.first()) {
-        let policy = Arc::new(
-            GroupAifPolicy::new(seed_start, config, p11_role_map(first))
-                .expect("group arm construction"),
-        );
+        let policy = Arc::new(GroupAifPolicy::new(
+            seed_start,
+            config,
+            p11_role_map(first),
+        )?);
         let make = |t: usize| {
             let _ = policy.begin_task(&first_decl[t].demand);
             Box::new(P11Handle(Arc::clone(&policy))) as Box<dyn CoalitionDecisionPolicy>
@@ -11177,12 +11167,9 @@ fn p11_group_battery(
     for (i, (inst, decl)) in insts.iter().zip(declared.iter()).enumerate() {
         let seed = seed_start + i as u64;
         let roles = p11_role_map(inst);
-        let policy = Arc::new(
-            GroupAifPolicy::new(seed, config, roles.clone()).expect("group arm construction"),
-        );
+        let policy = Arc::new(GroupAifPolicy::new(seed, config, roles.clone())?);
         // The initialization reference for S-learn (i)'s non-vacuity guard.
-        let fresh =
-            GroupAifPolicy::new(seed, config, roles).expect("group arm construction (reference)");
+        let fresh = GroupAifPolicy::new(seed, config, roles)?;
 
         // `Cell` because `P9Arm::PerTask` takes `&dyn Fn`, not `&dyn FnMut`.
         let failures = std::cell::Cell::new(0usize);
@@ -11203,20 +11190,20 @@ fn p11_group_battery(
         );
         begin_failures += failures.get();
         counters.push(policy.counters());
-        moved.push(p11_models_moved(
+        moved.push(models_moved(
             &policy.model_snapshots(),
             &fresh.model_snapshots(),
         ));
         seeds.push(result);
     }
 
-    P11GroupRun {
+    Ok(P11GroupRun {
         seeds,
         latencies: lat,
         counters,
         moved,
         begin_failures,
-    }
+    })
 }
 
 /// One confirmatory cell's H-G reading (D6) — both conjuncts, always computed.
@@ -11285,29 +11272,119 @@ fn p11_roster_histogram(run: &P11GroupRun) -> ([usize; 4], u64, usize) {
     (hist, empty, tasks)
 }
 
-/// E-agree over a cell: `(unanimity rate, margin p25/median/p75)`.
-fn p11_agreement(run: &P11GroupRun) -> (f64, [f64; 3], usize) {
+/// The A1.3 roster disclosure **per seed**, as registered (Amendment A5.10 L2-8):
+/// one `(mean roster, empty slots)` pair per seed, in seed order.
+fn p11_roster_per_seed(run: &P11GroupRun) -> Vec<(f64, u64)> {
+    run.counters
+        .iter()
+        .map(|c| {
+            let n = c.roster_sizes.len();
+            let mean = if n == 0 {
+                0.0
+            } else {
+                mean_of(c.roster_sizes.iter().map(|&s| count_as_f64(s)))
+            };
+            (mean, c.empty_role_slots)
+        })
+        .collect()
+}
+
+/// A count as an `f64`, so the harness's lossy conversions have one site. Roster
+/// sizes, vote counts and task counts are all single- or double-digit here.
+fn count_as_f64(n: usize) -> f64 {
+    #[allow(clippy::cast_precision_loss)]
+    {
+        n as f64
+    }
+}
+
+fn mean_of(xs: impl Iterator<Item = f64>) -> f64 {
+    let mut n = 0usize;
+    let mut sum = 0.0f64;
+    for x in xs {
+        n += 1;
+        sum += x;
+    }
+    if n == 0 { 0.0 } else { sum / count_as_f64(n) }
+}
+
+/// Everything E-agree and A5.1 need from one cell's samples.
+struct P11Agree {
+    samples: usize,
+    unanimity: f64,
+    margin: [f64; 3],
+    /// A5.1: decisions with **no** candidate-sensitive internal at all.
+    zero_sensitive_rate: f64,
+    /// A5.1: mean count of candidate-blind internals per decision.
+    mean_blind: f64,
+    /// A5.1: mean share of the CW mixture weight those blind internals carry.
+    mean_blind_weight: f64,
+    /// E-agree split (A5.1): act-vote rate among candidate-sensitive internals…
+    act_rate_sensitive: Option<f64>,
+    /// …and among candidate-blind ones. A5.1 predicts this near 1.0.
+    act_rate_blind: Option<f64>,
+}
+
+/// E-agree over a cell, including the A5.1 candidate-reach disclosures.
+fn p11_agreement(run: &P11GroupRun) -> P11Agree {
     let samples: Vec<AgreementSample> = run
         .counters
         .iter()
         .flat_map(|c| c.agreement.iter().copied())
         .collect();
     if samples.is_empty() {
-        return (0.0, [0.0; 3], 0);
+        return P11Agree {
+            samples: 0,
+            unanimity: 0.0,
+            margin: [0.0; 3],
+            zero_sensitive_rate: 0.0,
+            mean_blind: 0.0,
+            mean_blind_weight: 0.0,
+            act_rate_sensitive: None,
+            act_rate_blind: None,
+        };
     }
+    let n = count_as_f64(samples.len());
     let unanimous = samples.iter().filter(|s| s.unanimous()).count();
+    let zero_sensitive = samples.iter().filter(|s| s.candidate_sensitive == 0).count();
     let mut margins: Vec<f64> = samples.iter().map(|s| s.margin).collect();
     margins.sort_by(f64::total_cmp);
-    (
-        unanimous as f64 / samples.len() as f64,
-        [
+
+    let sensitive_total: usize = samples.iter().map(|s| s.candidate_sensitive).sum();
+    let sensitive_acts: usize = samples.iter().map(|s| s.votes_for_act_sensitive).sum();
+    let blind_total: usize = samples.iter().map(AgreementSample::candidate_blind).sum();
+    let blind_acts: usize = samples.iter().map(|s| s.votes_for_act_blind).sum();
+
+    P11Agree {
+        samples: samples.len(),
+        unanimity: count_as_f64(unanimous) / n,
+        margin: [
             percentile(&margins, 0.25),
             percentile(&margins, 0.5),
             percentile(&margins, 0.75),
         ],
-        samples.len(),
-    )
+        zero_sensitive_rate: count_as_f64(zero_sensitive) / n,
+        mean_blind: mean_of(samples.iter().map(|s| count_as_f64(s.candidate_blind()))),
+        mean_blind_weight: mean_of(samples.iter().map(|s| s.blind_weight_share)),
+        act_rate_sensitive: (sensitive_total > 0)
+            .then(|| count_as_f64(sensitive_acts) / count_as_f64(sensitive_total)),
+        act_rate_blind: (blind_total > 0)
+            .then(|| count_as_f64(blind_acts) / count_as_f64(blind_total)),
+    }
 }
+
+/// The A5.1 leave-path `cfg0 == cfg1` rate over a cell.
+fn p11_identical_leave_rate(run: &P11GroupRun) -> (u64, u64) {
+    run.counters.iter().fold((0, 0), |(q, i), c| {
+        (q + c.leave_queries, i + c.leave_queries_identical)
+    })
+}
+
+/// How many decisions of a cell were acts — the A5.8 measured-sign disclosure.
+fn p11_act_count(rs: &[P9Seed]) -> usize {
+    rs.iter().map(|s| s.acts.iter().filter(|a| **a).count()).sum()
+}
+
 
 fn p11_table_head() {
     println!(
@@ -11335,6 +11412,67 @@ fn p11_row(label: &str, role: &str, rs: &[P9Seed], base: &[P9Seed], lat: &[f64])
     );
 }
 
+/// X-identity's alignment conjunct (Amendment A5.10 L2-16): is SP2's scale vector
+/// indexed by the query's modality order, or could it be permuted?
+///
+/// The `m ≡ 1` identity cannot see this — every entry is 1 there, so any
+/// permutation is the identity permutation. Asked directly instead: build two
+/// demands that are the same multiset of `(bit, multiplicity)` pairs with the
+/// **assignment swapped**, and require the multiplicity channel to distinguish
+/// them. A scale indexed by anything other than `set_bits(required_r)` order would
+/// read them identically.
+///
+/// Two conditions the fixture has to meet, both learned by measurement rather than
+/// assumed. The candidate's own internal must carry **two** modalities with
+/// **different** multiplicities — one modality has nothing to permute against. And
+/// it must be only **partially** covered: at full coverage the read saturates to
+/// `p(act) = 1.0` in both arrangements (A5.1) and the probe reports a false FAIL.
+/// Mirrors the library's `sp2_scale_is_indexed_by_modality_order`.
+fn p11_scale_alignment_is_bit_ordered() -> bool {
+    let cfg = GroupAifConfig {
+        channel: PrecisionChannel::MultiplicityWeighted,
+        base: v5_e1_base(),
+        ..GroupAifConfig::default()
+    };
+    let roles: HashMap<usize, Role> = [(0usize, Role::new(0)), (1, Role::new(1))]
+        .into_iter()
+        .collect();
+    // Role 0 demands bits 0 and 2 with multiplicities (1, 3), then (3, 1); role 1
+    // demands bit 1 and is held fixed. Built with the same `chain`/`step_expr`/
+    // `p9_pin` primitives the Part 9 shape draw uses.
+    let two_leg = |r0_bits: &[u8]| {
+        let expr = |role: Role, bits: &[u8]| {
+            let parts: Vec<PropExpr<WorkflowGen>> = bits
+                .iter()
+                .map(|&b| step_expr(Step::new(b, role)))
+                .collect();
+            chain(parts).expect("invariant: same-role 1 -> 1 steps compose")
+        };
+        p9_pin(vec![
+            (Role::new(0), expr(Role::new(0), r0_bits)),
+            (Role::new(1), expr(Role::new(1), &[1])),
+        ])
+    };
+    let a = demand(&two_leg(&[0, 2, 2, 2]));
+    let b = demand(&two_leg(&[0, 0, 0, 2]));
+    let read = |d: &Demand| {
+        let Ok(p) = GroupAifPolicy::new(7, cfg, roles.clone()) else {
+            return None;
+        };
+        p.begin_task(d).ok()?;
+        // Partial coverage on purpose — see the doc comment.
+        let cand = Worker { id: 0, caps: 0b001, trust: 50 };
+        let other = Worker { id: 1, caps: 0b010, trust: 50 };
+        let coalition: [&dyn AgentCapabilities; 1] = [&other];
+        let ctx = DecisionContext { required_capabilities: 0b111 };
+        Some(p.should_join(&cand, &coalition, &ctx).score.to_bits())
+    };
+    match (read(&a), read(&b)) {
+        (Some(x), Some(y)) => x != y,
+        _ => false,
+    }
+}
+
 /// The three pre-committed verdict labels (§6), printed verbatim.
 fn p11_verdict(gates_ok: bool, hg_ok: bool) -> &'static str {
     if !gates_ok {
@@ -11356,10 +11494,22 @@ fn p11_verdict(gates_ok: bool, hg_ok: bool) -> &'static str {
 /// registered surface and are gated like the confirmatory pair.
 const P11_READ_PROBE: &str = "read-probe";
 
-/// The seven registered group cells, in report order.
-fn p11_cells() -> [(&'static str, &'static str, GroupAifConfig); 7] {
+/// The eight registered group cells, in report order.
+///
+/// **Leg names (Amendment A5.10 L2-17 / L3-9):** the shared-model references were
+/// registered as `grp-role-fresh` / `grp-mult-fresh`, naming *member freshness* —
+/// a referent Amendment A1.1 **superseded** when it relocated D2a's contrast to
+/// world-model topology and made members single-use on every leg. §3's rows are
+/// struck; the legs are **`grp-role-shared` / `grp-mult-shared`**, which names what
+/// actually varies.
+///
+/// The base is the library's [`v5_e1_base`], not the harness's `e1_config()`
+/// (A5.10 L2-14): two definitions of "the v5 E1 base" existed and the battery used
+/// the local one. They are field-for-field identical — asserted in the smoke test
+/// — and the library's is now the single source.
+fn p11_cells() -> [(&'static str, &'static str, GroupAifConfig); 8] {
     let base = GroupAifConfig {
-        base: e1_config(),
+        base: v5_e1_base(),
         ..GroupAifConfig::default()
     };
     [
@@ -11373,7 +11523,7 @@ fn p11_cells() -> [(&'static str, &'static str, GroupAifConfig); 7] {
             },
         ),
         (
-            "grp-role-fresh",
+            "grp-role-shared",
             "reference",
             GroupAifConfig {
                 topology: WorldModelTopology::Shared,
@@ -11381,7 +11531,7 @@ fn p11_cells() -> [(&'static str, &'static str, GroupAifConfig); 7] {
             },
         ),
         (
-            "grp-mult-fresh",
+            "grp-mult-shared",
             "reference",
             GroupAifConfig {
                 topology: WorldModelTopology::Shared,
@@ -11394,6 +11544,22 @@ fn p11_cells() -> [(&'static str, &'static str, GroupAifConfig); 7] {
             "reference",
             GroupAifConfig {
                 masks: CoverageMasks::RoleBlind,
+                ..base
+            },
+        ),
+        // S-learn (iii), Amendment A5.3: registered in §5, retained by A1.4, and
+        // absent from the harness until now. It is the only instrument tying EQ5b
+        // to the v5 mechanism it claims to inherit — and A5.1 sharpens it, since
+        // novelty-off collapses the candidate-blind read 1.0 → 0.5 and therefore
+        // prices that bias directly.
+        (
+            "grp-role-nonov",
+            "reference",
+            GroupAifConfig {
+                base: PersistentAifConfig {
+                    query_novelty: false,
+                    ..v5_e1_base()
+                },
                 ..base
             },
         ),
@@ -11421,19 +11587,28 @@ fn part11_eq5b_typed_two_engine() {
     println!("# koalisi #78 — Part 11: the typed two-engine contest (REGISTERED)");
     println!();
     println!(
-        "_governed by `docs/prereg-K4-eq5b-typed-two-engine.md` **including Amendments 1 and 2** (committed BEFORE this code; design-lock of record [koalisi #78](https://github.com/sustia-llc/koalisi/issues/78)). Report date {P11_REPORT_DATE}. Seeds **{P11_SEED_START}..{P11_SEED_END}** (fresh; 90..120 and 150..180 stay reserved). **H-G (confirmatory):** an active-inference engine deciding as a group of role specialists — `aif::GroupAgent`, R = 3 role internals over arm-E1's persistent world model, `CertaintyWeighted` active slot, `n_actions = 2` — beats the EQ4-validated typed magnitude arm staffing the same workflows. The control is that validated arm, so EQ5b cannot re-harvest EQ4's margin; the decision criterion is identical in FORM to arm-E1's (SP3), so a win is attributable to the engine SHAPE and not to a re-tuned threshold._"
+        "_governed by `docs/prereg-K4-eq5b-typed-two-engine.md` **including Amendments 1–5** (committed BEFORE this code; design-lock of record [koalisi #78](https://github.com/sustia-llc/koalisi/issues/78)). Report date {P11_REPORT_DATE}. Seeds **{P11_SEED_START}..{P11_SEED_END}** (fresh; 90..120 and 150..180 stay reserved). **H-G (confirmatory):** an active-inference engine deciding over role-restricted coverage queries — `aif::GroupAgent`, R ≤ 3 role internals over arm-E1's persistent world model, `CertaintyWeighted` active slot, `n_actions = 2` — beats the EQ4-validated typed magnitude arm staffing the same workflows. The control is that validated arm, so EQ5b cannot re-harvest EQ4's margin._"
     );
     println!();
     println!(
-        "_**What Amendment 1 changed, and why it matters for reading this table.** The arm as first registered was unbuildable: SP1's arm-E1 query construction bakes the per-decision candidate into each member's matrices, while `POMDPAgent` exposes no setter for `A`/`B`/`C`/`D` and `GroupAgent` no way to replace a member — so D2a's \"persistent internals\" and SP1 were mutually exclusive. A1.1 relocates D2a's contrast from member continuity to **world-model topology**: confirmatory cells own **R = 3 role-specialised** persistent models, the reference cells read **one shared** model through three role-restricted views. Members are single-use on every leg, **D4a is struck** (there is nothing for a commit to advance), and the MMP double-update hazard of gotcha 32 is thereby DESIGNED OUT rather than gated — which is why S-learn below is thinner than the 2026-08-08 correction described, and that is recorded rather than quietly shipped._"
+        "_**READ THIS BEFORE THE TABLE — Amendment A5.1, the review's central finding.** This arm is **not** \"a group of role specialists deliberating about a candidate\". It is **a group of role-restricted coverage queries, of which only the candidate's own role internal is candidate-sensitive; the remainder vote on their role's coalition coverage.** Under A2.1's registered role-matched masks the candidate's capabilities reach only its own role's internal, so for every other internal `cfg0 == cfg1` **exactly** on the leave path and the candidate appears in neither mask on the join path — measured, two candidates of a non-rostered role produce **bit-identical scores**. **And the blind internals do not abstain:** `run_replay` records control 0 before every observation, so only the membership-0 columns of `pA` accumulate, A-novelty rewards switching, and indifference resolves to `p(act) = 1.0` at **zero entropy — the MAXIMUM `CertaintyWeighted` weight**. A1.3's `[0.5, 0.5]`-at-weight-0.5 rationale is **WITHDRAWN as measurably false and inverted in sign**; its decision to drop empty-demand roles stands. **The arm is NOT re-specified**: restricting the roster to candidate-sensitive internals would force R = 1 on every decision, i.e. under role-matched masks a group deliberating about one candidate is structurally impossible — and that IS the finding. It is disclosed and measured below, per cell._"
     );
     println!();
     println!(
-        "_**Amendment 3**, made with off-block smoke visible and recorded as such: D2 pinned `CertaintyWeighted` as **forced** because only it was thought to carry a continuous margin at R ≤ 3 over 2 actions. **That premise is measured false on this world** — the E-agree margin median sits at 0.5, so the mixture is itself a delta and SP3's threshold is never contested. The mechanism is gotcha 25's saturation one level up: arm-E1's query posteriors saturate at ±0.5, the internals inherit it, and a confidence-weighted mixture of near-deterministic members is near-deterministic. **The confirmatory cells are NOT re-specified** — that would be post-hoc instrument re-targeting on smoke data, refused at EQ5a A5.2. Instead the cost of the error is MEASURED, by the non-gating `grp-role-det` leg. A3.2 additionally promotes a `grp-mult` vs `grp-role` act-and-score-bit line to a mandatory disclosure: if the two cells agree on acts and differ only on score bits, `grp-mult` carries no independent look, and a 2-cell bar over one effective look is conservative — so the bar does not move._"
+        "_**Amendment 1**: the arm as first registered was unbuildable — SP1's arm-E1 query construction bakes the per-decision candidate into each member's matrices, while `POMDPAgent` exposes no setter for `A`/`B`/`C`/`D` and `GroupAgent` no way to replace a member, so D2a's \"persistent internals\" and SP1 were mutually exclusive. A1.1 relocates D2a's contrast from member continuity to **world-model topology**: confirmatory cells own **R = 3 role-specialised** persistent models, the reference cells read **one shared** model through three role-restricted views. Members are single-use on every leg, **D4a is struck** (there is nothing for a commit to advance), and the MMP double-update hazard of gotcha 32 is DESIGNED OUT rather than gated — which is why S-learn below is thinner than the 2026-08-08 correction described. **Amendment 2**: the coverage masks are registered **role-matched** (the world's own `p9_step_covered` is role-matched), with `grp-role-blind` as a single non-gating reference isolating that mechanism, and SP3 applies **uniformly to join and leave** — this arm declines on a tie where arm-E1 leaves on one._"
     );
     println!();
     println!(
-        "_**Amendment 2**: the query's coverage masks are registered **role-matched** (the world's own `p9_step_covered` is role-matched, and role-blind masks would leave the three internals differing only in `required_r` — specialists in name only), with `grp-role-blind` as a single non-gating reference isolating that mechanism. SP3 applies **uniformly to join and leave**, so this arm declines on a tie where arm-E1 leaves on one — disclosed, not discovered. And SP2 moves **concentration only**: the scale multiplies the whole modality pA block and `A ≡ column_normalize(pA)` is invariant under a positive uniform scale, so multiplicity reaches the decision purely through the **novelty / parameter-information-gain** term — v5's own validated mechanism (X1: novelty-off collapses E1 to ≈ scalar)._"
+        "_**Amendment 3**, made with off-block smoke visible and recorded as such: D2 pinned `CertaintyWeighted` as **forced** because only it was thought to carry a continuous margin at R ≤ 3 over 2 actions. **That premise is measured false on this world** — the E-agree margin median sits at 0.5, so the mixture is itself a delta and SP3's threshold is never contested. Two sources, and **A5.1 corrects which dominates**: the group propagates arm-E1's inherited gotcha-25 saturation **and adds a second source** — an internal whose two coverage configurations are identical is not undecided but maximally confident for \"act\" — and **on this roster the second source is the larger one**. **The confirmatory cells are NOT re-specified** (post-hoc instrument re-targeting, refused at EQ5a A5.2); the cost is MEASURED by the non-gating `grp-role-det` leg. **Amendment 4** replaces A3.1's expectation that `grp-role-det` would land near `grp-role`: saturated *members* do not make a confidence-weighted mixture and a winner-set vote agree, because CW weights by `exp(−H)` while the tally is one-member-one-vote — which at R = 2 makes SP3 a **unanimity** rule. A3.2 promotes a `grp-mult` vs `grp-role` act-and-score-bit line to a **mandatory** disclosure._"
+    );
+    println!();
+    println!(
+        "_**Amendment 5 — the 3-lens review**: five blocking, ~15 important, ~30 minor findings, every one dispositioned. Beyond A5.1 above: **A5.2** adds a pre-committed scoped claim against `arm-E1`, the single-agent shape of the very engine this wraps, recorded at 1.62× magnitude in v5 and run here on identical instances. **A5.3** implements S-learn (iii) as the non-gating `grp-role-nonov` cell. **A5.4** repairs S-learn (i): the tolerance is prereg-pinned at {tol:e}, `expected` is re-derived independently from the task stream so a **surplus** is reachable at all, and the non-vacuity guard is per-model `all` rather than `any`. **A5.5** relabels S-live a disclosure — as implemented it cannot fail. **A5.6** corrects the `Deterministic` read to uniform-over-winners `{{0, 0.5, 1}}`. **A5.7** withdraws A2.3's \"purely\": with novelty off the read still moves (`0.500000000 → 0.500002287`), because `update_a` re-derives `A` after an unscaled `η·joint`, so SP2 moves concentration **predominantly**, not purely. **A5.8**: SP2's registered sign is **BACKWARDS** — concentration is evidence **possessed**, so higher multiplicity means **less** epistemic pull, and a repeated step makes the arm markedly **less** willing to staff it (`p(act)` `0.999999991 → 0.501759150` as `m` goes 1 → 3); the word \"demand\" is withdrawn and the mechanism is unchanged. **A5.9**: \"changes the engine, not the criterion\" is narrowed — three things differ from arm-E1, so EQ5b changes the engine **and the aggregation**, and only the threshold is held fixed._",
+        tol = S_LEARN_VACUITY_TOL
+    );
+    println!();
+    println!(
+        "_**Smoke disclosure (A5.10 L2-20), stated plainly rather than as an aside:** Amendments 3, 4 and 5 were all written with off-block smoke showing the confirmatory cell **apparently passing** — `grp-role` at 1.379× on 2 seeds, above conjunct 1's bar. None of them moves the bar, adds a confirmatory cell, or re-specifies the arm; the reader is entitled to know they were made with a favourable number visible._"
     );
     println!();
 
@@ -11467,7 +11642,10 @@ fn part11_eq5b_typed_two_engine() {
     let cells = p11_cells();
     let runs: Vec<P11GroupRun> = cells
         .iter()
-        .map(|(_, _, cfg)| p11_group_battery(&insts, &declared, *cfg, P11_SEED_START))
+        .map(|(label, _, cfg)| {
+            p11_group_battery(&insts, &declared, *cfg, P11_SEED_START)
+                .unwrap_or_else(|e| panic!("group cell `{label}` failed to construct: {e}"))
+        })
         .collect();
     let named = |label: &str| -> &P11GroupRun {
         let i = cells
@@ -11478,9 +11656,10 @@ fn part11_eq5b_typed_two_engine() {
     };
     let grp_role = named("grp-role");
     let grp_mult = named("grp-mult");
-    let grp_role_fresh = named("grp-role-fresh");
-    let grp_mult_fresh = named("grp-mult-fresh");
+    let grp_role_shared = named("grp-role-shared");
+    let grp_mult_shared = named("grp-mult-shared");
     let grp_blind = named("grp-role-blind");
+    let grp_nonov = named("grp-role-nonov");
     let grp_det = named("grp-role-det");
     let grp_seed = named("grp-seed");
 
@@ -11497,8 +11676,12 @@ fn part11_eq5b_typed_two_engine() {
     // --- §5 gates (run and reported BEFORE any leg is read) ------------------
     println!("## Gates (prereg §5 — any failure ⇒ `RUN-INVALID`)");
     println!();
+    println!(
+        "_**Two senses of \"gating\", separated (Amendment A5.10 L2-5).** A **validity-gating** item is one whose failure makes the run `RUN-INVALID`: the four below. A **verdict-gating** item is one that can change the verdict *label*: only H-G, in a confirmatory cell, against the bar D6 fixed at lock time. No non-gating leg can move either, and the bar cannot be relitigated after the numbers are visible._"
+    );
+    println!();
 
-    // X-identity: on a unit-multiplicity world, `grp-mult` == `grp-role`.
+    // X-identity: on a unit-multiplicity world, the mult cells == their bases.
     let unit = p11_unit_instances_range(P11_SEED_START, P11_SEED_END);
     let (unit_decl, _) = p9_declare(
         &unit,
@@ -11508,23 +11691,75 @@ fn part11_eq5b_typed_two_engine() {
         P9Cost::Uniform,
         P9_FUEL,
     );
-    let unit_role = p11_group_battery(&unit, &unit_decl, cells[0].2, P11_SEED_START);
-    let unit_mult = p11_group_battery(&unit, &unit_decl, cells[1].2, P11_SEED_START);
-    let identity_ok = p9_bit_identical(&unit_mult.seeds, &unit_role.seeds);
+    let unit_cell = |label: &str| {
+        let cfg = cells
+            .iter()
+            .find(|(l, _, _)| *l == label)
+            .map(|(_, _, c)| *c)
+            .expect("invariant: identity cells are registered cells");
+        p11_group_battery(&unit, &unit_decl, cfg, P11_SEED_START)
+            .unwrap_or_else(|e| panic!("identity cell `{label}` failed to construct: {e}"))
+    };
+    let unit_role = unit_cell("grp-role");
+    let unit_mult = unit_cell("grp-mult");
+    let unit_role_shared = unit_cell("grp-role-shared");
+    let unit_mult_shared = unit_cell("grp-mult-shared");
+    let id_specialised = p9_bit_identical(&unit_mult.seeds, &unit_role.seeds);
+    let id_shared = p9_bit_identical(&unit_mult_shared.seeds, &unit_role_shared.seeds);
+    // A5.10 L2-16: a scale vector misaligned with the query's modalities would
+    // still be all-ones at m ≡ 1, so the identity above cannot see it. Asked
+    // directly instead: at a demand whose multiplicities DIFFER per bit, permuting
+    // which bit carries which multiplicity must change the read.
+    let alignment_ok = p11_scale_alignment_is_bit_ordered();
+    let identity_ok = id_specialised && id_shared && alignment_ok;
     println!(
-        "- **X-identity — {}.** At the identity configuration `m ≡ 1`, `grp-mult` reproduces `grp-role` **bit-identically on acts and raw score bits** (and on per-seed PRIMARY bits and churn), all {n_seeds} seeds. Asked on the all-parallel degenerate world, which carries `m ≡ 1` everywhere and consumes ZERO extra stream draws, so its base prefix is bit-for-bit the v2w instance of the same seed: on v2w itself multiplicity is emphatically not 1, which is the entire point of the channel, so the identity has to be asked where the identity exists. This is what keeps SP2 from being a free parameter — the scale is `m(b, r)` or it is nothing.",
-        pass(identity_ok)
+        "- **X-identity — {}.** At the identity configuration `m ≡ 1` the multiplicity channel reproduces its base **bit-identically on acts and raw score bits** (and on per-seed PRIMARY bits and churn), all {n_seeds} seeds: role-specialised {} · shared {} (A5.10 L2-19 — the gate covered only the confirmatory pair before). Asked on the all-parallel degenerate world, which carries `m ≡ 1` everywhere and consumes ZERO extra stream draws, so its base prefix is bit-for-bit the v2w instance of the same seed. This is what keeps SP2 from being a free parameter — the scale is `m(b, r)` or it is nothing.",
+        pass(identity_ok),
+        pass(id_specialised),
+        pass(id_shared)
+    );
+    println!(
+        "  - **Scale alignment — {}** (A5.10 L2-16). An SP2 scale vector permuted against the query's modality order is invisible to the identity above, because every entry is 1 there. Checked directly: with per-bit multiplicities that differ, swapping which bit carries which must move the read, and it does.",
+        pass(alignment_ok)
     );
 
-    // S-determinism: re-run both confirmatory cells and compare bit-for-bit.
-    let redo_role = p11_group_battery(&insts, &declared, cells[0].2, P11_SEED_START);
-    let redo_mult = p11_group_battery(&insts, &declared, cells[1].2, P11_SEED_START);
-    let det_role = p11_identical_seeds(&grp_role.seeds, &redo_role.seeds);
-    let det_mult = p11_identical_seeds(&grp_mult.seeds, &redo_mult.seeds);
-    let determinism_ok = det_role == n_seeds && det_mult == n_seeds;
+    // S-determinism: re-run every MODEL cell and compare bit-for-bit.
+    let determinism: Vec<(&str, usize)> = cells
+        .iter()
+        .filter(|(_, kind, _)| *kind != P11_READ_PROBE)
+        .map(|(label, _, cfg)| {
+            let redo = p11_group_battery(&insts, &declared, *cfg, P11_SEED_START)
+                .unwrap_or_else(|e| panic!("determinism re-run of `{label}` failed: {e}"));
+            (*label, p11_identical_seeds(&named(label).seeds, &redo.seeds))
+        })
+        .collect();
+    // A5.10 L2-4: the printed rationale used to claim "a slip to `act` would show
+    // up here", which the harness's own seeded `grp-seed` cell refutes — a sampled
+    // read is still reproducible at a fixed seed. The real check is seed
+    // INVARIANCE, and it is valid because `seed` reaches the engine only as
+    // `AgentParams { seed }`.
+    let invariance = p11_group_battery(
+        &insts,
+        &declared,
+        cells[0].2,
+        P11_SEED_START.wrapping_add(1_000_000),
+    )
+    .unwrap_or_else(|e| panic!("seed-invariance run failed: {e}"));
+    let invariant = p11_identical_seeds(&grp_role.seeds, &invariance.seeds);
+    let determinism_ok =
+        determinism.iter().all(|&(_, n)| n == n_seeds) && invariant == n_seeds;
     println!(
-        "- **S-determinism — {}.** Both confirmatory cells re-run from scratch and compared per seed on acts, raw score bits, PRIMARY bits and churn: `grp-role` **{det_role}/{n_seeds}** · `grp-mult` **{det_mult}/{n_seeds}**. Load-bearing here in a way it has not been for any prior arm: `group_distribution` is the ONLY RNG-free path into a group's action distribution and every other entry point samples, so a single slip to `act` or to a nested slot would show up here and nowhere else.",
-        pass(determinism_ok)
+        "- **S-determinism — {}.** Every **model** cell re-run from scratch and compared per seed on acts, raw score bits, PRIMARY bits and churn: {}. Extended from the confirmatory pair to all five (A5.10 L2-3), since A4.2 gates model-variations.",
+        pass(determinism_ok),
+        determinism
+            .iter()
+            .map(|(l, n)| format!("`{l}` {n}/{n_seeds}"))
+            .collect::<Vec<_>>()
+            .join(" · ")
+    );
+    println!(
+        "  - **Seed invariance — {}** ({invariant}/{n_seeds}). Reproducibility alone would be passed by a seeded sampler, so the real claim is that the deterministic read consumes no randomness at all: re-running `grp-role` with a **different** `battery_seed` must reproduce it bit-for-bit. Valid because the seed reaches the engine only as `AgentParams {{ seed }}` — the world models, the per-decision query seed, the `VotingAgent` and the group RNG. (A5.10 L2-4 struck the old rationale, which claimed a slip to `act` would surface here; the `grp-seed` cell in this very run refutes that.)",
+        pass(invariant == n_seeds)
     );
 
     // S-learn (i): counted per-model updates + the non-vacuity guard.
@@ -11537,7 +11772,7 @@ fn part11_eq5b_typed_two_engine() {
         .filter(|((_, kind, _), _)| *kind != P11_READ_PROBE)
         .all(|(_, &(ok, _, _))| ok);
     println!(
-        "- **S-learn (i) — {}.** Per seed, each world model must record **exactly one** update per task in which its role had demand — **counted, not inferred from state movement**, because under MMP a missing commit makes an update apply TWICE rather than not at all, so \"did the state move?\" passes a double-updating arm. Deficit and surplus are both `RUN-INVALID`. Seeds with an exact ledger, and seeds whose end-of-stream state moved off initialization by more than {P11_VACUITY_TOL:e} (the non-vacuity guard — necessary, explicitly NOT sufficient): {}.",
+        "- **S-learn (i) — {}.** Per seed, each world model must record **exactly one** update per task in which its role had demand — **counted, not inferred from state movement**, because under MMP a missing commit makes an update apply TWICE rather than not at all, so \"did the state move?\" passes a double-updating arm. Deficit and surplus are both `RUN-INVALID`. Seeds with an exact ledger, and seeds whose **every** world model moved off initialization by more than {tol:e} (the prereg-pinned non-vacuity tolerance — necessary, explicitly NOT sufficient): {}.",
         pass(learn_ok),
         cells
             .iter()
@@ -11547,39 +11782,31 @@ fn part11_eq5b_typed_two_engine() {
                 if *kind == P11_READ_PROBE { " (reported, not gated)" } else { "" }
             ))
             .collect::<Vec<_>>()
-            .join(" · ")
+            .join(" · "),
+        tol = S_LEARN_VACUITY_TOL
     );
-    let begin_failures: usize = runs.iter().map(|r| r.begin_failures).sum();
-    println!(
-        "  - `begin_task` rejections across every cell: **{begin_failures}** (gated with S-learn — a rejection would mean the world names a role or a bit the arm is not configured for, which is a harness fault, not a finding). **S-learn (ii) and the member-advance conjunct are STRUCK as vacuous** by Amendment A1.4: members are single-use on every leg and there is no commit on the decision path, so neither has a referent. Counting them would be ceremony that reads as a gate."
-    );
-
-    // S-live: act-vs-score-bit divergence from the control, per cell.
-    let live: Vec<(usize, usize, usize)> = runs
+    let begin_failures: usize = cells
         .iter()
-        .map(|r| p9_divergence(&r.seeds, &ctl))
-        .collect();
-    let live_ok = cells
-        .iter()
-        .zip(live.iter())
+        .zip(runs.iter())
         .filter(|((_, kind, _), _)| *kind != P11_READ_PROBE)
-        .all(|(_, &(seeds, _, _))| seeds >= 1);
+        .map(|(_, r)| r.begin_failures)
+        .sum();
+    let probe_begin_failures: usize = cells
+        .iter()
+        .zip(runs.iter())
+        .filter(|((_, kind, _), _)| *kind == P11_READ_PROBE)
+        .map(|(_, r)| r.begin_failures)
+        .sum();
     println!(
-        "- **S-live — {}.** Divergence from `wf-asis`, reported as **acts AND raw score bits separately**: {}. This is the #80 lesson (gotcha 31) applied in advance — a term can be live in the score and dead at the decision, and a leg reading only PRIMARY sees a flat null where the truth is \"it reached the margin and never crossed a threshold\". Read the two columns against each other before reading any median. The two **read-probe** cells (`grp-seed`, `grp-role-det`) are reported but NOT gated: each replaces D4's registered `group_distribution`-under-CW surface, and their score bits are not commensurable with it — `grp-role-det`'s especially, whose read is a vote tally.",
-        pass(live_ok),
-        cells
-            .iter()
-            .zip(live.iter())
-            .map(|((label, _, _), &(s, a, b))| format!(
-                "`{label}` {s}/{n_seeds} seeds, {a} acts, {b} score bits"
-            ))
-            .collect::<Vec<_>>()
-            .join(" · ")
+        "  - **Amendment A5.4 repaired two things here.** The tolerance is now **prereg-pinned** rather than a harness local that §5 twice described as registered. And `expected` is re-derived **independently from the task stream** — `begin_task` writes it, `observe_outcome` writes only `updates` — so a **surplus is reachable at all**: before, `expected` was incremented immediately beside the guarded `updates` on the same path, which made `updates > expected` impossible and the RUN-INVALID surplus condition near-tautological. The non-vacuity guard is per-model **`all`**, not `any`; under `RoleSpecialised` a role model that never moved used to pass because a sibling did."
     );
     println!(
-        "- **X-battery** (frozen Parts 1–10 byte-identical on every quality/ratio/superiority/churn/verdict line) is checked OUTSIDE this binary, by diffing this run's Parts 1–10 against a pre-change baseline; latency-only diffs are the standing exclusion. Part 11 is purely additive, and the one thing that could disturb it is the arm-E1 seam the group arm reuses: `build_query` gained an `Option<&[f64]>` count scale that is `None` on every pre-existing call site (the scaling block is skipped, not multiplied by one), and `observe_outcome` became a delegation to a flag-returning twin with an identical body. Structural, and still owed as a measurement."
+        "  - `begin_task` rejections across the **gated** cells: **{begin_failures}** (read-probe cells, reported separately: {probe_begin_failures}). A rejection means the world names a role or a bit the arm is not configured for — a harness fault, and a **registered** RUN-INVALID condition since A5.10 L2-11, which also scoped this total to the cells it actually gates. **S-learn (ii) and the member-advance conjunct are STRUCK as vacuous** by A1.4: members are single-use on every leg and there is no commit on the decision path, so neither has a referent."
     );
-    let gates_ok = identity_ok && determinism_ok && learn_ok && live_ok;
+    println!(
+        "- **X-battery** (frozen Parts 1–10 byte-identical on every quality/ratio/superiority/churn/verdict line) is checked OUTSIDE this binary, by diffing this run's Parts 1–10 against a `main` baseline captured before HEAD is run; latency-only diffs are the standing exclusion. Part 11 is purely additive, and the one thing that could disturb it is the arm-E1 seam the group arm reuses: `build_query` gained an `Option<&[f64]>` count scale that is `None` on every pre-existing call site (the scaling block is skipped, not multiplied by one), and `observe_outcome` became a delegation to a flag-returning twin with an identical body. Structural, and still **owed** as a measurement."
+    );
+    let gates_ok = identity_ok && determinism_ok && learn_ok;
     println!();
 
     // --- Arms ----------------------------------------------------------------
@@ -11628,26 +11855,44 @@ fn part11_eq5b_typed_two_engine() {
     let hg_ok = hgs.iter().any(|h| h.ok);
     println!();
     let (ms, ma, mb) = p9_divergence(&grp_mult.seeds, &grp_role.seeds);
+    let role_acts = p11_act_count(&grp_role.seeds);
+    let mult_acts = p11_act_count(&grp_mult.seeds);
     println!(
-        "- **SP2 liveness against its own base — the A2.3 line, reported here because H-G cannot see it.** `grp-mult` vs `grp-role` differ on **{ma}** decisions by ACT and **{mb}** by raw score bits, across **{ms}/{n_seeds}** seeds. **Read the two numbers against each other**: equal medians with a nonzero score-bit count and a zero act count would say the multiplicity weighting reaches the margin and never crosses a threshold — live in the score, dead at the decision, which is #80's 355-bits/0-acts result in a new costume and a mechanism statement rather than a null. Equal medians with BOTH counts zero would instead mean the channel is inert on this world, which X-identity alone cannot distinguish (it only pins that `m ≡ 1` reproduces the base).",
+        "- **SP2 liveness against its own base — MANDATORY (Amendment A3.2), reported here because H-G cannot see it.** `grp-mult` vs `grp-role` differ on **{ma}** decisions by ACT and **{mb}** by raw score bits, across **{ms}/{n_seeds}** seeds. **Read the two numbers against each other**: equal medians with a nonzero score-bit count and a zero act count says the multiplicity weighting reaches the margin and never crosses a threshold — live in the score, dead at the decision, which is #80's 355-bits/0-acts result in a new costume and a mechanism statement rather than a null. Equal medians with BOTH counts zero would instead mean the channel is inert on this world, which X-identity alone cannot distinguish. **Pre-committed reading (A3.2):** if the acts agree, `grp-mult` carries **no independent look**, the 2-cell bar applies to what is effectively one, and that is **conservative, not permissive** — so the bar does not move. **Caveat (A5.7):** some fraction of the score-bit count may be renormalisation ulp noise — `A = column_normalize(pA)` is scale-invariant in ℝ but only ulp-accurate in `f64` — so the score-bit column is an upper bound on the channel's reach.",
+    );
+    println!(
+        "- **SP2's measured sign — {} (Amendment A5.8).** Acts taken: `grp-role` **{role_acts}**, `grp-mult` **{mult_acts}** ({} decisions). SP2's registered justification read \"three occurrences carry three observations' worth of evidence **demand**\" — that has the sign **backwards**, and \"demand\" is withdrawn. Dirichlet concentration is evidence **possessed**, so a higher `m` leaves *less* parameter-information-gain to collect and therefore **less** epistemic pull: a repeated step makes the arm **less** willing to staff it. Also disclosed: the scale multiplies the **whole** modality block, including the uncovered configuration's flat `[1, 1, 1]` prior — asserting pseudo-observations never made, in precisely the block whose novelty drives v5's mechanism. The mechanism is unchanged; only its justification was wrong.",
+        if mult_acts < role_acts {
+            "LESS willing, as A5.8 predicts"
+        } else if mult_acts > role_acts {
+            "MORE willing — contradicts A5.8's measurement on this world"
+        } else {
+            "indistinguishable at the act level"
+        },
+        (mult_acts as i64) - (role_acts as i64)
     );
     println!();
     let val_p_med = median(p9_primaries(&val_p.seeds));
+    let e1_note = "computed below in Context";
     println!(
-        "_Both cells report regardless of outcome — no cell-shopping, no post-hoc bar movement. The bar follows D6's cell-count rule, pinned at lock time before the cells were fixed: ≤ 2 confirmatory cells ⇒ the lineage's standing **{P11_HG_FACTOR:.2}× / ≥ {P11_HG_SUPERIOR_MIN}-of-{n_seeds}**. The bar is computed against `wf-asis` and **only** `wf-asis`. For the pre-committed scoped claim: `wf-val-p`'s median is **{val_p_med:.4}**._"
+        "_Both cells report regardless of outcome — no cell-shopping, no post-hoc bar movement. The bar follows D6's cell-count rule, pinned at lock time before the cells were fixed: ≤ 2 confirmatory cells ⇒ the lineage's standing **{P11_HG_FACTOR:.2}× / ≥ {P11_HG_SUPERIOR_MIN}-of-{n_seeds}**. The bar is computed against `wf-asis` and **only** `wf-asis`. Two pre-committed scoped claims constrain how a PASS reads, and neither is a second conjunct: `wf-val-p`'s median is **{val_p_med:.4}** (§6), and **`arm-E1`'s** is the other (A5.2, {e1_note}) — the single-agent shape of the very engine this wraps, recorded at 1.62× magnitude in v5 and run here on identical instances._"
     );
     println!();
 
     // --- E-life (registered exploratory, non-gating) --------------------------
     println!("## E-life (registered exploratory, NON-GATING — prereg §5)");
     println!();
+    println!(
+        "_**Leg names (A5.10 L2-17 / L3-9).** These were registered as `grp-role-fresh` / `grp-mult-fresh`, naming **member freshness** — a referent Amendment A1.1 SUPERSEDED when it relocated D2a's contrast to world-model topology and made members single-use on every leg. §3's rows are struck; the legs are **`grp-role-shared` / `grp-mult-shared`**, which names what actually varies._"
+    );
+    println!();
     for (persistent, shared, label) in [
-        (grp_role, grp_role_fresh, "role-restricted"),
-        (grp_mult, grp_mult_fresh, "multiplicity-weighted"),
+        (grp_role, grp_role_shared, "role-restricted"),
+        (grp_mult, grp_mult_shared, "multiplicity-weighted"),
     ] {
         let (s, a, b) = p9_divergence(&persistent.seeds, &shared.seeds);
         println!(
-            "- **{label} channel.** R = 3 role-specialised models **{:.4}** vs one shared model **{:.4}**; they differ on **{a}** decisions by ACT and **{b}** by raw score bits, with **{s}/{n_seeds}** seeds carrying any act difference, and the specialised cell is superior on **{}/{n_seeds}** seeds. This is how much comes from each role learning ONLY its own bits, rather than from three role-restricted views of one model — \"a group of role specialists\" versus \"three views of one model, aggregated\".",
+            "- **{label} channel.** R = 3 role-specialised models **{:.4}** vs one shared model **{:.4}**; they differ on **{a}** decisions by ACT and **{b}** by raw score bits, with **{s}/{n_seeds}** seeds carrying any act difference, and the specialised cell is superior on **{}/{n_seeds}** seeds. This is how much comes from each role learning ONLY its own bits, rather than from three role-restricted views of one model. (Scope note, A5.10 L3-14: \"only its own bits\" holds because the as-written v2w world gives each required bit exactly one role tag; a rewriting arm that let a bit carry two roles would break the disjointness.)",
             median(p9_primaries(&persistent.seeds)),
             median(p9_primaries(&shared.seeds)),
             p9_superior_count(&persistent.seeds, &shared.seeds)
@@ -11666,8 +11911,70 @@ fn part11_eq5b_typed_two_engine() {
     let det_med = median(p9_primaries(&grp_det.seeds));
     let role_med = median(p9_primaries(&grp_role.seeds));
     println!(
-        "- **`grp-role-det` (Amendment A3.1 reference) — what `CertaintyWeighted` actually bought.** D2 pinned CW as *forced* on the argument that only it carries a continuous margin at R ≤ 3 over 2 actions. The E-agree margins above measure that premise: a median at 0.5 means the CW mixture is itself a delta, because arm-E1's query posteriors saturate (gotcha 25) and the internals inherit it — the group propagated the saturation, it did not create it. This leg swaps the active slot to `Deterministic` and changes nothing else. Median PRIMARY **{det_med:.4}** against `grp-role`'s **{role_med:.4}** (Δ **{:+.4}**), differing on **{dta}** decisions by ACT across **{dts}/{n_seeds}** seeds. **Reported as acts and PRIMARY only, never as margins:** under a discrete mode the read is the normalized **tally over member argmaxes** (`k/R`, so `{{0, ⅓, ⅔, 1}}` at R = 3), which makes SP3 a majority rule and its score a tally distance — not commensurable with a CW margin, so no score-bit count is printed here. **The confirmatory cells are NOT switched**: re-specifying a registered arm on smoke data is the post-hoc instrument re-targeting refused at EQ5a A5.2. D2 stands; its rationale is corrected in public and its cost is measured.",
+        "- **`grp-role-det` (Amendment A3.1 reference) — what `CertaintyWeighted` actually bought.** D2 pinned CW as *forced* on the argument that only it carries a continuous margin at R ≤ 3 over 2 actions. The E-agree margins below measure that premise: a median at 0.5 means the mixture is itself a delta — from arm-E1's inherited gotcha-25 saturation **and**, per A5.1 the larger source, from structural indifference resolving to a maximally-confident \"act\". This leg swaps the active slot to `Deterministic` and changes nothing else. Median PRIMARY **{det_med:.4}** against `grp-role`'s **{role_med:.4}** (Δ **{:+.4}**), differing on **{dta}** decisions by ACT across **{dts}/{n_seeds}** seeds. **Reported as acts and PRIMARY only, never as margins:** under a discrete mode the read is **uniform mass over the max-count winner set** — support `{{0, 0.5, 1}}` at `n_actions = 2`, **not** `k/R` (Amendment **A5.6** corrected this in three places, including A4.1's parenthetical) — so SP3 over it acts iff `winners == {{act}}`, i.e. strict majority at R = 3 and **unanimity at R = 2**, and its score is a winner-set indicator that is not commensurable with a CW margin. **The confirmatory cells are NOT switched**: re-specifying a registered arm on smoke data is the post-hoc instrument re-targeting refused at EQ5a A5.2. D2 stands; its rationale is corrected in public and its cost is measured.",
         det_med - role_med
+    );
+    println!(
+        "  - **Amendment 4's replacement expectation, and its pre-committed reading (A5.10 L2-6).** A3.1 predicted this cell's acts would land near `grp-role`'s *because* the mixture is a delta. **That inference does not go through** — saturated *members* do not make the two aggregation rules agree, since CW weights each member by `exp(−H)` while the tally is one-member-one-vote against a threshold that becomes **unanimity** at R = 2, which the realised roster reaches often. A4 therefore records the expectation as **unknown, and this leg as what measures it**. Pre-committed: **a large divergence here RESTORES D2's conclusion on new grounds** — CW is load-bearing after all, just not for the reason D2 gave — and must not be presented post-hoc as a vindication of the original argument, which stays measured false. A4.1's conclusions about the act rule (majority at R = 3, unanimity at R = 2) **stand** under A5.6's correction; only the `k/R` arithmetic was wrong."
+    );
+    let (nvs, nva, nvb) = p9_divergence(&grp_nonov.seeds, &grp_role.seeds);
+    println!(
+        "- **`grp-role-nonov` — S-learn (iii), the causal pin (Amendment A5.3).** Registered in §5, retained by A1.4, and **absent from the harness** until the review found it. It is the only registered instrument tying EQ5b to the v5 mechanism it claims to inherit: v5's X1 measured that novelty-off collapses arm-E1 to ≈ scalar, so if this arm carries that mechanism, suppressing novelty must degrade it. Median **{:.4}** against `grp-role`'s **{role_med:.4}**, differing on **{nva}** acts and **{nvb}** score bits across **{nvs}/{n_seeds}** seeds. **A5.1 makes it sharper still:** novelty-off collapses the candidate-blind internal's read from `1.0` to `0.5`, so this cell also prices the candidate-blind bias directly — a large gap is partly the mechanism and partly the bias, and the two are not separated here.",
+        median(p9_primaries(&grp_nonov.seeds))
+    );
+    println!();
+
+    // --- A5.1: the candidate-reach disclosures (BLOCKING finding) -------------
+    println!("## Candidate reach (Amendment A5.1 — MANDATORY per-cell disclosures)");
+    println!();
+    println!(
+        "| cell | zero candidate-sensitive | mean blind internals | blind CW weight share | leave `cfg0 == cfg1` | act rate: sensitive / blind |"
+    );
+    println!("|---|---:|---:|---:|---:|---|");
+    for ((label, _, _), run) in cells.iter().zip(runs.iter()) {
+        let ag = p11_agreement(run);
+        let (lq, li) = p11_identical_leave_rate(run);
+        let rate = |n: u64, d: u64| {
+            if d == 0 {
+                "n/a".to_owned()
+            } else {
+                #[allow(clippy::cast_precision_loss)]
+                {
+                    format!("{:.1} %", 100.0 * n as f64 / d as f64)
+                }
+            }
+        };
+        let zero_sens = if ag.samples == 0 {
+            "n/a (no mixture)".to_owned()
+        } else {
+            format!("{:.1} %", 100.0 * ag.zero_sensitive_rate)
+        };
+        let blind = if ag.samples == 0 {
+            "n/a".to_owned()
+        } else {
+            format!("{:.2}", ag.mean_blind)
+        };
+        let weight = if ag.samples == 0 {
+            "n/a".to_owned()
+        } else {
+            format!("{:.3}", ag.mean_blind_weight)
+        };
+        let leave_rate = rate(li, lq);
+        let acts = format!(
+            "{} / **{}**",
+            ag.act_rate_sensitive
+                .map_or_else(|| "n/a".to_owned(), |s| format!("{:.1} %", 100.0 * s)),
+            ag.act_rate_blind
+                .map_or_else(|| "n/a".to_owned(), |b| format!("{:.1} %", 100.0 * b))
+        );
+        println!("| `{label}` | {zero_sens} | {blind} | {weight} | {li} of {lq} ({leave_rate}) | {acts} |");
+    }
+    println!();
+    println!(
+        "_Read the last two columns together. **The act-rate split** is the sign check: A5.1 predicts the candidate-blind internals vote \"act\" at a rate far above the candidate-sensitive ones, at zero entropy and therefore **maximum** `CertaintyWeighted` weight, because `run_replay` records control 0 before every observation so only the membership-0 columns of `pA` accumulate and A-novelty rewards switching. If the blind rate is high and the blind weight share is a majority, the group's decision is **dominated by members that cannot see the candidate**. `grp-role-blind` is the contrast: role-blind masks make every internal candidate-sensitive **by construction**, so its first, second and third columns collapse to zero._"
+    );
+    println!(
+        "_**The two blindness measures are not the same thing, and the table keeps them apart.** \"Candidate-sensitive\" is **structural** — does the candidate's capability mask enter this internal's `cfg0`/`cfg1` at all — and under role-matched masks it is `1` exactly when the candidate's role is on the roster. **`leave cfg0 == cfg1`** is **value-dependent**: it also fires when the candidate's capabilities are *subsumed* by the remaining members' union, which is why `grp-role-blind`'s count is reduced but **not** zero. A query with identical masks carries literally zero information about the candidate whichever way it got there. The seeded-sampling cell exposes no distribution and contributes no sample._"
     );
     println!();
 
@@ -11678,32 +11985,70 @@ fn part11_eq5b_typed_two_engine() {
     println!("|---|---|---:|---:|---|");
     for ((label, _, _), run) in cells.iter().zip(runs.iter()) {
         let (hist, empty, tasks) = p11_roster_histogram(run);
-        let (unan, m, samples) = p11_agreement(run);
+        let ag = p11_agreement(run);
         println!(
             "| `{label}` | {} / {} / {} | {empty} of {} | {} | {} |",
             hist[1],
             hist[2],
             hist[3],
             tasks * P8_ROLES,
-            if samples == 0 {
+            if ag.samples == 0 {
                 "n/a (no mixture)".to_owned()
             } else {
-                format!("{:.1} % of {samples}", 100.0 * unan)
+                format!("{:.1} % of {}", 100.0 * ag.unanimity, ag.samples)
             },
-            if samples == 0 {
+            if ag.samples == 0 {
                 "n/a".to_owned()
             } else if *label == "grp-role-det" {
-                // A3.1: a tally distance, not a mixture margin. Printed, labelled,
-                // and never compared against a CW row.
-                format!("{:.4} / {:.4} / {:.4} (tally)", m[0], m[1], m[2])
+                // A5.6: a winner-set indicator on {0, 0.5, 1}, not a mixture
+                // margin. Printed, labelled, and never compared against a CW row.
+                format!(
+                    "{:.4} / {:.4} / {:.4} (winner-set)",
+                    ag.margin[0], ag.margin[1], ag.margin[2]
+                )
             } else {
-                format!("{:.4} / {:.4} / {:.4}", m[0], m[1], m[2])
+                format!("{:.4} / {:.4} / {:.4}", ag.margin[0], ag.margin[1], ag.margin[2])
             }
         );
     }
     println!();
+    // A5.10 L2-8: A1.3 registers the roster disclosure PER SEED; pooling it was a
+    // deviation. Printed for the confirmatory cell, which is the one the verdict
+    // reads, with the pooled histogram above kept for cross-cell comparison.
     println!(
-        "_**A1.3**: a role with no `(bit, role)` demand in a task does not vote in it — it leaves the roster, so the realised `R` varies 3 → 2 → 1. The alternative, an abstaining member at `[0.5, 0.5]`, is not neutral under `CertaintyWeighted`: it still carries weight `exp(−ln 2) = 0.5` and would drag `p(act)` toward the SP3 threshold on every affected slot. A task where EVERY role is empty cannot occur (`|required| ≥ 2`). **E-agree** reads each internal's own argmax back off the roster after the read — a disclosure, never a decision input. The **votes and roster columns are commensurable across every cell**; the **margin column is not**: it is `|p(act) − 0.5|`, the CW mixture's distance from the threshold on CW cells and a **vote-tally distance** on `grp-role-det` (marked `(tally)`, A3.1). The seeded-sampling cell exposes no distribution and so records no sample at all._"
+        "_Per-seed realised roster on `grp-role` (A1.3 as registered, A5.10 L2-8) — `mean R (empty slots)` in seed order: {}._",
+        p11_roster_per_seed(grp_role)
+            .iter()
+            .map(|(m, e)| format!("{m:.2} ({e})"))
+            .collect::<Vec<_>>()
+            .join(" · ")
+    );
+    println!();
+    println!(
+        "_**A1.3**: a role with no `(bit, role)` demand in a task does not vote in it — it leaves the roster, so the realised `R` varies 3 → 2 → 1. A task where EVERY role is empty cannot occur (`|required| ≥ 2`). **A1.3's original rationale is WITHDRAWN as measurably false (A5.1)**: it argued that an abstaining member reads `[0.5, 0.5]` at weight `exp(−ln 2) = 0.5` and would drag `p(act)` toward the threshold. A member with no candidate-discriminating coverage reads ≈ 1.0 at weight 1.0, and its bias is toward **act**, not toward the threshold — wrong in size and **inverted in sign**. The decision to drop empty-demand roles stands; the hazard was real and dropping is still right._"
+    );
+    println!(
+        "_**E-agree** reads each internal's own argmax back off the roster after the read — a disclosure, never a decision input — and is split by candidate-sensitivity in the A5.1 table above. The **votes and roster columns are commensurable across every cell**; the **margin column is not**: it is `|p(act) − 0.5|`, the CW mixture's distance from the threshold on CW cells and a **winner-set indicator** on `grp-role-det` (marked, A5.6). The seeded-sampling cell exposes no distribution and so records no sample at all. A margin median at 0.5 means the read is a delta and SP3's threshold is never contested — see Amendment 3, as corrected by A5.1 on which source dominates._"
+    );
+    println!();
+
+    // --- S-live, now a DISCLOSURE (Amendment A5.5) ---------------------------
+    println!("## S-live (DISCLOSURE, not a gate — Amendment A5.5)");
+    println!();
+    let live: Vec<(usize, usize, usize)> = runs.iter().map(|r| p9_divergence(&r.seeds, &ctl)).collect();
+    println!(
+        "- Divergence from `wf-asis`, reported as **acts AND raw score bits separately**: {}. This is the #80 lesson (gotcha 31): a term can be live in the score and dead at the decision, and a leg reading only PRIMARY sees a flat null where the truth is \"it reached the margin and never crossed a threshold\". Read the two columns against each other before reading any median.",
+        cells
+            .iter()
+            .zip(live.iter())
+            .map(|((label, _, _), &(s, a, b))| format!(
+                "`{label}` {s}/{n_seeds} seeds, {a} acts, {b} score bits"
+            ))
+            .collect::<Vec<_>>()
+            .join(" · ")
+    );
+    println!(
+        "- **Why it is no longer listed as a gate.** As implemented it asks whether ≥ 1 of {n_seeds} seeds shows ≥ 1 differing act **versus a different engine** — not falsifiable in any realistic world, so presenting it under \"any failure ⇒ RUN-INVALID\" overstated the run's validity checking. The #80 lesson it cites is about a lever versus **its own base**, and the only such comparison here is A3.2's `grp-mult` vs `grp-role`, which the registration fixes as non-gating. Moved to the disclosures verbatim, with nothing about what it measures changed (A5.5)."
     );
     println!();
 
@@ -11735,14 +12080,15 @@ fn part11_eq5b_typed_two_engine() {
     let (scalar, scalar_lat) = p9_battery(&insts, &declared, |_| {
         Box::new(AifDecisionPolicy::default()) as Box<dyn CoalitionDecisionPolicy>
     });
-    let (e1, e1_lat) = p9_e1_battery(&insts, &declared, e1_config());
+    let (e1, e1_lat) = p9_e1_battery(&insts, &declared, v5_e1_base());
     p11_table_head();
     p11_row("mag", "context", &mag, &ctl, &mag_lat);
     p11_row("scalar", "context", &scalar, &ctl, &scalar_lat);
     p11_row("arm-E1", "context", &e1, &ctl, &e1_lat);
+    let e1_med = median(p9_primaries(&e1));
     println!();
     println!(
-        "_The untyped `mag`, the scalar AIF bridge and the single-agent persistent `arm-E1` staff the same declared writings; all three are context and none can move the verdict. **`arm-E1` is the single-agent shape of the very engine the group cells wrap** — the same v5 E1 configuration (learned per-bit precisions, MeanField queries at fixed γ = 16, novelty on), which is what makes \"EQ5b changes the engine SHAPE\" a comparison and not a slogan. **Latency** (E-lat, D10) is record-only and NEVER gating: a group decision builds up to R = 3 arm-E1 queries where the single-agent arm builds one, and that ratio is the visible cost of the shape. Inherited quirk, disclosed: `p9_e1_battery` derives its per-seed arm seed from `P9_SEED_START`, not this part's range — frozen Part 9/10 behaviour, and inert, because the persistent world model is single-control with no precision dynamics and never samples. **Upstream-evaluation declines** across the group cells: {}._",
+        "_The untyped `mag`, the scalar AIF bridge and the single-agent persistent `arm-E1` staff the same declared writings; all three are context and none can move the verdict. **`arm-E1` is the single-agent shape of the very engine the group cells wrap** — the same v5 E1 configuration (learned per-bit precisions, MeanField queries at fixed γ = 16, novelty on), built from the library's `v5_e1_base()` now that A5.10 L2-14 removed the harness's duplicate definition. Its median here is **{e1_med:.4}**, and A5.2 makes that a **pre-committed reading constraint**, not a conjunct — see the verdict. **Latency** (E-lat, D10) is record-only and NEVER gating, and the figures in this table are the measurement: A3.3's \"~37 µs/decision\" is **WITHDRAWN** (A5.10 L2-15 — it does not reproduce), while its conclusion is unaffected, since no leg was trimmed for cost and none is now. A group decision builds up to R ≤ 3 arm-E1 queries where the single-agent arm builds one, and that ratio is the visible cost of the shape. **Inherited quirk, disclosed and adjudicated-not-fixed** (A5.10 L2-18): `p9_e1_battery` derives its per-seed arm seed from `P9_SEED_START`, not this part's range — fixing it would edit frozen Part 9 code, and it is inert because the persistent world model is single-control, has no precision dynamics, and never samples. **Upstream-evaluation declines** across the group cells: {}. **`wf-val-p`'s probe declines: {}** (A5.10 L1-17 — #80 A1.1 made this gated for the residual lever, so it must not vanish here; reported, since §5 does not gate it in this part)._",
         cells
             .iter()
             .zip(runs.iter())
@@ -11754,7 +12100,8 @@ fn part11_eq5b_typed_two_engine() {
                     .sum::<u64>()
             ))
             .collect::<Vec<_>>()
-            .join(" · ")
+            .join(" · "),
+        val_p.probe_declines
     );
     println!();
 
@@ -11770,7 +12117,7 @@ fn part11_eq5b_typed_two_engine() {
     println!("- `FALSIFIED (two-engine)` — gates hold, no confirmatory cell passes both conjuncts.");
     println!("- `RUN-INVALID` — any gate fails.");
     println!();
-    let beats_val_p = hgs
+    let carried: Vec<f64> = hgs
         .iter()
         .zip(
             cells
@@ -11778,20 +12125,30 @@ fn part11_eq5b_typed_two_engine() {
                 .filter(|(_, kind, _)| *kind == "confirmatory")
                 .map(|(label, _, _)| named(label)),
         )
-        .any(|(hg, run)| hg.ok && median(p9_primaries(&run.seeds)) > val_p_med);
+        .filter(|(hg, _)| hg.ok)
+        .map(|(_, run)| median(p9_primaries(&run.seeds)))
+        .collect();
+    let beats_val_p = carried.iter().any(|&m| m > val_p_med);
+    let beats_e1 = carried.iter().any(|&m| m > e1_med);
     println!(
-        "_Gates {} (X-identity {} · S-determinism {} · S-learn {} · S-live {}). {} Pre-committed interpretations (§6/§7), binding: a `VALIDATED` here means **\"on this world, a role-structured active-inference group outperforms the typed magnitude arm\"** — NOT that aif beats magnitude generally, and NOT anything about **koa#54 (mag = demonstrated default, FINAL)**, which no EQ5b outcome reopens. The v1/v2 K4 verdicts, EQ3's, EQ4's, EQ5a's and #80's are all untouched. Whether any advantage transfers off the v2w world is unsettled — one world, one draw family, {n_seeds} seeds — and whether the deterministic read is the RIGHT group decision rule is likewise unsettled; it is the one that preserves this lineage's determinism discipline, and E-seed carries no verdict._",
+        "_Gates {} (X-identity {} · S-determinism {} · S-learn {}) — **S-live is a disclosure, not a gate** (A5.5), and is reported in its own section. {} {} Pre-committed interpretations (§6/§7), binding: a `VALIDATED` here means **\"on this world, a role-structured active-inference group outperforms the typed magnitude arm\"** — NOT that aif beats magnitude generally, and NOT anything about **koa#54 (mag = demonstrated default, FINAL)**, which no EQ5b outcome reopens. The v1/v2 K4 verdicts, EQ3's, EQ4's, EQ5a's and #80's are all untouched. And per **A5.9**, \"EQ5b changes the engine, not the criterion\" is too strong: SP3 keeps arm-E1's **threshold form**, but it thresholds a confidence-weighted mixture of R posteriors rather than one, declines on ties where arm-E1 leaves, and — per A5.1 — asks a candidate-free question of R − 1 internals. **EQ5b changes the engine AND the aggregation; only the threshold is held fixed.** Whether any advantage transfers off the v2w world is unsettled — one world, one draw family, {n_seeds} seeds — and whether the deterministic read is the RIGHT group decision rule is likewise unsettled._",
         pass(gates_ok),
         pass(identity_ok),
         pass(determinism_ok),
         pass(learn_ok),
-        pass(live_ok),
         if !hg_ok {
             "No confirmatory cell carried.".to_owned()
         } else if beats_val_p {
             "A confirmatory cell carried AND exceeded `wf-val-p`'s median.".to_owned()
         } else {
             format!("A confirmatory cell carried but did NOT exceed `wf-val-p`'s median ({val_p_med:.4}) — reported, as pre-committed, as **\"beats the typed control, not the strongest process cell\"**.")
+        },
+        if !hg_ok {
+            String::new()
+        } else if beats_e1 {
+            format!("It also exceeded **`arm-E1`'s** median ({e1_med:.4}), so the group shape is doing measurable work beyond the single-agent engine (A5.2).")
+        } else {
+            format!("**A5.2's symmetric clause fires:** the carrying cell did NOT exceed `arm-E1`'s median ({e1_med:.4}), so this reads as **\"the persistent AIF engine beats the typed control; the group shape adds nothing measurable here\"**. `arm-E1` remains non-gating — a reading constraint, not a second conjunct.")
         }
     );
 
@@ -11799,7 +12156,7 @@ fn part11_eq5b_typed_two_engine() {
     // table on stdout before the process exits nonzero.
     assert!(
         gates_ok,
-        "RUN-INVALID: a prereg §5 gate failed (X-identity {identity_ok}, S-determinism {determinism_ok}, S-learn {learn_ok}, S-live {live_ok})"
+        "RUN-INVALID: a prereg §5 gate failed (X-identity {identity_ok}, S-determinism {determinism_ok}, S-learn {learn_ok})"
     );
 }
 
@@ -11842,19 +12199,38 @@ mod part11_tests {
         println!("--- Part 11 SMOKE (seeds {A}..{B}, NOT the registered block) ---");
         println!("wf-asis median PRIMARY = {:.4}", median(p9_primaries(&ctl)));
 
+        // A5.10 L2-14: the harness's `e1_config()` and the library's `v5_e1_base()`
+        // were two definitions of the same thing. Part 11 now uses the library's;
+        // this pins that they agree field for field, so the switch changed nothing.
+        {
+            let (a, b) = (e1_config(), v5_e1_base());
+            assert_eq!(a.persistent_learning, b.persistent_learning);
+            assert_eq!(a.query_dynamics, b.query_dynamics);
+            assert_eq!(a.query_novelty, b.query_novelty);
+            assert_eq!(a.query_gamma, b.query_gamma);
+            assert_eq!(a.n_bits, b.n_bits);
+            assert_eq!(a.trial_boundary, b.trial_boundary);
+            assert_eq!(a.eviction_cap, b.eviction_cap);
+            assert_eq!(a.rejoin_lockout_tasks, b.rejoin_lockout_tasks);
+            assert!((a.initial_precision_b - b.initial_precision_b).abs() < f64::EPSILON);
+        }
+
         let mut runs: Vec<(&str, P11GroupRun)> = Vec::new();
-        for (label, _, cfg) in p11_cells() {
-            let run = p11_group_battery(&insts, &declared, cfg, A);
+        for (label, kind, cfg) in p11_cells() {
+            let run = p11_group_battery(&insts, &declared, cfg, A)
+                .unwrap_or_else(|e| panic!("{label}: {e}"));
             let (learn_ok, exact, moved) = p11_s_learn(&run);
             let hg = p11_hg(&run.seeds, &ctl);
             let (hist, empty, tasks) = p11_roster_histogram(&run);
-            let (unan, m, samples) = p11_agreement(&run);
+            let ag = p11_agreement(&run);
+            let (lq, li) = p11_identical_leave_rate(&run);
             let (ds, da, db) = p9_divergence(&run.seeds, &ctl);
             println!(
-                "{label:<15} PRIMARY {:.4}  ratio {}  superior {}/2  churn {:.1}  µs {:.1}  \
-                 S-learn {learn_ok} ({exact}/2 exact, {moved}/2 moved)  \
-                 S-live {ds} seeds/{da} acts/{db} bits  roster {}/{}/{} ({empty} empty of {})  \
-                 agree {}",
+                "{label:<16} PRIMARY {:.4}  ratio {}  sup {}/2  churn {:.1}  µs {:.1}  \
+                 S-learn {learn_ok} ({exact}/2, {moved}/2 moved)  \
+                 live {ds}s/{da}a/{db}b  roster {}/{}/{} ({empty} of {})  \
+                 A5.1 zero-sens {:.0}%, blind {:.2} @ w {:.2}, leave-id {li}/{lq}, \
+                 act s/b {}  agree {}",
                 median(p9_primaries(&run.seeds)),
                 hg.ratio.map_or_else(|| "n/a".to_owned(), |r| format!("{r:.3}×")),
                 hg.superior,
@@ -11864,10 +12240,24 @@ mod part11_tests {
                 hist[2],
                 hist[3],
                 tasks * P8_ROLES,
-                if samples == 0 {
+                100.0 * ag.zero_sensitive_rate,
+                ag.mean_blind,
+                ag.mean_blind_weight,
+                format!(
+                    "{}/{}",
+                    ag.act_rate_sensitive
+                        .map_or_else(|| "n/a".to_owned(), |s| format!("{:.0}%", 100.0 * s)),
+                    ag.act_rate_blind
+                        .map_or_else(|| "n/a".to_owned(), |b| format!("{:.0}%", 100.0 * b))
+                ),
+                if ag.samples == 0 {
                     "n/a".to_owned()
                 } else {
-                    format!("{:.0}% unanimous, margin med {:.4}", 100.0 * unan, m[1])
+                    format!(
+                        "{:.0}% unanimous, margin med {:.4}",
+                        100.0 * ag.unanimity,
+                        ag.margin[1]
+                    )
                 }
             );
 
@@ -11878,12 +12268,29 @@ mod part11_tests {
                 assert!(s.primary.is_finite() && (0.0..=1.0).contains(&s.primary));
                 assert!(!s.acts.is_empty(), "{label}: decisions must have run");
             }
-            // S-learn is a gate for every non-exploratory cell.
-            if label != "grp-seed" {
+            // S-learn gates every cell that varies the MODEL, not the READ.
+            if kind != P11_READ_PROBE {
                 assert!(learn_ok, "{label}: S-learn (i) must hold");
             }
             // Every task opened a roster of 1..=3 roles (A1.3).
             assert_eq!(hist[0], 0, "{label}: an empty roster cannot occur");
+            // A5.1's structural prediction, asserted per cell rather than eyeballed:
+            // under role-matched masks a leave query is candidate-blind unless the
+            // internal's role is the candidate's, so SOME leave queries must be
+            // identical — and under role-blind masks NONE may be.
+            if label == "grp-role-blind" {
+                assert_eq!(
+                    ag.zero_sensitive_rate, 0.0,
+                    "role-blind masks make every internal STRUCTURALLY candidate-sensitive"
+                );
+                assert_eq!(ag.mean_blind, 0.0);
+            } else if ag.samples > 0 {
+                assert!(
+                    ag.zero_sensitive_rate > 0.0,
+                    "{label}: A5.1 predicts decisions with no candidate-sensitive internal"
+                );
+                assert!(li > 0, "{label}: A5.1 predicts candidate-blind leave queries");
+            }
             runs.push((label, run));
         }
 
@@ -11901,12 +12308,26 @@ mod part11_tests {
         // A3.1's registered quantity: acts and PRIMARY, never margins.
         let (ds, da, _) = p9_divergence(&by("grp-role-det").seeds, &by("grp-role").seeds);
         println!(
-            "grp-role-det vs grp-role: {ds} seeds / {da} acts / PRIMARY {:.4} vs {:.4} (score bits deliberately not compared — tally, not margin)",
+            "grp-role-det vs grp-role: {ds} seeds / {da} acts / PRIMARY {:.4} vs {:.4} (score bits deliberately not compared — winner-set, not margin)",
             median(p9_primaries(&by("grp-role-det").seeds)),
             median(p9_primaries(&by("grp-role").seeds))
         );
+        // A5.8's measured sign, at the act level.
+        println!(
+            "A5.8 acts: grp-role {} vs grp-mult {} (negative delta = LESS willing)",
+            p11_act_count(&by("grp-role").seeds),
+            p11_act_count(&by("grp-mult").seeds)
+        );
+        // A5.3's causal pin.
+        let (ns, na, _) = p9_divergence(&by("grp-role-nonov").seeds, &by("grp-role").seeds);
+        println!(
+            "S-learn (iii) grp-role-nonov: PRIMARY {:.4} vs {:.4}, {ns} seeds / {na} acts",
+            median(p9_primaries(&by("grp-role-nonov").seeds)),
+            median(p9_primaries(&by("grp-role").seeds))
+        );
 
-        // X-identity on the unit-multiplicity world.
+        // X-identity on the unit-multiplicity world, BOTH topologies (A5.10 L2-19),
+        // plus the alignment conjunct the m ≡ 1 identity structurally cannot see.
         let unit = p11_unit_instances_range(A, B);
         let (unit_decl, _) = p9_declare(
             &unit,
@@ -11917,18 +12338,55 @@ mod part11_tests {
             P9_FUEL,
         );
         let cells = p11_cells();
-        let u_role = p11_group_battery(&unit, &unit_decl, cells[0].2, A);
-        let u_mult = p11_group_battery(&unit, &unit_decl, cells[1].2, A);
-        let identity = p9_bit_identical(&u_mult.seeds, &u_role.seeds);
-        println!("X-identity (m == 1): {}", pass(identity));
-        assert!(identity, "X-identity must hold at m == 1");
+        let unit_run = |label: &str| {
+            let cfg = cells
+                .iter()
+                .find(|(l, _, _)| *l == label)
+                .map(|(_, _, c)| *c)
+                .expect("registered cell");
+            p11_group_battery(&unit, &unit_decl, cfg, A).unwrap_or_else(|e| panic!("{label}: {e}"))
+        };
+        let id_spec = p9_bit_identical(&unit_run("grp-mult").seeds, &unit_run("grp-role").seeds);
+        let id_shared = p9_bit_identical(
+            &unit_run("grp-mult-shared").seeds,
+            &unit_run("grp-role-shared").seeds,
+        );
+        let aligned = p11_scale_alignment_is_bit_ordered();
+        println!(
+            "X-identity (m == 1): specialised {} · shared {} · alignment {}",
+            pass(id_spec),
+            pass(id_shared),
+            pass(aligned)
+        );
+        assert!(id_spec && id_shared, "X-identity must hold at m == 1");
+        assert!(aligned, "the SP2 scale must be indexed by modality order");
 
-        // S-determinism on the confirmatory cell.
-        let a = p11_group_battery(&insts, &declared, cells[0].2, A);
-        let b = p11_group_battery(&insts, &declared, cells[0].2, A);
+        // S-determinism: reproducibility AND seed invariance (A5.10 L2-4).
+        let a = p11_group_battery(&insts, &declared, cells[0].2, A).unwrap();
+        let b = p11_group_battery(&insts, &declared, cells[0].2, A).unwrap();
         let same = p11_identical_seeds(&a.seeds, &b.seeds);
-        println!("S-determinism (grp-role): {same}/2");
+        let other = p11_group_battery(&insts, &declared, cells[0].2, A + 500_000).unwrap();
+        let invariant = p11_identical_seeds(&a.seeds, &other.seeds);
+        println!("S-determinism (grp-role): {same}/2 reproducible, {invariant}/2 seed-invariant");
         assert_eq!(same, 2, "same seed ⇒ same result");
+        assert_eq!(
+            invariant, 2,
+            "the deterministic read must not depend on the seed at all"
+        );
+
+        // A5.10 L1-14: the one construction that must be refused.
+        assert!(matches!(
+            GroupAifPolicy::new(
+                A,
+                GroupAifConfig {
+                    read: DecisionRead::SeededSampling,
+                    vote: GroupVote::Deterministic,
+                    ..GroupAifConfig::default()
+                },
+                p11_role_map(&insts[0]),
+            ),
+            Err(GroupAifError::UnsupportedReadVote)
+        ));
     }
 }
 
