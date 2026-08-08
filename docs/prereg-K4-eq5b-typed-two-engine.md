@@ -906,3 +906,130 @@ D1, D2, D3, D5, D6 (**1.25× / ≥ 18-of-30**, two confirmatory cells), D7 (seed
 1–4 except where corrected above. **X-battery remains owed** and is measured
 outside the binary against a `main` baseline captured before HEAD is run.
 koa#54 stays FINAL.
+
+## Amendment 6 (post-first-run, pre-verdict, 2026-08-08) — S-learn's non-vacuity guard was unsatisfiable, and the first run is RUN-INVALID
+
+**The official run executed and returned `RUN-INVALID`.** Run of record `7e265fe`,
+koalisi v0.29.0, `aif-v0.13.0`, catgraph `v0.8.0` ×3, seeds 330..360,
+`--release`. This amendment is written **after** that run and **before** any
+verdict is read. Everything below is disclosed on that basis.
+
+### What the run returned
+
+| gate | result |
+|---|---|
+| **X-battery** | **PASS** — Parts 1–10 diffed against a `main` baseline captured before HEAD; zero non-latency differences |
+| **X-identity** (specialised / shared / alignment) | **PASS** |
+| **S-determinism** (all five model cells, + seed invariance) | **PASS** 30/30 |
+| **S-learn** | **FAIL** ⇒ `RUN-INVALID` |
+
+The failure is narrow. **The counted ledger — the half A5.4 repaired, and the
+only half that can catch the MMP double-apply the gate exists for — is 30/30
+exact on every cell: no deficit, no surplus, no miscount.** What failed is the
+**non-vacuity guard**: 28/30 on every *role-specialised* cell, 30/30 on both
+*shared* cells.
+
+### Diagnosis (read-only; the arm is not at fault)
+
+**Seeds 354 and 355, role 1 in both.** Measured against the real
+`GroupAifPolicy`, not inferred:
+
+```
+role 0   updates = 20  expected = 20   max |pA delta| = 1.52e-1
+role 1   updates =  0  expected =  0   max |pA delta| = 0e0     <-- never touched
+role 2   updates = 20  expected = 20   max |pA delta| = 1.08e-1
+```
+
+**Mechanism: pool-absence.** `p8_task_feasible` requires, for every required
+bit, a pool worker **whose role equals that bit's tag** and who holds the bit.
+A role with no worker in the pool can therefore never be legally tagged — the
+rejection loop erases every such draw. Seed 354 is `n = 5` with worker-role
+counts **[3, 0, 2]**; seed 355 is `n = 4` with **[2, 0, 2]**. On the block the
+correspondence is exact: **2** (seed, role) pairs with no pool worker, and **0**
+with zero demand despite a worker being present.
+
+**Arm-independent, because it is a property of the world.** Instances are drawn
+once and shared by every cell, so all four role-specialised variants inherit the
+same two dead models — which is why `grp-role-nonov` (novelty off) and
+`grp-role-blind` (different masks) report the identical 28/30. The shared
+topology's single model observes the always-non-empty union, hence 30/30.
+
+**The gate was always going to fire.** `P(a role is absent from the pool) =
+3·(2/3)^n − 3·(1/3)^n`, drawn once per seed, and `n ∈ 4..=16` uniform makes
+small pools common — 0.553 at `n = 4`, 0.357 at `n = 5`. Base rate over seeds
+0..3000 is **375/3000 = 12.5 %**, i.e. **≈ 3.76 expected failures per 30-seed
+block** (observed 2, well inside Poisson noise). **No seed block passes this
+guard.** A fresh block would fail too, which is why the guard — not the block —
+is what has to change.
+
+**One residual mechanism, which the fix must also cover:** over 3000 seeds
+exactly one (**1567, role 0**) had zero demand *with* the role present in the
+pool — a lone worker whose caps cover a single bit. Pool-absence explains 375 of
+376. The correct predicate is therefore `expected == 0`, **not** pool-absence.
+
+### A6.1 — the guard is corrected
+
+**A world model that received zero observations is exempt from the non-vacuity
+requirement.** Formally: non-vacuity applies to models with `expected > 0`, and
+**all** such models must move by more than the pinned `1e-9`. A model with
+`expected == 0` cannot move — the world gave its role nothing to do — and
+requiring it to is requiring the impossible.
+
+**The exempted models are disclosed, not silently dropped.** Per cell and per
+seed: how many models were exempt, and which (seed, role) pairs. That count is
+information about the **world** — it says a role was unstaffable-by-absence on
+that seed — and it belongs in the report.
+
+**A5.4's `any → all` change stands.** It is right for what it was written to
+catch: a frozen model hiding behind a learning sibling. What it could not do is
+separate *"asked and frozen"* (a real defect) from *"never asked"* (a world
+fact). `expected > 0` is exactly that separator, and it was already computed and
+already reported per model.
+
+**The counted ledger is unchanged.** Deficit and surplus both remain
+`RUN-INVALID`, on the independently-derived `expected` A5.4 installed.
+
+### A6.2 — the re-run, and why it is a reproduction
+
+The corrected guard is re-run on **the same block, 330..360**.
+
+**Justification, and it is checkable rather than asserted:** the non-vacuity
+guard is evaluated *after* the run, from counters, and **never feeds a
+decision**. Correcting it therefore cannot move a single measured value — every
+PRIMARY, act count, score bit, churn figure and disclosure is already determined
+by run `7e265fe`.
+
+**Self-imposed condition on the fix, registered here before it is written:** the
+re-run's Part 11 must be **byte-identical to run `7e265fe` except the S-learn
+line and the verdict line**. Any other difference means the fix touched
+behaviour it had no business touching, and is itself a RUN-INVALID condition.
+
+**Disclosed without hedging:** the numbers were seen before this amendment was
+written. A reader who wants to discount the re-run on that basis has the fact
+and the byte-identity condition with which to check it. The EQ5a A4.2 discipline
+applies — an amendment made with data visible must show the data — and it is
+satisfied by the diagnosis above rather than by assertion. What makes this a
+reproduction rather than a second look is not good faith; it is that the
+amendment is **incapable** of changing an outcome.
+
+### A6.3 — what the first run already established, verdict or no verdict
+
+`RUN-INVALID` means **no H-G verdict is read from run `7e265fe`**, and none is.
+These are gate-independent measurements and stand on their own:
+
+- **X-battery held.** The arm-E1 seam is byte-identical on the frozen path, as
+  the structural argument predicted.
+- **A5.1 confirmed at full scale**, not just on smoke: the group is dominated by
+  internals structurally blind to the candidate.
+- **A5.3's ablation:** `grp-role-nonov` 0.1125 vs `grp-role` 0.2270, differing on
+  3601 acts across 30/30 seeds — v5's X1 collapse reproduced at the group. The
+  inherited mechanism is load-bearing, though it also prices the candidate-blind
+  bias and the two are **not** separated.
+- **A5.2's clause fired automatically**, as pre-committed: a confirmatory cell
+  exceeded `arm-E1`'s median (0.0403) and **not** `wf-val-p`'s (0.2435).
+
+### Unchanged
+
+D1–D10, SP1–SP3, the bar (**1.25× / ≥ 18-of-30**, two confirmatory cells),
+seeds **330..360**, and Amendments 1–5 except A5.4's guard as corrected above.
+90..120 and 150..180 remain reserved. koa#54 stays FINAL.
