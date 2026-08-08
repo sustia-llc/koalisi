@@ -36,17 +36,25 @@ no library code, no example code, no test changes. catgraph is deliberately
   `VotingAgent::weighted_mixture` made `pub`. EQ5b's design-lock D4
   requires a deterministic group decision, and no RNG-free path to a group
   action distribution existed at `v0.12.0`.
-- Lockfile moved **two** packages: `aif` 0.12.0 → 0.13.0, and **`flume`
-  removed** (it rode aif's `communication` module, now behind a default-off
-  feature). The "exactly one package" phrasing of the v0.20.0 aif re-pin
-  does not hold here.
+- Lockfile delta is **not** summarisable as a package count. Directly:
+  `aif` 0.12.0 → 0.13.0, and **`flume` removed** (it rode aif's
+  `communication` module, now behind a default-off feature). Re-resolution
+  **also** moved three unrelated transitive edges:
+  `data-encoding-macro-internal` re-points `syn 2.0.118` → `syn 1.0.109`
+  (its requirement is `>=1, <3`, so the flip is legitimate and the
+  proc-macro now compiles against syn 1), `fastrand` drops its `getrandom`
+  edge, and `tempfile` moves `getrandom 0.3.4` → `0.4.3`. The v0.20.0 aif
+  re-pin's "exactly one package" phrasing does not hold here — and neither
+  does a "two packages" one. **Read the lock diff including dependency
+  arrays; a `name`/`version`/`source` grep cannot see edge changes.**
 
 ### Upstream breaking riders — both verified no-ops for koalisi
 - **`AifError` is now `#[non_exhaustive]` and gains `Unsupported(String)`.**
   koalisi uses the type only in return position (9 sites, all
-  `Result<_, aif::AifError>`) and never matches on it, so no `_` arm is
-  owed. The `decision`-family suites exercise every one of those paths and
-  pass unchanged.
+  `Result<_, aif::AifError>` — 6 return-position sites; 3 further textual
+  hits are rustdoc `# Errors` intra-doc links) and never matches on it, so
+  no `_` arm is owed. The `decision`-family suites exercise every one of
+  those paths and pass unchanged.
 - **`communication` moved behind a default-off feature** (and `serde` now
   implies it). koalisi takes aif's default features and touches no
   `communication` surface; the only observable effect is `flume` leaving
@@ -55,8 +63,15 @@ no library code, no example code, no test changes. catgraph is deliberately
 ### Drift check — CLEAN
 - **Suites** at baseline on all ten configurations —
   106 / 162 / 135 / 191 / 143 / 126 / 156 / 112 / 159 / 215. Measured
-  **before** the bump as well, and all ten already matched the recorded
-  table, so no stale documentation is hiding inside the comparison.
+  **before** the bump as well, and all ten matched the `CLAUDE.md` suite
+  table, so no drift is hiding inside that comparison. Scoped precisely:
+  the *table* was current; two other records were **not**, and the review
+  caught them — `CLAUDE.md` §Reproducers still said `process` 152 /
+  `decision,magnitude,process` 208 (the v0.27.0 figures, pre-#80), and
+  `README.md` listed only eight configurations, omitting both `process`
+  suites. Both are pre-existing from the v0.27.0/v0.28.0 cycles and are
+  **fixed in this PR** — stale docs being the failure mode a deps-only PR
+  carries most often, which is why the re-pin review carve-out was revoked.
 - **Default clippy `--all-targets`** clean, from a fresh target dir so
   nothing was cache-suppressed.
 - **Frozen K4 battery (Parts 1–10, `--release`) reproduced with zero

@@ -88,13 +88,19 @@ forex domain since removed).
   required exactly this and it did not exist at `v0.12.0`.
   **Two breaking riders, both verified no-ops here**: `AifError` is now
   `#[non_exhaustive]` + gains `Unsupported(String)` (koalisi uses the type
-  only in return position — 9 sites, all `Result<_, aif::AifError>` —
-  and never matches on it), and `communication` moved behind a
-  default-off feature (koalisi takes aif's default features and touches
-  no `communication` surface). **Lockfile delta is TWO packages, not
-  one**: `aif` 0.12.0 → 0.13.0 **and `flume` removed** (it rode
-  `communication`) — do not transcribe the "exactly one package" phrasing
-  from the v0.20.0 entry; check the diff.
+  only in return position — **6** sites, all `Result<_, aif::AifError>`;
+  3 further textual hits are rustdoc `# Errors` links — and never matches
+  on it), and `communication` moved behind a default-off feature (koalisi
+  takes aif's default features and touches no `communication` surface).
+  **Lockfile delta is NOT a package count** — `aif` bumped and `flume`
+  removed, but re-resolution ALSO moved three unrelated transitive edges
+  (`data-encoding-macro-internal`'s `syn` 2.0.118 → 1.0.109, legitimate
+  under its `>=1, <3` req; `fastrand` drops `getrandom`; `tempfile`
+  `getrandom` 0.3.4 → 0.4.3). **A `name`/`version`/`source` grep
+  structurally cannot see dependency-array edges — read the whole diff.**
+  This entry's first draft said "two packages" and the reviewer caught
+  it: the v0.26.0 warning got transcribed rather than followed, in the
+  very entry written to correct it.
   ⚠ **MSRV re-test still NOT owed here and deliberately not run**: the
   1.93 floor is `deep_causality_num =0.4.1` propagating through catgraph,
   which this hop does not touch. It remains owed at the next *catgraph*
@@ -1603,6 +1609,25 @@ These cost time during the build; future-me should not relearn them.
       as **S-learn** (#78 D9). This is the FOURTH instance of the
       lever-that-cannot-move failure class (v4 count injection, EQ5a's
       cancelling valuation term, #80's 355-bits/0-acts).
+    - **…but under MMP the same mistake DOUBLE-COUNTS instead of
+      freezing, and koalisi's world model is MMP.** The fixed point above
+      is the `MeanField` behaviour. Under `MarginalMessagePassing` —
+      which is exactly what `aif_persistent_policy.rs:568` configures —
+      an observation arriving with no action recorded since the previous
+      one **supersedes** the pending one rather than opening a new window
+      node (the `aif-v0.13.0` fix for what used to be an
+      index-out-of-bounds panic at horizon ≥ 2). Two commit-free reads
+      are therefore two looks at the SAME timestep, and the belief
+      update — plus, under `learn_*`, the Dirichlet update — **applies
+      twice**. So the two inference modes fail in opposite directions
+      from one bug: MeanField freezes, MMP silently over-learns.
+      **Consequence for the S-learn gate as drafted:** a conjunct that
+      only asks "did the world model move?" PASSES a double-updating MMP
+      arm. S-learn (i) must therefore be specified against an expected
+      update count, not mere movement — and D4a's read → decide →
+      `record_group_action` discipline is what makes the count
+      well-defined. Caught by the v0.29.0 re-pin review before any EQ5b
+      prereg line was written.
     - **Read → decide → `record_group_action`, and NEVER mixed with
       `group_distribution_recording`.** The recording read advances each
       member to its own argmax; the commit advances members to the
@@ -1664,9 +1689,9 @@ timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-tar
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features remote
 timeout 60s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features remote --example remote_coalition_consumer
 
-# === with process feature (EQ5a #76, 152 tests) ===
+# === with process feature (EQ5a #76 + #80 ResidualPolicy, 159 tests) ===
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features process
-timeout 300s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision,magnitude,process   # 208
+timeout 300s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision,magnitude,process   # 215
 # NOTE: strategy_comparison now requires all THREE features (Part 9), and the
 # battery run takes ~21 min — NO timeout wrapper on battery runs (run protocol).
 cargo run --release --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision,magnitude,process --example strategy_comparison
