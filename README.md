@@ -161,6 +161,8 @@ cargo test --features magnitude-fast       # 143 tests (+ EQ3 opt-in levers + re
 cargo test --features persistence          # 126 tests (+ chained event store + topology replay)
 cargo test --features persistence,magnitude # 156 tests (incl. the live-vs-replayed parity gate)
 cargo test --features remote               # 112 tests (+ gateway event buffer + loopback round-trip)
+cargo test --features process              # 159 tests (+ process-structured workflows + the unstaffable-residual policy)
+cargo test --features decision,magnitude,process # 215 tests (the full A/B battery surface)
 cargo test --features durable              # + container-backed restart-durability test (needs Docker)
 ```
 
@@ -170,7 +172,7 @@ cargo test --features durable              # + container-backed restart-durabili
 - tokio + tokio-util — async runtime + lifecycle primitives
 - rayon + tokio-rayon — CPU-bound graph operations bridge
 - [surrealdb-live-message](https://github.com/sustia-llc/surrealdb-live-message) (tag `v0.2.1`, **optional**, feature `durable`) — two-tier restart-durable message bus for the coalition decision log
-- [aif](https://github.com/sustia-llc/tira) (tag `aif-v0.12.0`, **optional**, feature `decision`) — active-inference engine for the AIF decision strategies (scalar, multimodal, persistent); `nalgebra` is only compiled when the feature is enabled
+- [aif](https://github.com/sustia-llc/tira) (tag `aif-v0.13.0`, **optional**, feature `decision`) — active-inference engine for the AIF decision strategies (scalar, multimodal, persistent); `nalgebra` is only compiled when the feature is enabled
 - [catgraph-magnitude](https://github.com/sustia-llc/catgraph) (tag `v0.8.0`, **optional**, feature `magnitude`) — enriched-category coalition magnitude for the categorical decision strategy
 - libp2p 0.56 (**optional**, feature `remote`) — TCP+noise+yamux `request-response` transport for the remote coalition-event gateway
 

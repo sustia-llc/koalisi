@@ -104,10 +104,9 @@ dependencies = [
 
 [[package]]
 name = "aif"
-version = "0.12.0"
-source = "git+https://github.com/sustia-llc/tira?tag=aif-v0.12.0#3db8e54bae39080b330feb72d57e6d80f68ca8b1"
+version = "0.13.0"
+source = "git+https://github.com/sustia-llc/tira?tag=aif-v0.13.0#74c8b120f6da798d3d9d4d562332c3943ca9171f"
 dependencies = [
- "flume",
  "nalgebra",
  "rand 0.10.2",
  "rand_distr 0.6.0",
@@ -1265,7 +1264,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ccc2776f0c61eca1ca32528f85548abd1a4be8fb53d1b21c013e4f18da1e7090"
 dependencies = [
  "data-encoding",
- "syn 2.0.118",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -1635,9 +1634,6 @@ name = "fastrand"
 version = "2.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f1f227452a390804cdb637b74a86990f2a7d7ba4b7d5693aac9b4dd6defd8d6"
-dependencies = [
- "getrandom 0.3.4",
-]
 
 [[package]]
 name = "ff"
@@ -1687,18 +1683,6 @@ name = "float_next_after"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8bf7cc16383c4b8d58b9905a8509f02926ce3058053c056376248d958c9df1e8"
-
-[[package]]
-name = "flume"
-version = "0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e139bc46ca777eb5efaf62df0ab8cc5fd400866427e56c68b22e414e53bd3be"
-dependencies = [
- "fastrand",
- "futures-core",
- "futures-sink",
- "spin",
-]
 
 [[package]]
 name = "fnv"
@@ -2898,7 +2882,7 @@ dependencies = [
 
 [[package]]
 name = "koalisi"
-version = "0.28.0"
+version = "0.29.0"
 dependencies = [
  "aif",
  "anyhow",
@@ -5908,7 +5892,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",

@@ -64,9 +64,63 @@ forex domain since removed).
   `surrealdb:surrealql-language` — for K3 (#6) surrealdb-live-message work,
   per the user CLAUDE.md routing rules.
 
-## Current state — 2026-08-05
+## Current state — 2026-08-08
 
 ### Done
+
+- **aif re-pin `aif-v0.12.0` → `aif-v0.13.0` — v0.29.0 (2026-08-08)**: the
+  EQ5b pin-first step — the typed two-engine registration
+  ([#78](https://github.com/sustia-llc/koalisi/issues/78)) must be born on
+  the final pins. **catgraph deliberately NOT moved** (stays `v0.8.0` ×3),
+  so this is an aif-only hop. **Drift check CLEAN**: all ten suites at
+  baseline counts (106/162/135/191/143/126/156/112/159/215 — measured
+  BEFORE the bump too, all ten matched the table, so no documentation
+  drift is hiding in the comparison), default clippy `--all-targets`
+  clean from a fresh target dir, and the frozen K4 battery (Parts 1–10,
+  `--release`) reproduced with **zero non-latency diffs** — every
+  quality/ratio/superiority/churn/verdict line byte-identical, latency
+  the sole mover, per the standing exclusion.
+  **What the hop buys** (tira#53, the EQ5b gate): `GroupAgent::group_distribution`
+  — the group action distribution formed with **no RNG draw** and **no
+  `last_action` advance** — plus `group_distribution_recording`,
+  `record_group_action`, the defaulted `Aggregator` distribution twins,
+  and `VotingAgent::weighted_mixture` made `pub`. EQ5b's design-lock D4
+  required exactly this and it did not exist at `v0.12.0`.
+  **Two breaking riders, both verified no-ops here**: `AifError` is now
+  `#[non_exhaustive]` + gains `Unsupported(String)` (koalisi uses the type
+  only in return position — **6** sites, all `Result<_, aif::AifError>`;
+  3 further textual hits are rustdoc `# Errors` links — and never matches
+  on it), and `communication` moved behind a default-off feature (koalisi
+  takes aif's default features and touches no `communication` surface).
+  **Lockfile delta is NOT a package count** — `aif` bumped and `flume`
+  removed, but re-resolution ALSO moved three unrelated transitive edges
+  (`data-encoding-macro-internal`'s `syn` 2.0.118 → 1.0.109, legitimate
+  under its `>=1, <3` req; `fastrand` drops `getrandom`; `tempfile`
+  `getrandom` 0.3.4 → 0.4.3). **A `name`/`version`/`source` grep
+  structurally cannot see dependency-array edges — read the whole diff.**
+  This entry's first draft said "two packages" and the reviewer caught
+  it: the v0.26.0 warning got transcribed rather than followed, in the
+  very entry written to correct it.
+  ⚠ **MSRV re-test still NOT owed here and deliberately not run**: the
+  1.93 floor is `deep_causality_num =0.4.1` propagating through catgraph,
+  which this hop does not touch. It remains owed at the next *catgraph*
+  re-pin (v0.9.0 removes that crate).
+  **EQ5b IS IN FLIGHT**: #78 carries the owner design-lock (posted
+  2026-08-08 BEFORE prereg): D1 v2w world verbatim from EQ5a §2; D2
+  `GroupAgent` + R=3 role-slotted internals over arm-E1, `CertaintyWeighted`
+  **forced** (3 voters × 2 actions makes the discrete-vote read a delta or
+  counts/3 — no usable score gradient); D3 BOTH precision cells
+  (`grp-role` literal / `grp-mult` multiplicity-weighted); **D4a**
+  commit discipline = pure read → decide → `record_group_action` (never
+  mixed with the recording read); D5 control `wf-asis` + `wf-val-p` as a
+  mandatory NON-gating reference under pre-committed scoped-claim
+  language; D6 cell-count bar rule ⇒ **1.25× / ≥18-of-30** at 2
+  confirmatory cells; D7 seeds **330..360** (90..120 + 150..180 stay
+  reserved); D8 Part 11, library behind `decision` + `process`; D9 gates
+  X-battery / X-identity / S-determinism / S-live / **S-learn**; D10
+  pin-first. Next: prereg doc → implementation (dispatched to
+  `rust-v2:rust-dev-v2`) → 3-lens review → official run.
+  See **gotcha 32**.
 
 - **Residual process-specificity RUN — v0.28.0 (2026-08-05, #80):
   `FALSIFIED (coverage proxy)`**. The EQ5a follow-up, a koalisi-side
@@ -121,9 +175,21 @@ forex domain since removed).
   208; all others unchanged. Seeds consumed: 270..300; 90..120 + 150..180
   still reserved. **EQ5b** (typed two-engine contest,
   `GroupAgent`-over-e1) split to
-  [#78](https://github.com/sustia-llc/koalisi/issues/78) — its build gate
-  is discharged (`GroupAgent::with_slots` + `Aggregator` live at
-  `aif-v0.12.0`; no tira release needed).
+  [#78](https://github.com/sustia-llc/koalisi/issues/78). ⚠ **The "no tira
+  release needed" claim recorded here at v0.27.0 is SUPERSEDED** (owner
+  design-lock, 2026-08-08): it was true of the surface it checked
+  (`GroupAgent::with_slots` + `Aggregator` are live and flat use is generic
+  in `X` at `aif-v0.12.0`) but the lock's D4 requires a **deterministic**
+  group decision, and there is **no RNG-free path to a group action
+  distribution** at that tag — `act` samples throughout, the nested
+  `action_probabilities` replaces only the final draw (it still samples each
+  member's action to `record_action`), and `VotingAgent::weighted_mixture`
+  is private. Filed as
+  [tira#53](https://github.com/sustia-llc/tira/issues/53) (distinct from
+  tira#51, which is nesting-scoped and does not subsume it). **Gate
+  DISCHARGED same day** — `aif-v0.13.0` ships `GroupAgent::group_distribution`
+  and koalisi re-pinned at v0.29.0. Lock D1–D10 + D4a + S-learn on #78;
+  seeds 330..360.
 - **catgraph re-pin `v0.7.0` ×2 → `v0.8.0` — v0.26.0 (2026-08-05)**: the
   EQ5a pin-first step — the process-structured registration
   ([#76](https://github.com/sustia-llc/koalisi/issues/76)) must be born
@@ -1527,6 +1593,74 @@ These cost time during the build; future-me should not relearn them.
       have now measured it and neither licenses making it a default;
       koa#54 (mag = demonstrated default) stays FINAL.
 
+32. **`GroupAgent` deterministic-read contracts (`aif-v0.13.0`, tira#53,
+    adopted v0.29.0) — rely on these.** Nothing here is koalisi code yet;
+    these are the upstream contracts EQ5b's arm is being designed against.
+    - **A read without a commit is a FIXED POINT.** Under the default
+      `MeanField` inference a member ignores observations while
+      `last_action` is `None` — beliefs reset to `D` and `update_a`
+      returns early. `act` has the same `t = 0` rule but then records;
+      `group_distribution` does not. So a group only ever read returns
+      **the same distribution forever and never learns**. For an
+      arm-E1-derived arm — whose entire validated mechanism is learned
+      per-bit precisions + novelty — that is a null by construction, and
+      it would present as an honest-looking negative. Upstream pins it
+      both ways (`test_uncommitted_reads_stay_at_t0`); koalisi gates it
+      as **S-learn** (#78 D9). This is the FOURTH instance of the
+      lever-that-cannot-move failure class (v4 count injection, EQ5a's
+      cancelling valuation term, #80's 355-bits/0-acts).
+    - **…but under MMP the same mistake DOUBLE-COUNTS instead of
+      freezing, and koalisi's world model is MMP.** The fixed point above
+      is the `MeanField` behaviour. Under `MarginalMessagePassing` —
+      which is exactly what `aif_persistent_policy.rs:568` configures —
+      an observation arriving with no action recorded since the previous
+      one **supersedes** the pending one rather than opening a new window
+      node (the `aif-v0.13.0` fix for what used to be an
+      index-out-of-bounds panic at horizon ≥ 2). Two commit-free reads
+      are therefore two looks at the SAME timestep, and the belief
+      update — plus, under `learn_*`, the Dirichlet update — **applies
+      twice**. So the two inference modes fail in opposite directions
+      from one bug: MeanField freezes, MMP silently over-learns.
+      **Consequence for the S-learn gate as drafted:** a conjunct that
+      only asks "did the world model move?" PASSES a double-updating MMP
+      arm. S-learn (i) must therefore be specified against an expected
+      update count, not mere movement — and D4a's read → decide →
+      `record_group_action` discipline is what makes the count
+      well-defined. Caught by the v0.29.0 re-pin review before any EQ5b
+      prereg line was written.
+    - **Read → decide → `record_group_action`, and NEVER mixed with
+      `group_distribution_recording`.** The recording read advances each
+      member to its own argmax; the commit advances members to the
+      **group's** resolved action. Combining them issues two
+      `record_action`s with no observation between, leaving the action
+      history one long so `last_action` and the smoother's next
+      transition disagree until the window slides — no panic, silent
+      drift. Pick one discipline (the gotcha-18 lesson again).
+    - **`CertaintyWeighted` is the only mode with a usable gradient at
+      koalisi's shape.** With R = 3 voters over 2 actions, `Deterministic`
+      returns uniform-over-winners — and a tie is arithmetically
+      impossible (counts sum to 3) — so it is always a delta;
+      `Probabilistic` returns counts/3 ∈ {0, ⅓, ⅔, 1}. Under CW the read
+      is exactly the mixture `act` samples from. The vote-mode read is
+      "the vote the group would deterministically cast", NOT the group's
+      policy, and is systematically sharper than `act`'s marginal.
+    - **The read is RNG-free, not side-effect-free.** Member beliefs and
+      (under `learn_*`) Dirichlet counts still move, exactly as in `act`;
+      only `last_action` is held fixed. A **failed** read has still moved
+      them, and there is no side-effect-free way to probe whether a group
+      supports the read at all.
+    - **RNG-freedom is inherited from the slots, not enforced.** It holds
+      for a deterministic sensory slot + `POMDPAgent` members +
+      `VotingAgent`. A member that is itself a `GroupAgent` breaks it
+      (nested `action_probabilities` runs `act`'s sampling loop verbatim)
+      and **nothing rejects it** — this is a flat-group surface; nesting
+      genericity is still tira#51.
+    - An active slot leaving the `Aggregator` distribution twins
+      defaulted yields `AifError::Unsupported`, distinguishable by
+      variant from a bad value. `AifError` is `#[non_exhaustive]` since
+      this release — koalisi only propagates it and never matches, so no
+      `_` arm is owed today; add one if that ever changes.
+
 ## Reproducers
 
 All assume `cwd = koalisi/`.
@@ -1555,9 +1689,9 @@ timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-tar
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features remote
 timeout 60s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features remote --example remote_coalition_consumer
 
-# === with process feature (EQ5a #76, 152 tests) ===
+# === with process feature (EQ5a #76 + #80 ResidualPolicy, 159 tests) ===
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features process
-timeout 300s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision,magnitude,process   # 208
+timeout 300s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision,magnitude,process   # 215
 # NOTE: strategy_comparison now requires all THREE features (Part 9), and the
 # battery run takes ~21 min — NO timeout wrapper on battery runs (run protocol).
 cargo run --release --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision,magnitude,process --example strategy_comparison
@@ -1698,10 +1832,12 @@ learning, ad-hoc RNG). Instead koalisi depends on the code-reviewed `aif` refere
 engine from the `tira` repo and bridges to it.
 
 - **Dependency:** `aif = { git = "https://github.com/sustia-llc/tira", tag =
-  "aif-v0.12.0", optional = true }` (shipped at `aif-v0.4.0`; → `v0.5.0` by follow-up #2;
+  "aif-v0.13.0", optional = true }` (shipped at `aif-v0.4.0`; → `v0.5.0` by follow-up #2;
   → `v0.9.0` by #43 Part 1, 2026-07-16 — decision suite passed unchanged;
   → `v0.11.0` by the #44 K4-v4 cycle; → `v0.12.0` by the 2026-08-01 pre-EQ4
-  adoption slice, v0.20.0 — drift-free), behind `[features] decision = ["dep:aif"]`.
+  adoption slice, v0.20.0 — drift-free; → `v0.13.0` by the EQ5b pin-first
+  re-pin, v0.29.0, 2026-08-08 — drift-free), behind
+  `[features] decision = ["dep:aif"]`.
   Originally an SSH URL (tira was private; cargo's libgit2 HTTPS fetch can't
   authenticate) — re-pinned to HTTPS in the 2026-07-27 release sweep after
   tira went public. Feature-off builds compile **no `aif` and no
