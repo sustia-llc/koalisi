@@ -497,3 +497,95 @@ SP1's `required_r` substitution, SP2's `m(b, r)` scale, SP3's threshold, and
 Amendment 1 in full (A1.1 topology contrast, D4a struck, A1.2 wrapper, A1.3
 roster drop, A1.4 S-learn re-scope). Gates X-battery / X-identity /
 S-determinism / S-live / S-learn unchanged. koa#54 stays FINAL.
+
+## Amendment 3 (pre-run, 2026-08-08) — D2's CW rationale is measured false; a Deterministic reference leg is added
+
+Posted to #78 before the affected code exists. Smoke on seeds **900..902**
+(off-block; 330..360 remain unconsumed) surfaced two findings. One changes the
+registration; the other is a result and is recorded for the report.
+
+### A3.1 (owner) — the CW mixture is saturated, and a Deterministic leg is registered
+
+**D2 pinned `CertaintyWeighted` as *forced*, not chosen**, on this argument:
+with 3 voters over 2 actions, `Deterministic` returns uniform-over-winners —
+always a delta, since a tie is arithmetically impossible — and `Probabilistic`
+returns counts/3 ∈ {0, ⅓, ⅔, 1}; **only CW carries a continuous margin**.
+
+**Smoke measures that premise false on this world.** The E-agree margin median
+is **0.5000 on every cell** — `|p(act) − 0.5| = 0.5` means the mixture puts all
+its mass on one action, i.e. **CW is itself a delta essentially always**, so
+SP3's threshold is never contested and CW's supposed advantage over the
+discrete modes does not exist here.
+
+Mechanism, and it is a known one: this is **gotcha 25's saturation reappearing
+one level up**. arm-E1's query posteriors saturate at ±0.5 (the join rail sits
+at `p = 1.0` certainty in every measured cell), the role internals inherit
+that, and a confidence-weighted mixture of near-deterministic members is
+near-deterministic. The group did not introduce the saturation; it propagated
+it.
+
+**Registered: a new non-gating reference leg `grp-role-det`** — `grp-role` with
+the active slot in `VotingMode::Deterministic`, everything else identical.
+
+Rationale for measuring rather than conceding: if the mixture really is a
+delta, that cell's **acts** should be near-identical to `grp-role`'s, which
+converts "the stated rationale was wrong" into a quantified claim about what CW
+actually bought on this world. Reported as act-count and PRIMARY divergence
+against `grp-role`, not as a margin comparison — the discrete-mode read is a
+tally over member argmaxes, not a policy, and the two are not commensurable as
+margins.
+
+**Explicitly NOT done: the confirmatory cells are not switched to a discrete
+mode.** That would re-specify the registered arm on the basis of smoke data —
+the same post-hoc instrument re-targeting this lineage refused at EQ5a A5.2,
+where the fusion schema was deliberately left un-tuned after its reach was
+visible. D2 stands as registered; its rationale is corrected in public and the
+cost of that error is measured.
+
+**Cell accounting unchanged:** still **2 confirmatory cells**, so D6 still
+gives **1.25× / ≥ 18-of-30**. `grp-role-det` joins `grp-role-fresh`,
+`grp-mult-fresh`, `grp-role-blind` and `wf-val-p` as non-gating references.
+
+### A3.2 (disclosure) — `grp-mult` may carry no independent look
+
+Smoke: `grp-mult` and `grp-role` post **identical PRIMARY, identical S-live
+counts against the control, and differ on 23 raw score bits with ZERO
+divergent acts.**
+
+That is **#80's pattern exactly** — live in the score, dead at the decision.
+Consistent with A2.3: SP2 moves only Dirichlet concentration, hence only the
+novelty term, and here it reaches the margin without crossing a threshold.
+
+Neither registered instrument can see it. H-G compares medians, which are
+equal; S-live is measured against `wf-asis`, not against the base channel. A
+**`grp-mult` vs `grp-role` act-and-score-bit divergence line is therefore
+promoted to a mandatory disclosure** — without it, a "the two cells agree"
+outcome would read as a flat null when the truth is a mechanism statement.
+
+Consequence for reading the verdict, pre-committed now: if this holds on the
+registered block, **`grp-mult` passes or fails *with* `grp-role` and
+contributes no independent look**. The 2-cell bar then applies to what is
+effectively one look — which is **conservative, not permissive**, so no bar
+change is warranted and none is made.
+
+### A3.3 — smoke figures are smoke
+
+Seeds 900..902, 2 seeds, off the registered block, reported here only to
+justify these amendments. They are **not** evidence for any hypothesis, they
+are not reported as results, and 330..360 remain unconsumed. Recording the
+numbers that drove a pre-run amendment is the EQ5a A4.2 discipline: a reader
+who wants to discount an amendment made with data visible needs to see the
+data.
+
+Also observed on smoke, and relevant to D10's budget: latency is **~37
+µs/decision**, not the ~190 µs projected. **No leg needs trimming for cost** —
+`grp-role-blind`, both fresh legs, E-seed and now `grp-role-det` all stay.
+
+`grp-role-blind` posted 0.461× against role-matched's 1.379×, which is support
+for A2.1's registered choice — noted, and equally not evidence.
+
+### Unchanged
+
+D1, D2 (**including CW itself**), D3, D5, D6, D7 (seeds **330..360**), D8, D10,
+SP1–SP3, and Amendments 1–2 in full. Gates X-battery / X-identity /
+S-determinism / S-live / S-learn unchanged. koa#54 stays FINAL.
