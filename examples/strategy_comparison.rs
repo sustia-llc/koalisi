@@ -116,8 +116,8 @@ use koalisi::decision::{
 // Part 11 (koalisi #78) EQ5b: the role-slotted group arm and its instrumentation.
 use koalisi::decision::{
     AgreementSample, CoverageMasks, DecisionRead, GroupAifConfig, GroupAifCounters, GroupAifError,
-    GroupAifPolicy, GroupVote, PrecisionChannel, S_LEARN_VACUITY_TOL, WorldModelTopology,
-    models_moved, v5_e1_base,
+    GroupAifPolicy, GroupVote, ModelLabel, PrecisionChannel, S_LEARN_VACUITY_TOL,
+    WorldModelTopology, models_moved, v5_e1_base,
 };
 // Part 7 (koalisi #69) EQ3 instrumentation surface + the upstream certificate /
 // factorization enums it reports. Feature-gated exactly like the `mag-eq3` arm.
@@ -11104,11 +11104,14 @@ struct P11GroupRun {
     latencies: Vec<f64>,
     /// Per-seed counters — the S-learn ledger and the A1.3 / E-agree disclosures.
     counters: Vec<GroupAifCounters>,
-    /// Per-seed non-vacuity: did **every** world model move off its
-    /// initialization? `all`, not `any` (Amendment A5.4), and evaluated by the
-    /// library's own [`models_moved`] at the prereg-pinned
-    /// [`S_LEARN_VACUITY_TOL`] — there is no second implementation.
+    /// Per-seed non-vacuity: did every world model **that was asked to learn**
+    /// move off its initialization? `all` within scope (A5.4), scoped to
+    /// `expected > 0` (**A6.1**), evaluated by the library's own [`models_moved`]
+    /// at the prereg-pinned [`S_LEARN_VACUITY_TOL`] — no second implementation.
     moved: Vec<bool>,
+    /// Per-seed models exempted by A6.1 (`expected == 0` — the world never asked
+    /// that role to do anything). **Disclosed, never silently dropped.**
+    exempt: Vec<Vec<ModelLabel>>,
     /// `begin_task` rejections. Nonzero means the world and the arm disagree about
     /// roles or the universe — a harness fault, and a **registered** RUN-INVALID
     /// condition since Amendment A5.10 L2-11.
@@ -11162,6 +11165,7 @@ fn p11_group_battery(
     let mut seeds = Vec::with_capacity(insts.len());
     let mut counters = Vec::with_capacity(insts.len());
     let mut moved = Vec::with_capacity(insts.len());
+    let mut exempt = Vec::with_capacity(insts.len());
     let mut begin_failures = 0usize;
 
     for (i, (inst, decl)) in insts.iter().zip(declared.iter()).enumerate() {
@@ -11189,11 +11193,19 @@ fn p11_group_battery(
             },
         );
         begin_failures += failures.get();
-        counters.push(policy.counters());
-        moved.push(models_moved(
+        let c = policy.counters();
+        // A6.1: the guard reads the ledger, so a model the world never asked to
+        // learn is exempt rather than failing. Evaluated post-hoc from counters
+        // and snapshots — it feeds no decision, which is why correcting it cannot
+        // move a measured value.
+        let nv = models_moved(
             &policy.model_snapshots(),
             &fresh.model_snapshots(),
-        ));
+            &c.model_updates,
+        );
+        moved.push(nv.ok);
+        exempt.push(nv.exempt);
+        counters.push(c);
         seeds.push(result);
     }
 
@@ -11202,6 +11214,7 @@ fn p11_group_battery(
         latencies: lat,
         counters,
         moved,
+        exempt,
         begin_failures,
     })
 }
@@ -11244,7 +11257,8 @@ fn p11_identical_seeds(a: &[P9Seed], b: &[P9Seed]) -> usize {
 }
 
 /// S-learn (i) over one cell: every world model of every seed advanced exactly its
-/// expected number of times, and the end-of-stream state is non-vacuously moved.
+/// expected number of times, and every model **that was asked to learn** moved
+/// off its initialization (Amendment A6.1).
 fn p11_s_learn(run: &P11GroupRun) -> (bool, usize, usize) {
     let exact = run.counters.iter().filter(|c| c.s_learn_exact()).count();
     let moved = run.moved.iter().filter(|&&m| m).count();
@@ -11252,6 +11266,29 @@ fn p11_s_learn(run: &P11GroupRun) -> (bool, usize, usize) {
         && moved == run.moved.len()
         && run.begin_failures == 0;
     (ok, exact, moved)
+}
+
+/// The A6.1 exemption disclosure for one cell: `(seeds carrying an exemption,
+/// total exempt models, the (seed, role) pairs)`.
+fn p11_exempt(run: &P11GroupRun, seed_start: u64) -> (usize, usize, Vec<String>) {
+    let mut seeds = 0usize;
+    let mut total = 0usize;
+    let mut pairs = Vec::new();
+    for (i, labels) in run.exempt.iter().enumerate() {
+        if labels.is_empty() {
+            continue;
+        }
+        seeds += 1;
+        total += labels.len();
+        for l in labels {
+            let name = match l {
+                ModelLabel::Role(r) => format!("r{}", r.index()),
+                ModelLabel::Shared => "shared".to_owned(),
+            };
+            pairs.push(format!("({}, {name})", seed_start + i as u64));
+        }
+    }
+    (seeds, total, pairs)
 }
 
 /// The realised-roster disclosure (A1.3) pooled over a cell's seeds:
@@ -11771,8 +11808,12 @@ fn part11_eq5b_typed_two_engine() {
         .zip(learn.iter())
         .filter(|((_, kind, _), _)| *kind != P11_READ_PROBE)
         .all(|(_, &(ok, _, _))| ok);
+    let exempt_rows: Vec<(usize, usize, Vec<String>)> = runs
+        .iter()
+        .map(|r| p11_exempt(r, P11_SEED_START))
+        .collect();
     println!(
-        "- **S-learn (i) — {}.** Per seed, each world model must record **exactly one** update per task in which its role had demand — **counted, not inferred from state movement**, because under MMP a missing commit makes an update apply TWICE rather than not at all, so \"did the state move?\" passes a double-updating arm. Deficit and surplus are both `RUN-INVALID`. Seeds with an exact ledger, and seeds whose **every** world model moved off initialization by more than {tol:e} (the prereg-pinned non-vacuity tolerance — necessary, explicitly NOT sufficient): {}.",
+        "- **S-learn (i) — {}.** Per seed, each world model must record **exactly one** update per task in which its role had demand — **counted, not inferred from state movement**, because under MMP a missing commit makes an update apply TWICE rather than not at all, so \"did the state move?\" passes a double-updating arm. Deficit and surplus are both `RUN-INVALID`. Seeds with an exact ledger, and seeds whose every **in-scope** world model moved off initialization by more than {tol:e} (the prereg-pinned non-vacuity tolerance — necessary, explicitly NOT sufficient): {}. **Amendment A6.1 scopes non-vacuity to models with `expected > 0`.** The first official run (`7e265fe`) returned `RUN-INVALID` here with the counted ledger 30/30 exact on every cell: seeds **354** and **355** each carried a role model at `expected == 0, updates == 0, max |pA delta| == 0e0` — never asked to learn, because `p8_task_feasible` requires a pool worker **of the tagged role** holding each required bit, so a role absent from the pool can never be legally tagged (354 is `n = 5` with worker-role counts `[3, 0, 2]`; 355 is `n = 4` with `[2, 0, 2]`). At `P(role absent) = 3·(2/3)^n − 3·(1/3)^n` — 0.553 at `n = 4`, 12.5 % of seeds, ≈ 3.76 expected failures per 30-seed block — **no seed block passes the uncorrected guard**, so the guard is what changed and not the block. **Exempt models, disclosed per cell and per seed:** {}. A5.4's `all` stands **within** that scope, so a model that WAS asked and stayed frozen still fails, and \"everything exempt\" is not a pass.",
         pass(learn_ok),
         cells
             .iter()
@@ -11781,6 +11822,16 @@ fn part11_eq5b_typed_two_engine() {
                 "`{label}`{} {exact}/{n_seeds} exact, {moved}/{n_seeds} moved",
                 if *kind == P11_READ_PROBE { " (reported, not gated)" } else { "" }
             ))
+            .collect::<Vec<_>>()
+            .join(" · "),
+        cells
+            .iter()
+            .zip(exempt_rows.iter())
+            .map(|((label, _, _), (seeds, total, pairs))| if *total == 0 {
+                format!("`{label}` none")
+            } else {
+                format!("`{label}` {total} model(s) on {seeds}/{n_seeds} seeds — {}", pairs.join(", "))
+            })
             .collect::<Vec<_>>()
             .join(" · "),
         tol = S_LEARN_VACUITY_TOL

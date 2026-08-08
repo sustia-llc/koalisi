@@ -163,34 +163,80 @@ pub const DEFAULT_N_ROLES: usize = 3;
 /// implementation of the comparison.
 pub const S_LEARN_VACUITY_TOL: f64 = 1e-9;
 
-/// S-learn (i)'s non-vacuity guard: **every** world model's pA counts differ from
-/// the reference by more than [`S_LEARN_VACUITY_TOL`] somewhere.
+/// What S-learn (i)'s non-vacuity guard found (Amendment **A6.1**).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct NonVacuity {
+    /// Every model that was **asked to learn** moved by more than the tolerance.
+    pub ok: bool,
+    /// Models exempted because `expected == 0` — the world never gave their role
+    /// anything to do, so they *cannot* move. **Disclosed, never silently
+    /// dropped:** an exempt model says a role was unstaffable on that seed, which
+    /// is information about the world.
+    pub exempt: Vec<ModelLabel>,
+}
+
+/// S-learn (i)'s non-vacuity guard: every world model **with `expected > 0`** has
+/// pA counts differing from the reference by more than [`S_LEARN_VACUITY_TOL`]
+/// somewhere.
 ///
-/// `all`, not `any` (Amendment A5.4): under
-/// [`WorldModelTopology::RoleSpecialised`] a role model that never moved used to
-/// pass because a sibling did. Necessary, and explicitly **not sufficient** — the
-/// counted ledger in [`GroupAifCounters::model_updates`] is the gate.
+/// # Why `expected > 0` and not "all" (Amendment A6.1)
 ///
-/// Learning-off configurations carry no pA at all; those are reported as *not
-/// moved* rather than silently skipped, which is the honest reading for a guard
-/// that exists to catch a frozen model.
+/// The first official run returned `RUN-INVALID` on this guard alone, with the
+/// counted ledger 30/30 exact. Two seeds carried a role model at
+/// `expected == 0, updates == 0, max |pA delta| == 0e0` — never asked to learn,
+/// because `p8_task_feasible` requires a pool worker **of the tagged role**
+/// holding each required bit, so a role absent from the pool can never be legally
+/// tagged. Requiring such a model to move is requiring the impossible, and at
+/// `P(role absent) = 3·(2/3)^n − 3·(1/3)^n` (0.553 at `n = 4`, ~12.5 % of seeds)
+/// **no seed block passes the uncorrected guard**.
+///
+/// The predicate keys on `expected == 0` rather than on pool-absence because one
+/// seed in 3000 reached zero demand with the role *present* — a lone worker
+/// covering a single bit. Only the `expected` reading catches both.
+///
+/// **A5.4's `any → all` stands** for the models that remain in scope: it is right
+/// for catching a frozen model hiding behind a learning sibling, and `expected > 0`
+/// is exactly the separator between *"asked and frozen"* (a real defect) and
+/// *"never asked"* (a world fact).
+///
+/// Necessary, and explicitly **not sufficient** — the counted ledger in
+/// [`GroupAifCounters::model_updates`] is the gate. Learning-off configurations
+/// carry no pA at all; an in-scope model without counts is reported as *not
+/// moved*, which is the honest reading for a guard that exists to catch a frozen
+/// model.
 #[must_use]
 pub fn models_moved(
     after: &[(ModelLabel, PersistentAifState)],
     before: &[(ModelLabel, PersistentAifState)],
-) -> bool {
-    !after.is_empty()
-        && after.len() == before.len()
-        && after
-            .iter()
-            .zip(before.iter())
-            .all(|((_, a), (_, b))| match (a.pa.as_ref(), b.pa.as_ref()) {
-                (Some(x), Some(y)) => x
-                    .iter()
-                    .zip(y.iter())
-                    .any(|(p, q)| (p - q).iter().any(|d| d.abs() > S_LEARN_VACUITY_TOL)),
-                _ => false,
-            })
+    audits: &[ModelUpdateAudit],
+) -> NonVacuity {
+    let mut exempt = Vec::new();
+    let mut ok = !after.is_empty() && after.len() == before.len();
+    let mut in_scope = 0usize;
+    for (i, ((label, a), (_, b))) in after.iter().zip(before.iter()).enumerate() {
+        // A model with no audit row is treated as in scope: a missing row means
+        // the ledger and the snapshots disagree about how many models exist, and
+        // silently exempting it would hide that.
+        if audits.get(i).is_some_and(|r| r.expected == 0) {
+            exempt.push(*label);
+            continue;
+        }
+        in_scope += 1;
+        let moved = match (a.pa.as_ref(), b.pa.as_ref()) {
+            (Some(x), Some(y)) => x
+                .iter()
+                .zip(y.iter())
+                .any(|(p, q)| (p - q).iter().any(|d| d.abs() > S_LEARN_VACUITY_TOL)),
+            _ => false,
+        };
+        ok &= moved;
+    }
+    // Every model exempt means nothing was asked to learn at all — vacuous in the
+    // strongest sense, and not something the exemption is meant to permit.
+    NonVacuity {
+        ok: ok && in_scope > 0,
+        exempt,
+    }
 }
 
 /// The scalar handed to [`aif::GroupAgent::group_distribution`].
@@ -1914,15 +1960,93 @@ mod tests {
         );
 
         // Non-vacuity guard: end-of-stream state differs from initialization, on
-        // EVERY model (Amendment A5.4 — `all`, not `any`).
+        // every model that was asked to learn (A5.4's `all`, A6.1's scope).
         let fresh = policy(GroupAifConfig::default(), &[(0, 0), (1, 1), (2, 2)]);
+        let audits = &p.counters().model_updates;
+        let nv = models_moved(&p.model_snapshots(), &fresh.model_snapshots(), audits);
+        assert!(nv.ok, "every world model must actually have learned");
+        assert!(nv.exempt.is_empty(), "all three roles had demand here");
         assert!(
-            models_moved(&p.model_snapshots(), &fresh.model_snapshots()),
-            "every world model must actually have learned"
+            !models_moved(&fresh.model_snapshots(), &fresh.model_snapshots(), audits).ok,
+            "…and an unmoved model must NOT pass the guard"
+        );
+    }
+
+    /// **Amendment A6.1**: a model the world never asked to learn is **exempt**
+    /// from non-vacuity and **disclosed**, while a model that WAS asked and stayed
+    /// frozen still fails. Both halves, because exempting the first without still
+    /// catching the second would gut the guard.
+    #[test]
+    fn non_vacuity_exempts_only_never_asked_models() {
+        let a0 = TestAgent { id: 0, caps: 0b001, trust: 50 };
+        let a1 = TestAgent { id: 1, caps: 0b010, trust: 50 };
+        let a2 = TestAgent { id: 2, caps: 0b100, trust: 50 };
+        let coalition: [&dyn AgentCapabilities; 2] = [&a1, &a2];
+        let ctx = DecisionContext { required_capabilities: 0b111 };
+        let succ = [true, true, true, false, false, false, false, false];
+
+        // R = 3 configured, but the world only ever demands roles 0 and 2 —
+        // exactly seeds 354/355, where no pool worker carries role 1.
+        let arm = policy(GroupAifConfig::default(), &[(0, 0), (1, 2), (2, 0)]);
+        let reference = policy(GroupAifConfig::default(), &[(0, 0), (1, 2), (2, 0)]);
+        let d = demand(&workflow(&[
+            (Role::new(0), &[0, 1]),
+            (Role::new(2), &[2]),
+        ]));
+        for _ in 0..4 {
+            arm.begin_task(&d).unwrap();
+            let _ = arm.should_join(&a0, &coalition, &ctx);
+            arm.observe_outcome(&succ);
+        }
+
+        let c = arm.counters();
+        // The counted ledger is untouched by A6.1 and still exact.
+        assert!(c.s_learn_exact(), "the ledger stays exact: {:?}", c.model_updates);
+        assert_eq!(
+            c.model_updates[1].expected, 0,
+            "role 1 was never asked to learn"
+        );
+
+        let nv = models_moved(
+            &arm.model_snapshots(),
+            &reference.model_snapshots(),
+            &c.model_updates,
         );
         assert!(
-            !models_moved(&fresh.model_snapshots(), &fresh.model_snapshots()),
-            "…and an unmoved model must NOT pass the guard"
+            nv.ok,
+            "a never-asked model must not fail the guard (A6.1) — this is the \
+             RUN-INVALID the first official run returned"
+        );
+        assert_eq!(
+            nv.exempt,
+            vec![ModelLabel::Role(Role::new(1))],
+            "…and it must be DISCLOSED, not silently dropped"
+        );
+
+        // The other half: a model that WAS asked and did not move still fails.
+        // Constructed by handing the guard the arm's own audits against its own
+        // post-run snapshots, so every in-scope model has zero delta.
+        let frozen = models_moved(&arm.model_snapshots(), &arm.model_snapshots(), &c.model_updates);
+        assert!(
+            !frozen.ok,
+            "an asked-and-frozen model must STILL fail — A5.4's `all` stands \
+             inside A6.1's scope"
+        );
+        assert_eq!(frozen.exempt, vec![ModelLabel::Role(Role::new(1))]);
+
+        // And "everything exempt" is not a pass: nothing was asked to learn at all.
+        let idle = policy(GroupAifConfig::default(), &[(0, 0)]);
+        let idle_ref = policy(GroupAifConfig::default(), &[(0, 0)]);
+        let idle_c = idle.counters();
+        let all_exempt = models_moved(
+            &idle.model_snapshots(),
+            &idle_ref.model_snapshots(),
+            &idle_c.model_updates,
+        );
+        assert_eq!(all_exempt.exempt.len(), 3, "no task was ever opened");
+        assert!(
+            !all_exempt.ok,
+            "a run in which NOTHING was asked to learn is vacuous, not exempt"
         );
     }
 
