@@ -68,6 +68,36 @@ forex domain since removed).
 
 ### Done
 
+- **EQ5b typed two-engine RUN — v0.30.0 (2026-08-08, #78): `VALIDATED
+  (two-engine)`** — the second validated registration in the K4 lineage,
+  after EQ4. **Read the mechanism before quoting the verdict.** Full
+  discipline (owner lock D1–D10 + D2a + D4a + S-learn on #78 BEFORE
+  prereg; prereg a2ca328 BEFORE implementation; **six pre-verdict
+  amendments**; 3-lens review BEFORE the run). Official re-run seeds
+  330..360: `grp-role` **0.2270 = 1.2567×**, 22/30 · `grp-mult` 0.2266 =
+  1.2544×, 22/30 · control `wf-asis` 0.1806. **Both cells clear conjunct 1
+  by 0.7 % / 0.4 % — the margin is reported in full and NOT renegotiated**,
+  the same discipline EQ5a applied to a narrow miss. Gates X-battery /
+  X-identity / S-determinism (+ seed invariance) / S-learn all PASS.
+  **Mechanism contradicts the arm's name, twice.** (1) **Role
+  specialisation is net NEGATIVE**: the shared-model reference cells score
+  HIGHER (0.2409 vs 0.2270; 0.2404 vs 0.2266), specialised superior on only
+  15/30 and 13/30 — A1.1 relocated D2a's contrast onto exactly this axis
+  and the "three views of one model" leg wins. (2) **The arm depends on the
+  structural defect the review found**: 23.0 % of decisions have ZERO
+  candidate-sensitive internals, the blind ones carry 0.626 of the CW weight
+  and act at 95.1 % vs 80.4 %, and removing them (`grp-role-blind`)
+  collapses the arm to **0.0268** from 0.2270. What beats the typed control
+  is a permissively-joining group dominated by members blind to the
+  candidate — not deliberation. Pre-committed clauses fired automatically:
+  did NOT exceed `wf-val-p` (0.2435) ⇒ "beats the typed control, not the
+  strongest process cell"; DID exceed `arm-E1` (0.0403). **koa#54 stays
+  FINAL** — no EQ5b outcome reopens it. Library:
+  `src/decision/group_policy.rs` (`GroupAifPolicy`, features `decision` +
+  `process`). Report `docs/ab-report-K4-eq5b-typed-two-engine.md` (13-item
+  ledger). See **gotcha 33**. Suites: `decision,magnitude,process` **239**;
+  all others unchanged. Seeds consumed: 330..360; **90..120 + 150..180
+  still reserved**.
 - **aif re-pin `aif-v0.12.0` → `aif-v0.13.0` — v0.29.0 (2026-08-08)**: the
   EQ5b pin-first step — the typed two-engine registration
   ([#78](https://github.com/sustia-llc/koalisi/issues/78)) must be born on
@@ -877,7 +907,7 @@ forex domain since removed).
   | `--features persistence,magnitude` | 156 (incl. the #18/#30 replay parity gate) | `cargo test --features persistence,magnitude` |
   | `--features remote` | 112 (gateway buffer + loopback round-trip) | `cargo test --features remote` |
   | `--features process` | 159 (EQ5a surface + #80 ResidualPolicy) | `cargo test --features process` |
-  | `--features decision,magnitude,process` | 215 (the Part 9 + Part 10 batteries) | `cargo test --features decision,magnitude,process` |
+  | `--features decision,magnitude,process` | 239 (the Part 9 + Part 10 + Part 11 batteries) | `cargo test --features decision,magnitude,process` |
   | `--features durable` | +1 container-backed restart test; needs Docker | `cargo test --features durable` |
 
   (All non-remote suites are the pre-v0.25.0 baselines +3 — the
@@ -922,6 +952,7 @@ koalisi/
 │   │   ├── mod.rs                          CoalitionDecisionPolicy + ThresholdPolicy (always compiled)
 │   │   ├── aif_policy.rs                   AifDecisionPolicy + EfeValueCalculator (feature `decision`)
 │   │   ├── reliability_value.rs            ReliabilityCoverage (#57, v0.16.0): reliability-weighted coverage ValueCalculator from the persistent world-model snapshot (feature `decision`; gotcha 24)
+│   │   ├── group_policy.rs                 GroupAifPolicy (#78, v0.30.0): aif::GroupAgent, R=3 role internals over arm-E1 world models, CertaintyWeighted, deterministic group_distribution read (features `decision`+`process`; gotcha 33)
 │   │   └── magnitude_policy.rs             MagnitudePolicy + MagnitudeValueCalculator + CouplingModel + CoalitionEvaluator cache (K6) (feature `magnitude`); relevant_masks/magnitude_or_zero pub(crate) for #18
 │   ├── process/                            EQ5a (#76, v0.27.0): process-structured tasks (feature `process`; gotcha 30)
 │   │   ├── mod.rs                          re-exports + the four things a caller must know
@@ -993,7 +1024,9 @@ koalisi/
 │   ├── prereg-K4-eq5a-process-structured.md #76 EQ5a pre-registration (+ FIVE pre-run amendments: pinned constants, erratum, two inert-leg fixes, the 3-lens review)
 │   ├── ab-report-K4-eq5a-process-structured.md #76 run — FALSIFIED (process structure); valuation converts where rewriting does not; 100% of a low ceiling; 15-item ledger (gotcha 30)
 │   ├── prereg-K4-residual-process-specificity.md #80 pre-registration (+ pre-run Amendment 1: probe declines gated, floor-condition disclosure)
-│   └── ab-report-K4-residual-process-specificity.md #80 run — FALSIFIED (coverage proxy); the lever replicates 1.34x but lift_wf == lift_flat; 355 score bits, 0 acts; 8-item ledger (gotcha 31)
+│   ├── ab-report-K4-residual-process-specificity.md #80 run — FALSIFIED (coverage proxy); the lever replicates 1.34x but lift_wf == lift_flat; 355 score bits, 0 acts; 8-item ledger (gotcha 31)
+│   ├── prereg-K4-eq5b-typed-two-engine.md  #78 EQ5b pre-registration (+ SIX pre-verdict amendments: unbuildable arm, coverage masks, CW rationale false, the A3.1 erratum, the 3-lens review, the unsatisfiable non-vacuity guard)
+│   └── ab-report-K4-eq5b-typed-two-engine.md #78 run — VALIDATED (two-engine) 1.2567x / 22-of-30; role specialisation NEGATIVE and the candidate-blind voters load-bearing; 13-item ledger (gotcha 33)
 └── tests/
     ├── topology_test.rs                    12 tests
     ├── algorithms_test.rs                  18 tests (incl. 3 feedback-loop/seeding tests, #41)
@@ -1661,6 +1694,47 @@ These cost time during the build; future-me should not relearn them.
       this release — koalisi only propagates it and never matches, so no
       `_` arm is owed today; add one if that ever changes.
 
+33. **EQ5b group-arm contracts (#78, v0.30.0) — rely on these.**
+    - **Under role-matched coverage masks, a group CANNOT deliberate about a
+      candidate.** `own = 0` for any internal whose role ≠ the candidate's,
+      so on leave `cfg0 == cfg1` exactly and on join the candidate appears
+      in neither mask — measured, two candidates of a non-rostered role
+      produce **bit-identical scores**. Only the candidate's own role
+      internal is ever candidate-sensitive; restricting the roster to those
+      would force R = 1. This is structural, not a bug, and it is why
+      EQ5b's arm is described as *"role-restricted coverage queries"* and
+      never as *"specialists deliberating about a candidate"*.
+    - **An indifferent internal does not abstain — it votes ACT at maximum
+      confidence.** `run_replay` records control 0 before every
+      observation, so only the membership-0 columns of `pA` accumulate,
+      A-novelty rewards switching, and `cfg0 == cfg1` resolves to
+      `p(act) = 1.0` at zero entropy — `exp(0) = 1.0`, the **maximum** CW
+      weight. Any future group arm must check this before assuming an
+      uninformed member is neutral; the intuitive `[0.5, 0.5]`-at-weight-0.5
+      model is wrong in size **and inverted in sign**.
+    - **Those blind voters are load-bearing for performance.** Removing them
+      (role-blind masks, every internal candidate-sensitive) collapses the
+      arm from 0.2270 to **0.0268**. A defect and a performance source can
+      be the same thing; do not "fix" it without re-registering.
+    - **Role specialisation measured NEGATIVE on v2w.** R = 3 per-role world
+      models score BELOW one shared model read through three role-restricted
+      views (0.2270 vs 0.2409), superior on only 15/30 seeds. Don't assume
+      per-role learning helps.
+    - **A non-vacuity gate must exempt `expected == 0`.** A role absent from
+      the **pool** can never be tagged (`p8_task_feasible` requires a worker
+      of the tagged role), so its model is never asked to learn and cannot
+      move. `P(role absent) = 3(2/3)ⁿ − 3(1/3)ⁿ` per seed — 0.553 at
+      `n = 4`, **12.5 % base rate**, ≈ 3.76 expected per 30-seed block, so
+      **no seed block passes an unexempted guard**. Key on `expected == 0`,
+      not pool-absence: one seed in 3000 reaches zero demand with the role
+      present (a lone single-bit worker).
+    - **`GroupAgent` mode choice at small R**: with 3 voters over 2 actions,
+      `Deterministic` reads uniform-over-winners `{0, 0.5, 1}` (NOT the
+      `k/R` tally — that is the `Probabilistic` branch), so SP3 over it is
+      majority at R = 3 and **unanimity** at R = 2. CW is the only mode with
+      a continuous margin in principle — but on this world the mixture
+      saturates to a delta anyway, so that advantage did not materialise.
+
 ## Reproducers
 
 All assume `cwd = koalisi/`.
@@ -1691,7 +1765,7 @@ timeout 60s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-tar
 
 # === with process feature (EQ5a #76 + #80 ResidualPolicy, 159 tests) ===
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features process
-timeout 300s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision,magnitude,process   # 215
+timeout 300s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision,magnitude,process   # 239
 # NOTE: strategy_comparison now requires all THREE features (Part 9), and the
 # battery run takes ~21 min — NO timeout wrapper on battery runs (run protocol).
 cargo run --release --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision,magnitude,process --example strategy_comparison

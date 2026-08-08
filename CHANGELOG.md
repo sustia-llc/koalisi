@@ -19,6 +19,75 @@ Planned work — issue-tracked (details in [`CLAUDE.md`](./CLAUDE.md)
 - **[#25]** metrics example, reframed onto the `CoalitionService` decision
   path / topology events.
 
+## [0.30.0] — 2026-08-08
+
+The EQ5b typed two-engine registration
+([#78](https://github.com/sustia-llc/koalisi/issues/78)). Verdict:
+**`VALIDATED (two-engine)`** — the second validated registration in the K4
+lineage, after EQ4 (`docs/ab-report-K4-eq5b-typed-two-engine.md`; prereg
+`docs/prereg-K4-eq5b-typed-two-engine.md` + Amendments 1–6, all pre-verdict).
+
+**Read the mechanism before quoting the verdict.** It passes by 0.7 %, and two
+findings contradict the arm's name.
+
+### Added
+- **`src/decision/group_policy.rs`** — `GroupAifPolicy` (features `decision` +
+  `process`): `aif::GroupAgent` with a `CopyAgent` sensory slot, **R = 3
+  role-slotted internals** over arm-E1's persistent world model, a
+  `VotingAgent` in `CertaintyWeighted`, deciding through `aif-v0.13.0`'s
+  **deterministic** `group_distribution` read (no RNG, no `last_action`
+  advance). Carries `WorldModelTopology`, `PrecisionChannel`, `CoverageMasks`,
+  `GroupVote`, `DecisionRead`, and the S-learn instrumentation
+  (`GroupAifCounters`, `ModelUpdateAudit`, `S_LEARN_VACUITY_TOL`).
+- `examples/strategy_comparison.rs` **Part 11** — ten arms, H-G with both
+  conjuncts printed per confirmatory cell, four in-binary gates, and every
+  registered disclosure.
+
+### Result
+- `grp-role` **0.2270 = 1.2567×**, superior **22/30** — PASS both conjuncts.
+- `grp-mult` **0.2266 = 1.2544×**, superior **22/30** — PASS.
+- Control `wf-asis` 0.1806. **The margin (0.7 % / 0.4 % over the bar) is
+  reported in full and not renegotiated** — the same discipline EQ5a applied to
+  a narrow miss against a higher bar.
+- Pre-committed scoped clauses fired automatically: **did not** exceed
+  `wf-val-p` (0.2435) ⇒ *"beats the typed control, not the strongest process
+  cell"*; **did** exceed `arm-E1` (0.0403).
+- Gates X-battery / X-identity / S-determinism (+ seed invariance) / S-learn
+  all **PASS**.
+
+### Mechanism — both findings cut against the framing
+- **Role specialisation is net NEGATIVE.** The shared-model reference cells
+  score *higher* than the role-specialised confirmatory cells (0.2409 vs
+  0.2270; 0.2404 vs 0.2266), with the specialised cell superior on only 15/30
+  and 13/30 seeds.
+- **The arm depends on the structural defect the review found.** 23.0 % of
+  decisions have **zero** candidate-sensitive internals; the blind ones carry
+  **0.626** of the CW weight and act at 95.1 % vs 80.4 %. Removing them
+  (`grp-role-blind`) collapses the arm to **0.0268**. What beats the typed
+  control is a permissively-joining group dominated by members blind to the
+  candidate — not deliberation, not specialisation.
+- `grp-role-nonov` 0.1125 vs 0.2270 reproduces v5's X1 collapse at the group,
+  but prices the mechanism **and** that bias together; they are not separated.
+
+### Process
+Six pre-verdict amendments, three correcting the registration's own reasoning:
+the arm as first registered was **unbuildable**; D2's `CertaintyWeighted`
+rationale was **measured false**; A3.1's replacement prediction was **measured
+false**. A 3-lens review (5 blocking / ~15 important / ~30 minor) ran before the
+run with every finding dispositioned. **The first official run returned
+`RUN-INVALID`** on a mis-specified S-learn guard that demanded movement from
+world models with `expected == 0`; the guard was unsatisfiable on **any** seed
+block (12.5 % base rate), so the guard — not the block — was corrected, and the
+re-run is a reproduction because the guard is post-hoc and provably could not
+move a value (verified: zero measured values changed).
+
+**Seeds consumed: 330..360. 90..120 and 150..180 remain reserved.**
+**koa#54 (mag = demonstrated default) stays FINAL** — no EQ5b outcome reopens it.
+
+### Changed
+- Suites: `decision,magnitude,process` 215 → **239**; all other configurations
+  unchanged.
+
 ## [0.29.0] — 2026-08-08
 
 The EQ5b pin-first re-pin ([#78](https://github.com/sustia-llc/koalisi/issues/78)):
