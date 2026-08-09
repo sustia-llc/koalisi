@@ -752,8 +752,8 @@ dependencies = [
 
 [[package]]
 name = "catgraph"
-version = "0.8.0"
-source = "git+https://github.com/sustia-llc/catgraph?tag=v0.8.0#5ee51f3d112483fbe8a93c68817cba0e85fb38a0"
+version = "0.9.0"
+source = "git+https://github.com/sustia-llc/catgraph?tag=v0.9.0#85c7134ccec7866186127d9d0c6d529e4a67f923"
 dependencies = [
  "either",
  "itertools 0.15.0",
@@ -761,17 +761,15 @@ dependencies = [
  "permutations",
  "rayon",
  "thiserror 2.0.18",
- "ultragraph",
  "union-find",
 ]
 
 [[package]]
 name = "catgraph-applied"
-version = "0.8.0"
-source = "git+https://github.com/sustia-llc/catgraph?tag=v0.8.0#5ee51f3d112483fbe8a93c68817cba0e85fb38a0"
+version = "0.9.0"
+source = "git+https://github.com/sustia-llc/catgraph?tag=v0.9.0#85c7134ccec7866186127d9d0c6d529e4a67f923"
 dependencies = [
  "catgraph",
- "deep_causality_num",
  "either",
  "itertools 0.15.0",
  "num",
@@ -781,25 +779,24 @@ dependencies = [
  "rayon-cond",
  "rust_decimal",
  "thiserror 2.0.18",
- "ultragraph",
+ "union-find",
 ]
 
 [[package]]
 name = "catgraph-magnitude"
-version = "0.8.0"
-source = "git+https://github.com/sustia-llc/catgraph?tag=v0.8.0#5ee51f3d112483fbe8a93c68817cba0e85fb38a0"
+version = "0.9.0"
+source = "git+https://github.com/sustia-llc/catgraph?tag=v0.9.0#85c7134ccec7866186127d9d0c6d529e4a67f923"
 dependencies = [
  "catgraph",
  "catgraph-applied",
- "deep_causality_num",
  "nalgebra",
  "num",
 ]
 
 [[package]]
 name = "catgraph-syntax"
-version = "0.8.0"
-source = "git+https://github.com/sustia-llc/catgraph?tag=v0.8.0#5ee51f3d112483fbe8a93c68817cba0e85fb38a0"
+version = "0.9.0"
+source = "git+https://github.com/sustia-llc/catgraph?tag=v0.9.0#85c7134ccec7866186127d9d0c6d529e4a67f923"
 dependencies = [
  "catgraph",
  "catgraph-applied",
@@ -6393,12 +6390,6 @@ dependencies = [
  "serde",
  "web-time",
 ]
-
-[[package]]
-name = "ultragraph"
-version = "0.9.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "286313b10d30a913d1939acecd14fba013fab09e7dc159f9900bc31c8a43cc03"
 
 [[package]]
 name = "unicase"
