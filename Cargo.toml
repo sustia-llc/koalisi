@@ -1,10 +1,17 @@
 [package]
 name = "koalisi"
-version = "0.30.0"
+version = "0.31.0"
 edition = "2024"
-# 1.93 floor forced by catgraph's deep_causality_num 0.4.1 pin (unchanged at
-# the v0.8.0 re-pin — catgraph holds num =0.4.1 there; catgraph v0.9.0 removes
-# that crate, so the floor is re-testable at the NEXT re-pin, not this one).
+# 1.93 floor, MEASURED at the v0.9.0 re-pin (2026-08-09) and NOT liftable by a
+# catgraph re-pin. `cargo +1.92 check` names three crates, not one:
+#   deep_causality_algebra 0.2.0, deep_causality_haft 0.4.2, deep_causality_num 0.4.1
+# — each requires rustc 1.93.0 on its own. The older note here said the floor was
+# `num` alone "propagating through catgraph" and would lift once catgraph v0.9.0
+# dropped that crate. BOTH halves were wrong: v0.9.0 retires only catgraph's
+# DIRECT dependency (cg#219/#221), while `num` remains in the lock beneath
+# haft -> algebra; and `haft` — which catgraph keeps as its one algebraic dep —
+# requires 1.93 regardless. Lifting the floor needs the DeepCausality substrate
+# to move, not koalisi or catgraph. 1.93.0 checks clean on all three features.
 rust-version = "1.93.0"
 description = "Reference implementation of agentic coalitions in Rust — tokio::sync task seams, temporal hypergraph topology, coalition algorithms, and optional Active Inference decision-making"
 license = "MIT OR Apache-2.0"

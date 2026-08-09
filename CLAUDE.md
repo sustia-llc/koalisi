@@ -39,7 +39,7 @@ limit (163.2k) and its tail was being silently truncated. Nothing was deleted.
 The two archives are held **outside this repository** (owner call, 2026-08-09);
 their location is recorded in `CLAUDE.local.md`:
 
-- **`project-history.md`** — the full release ledger v0.4.0 → v0.30.0 verbatim,
+- **`project-history.md`** — the full release ledger v0.4.0 → v0.31.0 verbatim,
   the Phase 5/6/7 narratives, the K1–K6 sections, the downstream/removed-work
   notes, and the obsolete gotchas 1–6 / 8–10.
 - **`ab-lineage-gotchas.md`** — gotchas 20–28 and 30–33 verbatim (the
@@ -103,14 +103,44 @@ forex domain since removed).
   `surrealdb:surrealql-language` — for K3 (#6) surrealdb-live-message work,
   per the user CLAUDE.md routing rules.
 
-## Current state — 2026-08-08 (v0.30.0)
+## Current state — 2026-08-09 (v0.31.0)
 
-Full release ledger v0.4.0 → v0.30.0 is the `project-history.md` archive (§1).
+Full release ledger v0.4.0 → v0.31.0 is the `project-history.md` archive (§1).
 The three most recent entries are kept here in brief — read the ledger before
 touching anything with a frozen battery, a pinned decision, or a registered doc.
 
 ### Latest three
 
+- **catgraph re-pin `v0.8.0` ×3 → `v0.9.0` — v0.31.0 (2026-08-09)**: all three
+  catgraph deps in lockstep (K6 rule). Upstream v0.9.0 is dependency
+  streamlining — cg#219/#221 give catgraph its own `Zero`/`One` + `Dual`,
+  cg#220 its own toposort + components. **Drift check CLEAN**: all ten suites
+  at baseline counts (106/162/135/191/143/126/156/112/159/239, measured BEFORE
+  the bump too — all ten matched the table, so no documentation drift hides in
+  the comparison; plus `durable` 107), default clippy `--all-targets` clean
+  from a fresh target dir, and **X-battery PASS with zero non-latency diffs**
+  (both runs 2129 lines; of 122 differing lines, 102 are table rows whose only
+  changed field is the final latency column and 20 are prose lines reporting
+  latency — strip that column and the diff is empty).
+  ⚠ **MSRV: re-tested, floor UNCHANGED at 1.93, and the note carried since
+  v0.17.0 was WRONG in both halves.** `cargo +1.92 check` names **three**
+  crates: `deep_causality_algebra 0.2.0`, `deep_causality_haft 0.4.2`,
+  `deep_causality_num 0.4.1` — each requires 1.93 on its own. (1) `num` is NOT
+  removed by v0.9.0: only catgraph's *direct* dep goes, and the crate remains
+  in the lock beneath `haft → algebra` (upstream's manifest says so outright).
+  (2) `num` was never the sole cause — `haft`, the one algebraic dep catgraph
+  keeps, requires 1.93 regardless. **No catgraph re-pin can lift this floor**;
+  it needs the DeepCausality substrate to move. The obligation is CLOSED as
+  corrected, not discharged — do not re-file it against the next re-pin.
+  **Lockfile**: FOUR catgraph packages move (core `catgraph` rides along as a
+  transitive), `ultragraph 0.9.2` leaves entirely, `union-find 0.4.4` is newly
+  referenced but was already present (no package added), `deep_causality_num`
+  vanishes from two dependency arrays while its stanza stays; net −1. **Third
+  time a `name`/`version` grep would have missed the real story** (v0.26.0,
+  v0.29.0). Breaking rider (cg#219/#221: `Rig` via `deep_causality_num`'s
+  `Zero`/`One` → `catgraph_applied::rig`) verified NOT applicable — koalisi
+  names no `Rig` impl, no `rig::`, no `deep_causality`/`ultragraph` path.
+  See **gotcha 34** for the battery-concurrency trap this run walked into.
 - **EQ5b typed two-engine RUN — v0.30.0 (2026-08-08, #78): `VALIDATED
   (two-engine)`** — the second validated registration in the K4 lineage, after
   EQ4. **Read the mechanism before quoting the verdict**: role specialisation
@@ -147,17 +177,6 @@ touching anything with a frozen battery, a pinned decision, or a registered doc.
   so read the whole diff. ⚠ **MSRV re-test still owed at the next *catgraph*
   re-pin** — the 1.93 floor is `deep_causality_num =0.4.1` propagating through
   catgraph, and v0.9.0 removes it. See **gotcha 32**.
-- **Residual process-specificity RUN — v0.28.0 (2026-08-05, #80): `FALSIFIED
-  (coverage proxy)`**. Seeds 300..330: the lever REPLICATED (`r_wf` 1.3355× ≥
-  1.25, stronger than EQ5a's 1.25×) **and then failed to be process-specific** —
-  `lift_wf` and `lift_flat` equal to four decimals, conjunct 1 FAIL vs a
-  contested bar 0.4194, conjunct 2 0/30. Mechanism: `res-wf` vs `res-flat`
-  differ on **355 raw score bits and 0 acts**, and every E-price/E-λ cell has
-  `r_wf` exactly equal to `r_flat` ⇒ the STRONG form. **Settles EQ5a's most
-  promising open lead — that valuation result was a coverage penalty, not a
-  process signal.** Library `src/process/residual.rs` (`ResidualPolicy`, feature
-  `process`); shipping it is NOT adopting it. Report
-  `docs/ab-report-K4-residual-process-specificity.md`. See **gotcha 31**.
 
 ### K4 A/B lineage — verdict trail
 
@@ -222,7 +241,7 @@ Rust implementation is dispatched to `rust-v2:rust-dev-v2`.
 
 ```
 koalisi/
-├── Cargo.toml                              git tag deps: catgraph-applied + catgraph-magnitude v0.8.0 in lockstep (one checkout — K6); aif, surrealdb-live-message, libp2p 0.56 (optional); no path deps since K3; MSRV 1.93
+├── Cargo.toml                              git tag deps: catgraph-applied + catgraph-magnitude + catgraph-syntax v0.9.0 in lockstep (one checkout — K6); aif-v0.13.0, surrealdb-live-message, libp2p 0.56 (optional); no path deps since K3; MSRV 1.93 (set by the DeepCausality substrate, NOT liftable by a catgraph re-pin — gotcha 34)
 ├── README.md                               user-facing
 ├── CLAUDE.md                               THIS FILE
 ├── config/{default,development,test}.toml  coalition threshold, history capacity; [sdb]+[docker] for the durable feature's upstream SETTINGS (cwd-resolved)
@@ -555,6 +574,36 @@ Numbering is preserved across all three files.
     - A future topology-event gateway is a SECOND `request_response`
       behaviour on the same swarm (`/koalisi/topology-events/1`, own
       schema version), NOT new `EventRequest` variants.
+
+34. **Drift-check protocol contracts (v0.31.0) — rely on these.**
+    - **Frozen-battery runs must be SERIAL.** "Latency is excluded from the
+      comparison" is true of latency as a *reported metric* and FALSE as a
+      guarantee that load cannot change the output: **Path A is a latency
+      criterion**, so timing noise propagates straight into a `VERDICT` line.
+      Measured at the v0.9.0 re-pin: batteries run concurrently with cargo
+      test suites produced a pre-bump run scoring Path A **PASS** — which
+      contradicts the report of record — and a 174-line diff showing a
+      spurious `VALIDATED (A+B)` → `VALIDATED (B)` "drift". Re-run serially
+      on a quiet machine, both sides reproduced the documented
+      `FALSIFIED (latency)` / `VALIDATED (B)` with zero non-latency diffs.
+      Check `pgrep -c 'cargo|rustc'` before starting, and never run the two
+      sides of a comparison under different load.
+    - **Diff the battery with the latency COLUMN stripped, not by grepping
+      for the word "latency".** Table rows carry latency as an unlabelled
+      final column, so a keyword filter leaves ~100 rows looking like real
+      diffs. Strip the trailing `| <float> |` from both sides and diff again;
+      an empty result is the actual X-battery PASS.
+    - **The MSRV floor is NOT koalisi's or catgraph's to lift.**
+      `deep_causality_algebra`, `deep_causality_haft` and
+      `deep_causality_num` each require rustc 1.93 independently, and
+      catgraph keeps `haft` as its one algebraic dep. Retiring `num` (cg#219)
+      changed nothing: it survives in the lock beneath `haft → algebra`.
+      Do NOT re-file "MSRV re-testable at the next catgraph re-pin" — that
+      note was wrong for three releases. Re-test only when the DeepCausality
+      substrate itself moves.
+    - **`cargo test … | rg '^test result' | tail` truncates.** Bare `tail` is
+      `tail -10`; suites with 11+ result lines (`persistence,magnitude`) lose
+      the lib-test line and undercount by ~95. Always `tail -20`.
 
 ### A/B-lineage gotchas 20–28, 30–33 — index only
 

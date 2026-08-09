@@ -19,6 +19,96 @@ Planned work — issue-tracked (details in [`CLAUDE.md`](./CLAUDE.md)
 - **[#25]** metrics example, reframed onto the `CoalitionService` decision
   path / topology events.
 
+## [0.31.0] — 2026-08-09
+
+The catgraph `v0.8.0` → `v0.9.0` re-pin, run under the standing re-pin protocol
+(own PR, no code changes mixed in). All three catgraph deps move in lockstep per
+the K6 one-repo-one-checkout rule. **Drift check CLEAN.**
+
+The headline is a correction, not a discharge: the MSRV re-test this re-pin was
+supposed to satisfy has been owed since v0.17.0 on a premise that turns out to
+be false in both halves.
+
+### Changed
+- `catgraph-applied`, `catgraph-magnitude`, `catgraph-syntax` → **`v0.9.0`**.
+  Upstream's `v0.9.0` is a dependency-streamlining release: cg#219/#221 make
+  catgraph own the `Zero`/`One` identity traits and the forward-mode `Dual`
+  (retiring its direct `deep_causality_num` / `deep_causality_num_dual` deps),
+  and cg#220 makes it own the toposort and connected-components passes
+  (retiring `ultragraph`).
+- **MSRV comment in `Cargo.toml` rewritten** — the floor stays **1.93.0**, now
+  recorded as a measured fact with its actual cause.
+
+### MSRV — re-test done, floor UNCHANGED, prior note was wrong
+`cargo +1.92 check --all-targets --features decision,magnitude,process` names
+**three** crates, not one:
+
+    deep_causality_algebra 0.2.0  requires rustc 1.93.0
+    deep_causality_haft    0.4.2  requires rustc 1.93.0
+    deep_causality_num     0.4.1  requires rustc 1.93.0
+
+`1.93.0` then checks clean. The note carried since v0.17.0 said the floor was
+`deep_causality_num =0.4.1` alone "propagating through catgraph", re-testable
+once catgraph v0.9.0 "removes that crate". Both halves fail:
+
+1. **`num` is not removed.** v0.9.0 retires only catgraph's *direct* dependency;
+   the crate remains in the lock beneath `haft → algebra`. Upstream's own
+   manifest says so: *"deep_causality_algebra and deep_causality_num remain in
+   the lock beneath haft either way — catgraph source just never names them."*
+2. **`num` was never the sole cause.** `haft 0.4.2` and `algebra 0.2.0` each
+   require 1.93 independently, and `haft` is the one algebraic dep catgraph
+   keeps. Removing `num` could not have lifted the floor.
+
+**The floor is set by the DeepCausality substrate as a whole and no catgraph
+re-pin can lift it.** The obligation is closed as *corrected*, not *discharged*.
+
+### Lockfile — read in full, not grepped
+- **Four** catgraph packages move, not three: the core `catgraph` crate goes
+  along as a transitive of `catgraph-applied`.
+- `ultragraph 0.9.2` leaves entirely — package stanza plus both
+  dependency-array references.
+- `union-find 0.4.4` is newly referenced by `catgraph-applied`; it was already
+  in the lock, so **no package is added**.
+- `deep_causality_num` disappears from two dependency arrays while its package
+  stanza stays. A `name`/`version`/`source` grep shows it unchanged in both
+  locks and reports nothing — only the dependency arrays reveal that its path
+  changed while the crate survived. Third occurrence of this trap (v0.26.0,
+  v0.29.0).
+- Net: **−1 package**.
+
+### Breaking rider — not applicable here
+cg#219/#221 are breaking for downstream scalars: a crate implementing `Rig` for
+its own type via `deep_causality_num`'s `Zero`/`One` must move to
+`catgraph_applied::rig::{Zero, One}`. koalisi names no `Rig` impl, no `rig::`
+import and no `deep_causality` or `ultragraph` path — it consumes concrete
+surfaces (`Coalition`, `HomMap`, `LawvereMetricSpace`, `UnitInterval`,
+`ZeroDiversityProof`). Verified by search across `src/`, `examples/`, `tests/`
+and `Cargo.toml`.
+
+### Gates
+- **All ten suites at baseline counts**, measured **before** the bump as well
+  (all ten matched the table, so no documentation drift hides in the
+  comparison): 106 / 162 / 135 / 191 / 143 / 126 / 156 / 112 / 159 / 239, plus
+  `durable` at 107 (= default + 1 container-backed restart test).
+- Default clippy `--all-targets` clean from a fresh target dir.
+- **X-battery PASS — zero non-latency diffs.** Both runs 2129 lines; of 122
+  differing lines, 102 are table rows whose only changed field is the final
+  latency column, and 20 are prose lines that explicitly report latency. With
+  the latency column stripped the diff is empty. Every quality / ratio /
+  superiority / churn / verdict line is byte-identical, both headline verdicts
+  included (`FALSIFIED (latency)` / `VALIDATED (B)`).
+
+### Method note — battery runs must be SERIAL
+The first attempt at the X-battery comparison was **invalid** and was discarded.
+Both runs had been executed concurrently with cargo test suites on the reasoning
+that latency is excluded from the comparison anyway. It is excluded as a
+*reported metric* but still feeds **Path A**, the v1 speed criterion — so
+latency noise propagates into a *verdict* line. The contaminated pre-bump run
+reported Path A **PASS**, contradicting the report of record, and the resulting
+diff showed a spurious `VALIDATED (A+B)` → `VALIDATED (B)` "change". Re-run
+serially on a quiet machine, both sides reproduce the documented
+`FALSIFIED (latency)` / `VALIDATED (B)`. See CLAUDE.md **gotcha 34**.
+
 ## [0.30.0] — 2026-08-08
 
 The EQ5b typed two-engine registration
