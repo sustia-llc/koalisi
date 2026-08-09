@@ -39,7 +39,7 @@ limit (163.2k) and its tail was being silently truncated. Nothing was deleted.
 The two archives are held **outside this repository** (owner call, 2026-08-09);
 their location is recorded in `CLAUDE.local.md`:
 
-- **`project-history.md`** — the full release ledger v0.4.0 → v0.30.0 verbatim,
+- **`project-history.md`** — the full release ledger v0.4.0 → v0.31.0 verbatim,
   the Phase 5/6/7 narratives, the K1–K6 sections, the downstream/removed-work
   notes, and the obsolete gotchas 1–6 / 8–10.
 - **`ab-lineage-gotchas.md`** — gotchas 20–28 and 30–33 verbatim (the
@@ -84,14 +84,19 @@ forex domain since removed).
 
 ## Available tooling for this project
 
-- **`causality` (DeepCausality) plugin** — the relevant graph tooling since K1
-  (#4): koalisi's topology backend is `catgraph_applied::Hypergraph` (plain
-  `Vec`/`HashMap` container — read its module docs at the pinned catgraph tag
-  for the contract), and catgraph itself builds on the DeepCausality substrate
-  (`deep_causality_num` `Zero`/`One`; `ultragraph` for catgraph's graph
-  algorithms, Track A). Use `causality:causality-applied` (skills
-  `causality:causal-graphs` — ultragraph — and `causality:data-structures`)
-  for substrate-level questions, and `causality:causality-theory` for the
+- **`causality` (DeepCausality) plugin** — **scope SHRANK sharply at the
+  v0.9.0 re-pin (v0.31.0); read this before routing.** koalisi's topology
+  backend is `catgraph_applied::Hypergraph` (plain `Vec`/`HashMap` container —
+  read its module docs at the pinned catgraph tag for the contract). catgraph
+  no longer sits on the DeepCausality substrate for any of it: cg#219/#221 gave
+  it its own `Zero`/`One` + `Dual` (retiring `deep_causality_num`) and cg#220
+  its own toposort + connected components (retiring `ultragraph`). **There is
+  no `ultragraph` package in koalisi's lock at all**, so
+  `causality:causal-graphs` describes a crate that is not in the dependency
+  graph — do NOT route graph-algorithm questions there; the implementations
+  are catgraph's own. What remains is a single optional edge:
+  `catgraph-syntax` → `deep_causality_haft` → `algebra` → `num`, present only
+  under feature `process`. `causality:causality-theory` is still apt for the
   algebraic layer (`Rig`, HKT/witnesses) catgraph's enrichment sits on.
 - ~~`graph` plugin v2.0.1~~ (yamafaktory hypergraph skills) — **OBSOLETE for
   `src/topology/` since K1**; historical reference only (pre-K1 semantics, the
@@ -103,14 +108,53 @@ forex domain since removed).
   `surrealdb:surrealql-language` — for K3 (#6) surrealdb-live-message work,
   per the user CLAUDE.md routing rules.
 
-## Current state — 2026-08-08 (v0.30.0)
+## Current state — 2026-08-09 (v0.31.0)
 
-Full release ledger v0.4.0 → v0.30.0 is the `project-history.md` archive (§1).
+Full release ledger v0.4.0 → v0.31.0 is the `project-history.md` archive (§1).
 The three most recent entries are kept here in brief — read the ledger before
 touching anything with a frozen battery, a pinned decision, or a registered doc.
 
 ### Latest three
 
+- **catgraph re-pin `v0.8.0` ×3 → `v0.9.0` — v0.31.0 (2026-08-09)**: all three
+  catgraph deps in lockstep (K6 rule). Upstream v0.9.0 is dependency
+  streamlining — cg#219/#221 give catgraph its own `Zero`/`One` + `Dual`,
+  cg#220 its own toposort + components. **Drift check CLEAN**: all ten suites
+  at baseline counts (106/162/135/191/143/126/156/112/159/239, measured BEFORE
+  the bump too — all ten matched the table, so no documentation drift hides in
+  the comparison; plus `durable` 107), default clippy `--all-targets` clean
+  from a fresh target dir, and **X-battery PASS with zero non-latency diffs**
+  (both runs 2129 lines; of 122 differing lines, 102 are table rows whose only
+  changed field is the final latency column and 20 are prose lines reporting
+  latency — strip that column and the diff is empty).
+  ⚠ **MSRV: re-tested; declared floor stays 1.93 but it is
+  FEATURE-CONDITIONAL, and the note carried since v0.17.0 was wrong.** The
+  DeepCausality chain enters through exactly ONE edge — optional
+  `catgraph-syntax` → `haft` → `algebra` → `num` — so it is present **only
+  under `process`**. `cargo tree -i deep_causality_haft` finds nothing at
+  default features or at `decision,magnitude`, and `cargo +1.92 check
+  --all-targets --ignore-rust-version` **succeeds** at default features and at
+  `decision,magnitude,persistence,remote` (1.91 too; 1.85/1.86 fail on
+  let-chains). Only with `process` on do `algebra` / `haft` / `num` each demand
+  1.93. So the old note fails twice over: `num` is not removed by v0.9.0 (it
+  survives beneath `haft → algebra`) and was never the sole cause — but the
+  floor is **koalisi's own**, imposed by its optional feature, not the
+  substrate's. `rust-version = "1.93.0"` declares the max across features
+  (cargo has no per-feature MSRV) and therefore refuses 1.91/1.92 downstreams
+  whose graph has zero DeepCausality crates; **whether to lower it is an OPEN
+  owner decision**, recorded in `Cargo.toml`. Obligation CLOSED as corrected.
+  (This entry's own first draft claimed "no catgraph re-pin can lift this
+  floor" — the reviewer disproved it; see **gotcha 34**, which now warns
+  against a third single-measurement claim.)
+  **Lockfile**: FOUR catgraph packages move (core `catgraph` rides along as a
+  transitive), `ultragraph 0.9.2` leaves entirely, `union-find 0.4.4` is newly
+  referenced but was already present (no package added), `deep_causality_num`
+  vanishes from two dependency arrays while its stanza stays; net −1. **Third
+  time a `name`/`version` grep would have missed the real story** (v0.26.0,
+  v0.29.0). Breaking rider (cg#219/#221: `Rig` via `deep_causality_num`'s
+  `Zero`/`One` → `catgraph_applied::rig`) verified NOT applicable — koalisi
+  names no `Rig` impl, no `rig::`, no `deep_causality`/`ultragraph` path.
+  See **gotcha 34** for the battery-concurrency trap this run walked into.
 - **EQ5b typed two-engine RUN — v0.30.0 (2026-08-08, #78): `VALIDATED
   (two-engine)`** — the second validated registration in the K4 lineage, after
   EQ4. **Read the mechanism before quoting the verdict**: role specialisation
@@ -144,20 +188,13 @@ touching anything with a frozen battery, a pinned decision, or a registered doc.
   default-off feature). **Lockfile delta is NOT a package count** —
   re-resolution also moved three unrelated transitive edges; a
   `name`/`version`/`source` grep structurally cannot see dependency-array edges,
-  so read the whole diff. ⚠ **MSRV re-test still owed at the next *catgraph*
-  re-pin** — the 1.93 floor is `deep_causality_num =0.4.1` propagating through
-  catgraph, and v0.9.0 removes it. See **gotcha 32**.
-- **Residual process-specificity RUN — v0.28.0 (2026-08-05, #80): `FALSIFIED
-  (coverage proxy)`**. Seeds 300..330: the lever REPLICATED (`r_wf` 1.3355× ≥
-  1.25, stronger than EQ5a's 1.25×) **and then failed to be process-specific** —
-  `lift_wf` and `lift_flat` equal to four decimals, conjunct 1 FAIL vs a
-  contested bar 0.4194, conjunct 2 0/30. Mechanism: `res-wf` vs `res-flat`
-  differ on **355 raw score bits and 0 acts**, and every E-price/E-λ cell has
-  `r_wf` exactly equal to `r_flat` ⇒ the STRONG form. **Settles EQ5a's most
-  promising open lead — that valuation result was a coverage penalty, not a
-  process signal.** Library `src/process/residual.rs` (`ResidualPolicy`, feature
-  `process`); shipping it is NOT adopting it. Report
-  `docs/ab-report-K4-residual-process-specificity.md`. See **gotcha 31**.
+  so read the whole diff. ~~⚠ MSRV re-test still owed at the next *catgraph*
+  re-pin — the 1.93 floor is `deep_causality_num =0.4.1` propagating through
+  catgraph, and v0.9.0 removes it.~~ **RETIRED as WRONG at v0.31.0** — `num`
+  is not removed (it survives beneath `haft → algebra`) and was never the sole
+  cause; the floor is in fact koalisi's own, gated behind the optional
+  `process` feature. Do NOT act on the struck sentence; see the v0.31.0 entry
+  and **gotcha 34**. See **gotcha 32**.
 
 ### K4 A/B lineage — verdict trail
 
@@ -222,7 +259,7 @@ Rust implementation is dispatched to `rust-v2:rust-dev-v2`.
 
 ```
 koalisi/
-├── Cargo.toml                              git tag deps: catgraph-applied + catgraph-magnitude v0.8.0 in lockstep (one checkout — K6); aif, surrealdb-live-message, libp2p 0.56 (optional); no path deps since K3; MSRV 1.93
+├── Cargo.toml                              git tag deps: catgraph-applied + catgraph-magnitude + catgraph-syntax v0.9.0 in lockstep (one checkout — K6); aif-v0.13.0, surrealdb-live-message, libp2p 0.56 (optional); no path deps since K3; MSRV 1.93 (set by the DeepCausality substrate, NOT liftable by a catgraph re-pin — gotcha 34)
 ├── README.md                               user-facing
 ├── CLAUDE.md                               THIS FILE
 ├── config/{default,development,test}.toml  coalition threshold, history capacity; [sdb]+[docker] for the durable feature's upstream SETTINGS (cwd-resolved)
@@ -555,6 +592,49 @@ Numbering is preserved across all three files.
     - A future topology-event gateway is a SECOND `request_response`
       behaviour on the same swarm (`/koalisi/topology-events/1`, own
       schema version), NOT new `EventRequest` variants.
+
+34. **Drift-check protocol contracts (v0.31.0) — rely on these.**
+    - **Frozen-battery runs must be SERIAL.** "Latency is excluded from the
+      comparison" is true of latency as a *reported metric* and FALSE as a
+      guarantee that load cannot change the output: **Path A is a latency
+      criterion**, so timing noise propagates straight into a `VERDICT` line.
+      Measured at the v0.9.0 re-pin: batteries run concurrently with cargo
+      test suites produced a pre-bump run scoring Path A **PASS** — which
+      contradicts the report of record — and a 174-line diff showing a
+      spurious `VALIDATED (A+B)` → `VALIDATED (B)` "drift". Re-run serially
+      on a quiet machine, both sides reproduced the documented
+      `FALSIFIED (latency)` / `VALIDATED (B)` with zero non-latency diffs.
+      Check `pgrep -c 'cargo|rustc'` before starting, and never run the two
+      sides of a comparison under different load.
+    - **Diff the battery with the latency COLUMN stripped, not by grepping
+      for the word "latency".** Table rows carry latency as an unlabelled
+      final column, so a keyword filter leaves ~100 rows looking like real
+      diffs. Strip the trailing `| <float> |` from both sides and diff again;
+      an empty result is the actual X-battery PASS.
+    - **The MSRV floor is FEATURE-CONDITIONAL — measure per feature set,
+      never once.** The whole DeepCausality chain enters through exactly
+      ONE edge: optional `catgraph-syntax` → `haft` → `algebra` → `num`,
+      i.e. only under feature `process`. `cargo tree -i deep_causality_haft`
+      finds **nothing** at default features or at `decision,magnitude`, and
+      `cargo +1.92 check --all-targets --ignore-rust-version` **succeeds**
+      at default features and at `decision,magnitude,persistence,remote`
+      (1.91 too; 1.85/1.86 fail on let-chains). Only with `process` on do
+      `algebra` 0.2.0 / `haft` 0.4.2 / `num` 0.4.1 each demand 1.93.
+      `rust-version = "1.93.0"` declares the MAXIMUM across features because
+      cargo has no per-feature MSRV — so it refuses 1.91/1.92 downstreams
+      whose graph contains zero DeepCausality crates.
+      **TWO successive wrong claims have been retired here; do not write a
+      third from a single measurement.** (a) "the floor is `num` alone,
+      liftable at the next catgraph re-pin" — false, `num` survives beneath
+      `haft`. (b) "no catgraph re-pin can lift it, the DeepCausality
+      substrate must move" — also false, the floor is koalisi's own, imposed
+      by its optional feature; gating or dropping `catgraph-syntax` lifts the
+      default-build floor today. Both errors came from measuring ONLY with
+      `--features decision,magnitude,process` and generalising. Any MSRV
+      claim must state the feature set it was measured under.
+    - **`cargo test … | rg '^test result' | tail` truncates.** Bare `tail` is
+      `tail -10`; suites with 11+ result lines (`persistence,magnitude`) lose
+      the lib-test line and undercount by ~95. Always `tail -20`.
 
 ### A/B-lineage gotchas 20–28, 30–33 — index only
 

@@ -1,10 +1,34 @@
 [package]
 name = "koalisi"
-version = "0.30.0"
+version = "0.31.0"
 edition = "2024"
-# 1.93 floor forced by catgraph's deep_causality_num 0.4.1 pin (unchanged at
-# the v0.8.0 re-pin — catgraph holds num =0.4.1 there; catgraph v0.9.0 removes
-# that crate, so the floor is re-testable at the NEXT re-pin, not this one).
+# 1.93 floor — MEASURED at the v0.9.0 re-pin (2026-08-09), and it is
+# FEATURE-CONDITIONAL: only the `process` feature needs it.
+#   `cargo tree -i deep_causality_haft` finds NOTHING at default features or at
+#   `decision,magnitude`; the whole DeepCausality chain enters through exactly
+#   one edge — optional `catgraph-syntax` -> haft -> algebra -> num — so it is
+#   present only under `process`. Measured: `cargo +1.92 check --all-targets
+#   --ignore-rust-version` succeeds at default features AND at
+#   `decision,magnitude,persistence,remote`; 1.91 also succeeds; 1.85/1.86 fail
+#   on let-chains (stabilised 1.88). With `process` on, three crates each demand
+#   1.93 — deep_causality_algebra 0.2.0, deep_causality_haft 0.4.2,
+#   deep_causality_num 0.4.1.
+# Two earlier claims are now retired, both wrong:
+#   (a) pre-v0.31.0: "the floor is deep_causality_num alone, propagating through
+#       catgraph; v0.9.0 removes it, so it is re-testable at the next re-pin."
+#       v0.9.0 retires only catgraph's DIRECT dep (cg#219/#221); num survives
+#       beneath haft -> algebra, and haft demands 1.93 on its own.
+#   (b) v0.31.0's first correction: "no catgraph re-pin can lift this; it needs
+#       the DeepCausality substrate to move." Also wrong — the floor is
+#       koalisi's own, imposed by its optional `process` feature. Gating or
+#       dropping `catgraph-syntax` would lift the default-build floor today.
+# Cargo has no per-feature MSRV, so this declares the MAXIMUM across features.
+# CONSEQUENCE, deliberate and owner-visible: a downstream on 1.91/1.92 wanting
+# only default features (or the decision,magnitude A/B showcase) is refused by
+# this line for a build whose graph contains zero DeepCausality crates.
+# OPEN DECISION (owner): keep the conservative max, or lower it to the
+# non-process floor and accept that `--features process` then fails with a
+# transitive-dep error instead of this clean message.
 rust-version = "1.93.0"
 description = "Reference implementation of agentic coalitions in Rust — tokio::sync task seams, temporal hypergraph topology, coalition algorithms, and optional Active Inference decision-making"
 license = "MIT OR Apache-2.0"
@@ -25,10 +49,11 @@ serde = { version = "1.0", features = ["derive"] }
 
 # Topology backend: catgraph's CRUD hypergraph container (the K1 re-back,
 # catgraph#23 design). HTTPS URL since catgraph went public (was SSH while
-# private). Tag kept in lockstep with `catgraph-magnitude` (one repo, one
+# private). Tag kept in lockstep with `catgraph-magnitude` AND `catgraph-syntax`
+# — all THREE move together (one repo, one
 # checkout — a tag split duplicates catgraph/catgraph-applied/itertools
 # compile units).
-catgraph-applied = { git = "https://github.com/sustia-llc/catgraph", tag = "v0.8.0" }
+catgraph-applied = { git = "https://github.com/sustia-llc/catgraph", tag = "v0.9.0" }
 rayon = "1.12"
 tokio-rayon = "2.1"
 
@@ -47,7 +72,7 @@ nalgebra = { version = "0.35", optional = true }
 # Optional: categorical magnitude decision strategy (coalition diversity via
 # catgraph's enriched-category magnitude). HTTPS since catgraph went public;
 # tag in lockstep with `catgraph-applied` above.
-catgraph-magnitude = { git = "https://github.com/sustia-llc/catgraph", tag = "v0.8.0", optional = true }
+catgraph-magnitude = { git = "https://github.com/sustia-llc/catgraph", tag = "v0.9.0", optional = true }
 
 # Optional: the colored-syntax layer over catgraph-applied's free-prop term
 # engine — the `FrobeniusOr` spider family and the textual presentation surface.
@@ -56,7 +81,7 @@ catgraph-magnitude = { git = "https://github.com/sustia-llc/catgraph", tag = "v0
 # repo, one checkout — a tag split duplicates the catgraph/catgraph-applied
 # compile units). Feature-off builds pull NEITHER this nor its transitive
 # `deep_causality_haft`.
-catgraph-syntax = { git = "https://github.com/sustia-llc/catgraph", tag = "v0.8.0", optional = true }
+catgraph-syntax = { git = "https://github.com/sustia-llc/catgraph", tag = "v0.9.0", optional = true }
 
 # Optional: durable coalition decision messaging (two-tier SurrealDB bus:
 # CHANGEFEED log + LIVE wake-up + cursor catch-up; at-least-once,
