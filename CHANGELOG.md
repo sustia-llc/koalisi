@@ -51,6 +51,9 @@ The whole DeepCausality chain enters through **exactly one edge** — the option
   1.91 also succeeds; 1.85/1.86 fail on let-chains (stabilised 1.88), so the
   non-`process` floor is >1.86 and ≤1.91 (not pinned exactly — 1.87–1.90 not
   installed).
+  **⚠ This bullet is FALSE — see the correction below.** `durable` is
+  non-`process` and its floor is **1.92**, and these numbers were taken with
+  `--ignore-rust-version`, which cannot see a dependency floor at all.
 - Only with `process` on do three crates each demand 1.93:
   `deep_causality_algebra 0.2.0`, `deep_causality_haft 0.4.2`,
   `deep_causality_num 0.4.1`.
@@ -66,12 +69,16 @@ demand 1.93 independently.
 imposed by koalisi's own optional feature.
 
 > **⚠ Corrected same day (2026-08-09).** The measurements in this section were
-> taken with `--ignore-rust-version`, which **bypasses the very gate a
-> downstream hits** and therefore does not measure a floor at all. Two claims
-> above are wrong as a result: `decision` and `magnitude-fast` need **1.89**
-> (`nalgebra 0.35` / `safe_arch` / `wide`), not 1.88–1.92; and `durable` fails
-> below 1.90 with cargo's clean message (`roaring 0.11.4`), not the cryptic
-> avx512 error described. The real picture is **four tiers** — 1.88 default /
+> taken with `--ignore-rust-version`, which bypasses the gate a downstream hits
+> — and suppresses the *dependency* rust-version checks too, so it cannot see a
+> dependency floor at all. Precisely one claim above is falsified by
+> re-measurement: **"the non-`process` floor is >1.86 and ≤1.91"** (flagged
+> inline at that bullet). It is wrong twice — `durable` is non-`process` and
+> needs **1.92**, and `decision` / `magnitude-fast` need **1.89**
+> (`nalgebra 0.35` / `safe_arch` / `wide`), which the flag hid. The section's
+> other claims — the single `catgraph-syntax` → `haft` edge, `cargo tree -i`
+> finding no match without `process`, and the three 1.93-demanding crates —
+> re-verified correct. The real picture is **four tiers**: 1.88 default /
 > `magnitude` / `persistence` / `remote` · 1.89 + `decision` /
 > `magnitude-fast` · 1.92 + `durable` · 1.93 + `process`.
 > **`rust-version` stays 1.93** (owner, same day): lowering was implemented,

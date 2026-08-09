@@ -604,19 +604,29 @@ Numbering is preserved across all three files.
       final column, so a keyword filter leaves ~100 rows looking like real
       diffs. Strip the trailing `| <float> |` from both sides and diff again;
       an empty result is the actual X-battery PASS.
-    - **NEVER measure MSRV with `--ignore-rust-version`.** That flag
-      bypasses the exact gate a downstream hits, so it does not measure a
-      floor at all. Under it `+1.88 --features decision` COMPILES; without
-      it cargo refuses — `nalgebra@0.35.0 requires rustc 1.89.0`. Use a
-      plain `cargo +<v> check --all-targets --features <set>`.
+    - **The obvious way to re-measure MSRV DOES NOT WORK, and the obvious
+      workaround is the trap.** Because the package declares the
+      cross-feature maximum, cargo refuses any toolchain below 1.93 before
+      evaluating a single dependency —
+      `cargo +1.89 check --no-default-features --features decision` dies
+      with `koalisi@0.31.0 requires rustc 1.93.0`, so every sub-1.93 tier
+      is unmeasurable from the committed manifest. **Procedure**:
+      temporarily set `rust-version` low (1.85.0), run
+      `cargo +<v> check --all-targets --features <set>`, restore 1.93.0,
+      and diff the manifest to prove the probe left no trace.
+      **Do NOT substitute `--ignore-rust-version`** — it suppresses the
+      dependency rust-version checks too, so it cannot see a dependency
+      floor at all. That flag produced retired claim (d).
     - **The floor is feature-conditional, with FOUR tiers** (measured
       2026-08-09): **1.88** default / `magnitude` / `persistence` /
-      `remote` (1.87 fails on let-chains) · **1.89** + `decision`,
-      `magnitude-fast` (nalgebra / safe_arch / wide) · **1.92** + `durable`
-      (cargo refuses <1.90 for `roaring`; 1.91 then fails to compile) ·
-      **1.93** + `process` (`algebra`/`haft`/`num`, via the single optional
-      `catgraph-syntax` edge — `cargo tree -i deep_causality_haft` finds
-      nothing without it).
+      `remote` (1.87 fails on let-chains — inside the `catgraph 0.9.0`
+      transitive, which declares no `rust-version`, not koalisi's own
+      source) · **1.89** + `decision`, `magnitude-fast` (nalgebra /
+      safe_arch / wide) · **1.92** + `durable` (cargo refuses <1.90
+      declaratively for `roaring`; 1.90 **and** 1.91 then both fail to
+      compile — measured on both, not inferred) · **1.93** + `process`
+      (`algebra`/`haft`/`num`, via the single optional `catgraph-syntax`
+      edge — `cargo tree -i deep_causality_haft` finds nothing without it).
     - **`rust-version = "1.93.0"` is the cross-feature MAXIMUM and STAYS.**
       Lowering was tried and reverted (owner, 2026-08-09) on two measured
       grounds: the benefit is illusory — `strategy_comparison` requires all
@@ -625,8 +635,12 @@ Numbering is preserved across all three files.
       RESOLUTION**: with 1.88 declared, `cargo update --dry-run` reported
       `Locking 107 packages to latest Rust 1.88.0 compatible versions` and
       held back nalgebra, roaring, safe_arch, wide and the deep_causality
-      crates. A declared MSRV that silently freezes dependency lines is a
-      hazard in a repo whose discipline is explainable lockfile deltas.
+      crates. Calibration so this is not overstated: cargo **announces**
+      that line, and MSRV-aware selection has an opt-out
+      (`cargo update --ignore-rust-version`, or `[resolver]
+      incompatible-rust-versions = "allow"`), so the cost is one config
+      line plus the standing need to notice held-back deps — it outweighed
+      a benefit already near zero, not a real one.
       Accepted cost: 1.88–1.92 downstreams are refused a default-only build
       that would compile.
     - **FOUR wrong claims have been retired here. Do not write a fifth.**
@@ -634,10 +648,11 @@ Numbering is preserved across all three files.
       — `num` survives beneath `haft`. (b) "no catgraph re-pin can lift it,
       the substrate must move" — the `process` tier is koalisi's own
       optional feature. (c) "only `process` needs more than the default
-      floor" — `durable` needs 1.92. (d) "the default floor is 1.88" —
-      `decision` and `magnitude-fast` need 1.89. Every one came from
-      measuring a chosen subset and generalising; (d) additionally from the
-      masking flag. **"I checked the widest feature set" is NOT "I checked
+      floor" — `durable` needs 1.92. (d) "the default floor is 1.88 **for
+      everything but `durable`/`process`**" — the 1.88 tier itself is
+      right; its *extent* was wrong, since `decision` and `magnitude-fast`
+      need 1.89. Every one came from measuring a chosen subset and
+      generalising; (d) additionally from the masking flag. **"I checked the widest feature set" is NOT "I checked
       every feature"** — `durable` sits in no other tier's superset.
     - **`cargo test … | rg '^test result' | tail` truncates.** Bare `tail` is
       `tail -10`; suites with 11+ result lines (`persistence,magnitude`) lose
