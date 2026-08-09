@@ -53,8 +53,14 @@ their location is recorded in `CLAUDE.local.md`:
   stayed: the Phase 7 persistence design, the K3 hot-path bench, the
   SwarmAgentic digest + paper.
 
-Gotcha numbering is preserved across the split, so every existing
-cross-reference in code, docs and reports still resolves.
+Gotcha numbering is preserved across the split, so existing cross-references
+resolve **for holders of the archives**. Be aware of the limit: rustdoc and
+report references to relocated gotchas — e.g. `src/decision/group_policy.rs`
+(24, 25, 28, 32), `src/decision/reliability_value.rs` (21),
+`src/process/residual.rs` (28), `CHANGELOG.md` (21) and
+`docs/k4-arm-choice-memo.md` (20–23) — now name text that is NOT in this
+repository. A public reader, or any session without the archives, cannot follow
+them. The retained gotchas (7, 11–19, 29) are unaffected and self-contained.
 
 ## Mission (one paragraph)
 
@@ -89,7 +95,8 @@ forex domain since removed).
   algebraic layer (`Rig`, HKT/witnesses) catgraph's enrichment sits on.
 - ~~`graph` plugin v2.0.1~~ (yamafaktory hypergraph skills) — **OBSOLETE for
   `src/topology/` since K1**; historical reference only (pre-K1 semantics, the
-  dropped `PersistentHypergraph` idea — see the Phase 7 note).
+  dropped `PersistentHypergraph` idea — see the Phase 7 narrative in the
+  `project-history.md` archive §2).
 - `rust-v2:rust-dev-v2` / `rust-v2:rust-practical` — primary Rust agents per
   the user CLAUDE.md routing rules.
 - `surrealdb:surrealdb-rust-v3` / `surrealdb:surrealdb-search` /
@@ -154,12 +161,16 @@ touching anything with a frozen battery, a pinned decision, or a registered doc.
 
 ### K4 A/B lineage — verdict trail
 
-Every row is a pre-registered run; its prereg and report live in `docs/` and are
-IMMUTABLE. Full entries in the history ledger.
+Most rows are pre-registered runs whose prereg + report pair lives in `docs/`
+and is IMMUTABLE. Four are not, and `docs/` will not yield a prereg for them:
+**v1/v2** registered on issue #7 (report only), **K1** and **K6** are a
+backend-parity and an optimization re-run rather than registrations (report
+only), and **#54** is a decision memo + design note. Full entries in the
+history ledger.
 
 | # | Arm / question | Seeds | Verdict | Gotcha |
 |---|---|---|---|---|
-| v1 / v2 | magnitude vs scalar AIF (#7) | 0..30 | `FALSIFIED (latency)` / `VALIDATED (B)` | 15 |
+| v1 / v2 | magnitude vs scalar AIF (#7) | 0..30 | `FALSIFIED (latency)` / `VALIDATED (B)` | — |
 | K1 | catgraph backend parity (#4) | 0..30 | byte-identical re-run | 12 |
 | K6 | evaluator hot path (#14) | 0..30 | Path A missed; dual verdict unchanged | 15 |
 | v3 | multimodal AIF (#43) | 0..30 | `FALSIFIED (multimodality)` — decision-equivalent to scalar | — |
@@ -286,12 +297,9 @@ koalisi/
 │   ├── supervised_monitor.rs               spawn_supervised restart demo over SampleMonitor<SensorEvent> (v0.11.0; was supervised_swarm)
 │   ├── population_search.rs                #42: TaskCoverage-driven structure search + record/replay (default features; was missing from this inventory — added v0.16.0)
 │   ├── population_reliability.rs           #57 (v0.16.0): outcome stream → world-model snapshot → ReliabilityCoverage → search + replay (feature decision)
-│   ├── strategy_comparison.rs              divergence demo + K4 A/B battery (features decision,magnitude)
+│   ├── strategy_comparison.rs              divergence demo + K4 A/B battery (requires ALL THREE: decision,magnitude,process — since EQ5a Part 9)
 │   ├── remote_coalition_consumer.rs        #38 (v0.25.0): gateway + client in one process over a live CoalitionService (feature `remote`)
 │   └── durable_decisions.rs                durable decision log end-to-end (feature `durable`)
-│   (held OUTSIDE this repo since 2026-08-09 — location in CLAUDE.local.md:)
-│   project-history.md                       ARCHIVE: release ledger v0.4.0→v0.30.0, Phase 5/6/7 + K1–K6 narratives, downstream/removed work, obsolete gotchas 1–6/8–10
-│   ab-lineage-gotchas.md                    ARCHIVE: gotchas 20–28 + 30–33 verbatim — READ BEFORE any K4-lineage registration
 ├── .claude/docs/                           TRACKED internal design docs + references (docs/ reorg 2026-07-27; rest of .claude/ stays gitignored)
 │   ├── phase7-persistence-design.md        Phase 7 EventStore design (#21 deliverable; P7.1–P7.5 phasing)
 │   ├── k3-hot-path-bench.md                K3 kameo-vs-tokio bench evidence
@@ -335,6 +343,10 @@ koalisi/
     ├── remote_integration.rs               1 test (#38: loopback round-trip service → tee → gateway → client, cursor deltas + seq ordering; feature `remote`)
     └── replay_parity.rs                    1 test (#30: magnitude_history live == replayed — THE parity gate; features `persistence,magnitude`)
 ```
+
+Two further files belong to this project but are **not in this tree** — the
+`project-history.md` and `ab-lineage-gotchas.md` archives (see §Where the rest
+of the record lives; location in `CLAUDE.local.md`).
 
 ## Worth flagging (gotchas)
 
@@ -627,7 +639,7 @@ timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-tar
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features magnitude
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision,magnitude
-timeout 120s cargo run --release --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision,magnitude --example strategy_comparison
+# strategy_comparison needs ALL THREE features — see the process block below.
 timeout 60s  cargo run --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision --example population_reliability   # #57 (v0.16.0)
 
 # === with persistence feature (P7.1 store + P7.2 replay, 126 tests) ===

@@ -1455,7 +1455,8 @@ buggy); it bridges koalisi capabilities to the correct engine.
 - Deferred (tracked as GitHub issues #1, #2): wiring `AifDecisionPolicy`
   into a live kameo / `CoalitionManager` call site, and recovering aif's
   `TrustBeliefs`/`CompatibilityBeliefs`/`CoalitionHistory` for richer
-  scoring. See `CLAUDE.md` §"Phase 6".
+  scoring. See §"Phase 6" of the `project-history.md` archive (§2), where the
+  section moved out of `CLAUDE.md` in the 2026-08-09 trim.
 
 ## [0.5.0] — 2026-05-27
 
