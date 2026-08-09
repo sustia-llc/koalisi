@@ -2,33 +2,52 @@
 name = "koalisi"
 version = "0.31.0"
 edition = "2024"
-# 1.93 floor — MEASURED at the v0.9.0 re-pin (2026-08-09), and it is
-# FEATURE-CONDITIONAL: only the `process` feature needs it.
-#   `cargo tree -i deep_causality_haft` finds NOTHING at default features or at
-#   `decision,magnitude`; the whole DeepCausality chain enters through exactly
-#   one edge — optional `catgraph-syntax` -> haft -> algebra -> num — so it is
-#   present only under `process`. Measured: `cargo +1.92 check --all-targets
-#   --ignore-rust-version` succeeds at default features AND at
-#   `decision,magnitude,persistence,remote`; 1.91 also succeeds; 1.85/1.86 fail
-#   on let-chains (stabilised 1.88). With `process` on, three crates each demand
-#   1.93 — deep_causality_algebra 0.2.0, deep_causality_haft 0.4.2,
-#   deep_causality_num 0.4.1.
-# Two earlier claims are now retired, both wrong:
+# 1.93 = the CROSS-FEATURE MAXIMUM. Owner decision 2026-08-09, taken twice:
+# lowering was tried, measured, and REVERTED. Keep this value.
+#
+# The floor is feature-conditional, with FOUR tiers. Measure with a plain
+# `cargo +<v> check --all-targets --features <set>` and NEVER with
+# `--ignore-rust-version` — see the trap below.
+#   1.88  default, `magnitude`, `persistence`, `remote`  (1.87 fails: let-chains)
+#   1.89  + `decision`, `magnitude-fast`  (nalgebra 0.35 / safe_arch / wide)
+#   1.92  + `durable`  (cargo refuses <1.90 for roaring 0.11.4; 1.91 then fails
+#         to compile on lifetime / Iterator-not-general-enough in the surrealdb
+#         stack, so the effective floor is 1.92)
+#   1.93  + `process`  (deep_causality_algebra 0.2.0 / haft 0.4.2 / num 0.4.1,
+#         reached through the single optional edge `catgraph-syntax` -> haft;
+#         `cargo tree -i deep_causality_haft` finds NOTHING without `process`)
+#
+# WHY THE MAXIMUM AND NOT THE DEFAULT FLOOR (both measured, 2026-08-09):
+#   - The headline benefit was illusory. `examples/strategy_comparison.rs` has
+#     `required-features = [decision, magnitude, process]`, so the A/B showcase
+#     needs 1.93 regardless; `decision` alone needs 1.89. Lowering would only
+#     have bought default/`magnitude`-class builds on 1.88..1.92.
+#   - The cost is real and ongoing. Edition 2024 => resolver 3, so this value
+#     CONSTRAINS RESOLUTION. With 1.88 declared, `cargo update --dry-run`
+#     reported `Locking 107 packages to latest Rust 1.88.0 compatible versions`
+#     and held back nalgebra, roaring, safe_arch, wide and the deep_causality
+#     crates. In a repo whose discipline is explainable lockfile deltas, a
+#     declared MSRV that silently freezes dependency lines is a hazard.
+#   Consequence accepted: a downstream on 1.88..1.92 wanting only default
+#   features is refused by this line even though that build would compile.
+#
+# ⚠ THE MEASUREMENT TRAP that produced three of the wrong claims below:
+#   `--ignore-rust-version` bypasses the very gate a downstream hits. Under it,
+#   `+1.88 --features decision` COMPILES; without it, cargo refuses with
+#   "nalgebra@0.35.0 requires rustc 1.89.0". A floor measured with that flag is
+#   not the floor anyone experiences.
+#
+# FOUR retired claims, all wrong, all from measuring a chosen subset:
 #   (a) pre-v0.31.0: "the floor is deep_causality_num alone, propagating through
-#       catgraph; v0.9.0 removes it, so it is re-testable at the next re-pin."
-#       v0.9.0 retires only catgraph's DIRECT dep (cg#219/#221); num survives
-#       beneath haft -> algebra, and haft demands 1.93 on its own.
-#   (b) v0.31.0's first correction: "no catgraph re-pin can lift this; it needs
-#       the DeepCausality substrate to move." Also wrong — the floor is
-#       koalisi's own, imposed by its optional `process` feature. Gating or
-#       dropping `catgraph-syntax` would lift the default-build floor today.
-# Cargo has no per-feature MSRV, so this declares the MAXIMUM across features.
-# CONSEQUENCE, deliberate and owner-visible: a downstream on 1.91/1.92 wanting
-# only default features (or the decision,magnitude A/B showcase) is refused by
-# this line for a build whose graph contains zero DeepCausality crates.
-# OPEN DECISION (owner): keep the conservative max, or lower it to the
-# non-process floor and accept that `--features process` then fails with a
-# transitive-dep error instead of this clean message.
+#       catgraph; v0.9.0 removes it." v0.9.0 retires only catgraph's DIRECT dep;
+#       num survives beneath haft -> algebra.
+#   (b) v0.31.0: "no catgraph re-pin can lift it; the DeepCausality substrate
+#       must move." The `process` tier is koalisi's own optional feature.
+#   (c) v0.31.0: "only `process` needs more than the default floor." `durable`
+#       needs 1.92.
+#   (d) the reverted lowering: "the default floor is 1.88 for everything but
+#       durable/process." `decision` and `magnitude-fast` need 1.89 — hidden by
+#       `--ignore-rust-version`.
 rust-version = "1.93.0"
 description = "Reference implementation of agentic coalitions in Rust — tokio::sync task seams, temporal hypergraph topology, coalition algorithms, and optional Active Inference decision-making"
 license = "MIT OR Apache-2.0"

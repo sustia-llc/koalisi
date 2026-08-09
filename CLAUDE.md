@@ -127,25 +127,18 @@ touching anything with a frozen battery, a pinned decision, or a registered doc.
   (both runs 2129 lines; of 122 differing lines, 102 are table rows whose only
   changed field is the final latency column and 20 are prose lines reporting
   latency — strip that column and the diff is empty).
-  ⚠ **MSRV: re-tested; declared floor stays 1.93 but it is
-  FEATURE-CONDITIONAL, and the note carried since v0.17.0 was wrong.** The
-  DeepCausality chain enters through exactly ONE edge — optional
-  `catgraph-syntax` → `haft` → `algebra` → `num` — so it is present **only
-  under `process`**. `cargo tree -i deep_causality_haft` finds nothing at
-  default features or at `decision,magnitude`, and `cargo +1.92 check
-  --all-targets --ignore-rust-version` **succeeds** at default features and at
-  `decision,magnitude,persistence,remote` (1.91 too; 1.85/1.86 fail on
-  let-chains). Only with `process` on do `algebra` / `haft` / `num` each demand
-  1.93. So the old note fails twice over: `num` is not removed by v0.9.0 (it
-  survives beneath `haft → algebra`) and was never the sole cause — but the
-  floor is **koalisi's own**, imposed by its optional feature, not the
-  substrate's. `rust-version = "1.93.0"` declares the max across features
-  (cargo has no per-feature MSRV) and therefore refuses 1.91/1.92 downstreams
-  whose graph has zero DeepCausality crates; **whether to lower it is an OPEN
-  owner decision**, recorded in `Cargo.toml`. Obligation CLOSED as corrected.
-  (This entry's own first draft claimed "no catgraph re-pin can lift this
-  floor" — the reviewer disproved it; see **gotcha 34**, which now warns
-  against a third single-measurement claim.)
+  ⚠ **MSRV: re-tested; declared floor stays 1.93, and the note carried since
+  v0.17.0 was wrong.** The claim recorded in this entry on the day
+  (*"feature-conditional; only `process` needs more than the default floor"*)
+  was **itself wrong twice more** and was corrected same-day — see the
+  four-tier table in `Cargo.toml` and **gotcha 34**. Short version: the floor
+  is feature-conditional across **four** tiers (1.88 default/`magnitude`/
+  `persistence`/`remote` · 1.89 + `decision`/`magnitude-fast` · 1.92 +
+  `durable` · 1.93 + `process`); `num` is not removed by v0.9.0 and was never
+  the sole cause; and `rust-version = "1.93.0"` **stays** as the cross-feature
+  maximum — lowering it was tried and reverted, because the A/B showcase needs
+  1.93 regardless and resolver 3 turns a lower declared MSRV into a silent
+  brake on dependency updates. Obligation CLOSED as corrected.
   **Lockfile**: FOUR catgraph packages move (core `catgraph` rides along as a
   transitive), `ultragraph 0.9.2` leaves entirely, `union-find 0.4.4` is newly
   referenced but was already present (no package added), `deep_causality_num`
@@ -259,7 +252,7 @@ Rust implementation is dispatched to `rust-v2:rust-dev-v2`.
 
 ```
 koalisi/
-├── Cargo.toml                              git tag deps: catgraph-applied + catgraph-magnitude + catgraph-syntax v0.9.0 in lockstep (one checkout — K6); aif-v0.13.0, surrealdb-live-message, libp2p 0.56 (optional); no path deps since K3; MSRV 1.93 (set by the DeepCausality substrate, NOT liftable by a catgraph re-pin — gotcha 34)
+├── Cargo.toml                              git tag deps: catgraph-applied + catgraph-magnitude + catgraph-syntax v0.9.0 in lockstep (one checkout — K6); aif-v0.13.0, surrealdb-live-message, libp2p 0.56 (optional); no path deps since K3; MSRV 1.93 = the cross-feature MAXIMUM over four tiers (1.88/1.89/1.92/1.93) — lowering was tried and REVERTED, gotcha 34
 ├── README.md                               user-facing
 ├── CLAUDE.md                               THIS FILE
 ├── config/{default,development,test}.toml  coalition threshold, history capacity; [sdb]+[docker] for the durable feature's upstream SETTINGS (cwd-resolved)
@@ -611,27 +604,41 @@ Numbering is preserved across all three files.
       final column, so a keyword filter leaves ~100 rows looking like real
       diffs. Strip the trailing `| <float> |` from both sides and diff again;
       an empty result is the actual X-battery PASS.
-    - **The MSRV floor is FEATURE-CONDITIONAL — measure per feature set,
-      never once.** The whole DeepCausality chain enters through exactly
-      ONE edge: optional `catgraph-syntax` → `haft` → `algebra` → `num`,
-      i.e. only under feature `process`. `cargo tree -i deep_causality_haft`
-      finds **nothing** at default features or at `decision,magnitude`, and
-      `cargo +1.92 check --all-targets --ignore-rust-version` **succeeds**
-      at default features and at `decision,magnitude,persistence,remote`
-      (1.91 too; 1.85/1.86 fail on let-chains). Only with `process` on do
-      `algebra` 0.2.0 / `haft` 0.4.2 / `num` 0.4.1 each demand 1.93.
-      `rust-version = "1.93.0"` declares the MAXIMUM across features because
-      cargo has no per-feature MSRV — so it refuses 1.91/1.92 downstreams
-      whose graph contains zero DeepCausality crates.
-      **TWO successive wrong claims have been retired here; do not write a
-      third from a single measurement.** (a) "the floor is `num` alone,
-      liftable at the next catgraph re-pin" — false, `num` survives beneath
-      `haft`. (b) "no catgraph re-pin can lift it, the DeepCausality
-      substrate must move" — also false, the floor is koalisi's own, imposed
-      by its optional feature; gating or dropping `catgraph-syntax` lifts the
-      default-build floor today. Both errors came from measuring ONLY with
-      `--features decision,magnitude,process` and generalising. Any MSRV
-      claim must state the feature set it was measured under.
+    - **NEVER measure MSRV with `--ignore-rust-version`.** That flag
+      bypasses the exact gate a downstream hits, so it does not measure a
+      floor at all. Under it `+1.88 --features decision` COMPILES; without
+      it cargo refuses — `nalgebra@0.35.0 requires rustc 1.89.0`. Use a
+      plain `cargo +<v> check --all-targets --features <set>`.
+    - **The floor is feature-conditional, with FOUR tiers** (measured
+      2026-08-09): **1.88** default / `magnitude` / `persistence` /
+      `remote` (1.87 fails on let-chains) · **1.89** + `decision`,
+      `magnitude-fast` (nalgebra / safe_arch / wide) · **1.92** + `durable`
+      (cargo refuses <1.90 for `roaring`; 1.91 then fails to compile) ·
+      **1.93** + `process` (`algebra`/`haft`/`num`, via the single optional
+      `catgraph-syntax` edge — `cargo tree -i deep_causality_haft` finds
+      nothing without it).
+    - **`rust-version = "1.93.0"` is the cross-feature MAXIMUM and STAYS.**
+      Lowering was tried and reverted (owner, 2026-08-09) on two measured
+      grounds: the benefit is illusory — `strategy_comparison` requires all
+      three features, so the A/B showcase needs 1.93 regardless — and
+      **edition 2024 means resolver 3, so this value CONSTRAINS
+      RESOLUTION**: with 1.88 declared, `cargo update --dry-run` reported
+      `Locking 107 packages to latest Rust 1.88.0 compatible versions` and
+      held back nalgebra, roaring, safe_arch, wide and the deep_causality
+      crates. A declared MSRV that silently freezes dependency lines is a
+      hazard in a repo whose discipline is explainable lockfile deltas.
+      Accepted cost: 1.88–1.92 downstreams are refused a default-only build
+      that would compile.
+    - **FOUR wrong claims have been retired here. Do not write a fifth.**
+      (a) "the floor is `num` alone, liftable at the next catgraph re-pin"
+      — `num` survives beneath `haft`. (b) "no catgraph re-pin can lift it,
+      the substrate must move" — the `process` tier is koalisi's own
+      optional feature. (c) "only `process` needs more than the default
+      floor" — `durable` needs 1.92. (d) "the default floor is 1.88" —
+      `decision` and `magnitude-fast` need 1.89. Every one came from
+      measuring a chosen subset and generalising; (d) additionally from the
+      masking flag. **"I checked the widest feature set" is NOT "I checked
+      every feature"** — `durable` sits in no other tier's superset.
     - **`cargo test … | rg '^test result' | tail` truncates.** Bare `tail` is
       `tail -10`; suites with 11+ result lines (`persistence,magnitude`) lose
       the lib-test line and undercount by ~95. Always `tail -20`.
@@ -768,8 +775,12 @@ What is still open:
 - **[#25] Metrics example** — still valid but needs reframing: instrument the
   `CoalitionService` decision path / topology events, not the deleted
   `tick_bus`/`alert_bus`.
-- **MSRV re-test** — owed at the next *catgraph* re-pin; v0.9.0 removes
-  `deep_causality_num =0.4.1`, the crate that forces the current 1.93 floor.
+- ~~**MSRV re-test** — owed at the next *catgraph* re-pin.~~ **DONE and
+  CLOSED at v0.31.0 (2026-08-09), as a correction**: the premise was false
+  (`deep_causality_num` is not removed by v0.9.0 and was never the sole
+  cause). The floor has four tiers and `rust-version` stays 1.93 as the
+  cross-feature maximum — lowering was tried and reverted. **Do not re-file
+  this.** See **gotcha 34**.
 
 Downstream projects (nautilus_trader bridge, tauhokohoko integration) and
 removed work (databento → `biome`, the forex-coupled backlog) are recorded in

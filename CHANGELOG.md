@@ -62,12 +62,25 @@ dependency (the crate survives beneath `haft → algebra`, as upstream's own
 manifest states), and `num` was never the sole cause since `haft` and `algebra`
 demand 1.93 independently.
 
-**But the floor is koalisi's own, not the substrate's** — it is imposed by
-koalisi's optional `process` feature, and gating or dropping `catgraph-syntax`
-would lift the default-build floor today. `rust-version` declares the maximum
-across features because cargo has no per-feature MSRV, so this line currently
-refuses 1.91/1.92 downstreams building a graph with zero DeepCausality crates.
-**Whether to lower it is an open owner decision**, recorded in `Cargo.toml`.
+**But the floor is koalisi's own, not the substrate's** — the `process` tier is
+imposed by koalisi's own optional feature.
+
+> **⚠ Corrected same day (2026-08-09).** The measurements in this section were
+> taken with `--ignore-rust-version`, which **bypasses the very gate a
+> downstream hits** and therefore does not measure a floor at all. Two claims
+> above are wrong as a result: `decision` and `magnitude-fast` need **1.89**
+> (`nalgebra 0.35` / `safe_arch` / `wide`), not 1.88–1.92; and `durable` fails
+> below 1.90 with cargo's clean message (`roaring 0.11.4`), not the cryptic
+> avx512 error described. The real picture is **four tiers** — 1.88 default /
+> `magnitude` / `persistence` / `remote` · 1.89 + `decision` /
+> `magnitude-fast` · 1.92 + `durable` · 1.93 + `process`.
+> **`rust-version` stays 1.93** (owner, same day): lowering was implemented,
+> measured and reverted, because `strategy_comparison` requires all three
+> features so the A/B showcase needs 1.93 regardless, and edition 2024's
+> resolver 3 makes a lower declared MSRV a silent brake on dependency updates
+> (`cargo update --dry-run` at 1.88 held back nalgebra, roaring, safe_arch,
+> wide and the deep_causality crates). See `Cargo.toml` and gotcha 34.
+
 The obligation is closed as *corrected*, not *discharged*.
 
 ### Lockfile — read in full, not grepped
