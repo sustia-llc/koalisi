@@ -175,12 +175,13 @@ cargo test --features durable              # + container-backed restart-durabili
 
 ## Dependencies
 
-- [catgraph-applied](https://github.com/sustia-llc/catgraph) (tag `v0.8.0`, kept in lockstep with catgraph-magnitude — one repo, one checkout) — CRUD hypergraph container backing the topology layer (the K1 re-back; replaced yamafaktory `hypergraph` v4.2.0)
+- [catgraph-applied](https://github.com/sustia-llc/catgraph) (tag `v0.9.0`, kept in lockstep with catgraph-magnitude and catgraph-syntax — one repo, one checkout, all three move together) — CRUD hypergraph container backing the topology layer (the K1 re-back; replaced yamafaktory `hypergraph` v4.2.0)
 - tokio + tokio-util — async runtime + lifecycle primitives
 - rayon + tokio-rayon — CPU-bound graph operations bridge
 - [surrealdb-live-message](https://github.com/sustia-llc/surrealdb-live-message) (tag `v0.2.1`, **optional**, feature `durable`) — two-tier restart-durable message bus for the coalition decision log
 - [aif](https://github.com/sustia-llc/tira) (tag `aif-v0.13.0`, **optional**, feature `decision`) — active-inference engine for the AIF decision strategies (scalar, multimodal, persistent); `nalgebra` is only compiled when the feature is enabled
-- [catgraph-magnitude](https://github.com/sustia-llc/catgraph) (tag `v0.8.0`, **optional**, feature `magnitude`) — enriched-category coalition magnitude for the categorical decision strategy
+- [catgraph-magnitude](https://github.com/sustia-llc/catgraph) (tag `v0.9.0`, **optional**, feature `magnitude`) — enriched-category coalition magnitude for the categorical decision strategy
+- [catgraph-syntax](https://github.com/sustia-llc/catgraph) (tag `v0.9.0`, **optional**, feature `process`) — colored-syntax layer over the free-prop term surface (EQ5a, #76); the one edge that pulls the DeepCausality substrate in, and so the only reason the crate's MSRV is 1.93
 - libp2p 0.56 (**optional**, feature `remote`) — TCP+noise+yamux `request-response` transport for the remote coalition-event gateway
 
 ## References

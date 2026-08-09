@@ -39,28 +39,36 @@ be false in both halves.
 - **MSRV comment in `Cargo.toml` rewritten** — the floor stays **1.93.0**, now
   recorded as a measured fact with its actual cause.
 
-### MSRV — re-test done, floor UNCHANGED, prior note was wrong
-`cargo +1.92 check --all-targets --features decision,magnitude,process` names
-**three** crates, not one:
+### MSRV — re-test done; declared floor stays 1.93, but it is FEATURE-CONDITIONAL
+The whole DeepCausality chain enters through **exactly one edge** — the optional
+`catgraph-syntax` → `deep_causality_haft` → `algebra` → `num` — so it is present
+**only under feature `process`**:
 
-    deep_causality_algebra 0.2.0  requires rustc 1.93.0
-    deep_causality_haft    0.4.2  requires rustc 1.93.0
-    deep_causality_num     0.4.1  requires rustc 1.93.0
+- `cargo tree -i deep_causality_haft` → *no match* at default features, and no
+  match at `decision,magnitude`. It resolves only with `--features process`.
+- `cargo +1.92 check --all-targets --ignore-rust-version` → **exit 0** at
+  default features, and **exit 0** at `decision,magnitude,persistence,remote`.
+  1.91 also succeeds; 1.85/1.86 fail on let-chains (stabilised 1.88), so the
+  non-`process` floor is >1.86 and ≤1.91 (not pinned exactly — 1.87–1.90 not
+  installed).
+- Only with `process` on do three crates each demand 1.93:
+  `deep_causality_algebra 0.2.0`, `deep_causality_haft 0.4.2`,
+  `deep_causality_num 0.4.1`.
 
-`1.93.0` then checks clean. The note carried since v0.17.0 said the floor was
-`deep_causality_num =0.4.1` alone "propagating through catgraph", re-testable
-once catgraph v0.9.0 "removes that crate". Both halves fail:
+The note carried since v0.17.0 said the floor was `deep_causality_num =0.4.1`
+alone "propagating through catgraph", re-testable once catgraph v0.9.0 "removes
+that crate". Both halves fail: v0.9.0 retires only catgraph's *direct*
+dependency (the crate survives beneath `haft → algebra`, as upstream's own
+manifest states), and `num` was never the sole cause since `haft` and `algebra`
+demand 1.93 independently.
 
-1. **`num` is not removed.** v0.9.0 retires only catgraph's *direct* dependency;
-   the crate remains in the lock beneath `haft → algebra`. Upstream's own
-   manifest says so: *"deep_causality_algebra and deep_causality_num remain in
-   the lock beneath haft either way — catgraph source just never names them."*
-2. **`num` was never the sole cause.** `haft 0.4.2` and `algebra 0.2.0` each
-   require 1.93 independently, and `haft` is the one algebraic dep catgraph
-   keeps. Removing `num` could not have lifted the floor.
-
-**The floor is set by the DeepCausality substrate as a whole and no catgraph
-re-pin can lift it.** The obligation is closed as *corrected*, not *discharged*.
+**But the floor is koalisi's own, not the substrate's** — it is imposed by
+koalisi's optional `process` feature, and gating or dropping `catgraph-syntax`
+would lift the default-build floor today. `rust-version` declares the maximum
+across features because cargo has no per-feature MSRV, so this line currently
+refuses 1.91/1.92 downstreams building a graph with zero DeepCausality crates.
+**Whether to lower it is an open owner decision**, recorded in `Cargo.toml`.
+The obligation is closed as *corrected*, not *discharged*.
 
 ### Lockfile — read in full, not grepped
 - **Four** catgraph packages move, not three: the core `catgraph` crate goes
