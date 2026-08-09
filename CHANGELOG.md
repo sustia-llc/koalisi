@@ -51,6 +51,9 @@ The whole DeepCausality chain enters through **exactly one edge** — the option
   1.91 also succeeds; 1.85/1.86 fail on let-chains (stabilised 1.88), so the
   non-`process` floor is >1.86 and ≤1.91 (not pinned exactly — 1.87–1.90 not
   installed).
+  **⚠ This bullet is FALSE — see the correction below.** `durable` is
+  non-`process` and its floor is **1.92**, and these numbers were taken with
+  `--ignore-rust-version`, which cannot see a dependency floor at all.
 - Only with `process` on do three crates each demand 1.93:
   `deep_causality_algebra 0.2.0`, `deep_causality_haft 0.4.2`,
   `deep_causality_num 0.4.1`.
@@ -62,12 +65,29 @@ dependency (the crate survives beneath `haft → algebra`, as upstream's own
 manifest states), and `num` was never the sole cause since `haft` and `algebra`
 demand 1.93 independently.
 
-**But the floor is koalisi's own, not the substrate's** — it is imposed by
-koalisi's optional `process` feature, and gating or dropping `catgraph-syntax`
-would lift the default-build floor today. `rust-version` declares the maximum
-across features because cargo has no per-feature MSRV, so this line currently
-refuses 1.91/1.92 downstreams building a graph with zero DeepCausality crates.
-**Whether to lower it is an open owner decision**, recorded in `Cargo.toml`.
+**But the floor is koalisi's own, not the substrate's** — the `process` tier is
+imposed by koalisi's own optional feature.
+
+> **⚠ Corrected same day (2026-08-09).** The measurements in this section were
+> taken with `--ignore-rust-version`, which bypasses the gate a downstream hits
+> — and suppresses the *dependency* rust-version checks too, so it cannot see a
+> dependency floor at all. Precisely one claim above is falsified by
+> re-measurement: **"the non-`process` floor is >1.86 and ≤1.91"** (flagged
+> inline at that bullet). It is wrong twice — `durable` is non-`process` and
+> needs **1.92**, and `decision` / `magnitude-fast` need **1.89**
+> (`nalgebra 0.35` / `safe_arch` / `wide`), which the flag hid. The section's
+> other claims — the single `catgraph-syntax` → `haft` edge, `cargo tree -i`
+> finding no match without `process`, and the three 1.93-demanding crates —
+> re-verified correct. The real picture is **four tiers**: 1.88 default /
+> `magnitude` / `persistence` / `remote` · 1.89 + `decision` /
+> `magnitude-fast` · 1.92 + `durable` · 1.93 + `process`.
+> **`rust-version` stays 1.93** (owner, same day): lowering was implemented,
+> measured and reverted, because `strategy_comparison` requires all three
+> features so the A/B showcase needs 1.93 regardless, and edition 2024's
+> resolver 3 makes a lower declared MSRV a silent brake on dependency updates
+> (`cargo update --dry-run` at 1.88 held back nalgebra, roaring, safe_arch,
+> wide and the deep_causality crates). See `Cargo.toml` and gotcha 34.
+
 The obligation is closed as *corrected*, not *discharged*.
 
 ### Lockfile — read in full, not grepped
