@@ -259,6 +259,19 @@ pub use aif_persistent_policy::{
     PersistentAifArm, PersistentAifConfig, PersistentAifState, TrialBoundary,
 };
 
+/// EQ5b (koalisi #78): the role-slotted `GroupAgent` arm. Needs BOTH features —
+/// the AIF engine (`decision`) and the workflow demand surface (`process`) — so it
+/// is gated on the conjunction rather than on either alone.
+#[cfg(all(feature = "decision", feature = "process"))]
+mod group_policy;
+#[cfg(all(feature = "decision", feature = "process"))]
+pub use group_policy::{
+    AgreementSample, CoverageMasks, DEFAULT_N_ROLES, DecisionRead, GROUP_N_ACTIONS, GroupAifConfig,
+    GroupAifCounters, GroupAifError, GroupAifPolicy, GroupVote, ModelLabel, ModelUpdateAudit,
+    NonVacuity, PrecisionChannel, S_LEARN_VACUITY_TOL, WorldModelTopology, models_moved,
+    v5_e1_base,
+};
+
 #[cfg(feature = "decision")]
 mod reliability_value;
 #[cfg(feature = "decision")]

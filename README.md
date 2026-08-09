@@ -138,6 +138,13 @@ The run history is deliberately adversarial:
 | K4 v4 ([#44](https://github.com/sustia-llc/koalisi/issues/44)) | persistent AIF (learning + precision dynamics) | `FALSIFIED (persistence)` — genuinely escapes the v3 equivalence theorem, but loses on quality |
 | K4 v5 ([#53](https://github.com/sustia-llc/koalisi/issues/53)) | E1-only persistent AIF (learned precisions + novelty, fixed γ) | `VALIDATED (gap closed)` — first arm to beat magnitude on out-of-sample quality (0.4406 vs 0.2720), at a churn + latency cost |
 | K4 v6 ([#56](https://github.com/sustia-llc/koalisi/issues/56)) | v5 + never-evict state damping | `FALSIFIED (never-evict)` — the eviction churn *is* the winning mechanism (monotone cap series) |
+| EQ1 ([#61](https://github.com/sustia-llc/koalisi/issues/61)) | de-saturated query regime (γ sweep) | `FALSIFIED (de-saturation)` — γ frees only the leave stream; the join rail is margin-proof at p = 1.0 |
+| EQ1-corrected ([#63](https://github.com/sustia-llc/koalisi/issues/63)) | block-level coverage routing | `FALSIFIED (block-routing)` — the value window barely exceeds the competing singleton lattice |
+| EQ3 ([#69](https://github.com/sustia-llc/koalisi/issues/69)) | incremental-magnitude latency levers | `FALSIFIED (latency re-match)` — bit-parity held, but the 2.5× gap never closed |
+| EQ4 ([#72](https://github.com/sustia-llc/koalisi/issues/72)) | typed roles (ρ-modulated coupling) | `VALIDATED (typed roles)` — 3.61× on 30/30 seeds; the lever is *retained role-diverse redundancy*, not coverage routing |
+| EQ5a ([#76](https://github.com/sustia-llc/koalisi/issues/76)) | process-structured tasks (string-diagram rewriting) | `FALSIFIED (process structure)` — rewriting converted 100 % of a low ceiling; the signal was *valuation*, not rewriting |
+| EQ5a follow-up ([#80](https://github.com/sustia-llc/koalisi/issues/80)) | is the residual lever process-specific? | `FALSIFIED (coverage proxy)` — it replicates at 1.34× and then behaves identically without the process structure |
+| EQ5b ([#78](https://github.com/sustia-llc/koalisi/issues/78)) | `GroupAgent` of role-slotted AIF internals over the v5 world model | `VALIDATED (two-engine)` — 1.2567× on 22/30, **by 0.7 %**; but role specialisation measured *negative* and the win rides members structurally blind to the candidate |
 
 Two feedback-calculator arms ran the same gauntlet
 ([#46](https://github.com/sustia-llc/koalisi/issues/46) `FALSIFIED`,
@@ -162,7 +169,7 @@ cargo test --features persistence          # 126 tests (+ chained event store + 
 cargo test --features persistence,magnitude # 156 tests (incl. the live-vs-replayed parity gate)
 cargo test --features remote               # 112 tests (+ gateway event buffer + loopback round-trip)
 cargo test --features process              # 159 tests (+ process-structured workflows + the unstaffable-residual policy)
-cargo test --features decision,magnitude,process # 215 tests (the full A/B battery surface)
+cargo test --features decision,magnitude,process # 239 tests (the full A/B battery surface)
 cargo test --features durable              # + container-backed restart-durability test (needs Docker)
 ```
 

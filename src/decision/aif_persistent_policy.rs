@@ -79,7 +79,9 @@ const MAX_N_BITS: usize = 16;
 const N_OUTCOMES: usize = 3;
 const SUCCESS: usize = 0;
 const FAILURE: usize = 1;
-const NO_OBS: usize = 2;
+/// The likelihood-neutral outcome index (its `A` row is uniform across states).
+/// `pub(crate)` for koalisi #78's group members, which replay on the same alphabet.
+pub(crate) const NO_OBS: usize = 2;
 
 /// Persistent initial A anchors (Amendment A1.2): asymmetric so the state-label
 /// symmetry a flat A cannot break is broken from construction. Columns are
@@ -208,7 +210,7 @@ impl PersistentAifConfig {
 /// Mask of the low `n_bits` bits — the capability universe an arm reads. Every
 /// arm clamps `n_bits` to [`MAX_N_BITS`] (< 32) before storing it, so the shift
 /// cannot overflow.
-fn low_mask(n_bits: usize) -> u32 {
+pub(crate) fn low_mask(n_bits: usize) -> u32 {
     debug_assert!(n_bits <= MAX_N_BITS, "n_bits is clamped at construction");
     (1u32 << n_bits) - 1
 }
@@ -334,6 +336,19 @@ impl PersistentAifArm {
     /// (a `&[bool; 8]` coerces at the default width). A mismatched length is warned
     /// and the update is SKIPPED — the arm never panics inside a battery.
     pub fn observe_outcome(&self, required: u32, per_bit_success: &[bool]) {
+        let _applied = self.observe_outcome_checked(required, per_bit_success);
+    }
+
+    /// [`observe_outcome`](Self::observe_outcome), reporting whether the engine
+    /// update actually applied.
+    ///
+    /// Byte-for-byte the same work — `observe_outcome` is a thin wrapper that drops
+    /// the flag — split out for koalisi #78's **S-learn (i)** gate, which must
+    /// *count* per-model updates rather than infer them from state movement (a
+    /// deficit and a surplus are both RUN-INVALID there, and a silently skipped
+    /// update is exactly a deficit). Returns `false` on a width mismatch or an
+    /// engine rejection, both of which are warned and skipped as before.
+    pub(crate) fn observe_outcome_checked(&self, required: u32, per_bit_success: &[bool]) -> bool {
         let n_bits = self.config.n_bits;
         if per_bit_success.len() != n_bits {
             tracing::warn!(
@@ -341,7 +356,7 @@ impl PersistentAifArm {
                 expected = n_bits,
                 "persistent observe_outcome width mismatch, skipping the update"
             );
-            return;
+            return false;
         }
         let obs: Vec<usize> = (0..n_bits)
             .map(|b| {
@@ -360,10 +375,25 @@ impl PersistentAifArm {
         // observe-then-record here because the single-control agent's every action
         // is 0, so `mmp_act_hist` is all-zero regardless of alignment).
         inner.agent.record_action(0);
+        let mut applied = true;
         if let Err(e) = inner.agent.action_probabilities_multi(&obs) {
             // Structurally impossible (obs has n_modalities entries), but never
-            // panic inside a battery: log and skip the update.
+            // panic inside a battery: log, and report that the INFERENCE update
+            // did not apply.
+            //
+            // Scope of `applied = false`, precisely (code-review finding, v0.30.0):
+            // it means the engine rejected the belief/Dirichlet update, and
+            // nothing more. It is NOT a rollback. `record_action(0)` above has
+            // already run, and the replay push and `tasks_observed` increment
+            // below still run — so the world model HAS advanced, and the next
+            // `build_query` replays one sequence more. An earlier version of this
+            // comment said the update was "skipped as before", which overstated
+            // it. The S-learn ledger consequence is conservative (the group's
+            // `updates` does not advance, so the seed reads as a deficit and the
+            // run is RUN-INVALID), which is the safe direction — but do not read
+            // `applied == false` as "this call left no trace".
             tracing::warn!(error = %e, "persistent observe_outcome failed");
+            applied = false;
         }
         if self.config.trial_boundary == TrialBoundary::PerTask {
             inner.agent.reset_window();
@@ -376,6 +406,48 @@ impl PersistentAifArm {
         // Task boundary: reset the per-task eviction counter (#56). `evicted_at`
         // persists across tasks (it drives the cross-task rejoin lockout).
         inner.evictions_this_task = 0;
+        applied
+    }
+
+    /// The effective capability-bit width of this arm's world model — `n_bits`
+    /// after the construction-time clamp.
+    ///
+    /// Gated on `process`: its only consumer is the `EQ5b` group arm, and an
+    /// ungated `pub(crate)` helper would be dead code in a `decision`-only build.
+    #[cfg(feature = "process")]
+    pub(crate) fn n_bits(&self) -> usize {
+        self.config.n_bits
+    }
+
+    /// Build one arm-E1 **query POMDP** off this world model, without touching any
+    /// of the arm's own decision state.
+    ///
+    /// This is [`build_query`] with the arm's own `Inner` supplied and its
+    /// `decision_counter` left alone — the koalisi #78 (`EQ5b`) **SP1** seam: internal
+    /// agent `r` of the group arm is "arm-E1's existing query construction with
+    /// `required_r` substituted for `required`", and re-using the real constructor
+    /// is what makes that claim true rather than approximated.
+    ///
+    /// `seed` is the caller's (query RNG hygiene only — the query is never sampled).
+    /// `count_scale`, when present, is index-aligned with
+    /// [`set_bits(required, n_bits)`](set_bits) and scales each modality's injected
+    /// Dirichlet counts — the **SP2** multiplicity channel. `None` is the arm-E1
+    /// path, arithmetically untouched.
+    ///
+    /// # Errors
+    ///
+    /// Whatever the engine rejects while building the query model.
+    #[cfg(feature = "process")]
+    pub(crate) fn role_query(
+        &self,
+        required: u32,
+        cfg0: u32,
+        cfg1: u32,
+        seed: u64,
+        count_scale: Option<&[f64]>,
+    ) -> Result<(aif::POMDPAgent, Vec<Vec<usize>>), aif::AifError> {
+        let inner = self.inner.lock().expect("persistent arm mutex poisoned");
+        build_query(&inner, &self.config, seed, required, cfg0, cfg1, count_scale)
     }
 
     /// Snapshot the persistent world model (design note §5 serialization seam).
@@ -411,7 +483,7 @@ impl PersistentAifArm {
         let seed = inner.battery_seed ^ splitmix64(inner.decision_counter);
 
         let (mut query, replay_seqs) =
-            match build_query(&inner, &self.config, seed, required, cfg0, cfg1) {
+            match build_query(&inner, &self.config, seed, required, cfg0, cfg1, None) {
                 Ok(q) => q,
                 Err(e) => {
                     tracing::warn!(error = %e, "persistent query construction failed");
@@ -582,6 +654,11 @@ fn build_persistent_agent(
 /// Build the fresh membership-factor query POMDP and the replay observation
 /// sequences (r-length, restricted to `required`). Returns the query agent ready
 /// for replay + posterior read.
+///
+/// `count_scale` (koalisi #78 SP2) optionally scales each modality's injected
+/// Dirichlet counts, index-aligned with `set_bits(required, n_bits)`. `None` — the
+/// arm-E1 path — leaves the arithmetic **untouched**, not merely equivalent: the
+/// scaling block is skipped entirely.
 fn build_query(
     inner: &Inner,
     config: &PersistentAifConfig,
@@ -589,6 +666,7 @@ fn build_query(
     required: u32,
     cfg0: u32,
     cfg1: u32,
+    count_scale: Option<&[f64]>,
 ) -> Result<(aif::POMDPAgent, Vec<Vec<usize>>), aif::AifError> {
     let required_bits = set_bits(required, config.n_bits);
     let r = required_bits.len();
@@ -604,7 +682,7 @@ fn build_query(
     // Covered under the membership config ⇒ the persistent modality's Dirichlet counts
     // for that bit state (the exact learned reliability model); uncovered ⇒ the flat
     // block at unit concentration `[1, 1, 1]` (uninformative). `A ≡ column-normalize(pA)`.
-    let pa_counts: Vec<DMatrix<f64>> = (0..r)
+    let mut pa_counts: Vec<DMatrix<f64>> = (0..r)
         .map(|m| {
             let bit = required_bits[m];
             DMatrix::from_fn(N_OUTCOMES, n_joint, |row, j| {
@@ -619,6 +697,11 @@ fn build_query(
             })
         })
         .collect();
+    // Applied before `a` is derived so the supplied `a` and the injected counts
+    // agree bit-for-bit rather than to within an ulp.
+    if let Some(scale) = count_scale {
+        scale_pa_counts(&mut pa_counts, scale);
+    }
     let a: Vec<DMatrix<f64>> = pa_counts.iter().map(column_normalize).collect();
 
     // pB counts (Amendment A2.2): r bit-drift factors carry the persistent per-bit pB
@@ -715,6 +798,31 @@ fn build_query(
     Ok((query, replay_seqs))
 }
 
+/// Scale each modality's injected Dirichlet counts in place — koalisi #78 **SP2**.
+///
+/// "Dirichlet counts ARE observation counts", so a step occurring `k` times carries
+/// `k` observations' worth of evidence demand. The whole modality block scales,
+/// which leaves `A = column_normalize(pA)` mathematically fixed and moves only the
+/// CONCENTRATION — i.e. the novelty / parameter-info-gain term, which is precisely
+/// v5's validated mechanism.
+///
+/// `scale` is index-aligned with the query's modalities; a missing, non-finite, or
+/// non-positive entry is treated as `1.0` (no scaling) rather than corrupting a
+/// count matrix.
+fn scale_pa_counts(pa_counts: &mut [DMatrix<f64>], scale: &[f64]) {
+    for (m, block) in pa_counts.iter_mut().enumerate() {
+        let s = scale.get(m).copied().unwrap_or(1.0);
+        // Exact equality is deliberate, and is the point: the identity
+        // configuration must be UNTOUCHED arithmetic, not a multiplication by 1.0
+        // that happens to round back. An epsilon band here would be the bug.
+        #[allow(clippy::float_cmp)]
+        let is_unit = s == 1.0;
+        if s.is_finite() && s > 0.0 && !is_unit {
+            *block *= s;
+        }
+    }
+}
+
 /// One entry of a covered query pA column (Amendment A2.2): the persistent
 /// modality's Dirichlet count for bit `bit` in state `s_bit`, outcome row `row`.
 ///
@@ -758,7 +866,11 @@ fn column_normalize(m: &DMatrix<f64>) -> DMatrix<f64> {
 /// Replay the recent outcome window into `query` and return the marginal action
 /// posterior. With no replay history the neutral all-no-obs read is used (A1.4,
 /// likelihood-neutral by construction).
-fn run_replay(
+///
+/// `pub(crate)` for koalisi #78's group arm, whose role members are arm-E1 queries
+/// and must replay on **exactly** this discipline — the alternative was a
+/// second copy of it drifting out of step.
+pub(crate) fn run_replay(
     query: &mut aif::POMDPAgent,
     seqs: &[Vec<usize>],
     r: usize,
@@ -798,7 +910,10 @@ fn union_caps(agents: &[&dyn AgentCapabilities]) -> u32 {
 }
 
 /// Ascending indices of the set bits of `mask` within the low `n_bits` universe.
-fn set_bits(mask: u32, n_bits: usize) -> Vec<usize> {
+///
+/// `pub(crate)` so koalisi #78's SP2 scale vector can be built in the SAME order
+/// the query's modalities are.
+pub(crate) fn set_bits(mask: u32, n_bits: usize) -> Vec<usize> {
     (0..n_bits).filter(|&b| mask & (1u32 << b) != 0).collect()
 }
 
@@ -811,7 +926,7 @@ fn normalize(v: &[f64]) -> Vec<f64> {
 
 /// SplitMix64 finalizer — derives a deterministic per-decision query seed
 /// (hygiene only; the arm never samples).
-fn splitmix64(x: u64) -> u64 {
+pub(crate) fn splitmix64(x: u64) -> u64 {
     let mut z = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
     z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
     z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
@@ -862,7 +977,8 @@ mod tests {
         let arm = PersistentAifArm::new(7, PersistentAifConfig::default()).unwrap();
         let inner = arm.inner.lock().unwrap();
         let required = 0b0000_0011u32; // bits 0 and 1
-        let (query, replay) = build_query(&inner, &arm.config, 1234, required, 0b01, 0b11).unwrap();
+        let (query, replay) =
+            build_query(&inner, &arm.config, 1234, required, 0b01, 0b11, None).unwrap();
 
         // r = 2 bit factors + 1 membership factor; n_actions = 1·1·2 = 2.
         assert_eq!(query.n_factors(), 3);
