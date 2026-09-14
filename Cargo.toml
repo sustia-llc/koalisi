@@ -66,7 +66,8 @@ edition = "2024"
 #   1.88, per the procedure above): `cargo +1.88 check --features decision`
 #   COMPILES under the flag, and without it cargo refuses with
 #   "nalgebra@0.35.0 requires rustc 1.89.0". On the COMMITTED manifest that same
-#   command refuses naming koalisi@1.93.0 instead, never reaching nalgebra.
+#   command refuses with "koalisi@0.32.0 requires rustc 1.93.0" instead, never
+#   reaching nalgebra.
 #
 # FOUR retired claims, all wrong, all from measuring a chosen subset:
 #   (a) pre-v0.31.0: "the floor is deep_causality_num alone, propagating through

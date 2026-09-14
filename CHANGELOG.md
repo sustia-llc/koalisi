@@ -38,17 +38,41 @@ collapses from 1.93 to 1.88 because the last DeepCausality edge is gone.
   `catgraph-syntax` → DeepCausality sentence is retired.
 
 ### Compile-breaking set — none
-Every name the seams list as breaking is a zero-hit in `src/`, `tests/`,
-`examples/` (`rg -n -w 'Cospan|Span|PetriNet|structurally_equal|assert_valid|
-from_permutation|permute_side|Rig|Tropical|MatR|MatKron|Decomposition|EvalPath|
-Arrow|haft'` → nothing). Two shapes re-verified at the tag rather than assumed:
-`CatgraphError::Presentation { message }` (constructed at
-`src/process/theory.rs:263`, `src/process/signature.rs:204`) is unchanged
+Every name the stack roadmap's seams items (1)–(9) call breaking, plus the
+earlier zero-hit list, was searched **unanchored** over `src/`, `tests/`,
+`examples/` (`_` is a word character, so a `-w` search cannot see
+`from_permutation_on_domain`):
+
+```
+rg -n -o 'is_left_id|is_right_id|assert_valid|FrobeniusMorphism|cospan_to_frobenius|as_cospan|PetriNet|PetriDecoration|new_unchecked|Composable|is_left_identity|is_right_identity|represents_id|from_permutation|HypergraphLattice|GaugeGroup|HypergraphRewriteGroup|plaquette_action|total_action|record_transition|wilson_loop|is_causally_invariant|structurally_equal|RewriteRule|apply_at|replay|RewriteRejection|RewriteBoundary|RewriteSide|UnitInterval|from_rig_value|UNIT_INTERVAL_FLOOR|\b(Cospan|Span|Rig|Tropical|MatR|MatKron|Decomposition|EvalPath|Arrow|haft)\b' src tests examples
+```
+
+Three names hit; each is compile-neutral, and the clippy runs below are the
+proof:
+- `RewriteRule` (19 hits; the calls are `RewriteRule::new(lhs, rhs)` at
+  `src/process/theory.rs:292,304,319`, propagated with `?`) and `replay`
+  (175 hits, all but one koalisi's own `replay_into_event_log` / `run_replay` /
+  replay buffers; the catgraph call is `replay(start, rules, outcome.steps())?`
+  at `src/process/rewrite.rs:111`) — item (8), core + applied #447: return
+  types unchanged, only the `CatgraphError` variant and message text moved.
+  koalisi matches no rewrite rejection and asserts on no message text
+  (`rg -n Presentation src tests examples` → two constructions of koalisi's own
+  errors, `src/process/theory.rs:263` and `src/process/signature.rs:204`, plus
+  two doc lines).
+- `UnitInterval` (3 hits, `src/decision/magnitude_policy.rs:277,1032,1040`) —
+  item (9), **applied** #451: `UnitInterval::new(p)?` at line 1040 is fed
+  `CouplingModel::coupling` (`magnitude_policy.rs:732–739`), a ratio of
+  `count_ones` over a non-zero `u32` mask, so any positive `p` is ≥ 1/32 and
+  the new `Err` on `0 < p < 1e-9` is unreachable from this caller.
+
+Two shapes re-verified at the tag rather than assumed:
+`CatgraphError::Presentation { message }` is unchanged
 (`catgraph/src/errors.rs:449` at `v0.23.0`), and `FrobeniusOr` still has five
 variants (`catgraph-syntax/src/frobenius.rs:173–184`), so the exhaustive match
 at `src/process/cost.rs:120–124` compiles. `EvalPath::MergeOnly` (magnitude
-`v0.19.1`) does not reach koalisi: it names `ZeroDiversityProof::SkeletalMerge`,
-never `EvalPath`.
+`v0.19.1`) does not reach koalisi, which names
+`ZeroDiversityProof::SkeletalMerge` (`magnitude_policy.rs:3086,3226,3668`,
+`examples/strategy_comparison.rs:5967,6253,13197,13229`) and never `EvalPath`.
 
 ### Gates
 - **All eleven suites at baseline counts on BOTH sides**, measured on a
@@ -65,13 +89,17 @@ never `EvalPath`.
   that report latency or wall-clock time in prose or in a `latency µs` row
   (Criterion 2 and Path B.3 keep their FAIL / PASS outcomes; the Part 9 A3.2
   search-cost disclosure reads 0.3 s / 2.1 s against 0.1 s / 1.1 s, one run each
-  side). Every quality / ratio / superiority / churn / verdict line is
-  byte-identical, both headline verdicts included (`FALSIFIED (latency)` /
-  `VALIDATED (B)`).
-- The three predicted value-exposure rows (magnitude #451 `UnitInterval`
-  closure, #450 `SCHUR_SLOW_FALLBACK_TOL` retune, #436 `MergeOnly` on mutual
-  clones) produced no decision change on the frozen battery. No drift note is
-  filed.
+  side). All 33 `VERDICT` / `FALSIFIED` / `VALIDATED` lines are
+  byte-identical (`rg 'VERDICT|FALSIFIED|VALIDATED'` on each side, `diff`
+  exit 0), both headline verdicts included (`FALSIFIED (latency)` /
+  `VALIDATED (B)`). Of the 11 surviving pairs, one is the mm/scalar
+  **latency** ratio (1.46× → 1.52×) and three are `Medians … Churn …
+  Latency` lines whose only changed field is the latency — their median,
+  churn and quality fields are identical.
+- The three predicted value-exposure rows (applied #451 `UnitInterval`
+  closure, magnitude #450 `SCHUR_SLOW_FALLBACK_TOL` retune, magnitude #436
+  `MergeOnly` on mutual clones) produced no decision change on the frozen
+  battery. No drift note is filed.
 
 ### MSRV — three tiers now; the 1.93 tier is gone; declaration is C-D1
 Measured with the committed procedure (`rust-version` temporarily 1.85.0,
@@ -109,7 +137,8 @@ lifted it.
   (was `0.4.3`). Both old versions keep their stanzas.
 
 ### Process
-No CI: koalisi tracks no workflow; suites and battery run locally. The pre-pin
+No CI: koalisi tracks no workflow (`git ls-files | rg '\.github|workflows'` →
+nothing); suites and battery run locally. The pre-pin
 baseline ran on `git worktree add /tmp/koalisi-base e612a5f` with its own
 target dir; the pinned tree used the repo's `/tmp/koalisi-target`; clippy and
 each MSRV toolchain used fresh dirs.

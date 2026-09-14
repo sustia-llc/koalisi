@@ -129,8 +129,8 @@ touching anything with a frozen battery, a pinned decision, or a registered doc.
   at six features, and **X-battery PASS with zero non-latency diffs** (both
   runs serial, 2129 lines; 70 differing line-pairs, 59 latency-column-only
   table rows + 11 latency/timing prose lines; every verdict byte-identical).
-  The three predicted `mag`-arm exposures (magnitude #451/#450/#436) moved no
-  decision. **MSRV: the 1.93 `process` tier is GONE** — no `deep_causality_*`
+  The three predicted `mag`-arm exposures (applied #451, magnitude #450/#436)
+  moved no decision. **MSRV: the 1.93 `process` tier is GONE** — no `deep_causality_*`
   package is in the lock (cg#222 owns the syntax Arrow seam). Measured
   2026-09-14: **three tiers**, 1.88 default/`magnitude`/`persistence`/
   `remote`/`process` · 1.89 + `decision`/`magnitude-fast` (and the showcase
@@ -372,6 +372,8 @@ koalisi/
     ├── durable_integration.rs              1 container-backed restart test (feature `durable`)
     ├── ingestion_integration.rs            3 tests (K5: synthetic sources → monitors → coalition formation; default features)
     ├── magnitude_trajectory.rs             6 tests (#18: hand-computed trajectory semantics; feature `magnitude`)
+    ├── population_test.rs                  4 tests (#42: population coalition-structure search; default features)
+    ├── common/                             shared fixtures for the integration suites (mod.rs + algorithms.rs + topology.rs)
     ├── persistence_integration.rs          7 tests (#29: roundtrip, rotation+reopen, tamper, torn tail, sealed opaque, writer drain, bounds; feature `persistence`)
     ├── topology_replay.rs                  3 tests (#30: 13-variant round-trip, reconstruction equality, schema/Sealed rejection; feature `persistence`)
     ├── remote_integration.rs               1 test (#38: loopback round-trip service → tee → gateway → client, cursor deltas + seq ordering; feature `remote`)
@@ -613,7 +615,7 @@ Numbering is preserved across all three files.
       cross-feature maximum, cargo refuses any toolchain below 1.93 before
       evaluating a single dependency —
       `cargo +1.89 check --no-default-features --features decision` dies
-      with `koalisi@0.31.0 requires rustc 1.93.0`, so every sub-1.93 tier
+      with `koalisi@0.32.0 requires rustc 1.93.0`, so every sub-1.93 tier
       is unmeasurable from the committed manifest. **Procedure**:
       temporarily set `rust-version` low (1.85.0), run
       `cargo +<v> check --all-targets --features <set>`, restore 1.93.0,
