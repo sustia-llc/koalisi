@@ -96,7 +96,7 @@ serde = { version = "1.0", features = ["derive"] }
 # — all THREE move together (one repo, one
 # checkout — a tag split duplicates catgraph/catgraph-applied/itertools
 # compile units).
-catgraph-applied = { git = "https://github.com/sustia-llc/catgraph", tag = "v0.9.0" }
+catgraph-applied = { git = "https://github.com/sustia-llc/catgraph", tag = "v0.23.0" }
 rayon = "1.12"
 tokio-rayon = "2.1"
 
@@ -115,7 +115,7 @@ nalgebra = { version = "0.35", optional = true }
 # Optional: categorical magnitude decision strategy (coalition diversity via
 # catgraph's enriched-category magnitude). HTTPS since catgraph went public;
 # tag in lockstep with `catgraph-applied` above.
-catgraph-magnitude = { git = "https://github.com/sustia-llc/catgraph", tag = "v0.9.0", optional = true }
+catgraph-magnitude = { git = "https://github.com/sustia-llc/catgraph", tag = "v0.23.0", optional = true }
 
 # Optional: the colored-syntax layer over catgraph-applied's free-prop term
 # engine — the `FrobeniusOr` spider family and the textual presentation surface.
@@ -124,7 +124,7 @@ catgraph-magnitude = { git = "https://github.com/sustia-llc/catgraph", tag = "v0
 # repo, one checkout — a tag split duplicates the catgraph/catgraph-applied
 # compile units). Feature-off builds pull NEITHER this nor its transitive
 # `deep_causality_haft`.
-catgraph-syntax = { git = "https://github.com/sustia-llc/catgraph", tag = "v0.9.0", optional = true }
+catgraph-syntax = { git = "https://github.com/sustia-llc/catgraph", tag = "v0.23.0", optional = true }
 
 # Optional: durable coalition decision messaging (two-tier SurrealDB bus:
 # CHANGEFEED log + LIVE wake-up + cursor catch-up; at-least-once,
