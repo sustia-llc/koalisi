@@ -2,13 +2,12 @@
 name = "koalisi"
 version = "0.32.0"
 edition = "2024"
-# 1.93 is the DECLARED floor. It is no longer the measured cross-feature
-# maximum: that is 1.92 since the catgraph v0.23.0 re-pin (v0.32.0). Whether
-# the declaration moves is owner decision C-D1 (the 2026-09-13 stack re-pin
-# plan §4); until it is taken the value stays and the tiers below are
-# documentation. Owner decision 2026-08-09 (keep 1.93, lowering tried and
-# REVERTED) was taken when the maximum WAS 1.93; its resolver-3 ground still
-# applies to any lower declaration, its showcase ground no longer does.
+# 1.93 is the DECLARED floor — owner decision C-D1, 2026-09-14: KEEP 1.93.
+# It is no longer the measured cross-feature maximum (that is 1.92 since the
+# catgraph v0.23.0 re-pin, v0.32.0); the tiers below are documentation, and
+# the resolver-3 ground from the 2026-08-09 decision (keep 1.93, lowering
+# tried and REVERTED) is the reason the declaration stays put. Do not lower
+# it in passing; a change needs a new owner decision.
 #
 # The floor is feature-conditional, with THREE tiers (measured 2026-09-14 at
 # catgraph v0.23.0, `cargo +<v> check --all-targets --locked --features <set>`

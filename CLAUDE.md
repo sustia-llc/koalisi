@@ -135,8 +135,8 @@ touching anything with a frozen battery, a pinned decision, or a registered doc.
   2026-09-14: **three tiers**, 1.88 default/`magnitude`/`persistence`/
   `remote`/`process` · 1.89 + `decision`/`magnitude-fast` (and the showcase
   set) · 1.92 + `durable`. The cross-feature max is 1.92; **`rust-version`
-  stays 1.93.0 pending owner decision C-D1** (the 2026-08-09 showcase ground
-  no longer holds, the resolver-3 ground still does). Lockfile: four catgraph
+  stays 1.93.0 — owner decision C-D1, 2026-09-14** (the 2026-08-09 showcase
+  ground no longer holds, the resolver-3 ground still does). Lockfile: four catgraph
   packages move, three `deep_causality_*` stanzas leave (net −3),
   `catgraph-applied` swaps `rand` for `rand_core`, and two unrelated edges
   (`data-encoding-macro-internal` → `syn 2`, `tempfile` → `getrandom 0.3.4`)
@@ -256,7 +256,7 @@ Rust implementation is dispatched to `rust-v2:rust-dev-v2`.
 
 ```
 koalisi/
-├── Cargo.toml                              git tag deps: catgraph-applied + catgraph-magnitude + catgraph-syntax v0.23.0 in lockstep (one checkout — K6); aif-v0.13.0, surrealdb-live-message, libp2p 0.56 (optional); no path deps since K3; declared MSRV 1.93 sits ABOVE the measured cross-feature max 1.92 over three tiers (1.88/1.89/1.92) — owner decision C-D1 pending, gotcha 34
+├── Cargo.toml                              git tag deps: catgraph-applied + catgraph-magnitude + catgraph-syntax v0.23.0 in lockstep (one checkout — K6); aif-v0.13.0, surrealdb-live-message, libp2p 0.56 (optional); no path deps since K3; declared MSRV 1.93 sits ABOVE the measured cross-feature max 1.92 over three tiers (1.88/1.89/1.92) — owner decision C-D1 2026-09-14: KEEP 1.93, gotcha 34
 ├── README.md                               user-facing
 ├── CLAUDE.md                               THIS FILE
 ├── config/{default,development,test}.toml  coalition threshold, history capacity; [sdb]+[docker] for the durable feature's upstream SETTINGS (cwd-resolved)
@@ -636,9 +636,9 @@ Numbering is preserved across all three files.
       cg#222 made `catgraph-syntax`'s Arrow seam crate-owned, and
       `rg -n deep_causality Cargo.lock` finds nothing at `v0.23.0`.
     - **`rust-version = "1.93.0"` is DECLARED, and since v0.32.0 sits ABOVE
-      the measured cross-feature maximum (1.92).** Whether it moves is
-      owner decision C-D1 (stack re-pin plan §4); do not change it in
-      passing. The 2026-08-09 decision to keep 1.93 rested on two measured
+      the measured cross-feature maximum (1.92). Owner decision C-D1
+      (2026-09-14): KEEP 1.93.** Do not change it in passing. The
+      2026-08-09 decision to keep 1.93 rested on two measured
       grounds: (i) `strategy_comparison` requires all three features, so
       the A/B showcase needed 1.93 regardless — **this no longer holds**,
       the showcase set checks on 1.89; (ii) **edition 2024 means resolver
@@ -802,14 +802,11 @@ What is still open:
 - **[#25] Metrics example** — still valid but needs reframing: instrument the
   `CoalitionService` decision path / topology events, not the deleted
   `tick_bus`/`alert_bus`.
-- **MSRV — owner decision C-D1 OPEN (2026-09-14, v0.32.0).** The v0.23.0
-  re-pin removed the last DeepCausality edge and the `process` tier with it;
-  the measured cross-feature maximum is now 1.92 while `rust-version`
-  declares 1.93. Options: keep 1.93 (declaration unchanged, tiers are
-  documentation) or lower to 1.92 (the resolver-3 ground from 2026-08-09
-  still applies and must be priced again). The tiers are measured and
-  recorded in `Cargo.toml` and gotcha 34 — nothing further is owed until the
-  owner decides.
+- **MSRV — C-D1 DECIDED (owner, 2026-09-14): KEEP `rust-version = 1.93.0`.**
+  The v0.23.0 re-pin removed the last DeepCausality edge and the `process`
+  tier with it; the measured cross-feature maximum is 1.92 and the
+  declaration stays above it on the resolver-3 ground. Tiers recorded in
+  `Cargo.toml` and gotcha 34. Nothing is owed; **do not re-file.**
 
 Downstream projects (nautilus_trader bridge, tauhokohoko integration) and
 removed work (databento → `biome`, the forex-coupled backlog) are recorded in
