@@ -84,20 +84,21 @@ forex domain since removed).
 
 ## Available tooling for this project
 
-- **`causality` (DeepCausality) plugin** — **scope SHRANK sharply at the
-  v0.9.0 re-pin (v0.31.0); read this before routing.** koalisi's topology
-  backend is `catgraph_applied::Hypergraph` (plain `Vec`/`HashMap` container —
-  read its module docs at the pinned catgraph tag for the contract). catgraph
-  no longer sits on the DeepCausality substrate for any of it: cg#219/#221 gave
-  it its own `Zero`/`One` + `Dual` (retiring `deep_causality_num`) and cg#220
-  its own toposort + connected components (retiring `ultragraph`). **There is
-  no `ultragraph` package in koalisi's lock at all**, so
-  `causality:causal-graphs` describes a crate that is not in the dependency
-  graph — do NOT route graph-algorithm questions there; the implementations
-  are catgraph's own. What remains is a single optional edge:
-  `catgraph-syntax` → `deep_causality_haft` → `algebra` → `num`, present only
-  under feature `process`. `causality:causality-theory` is still apt for the
-  algebraic layer (`Rig`, HKT/witnesses) catgraph's enrichment sits on.
+- **`causality` (DeepCausality) plugin** — **NO DeepCausality crate is in
+  koalisi's lock since the v0.23.0 re-pin (v0.32.0); read this before
+  routing.** koalisi's topology backend is `catgraph_applied::Hypergraph`
+  (plain `Vec`/`HashMap` container — read its module docs at the pinned
+  catgraph tag for the contract). catgraph sits on none of the DeepCausality
+  substrate: cg#219/#221 gave it its own `Zero`/`One` + `Dual` (retiring
+  `deep_causality_num`), cg#220 its own toposort + connected components
+  (retiring `ultragraph`), and cg#222 made `catgraph-syntax`'s Arrow seam
+  crate-owned (retiring `deep_causality_haft`, which was the last edge, under
+  feature `process` only). `rg -n 'deep_causality|ultragraph' Cargo.lock` →
+  nothing. `causality:causal-graphs` and the substrate-specific skills
+  describe crates that are not in the dependency graph — do NOT route there;
+  the implementations are catgraph's own. `causality:causality-theory` is
+  still apt for the algebraic layer (`Rig`, HKT/witnesses) catgraph's
+  enrichment sits on, as theory reference only.
 - ~~`graph` plugin v2.0.1~~ (yamafaktory hypergraph skills) — **OBSOLETE for
   `src/topology/` since K1**; historical reference only (pre-K1 semantics, the
   dropped `PersistentHypergraph` idea — see the Phase 7 narrative in the
@@ -108,14 +109,39 @@ forex domain since removed).
   `surrealdb:surrealql-language` — for K3 (#6) surrealdb-live-message work,
   per the user CLAUDE.md routing rules.
 
-## Current state — 2026-08-09 (v0.31.0)
+## Current state — 2026-09-14 (v0.32.0)
 
-Full release ledger v0.4.0 → v0.31.0 is the `project-history.md` archive (§1).
+Full release ledger v0.4.0 → v0.32.0 is the `project-history.md` archive (§1).
 The three most recent entries are kept here in brief — read the ledger before
 touching anything with a frozen battery, a pinned decision, or a registered doc.
 
 ### Latest three
 
+- **catgraph re-pin `v0.9.0` ×3 → `v0.23.0` — v0.32.0 (2026-09-14, #87)**:
+  Phase C of the stack's 2026-09-13 downstream re-pin plan; all three catgraph
+  deps in lockstep (K6 rule), the pin its own commit. Fifteen upstream tags
+  absorbed (`v0.10.0` … `v0.23.0`); **compile-breaking set NONE** (every seams-listed breaking name is a
+  zero-hit; `Presentation { message }` and the five-variant `FrobeniusOr`
+  re-verified at the tag). **Drift check CLEAN**: all eleven suites at
+  baseline counts on both sides (106/162/135/191/143/126/156/112/159/239,
+  `durable` 107 — pre-pin measured on a worktree of `main`), clippy
+  `--all-targets -D warnings` clean from a fresh target dir at default and
+  at six features, and **X-battery PASS with zero non-latency diffs** (both
+  runs serial, 2129 lines; 70 differing line-pairs, 59 latency-column-only
+  table rows + 11 latency/timing prose lines; every verdict byte-identical).
+  The three predicted `mag`-arm exposures (magnitude #451/#450/#436) moved no
+  decision. **MSRV: the 1.93 `process` tier is GONE** — no `deep_causality_*`
+  package is in the lock (cg#222 owns the syntax Arrow seam). Measured
+  2026-09-14: **three tiers**, 1.88 default/`magnitude`/`persistence`/
+  `remote`/`process` · 1.89 + `decision`/`magnitude-fast` (and the showcase
+  set) · 1.92 + `durable`. The cross-feature max is 1.92; **`rust-version`
+  stays 1.93.0 pending owner decision C-D1** (the 2026-08-09 showcase ground
+  no longer holds, the resolver-3 ground still does). Lockfile: four catgraph
+  packages move, three `deep_causality_*` stanzas leave (net −3),
+  `catgraph-applied` swaps `rand` for `rand_core`, and two unrelated edges
+  (`data-encoding-macro-internal` → `syn 2`, `tempfile` → `getrandom 0.3.4`)
+  moved — fourth time the dependency arrays carried the story. See
+  **gotcha 34** (tier bullets rewritten).
 - **catgraph re-pin `v0.8.0` ×3 → `v0.9.0` — v0.31.0 (2026-08-09)**: all three
   catgraph deps in lockstep (K6 rule). Upstream v0.9.0 is dependency
   streamlining — cg#219/#221 give catgraph its own `Zero`/`One` + `Dual`,
@@ -166,28 +192,6 @@ touching anything with a frozen battery, a pinned decision, or a registered doc.
   `decision` + `process`). Report
   `docs/ab-report-K4-eq5b-typed-two-engine.md` (13-item ledger). See
   **gotcha 33**.
-- **aif re-pin `aif-v0.12.0` → `aif-v0.13.0` — v0.29.0 (2026-08-08)**: the EQ5b
-  pin-first step; **catgraph deliberately NOT moved** (stays `v0.8.0` ×3), so an
-  aif-only hop. Drift check CLEAN — all ten suites at baseline counts (measured
-  before the bump too), clippy `--all-targets` clean from a fresh target dir,
-  frozen K4 battery reproduced with zero non-latency diffs. What it buys
-  (tira#53, the EQ5b gate): `GroupAgent::group_distribution` — the group action
-  distribution formed with no RNG draw and no `last_action` advance — plus
-  `group_distribution_recording`, `record_group_action`, the defaulted
-  `Aggregator` distribution twins, and `VotingAgent::weighted_mixture` made
-  `pub`. Two breaking riders verified no-ops here (`AifError` is now
-  `#[non_exhaustive]` + gains `Unsupported(String)`, used only in return
-  position at 6 sites and never matched on; `communication` moved behind a
-  default-off feature). **Lockfile delta is NOT a package count** —
-  re-resolution also moved three unrelated transitive edges; a
-  `name`/`version`/`source` grep structurally cannot see dependency-array edges,
-  so read the whole diff. ~~⚠ MSRV re-test still owed at the next *catgraph*
-  re-pin — the 1.93 floor is `deep_causality_num =0.4.1` propagating through
-  catgraph, and v0.9.0 removes it.~~ **RETIRED as WRONG at v0.31.0** — `num`
-  is not removed (it survives beneath `haft → algebra`) and was never the sole
-  cause; the floor is in fact koalisi's own, gated behind the optional
-  `process` feature. Do NOT act on the struck sentence; see the v0.31.0 entry
-  and **gotcha 34**. See **gotcha 32**.
 
 ### K4 A/B lineage — verdict trail
 
@@ -252,7 +256,7 @@ Rust implementation is dispatched to `rust-v2:rust-dev-v2`.
 
 ```
 koalisi/
-├── Cargo.toml                              git tag deps: catgraph-applied + catgraph-magnitude + catgraph-syntax v0.9.0 in lockstep (one checkout — K6); aif-v0.13.0, surrealdb-live-message, libp2p 0.56 (optional); no path deps since K3; MSRV 1.93 = the cross-feature MAXIMUM over four tiers (1.88/1.89/1.92/1.93) — lowering was tried and REVERTED, gotcha 34
+├── Cargo.toml                              git tag deps: catgraph-applied + catgraph-magnitude + catgraph-syntax v0.23.0 in lockstep (one checkout — K6); aif-v0.13.0, surrealdb-live-message, libp2p 0.56 (optional); no path deps since K3; declared MSRV 1.93 sits ABOVE the measured cross-feature max 1.92 over three tiers (1.88/1.89/1.92) — owner decision C-D1 pending, gotcha 34
 ├── README.md                               user-facing
 ├── CLAUDE.md                               THIS FILE
 ├── config/{default,development,test}.toml  coalition threshold, history capacity; [sdb]+[docker] for the durable feature's upstream SETTINGS (cwd-resolved)
@@ -617,43 +621,49 @@ Numbering is preserved across all three files.
       **Do NOT substitute `--ignore-rust-version`** — it suppresses the
       dependency rust-version checks too, so it cannot see a dependency
       floor at all. That flag produced retired claim (d).
-    - **The floor is feature-conditional, with FOUR tiers** (measured
-      2026-08-09): **1.88** default / `magnitude` / `persistence` /
-      `remote` (1.87 fails on let-chains — inside the `catgraph 0.9.0`
-      transitive, which declares no `rust-version`, not koalisi's own
-      source) · **1.89** + `decision`, `magnitude-fast` (nalgebra /
-      safe_arch / wide) · **1.92** + `durable` (cargo refuses <1.90
-      declaratively for `roaring`; 1.90 **and** 1.91 then both fail to
-      compile — measured on both, not inferred) · **1.93** + `process`
-      (`algebra`/`haft`/`num`, via the single optional `catgraph-syntax`
-      edge — `cargo tree -i deep_causality_haft` finds nothing without it).
-    - **`rust-version = "1.93.0"` is the cross-feature MAXIMUM and STAYS.**
-      Lowering was tried and reverted (owner, 2026-08-09) on two measured
-      grounds: the benefit is illusory — `strategy_comparison` requires all
-      three features, so the A/B showcase needs 1.93 regardless — and
-      **edition 2024 means resolver 3, so this value CONSTRAINS
-      RESOLUTION**: with 1.88 declared, `cargo update --dry-run` reported
-      `Locking 107 packages to latest Rust 1.88.0 compatible versions` and
-      held back nalgebra, roaring, safe_arch, wide and the deep_causality
-      crates. Calibration so this is not overstated: cargo **announces**
-      that line, and MSRV-aware selection has an opt-out
-      (`cargo update --ignore-rust-version`, or `[resolver]
+    - **The floor is feature-conditional, with THREE tiers** (measured
+      2026-09-14 at catgraph `v0.23.0`, `cargo +<v> check --all-targets
+      --locked --features <set>`): **1.88** default / `magnitude` /
+      `persistence` / `remote` / `process` (1.87 fails on five let-chains
+      inside the `catgraph 0.23.0` lib, which declares no `rust-version`,
+      not koalisi's own source) · **1.89** + `decision`, `magnitude-fast`,
+      and the showcase set `decision,magnitude,process` (1.88 refused
+      declaratively: nalgebra 0.35.0 / safe_arch 1.0.0 / wide 1.5.0) ·
+      **1.92** + `durable` (1.91 fails to compile `diskann`; at v0.31.0
+      1.90 was measured failing too). **The 1.93 `process` tier is GONE**:
+      cg#222 made `catgraph-syntax`'s Arrow seam crate-owned, and
+      `rg -n deep_causality Cargo.lock` finds nothing at `v0.23.0`.
+    - **`rust-version = "1.93.0"` is DECLARED, and since v0.32.0 sits ABOVE
+      the measured cross-feature maximum (1.92).** Whether it moves is
+      owner decision C-D1 (stack re-pin plan §4); do not change it in
+      passing. The 2026-08-09 decision to keep 1.93 rested on two measured
+      grounds: (i) `strategy_comparison` requires all three features, so
+      the A/B showcase needed 1.93 regardless — **this no longer holds**,
+      the showcase set checks on 1.89; (ii) **edition 2024 means resolver
+      3, so the declared value CONSTRAINS RESOLUTION**: with 1.88 declared,
+      `cargo update --dry-run` reported `Locking 107 packages to latest
+      Rust 1.88.0 compatible versions` and held back nalgebra, roaring,
+      safe_arch, wide and the deep_causality crates — this applies to any
+      lower declaration as before. Calibration so it is not overstated:
+      cargo **announces** that line, and MSRV-aware selection has an
+      opt-out (`cargo update --ignore-rust-version`, or `[resolver]
       incompatible-rust-versions = "allow"`), so the cost is one config
-      line plus the standing need to notice held-back deps — it outweighed
-      a benefit already near zero, not a real one.
-      Accepted cost: 1.88–1.92 downstreams are refused a default-only build
-      that would compile.
+      line plus the standing need to notice held-back deps.
+      Cost of the current value: 1.88–1.92 downstreams are refused a
+      default-only build that would compile.
     - **FOUR wrong claims have been retired here. Do not write a fifth.**
       (a) "the floor is `num` alone, liftable at the next catgraph re-pin"
-      — `num` survives beneath `haft`. (b) "no catgraph re-pin can lift it,
-      the substrate must move" — the `process` tier is koalisi's own
-      optional feature. (c) "only `process` needs more than the default
-      floor" — `durable` needs 1.92. (d) "the default floor is 1.88 **for
-      everything but `durable`/`process`**" — the 1.88 tier itself is
-      right; its *extent* was wrong, since `decision` and `magnitude-fast`
-      need 1.89. Every one came from measuring a chosen subset and
-      generalising; (d) additionally from the masking flag. **"I checked the widest feature set" is NOT "I checked
-      every feature"** — `durable` sits in no other tier's superset.
+      — `num` survived beneath `haft` until v0.23.0. (b) "no catgraph
+      re-pin can lift it, the substrate must move" — the `process` tier
+      was koalisi's own optional feature, and the v0.23.0 re-pin lifted it.
+      (c) "only `process` needs more than the default floor" — `durable`
+      needs 1.92. (d) "the default floor is 1.88 **for everything but
+      `durable`/`process`**" — the 1.88 tier itself is right; its *extent*
+      was wrong, since `decision` and `magnitude-fast` need 1.89. Every one
+      came from measuring a chosen subset and generalising; (d)
+      additionally from the masking flag. **"I checked the widest feature
+      set" is NOT "I checked every feature"** — `durable` sits in no other
+      tier's superset.
     - **`cargo test … | rg '^test result' | tail` truncates.** Bare `tail` is
       `tail -10`; suites with 11+ result lines (`persistence,magnitude`) lose
       the lib-test line and undercount by ~95. Always `tail -20`.
@@ -790,12 +800,14 @@ What is still open:
 - **[#25] Metrics example** — still valid but needs reframing: instrument the
   `CoalitionService` decision path / topology events, not the deleted
   `tick_bus`/`alert_bus`.
-- ~~**MSRV re-test** — owed at the next *catgraph* re-pin.~~ **DONE and
-  CLOSED at v0.31.0 (2026-08-09), as a correction**: the premise was false
-  (`deep_causality_num` is not removed by v0.9.0 and was never the sole
-  cause). The floor has four tiers and `rust-version` stays 1.93 as the
-  cross-feature maximum — lowering was tried and reverted. **Do not re-file
-  this.** See **gotcha 34**.
+- **MSRV — owner decision C-D1 OPEN (2026-09-14, v0.32.0).** The v0.23.0
+  re-pin removed the last DeepCausality edge and the `process` tier with it;
+  the measured cross-feature maximum is now 1.92 while `rust-version`
+  declares 1.93. Options: keep 1.93 (declaration unchanged, tiers are
+  documentation) or lower to 1.92 (the resolver-3 ground from 2026-08-09
+  still applies and must be priced again). The tiers are measured and
+  recorded in `Cargo.toml` and gotcha 34 — nothing further is owed until the
+  owner decides.
 
 Downstream projects (nautilus_trader bridge, tauhokohoko integration) and
 removed work (databento → `biome`, the forex-coupled backlog) are recorded in

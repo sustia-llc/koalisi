@@ -19,6 +19,101 @@ Planned work — issue-tracked (details in [`CLAUDE.md`](./CLAUDE.md)
 - **[#25]** metrics example, reframed onto the `CoalitionService` decision
   path / topology events.
 
+## [0.32.0] — 2026-09-14
+
+The catgraph `v0.9.0` → `v0.23.0` re-pin (#87), Phase C of the stack's
+2026-09-13 downstream re-pin plan. All three catgraph deps move in lockstep per
+the K6 one-repo-one-checkout rule; the pin is its own commit so a battery drift
+would be attributable to it. **Drift check CLEAN.** The `process` MSRV tier
+collapses from 1.93 to 1.88 because the last DeepCausality edge is gone.
+
+### Changed
+- `catgraph-applied`, `catgraph-magnitude`, `catgraph-syntax` → **`v0.23.0`**
+  (15 upstream tags, `v0.10.0` … `v0.23.0`; the consumer-facing digest is the stack roadmap's
+  cross-repo seams items (1)–(9)).
+- **MSRV comment in `Cargo.toml` rewritten** — three measured tiers, the 1.93
+  tier gone; the declared `rust-version` stays 1.93.0 pending owner decision
+  C-D1 (see MSRV below).
+- `README.md` dependency lines and `CLAUDE.md` tooling / gotcha 34 text: the
+  `catgraph-syntax` → DeepCausality sentence is retired.
+
+### Compile-breaking set — none
+Every name the seams list as breaking is a zero-hit in `src/`, `tests/`,
+`examples/` (`rg -n -w 'Cospan|Span|PetriNet|structurally_equal|assert_valid|
+from_permutation|permute_side|Rig|Tropical|MatR|MatKron|Decomposition|EvalPath|
+Arrow|haft'` → nothing). Two shapes re-verified at the tag rather than assumed:
+`CatgraphError::Presentation { message }` (constructed at
+`src/process/theory.rs:263`, `src/process/signature.rs:204`) is unchanged
+(`catgraph/src/errors.rs:449` at `v0.23.0`), and `FrobeniusOr` still has five
+variants (`catgraph-syntax/src/frobenius.rs:173–184`), so the exhaustive match
+at `src/process/cost.rs:120–124` compiles. `EvalPath::MergeOnly` (magnitude
+`v0.19.1`) does not reach koalisi: it names `ZeroDiversityProof::SkeletalMerge`,
+never `EvalPath`.
+
+### Gates
+- **All eleven suites at baseline counts on BOTH sides**, measured on a
+  worktree of `main` before the pin and on the pinned tree after, every
+  `test result` line summed: 106 / 162 / 135 / 191 / 143 / 126 / 156 / 112 /
+  159 / 239, plus `durable` 107.
+- Clippy `--all-targets -- -D warnings` clean from a fresh target dir at
+  default features and at
+  `decision,magnitude,process,persistence,remote,magnitude-fast`.
+- **X-battery PASS — zero non-latency diffs.** Both runs serial on a quiet
+  machine (`pgrep -c 'cargo|rustc'` = 0 at each start), 2129 lines each. 70
+  line-pairs differ raw; 59 are table rows whose only changed cell is the
+  trailing latency column, and the 11 that survive the column strip are lines
+  that report latency or wall-clock time in prose or in a `latency µs` row
+  (Criterion 2 and Path B.3 keep their FAIL / PASS outcomes; the Part 9 A3.2
+  search-cost disclosure reads 0.3 s / 2.1 s against 0.1 s / 1.1 s, one run each
+  side). Every quality / ratio / superiority / churn / verdict line is
+  byte-identical, both headline verdicts included (`FALSIFIED (latency)` /
+  `VALIDATED (B)`).
+- The three predicted value-exposure rows (magnitude #451 `UnitInterval`
+  closure, #450 `SCHUR_SLOW_FALLBACK_TOL` retune, #436 `MergeOnly` on mutual
+  clones) produced no decision change on the frozen battery. No drift note is
+  filed.
+
+### MSRV — three tiers now; the 1.93 tier is gone; declaration is C-D1
+Measured with the committed procedure (`rust-version` temporarily 1.85.0,
+`cargo +<v> check --all-targets --locked --features <set>` per set, restored,
+manifest diff clean; never `--ignore-rust-version`):
+
+| tier | feature sets | evidence |
+|---|---|---|
+| 1.88 | default · `magnitude` · `persistence` · `remote` · **`process`** | 1.87 fails: five `let` chains in the `catgraph 0.23.0` lib |
+| 1.89 | `decision` · `magnitude-fast` · `decision,magnitude,process` | 1.88 refused declaratively: nalgebra 0.35.0 / safe_arch 1.0.0 / wide 1.5.0 |
+| 1.92 | `durable` | 1.91 fails compiling `diskann` (lifetime / `Iterator` not general enough) |
+
+The cross-feature maximum is therefore **1.92**, and `rust-version = "1.93.0"`
+now sits above it. The value is **unchanged in this release**: whether to move
+it is owner decision C-D1 (stack re-pin plan §4). Of the two 2026-08-09 grounds
+for declaring the maximum, the showcase ground no longer holds
+(`strategy_comparison`'s feature set checks on 1.89) and the resolver-3 ground
+applies to any lower value as before. Retired claim (b) of v0.31.0 ("no
+catgraph re-pin can lift it") is now also *empirically* wrong: this re-pin
+lifted it.
+
+### Lockfile — read in full, not grepped
+- **Four** catgraph packages move (core `catgraph` rides as a transitive).
+- `deep_causality_algebra 0.2.0`, `deep_causality_haft 0.4.2`,
+  `deep_causality_num 0.4.1` leave — package stanzas and the
+  `catgraph-syntax` dependency-array edge. 681 → 678 packages, net **−3**.
+  `rg -n 'deep_causality|ultragraph' Cargo.lock` → nothing.
+- `catgraph-applied`'s dependency array swaps `rand 0.10.2` for
+  `rand_core 0.10.1` (cg#239); the `rand 0.10.2` stanza survives for three
+  other consumers.
+- Two unrelated edges moved under re-resolution, invisible to a
+  `name`/`version`/`source` grep (fourth occurrence: v0.26.0, v0.29.0,
+  v0.31.0): `data-encoding-macro-internal 0.1.18` now references
+  `syn 2.0.118` (was `1.0.109`) and `tempfile` references `getrandom 0.3.4`
+  (was `0.4.3`). Both old versions keep their stanzas.
+
+### Process
+No CI: koalisi tracks no workflow; suites and battery run locally. The pre-pin
+baseline ran on `git worktree add /tmp/koalisi-base e612a5f` with its own
+target dir; the pinned tree used the repo's `/tmp/koalisi-target`; clippy and
+each MSRV toolchain used fresh dirs.
+
 ## [0.31.0] — 2026-08-09
 
 The catgraph `v0.8.0` → `v0.9.0` re-pin, run under the standing re-pin protocol
