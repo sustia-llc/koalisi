@@ -40,6 +40,7 @@ from temporal hypergraph topology to coalition formation algorithms to
 | `ingest` | Domain-neutral ingestion (K5): `Sample`/`DataSource` traits, generic `SampleMonitor<S>`, `Pacing` + `pump_source`, synthetic NEST-shaped multi-resolution and tauhokohoko-shaped sensor-event fixture sources (seeded, no credentials) |
 | `decision` | `CoalitionDecisionPolicy` trait + always-available `ThresholdPolicy`; optional Active Inference strategy (`EfeValueCalculator`, `AifDecisionPolicy`) behind the `decision` feature; optional categorical-magnitude strategy (`MagnitudeValueCalculator`, `MagnitudePolicy`) behind the `magnitude` feature |
 | `persistence` | Append-only event store (feature `persistence`): hash-chained streams, CBOR frame log (`FileEventStore`), crash-tail recovery, writer task; topology events tap in and replay back into a fresh `EventLog` all queries run on unchanged (P7.1 + P7.2) — see `.claude/docs/phase7-persistence-design.md` |
+| `harness` | The K7 A/B harness (feature `harness`): seeded instance generation, the battery loop (bootstrap join, policy-gated arrivals, one leave sweep), per-seed metrics, report helpers — the plumbing every K7 registration shares |
 | `subsystems` | `CoalitionService` — the policy-gated coalition-membership seam (join/leave consult a `CoalitionDecisionPolicy` before mutating the hypergraph) — plus a decision-tap tee (`spawn_decision_tee`), an optional durable decision log (`durable`), and an optional libp2p remote coalition-event gateway (`remote`: bounded buffer, cursor polling, stable `RemoteCoalitionEventV1` wire schema) |
 
 ## Quick start
@@ -100,7 +101,8 @@ cargo run --example supervised_monitor
 cargo run --example population_search
 
 # Feature-gated
-cargo run --release --features decision,magnitude --example strategy_comparison   # divergence demo + AIF-vs-magnitude A/B report (#7)
+cargo run --release --features decision,magnitude,process --example strategy_comparison   # the frozen K4 archive battery (Parts 1–11, ~20 min, serial)
+cargo run --features harness --example gauntlet                                   # K7 harness skeleton — zero registrations yet
 cargo run --features decision --example population_reliability                    # learned-reliability fitness for the structure search (#57)
 cargo run --features durable --example durable_decisions                          # durable decision log (needs Docker)
 cargo run --features remote --example remote_coalition_consumer                   # remote coalition-event gateway + client, one process (#38)
@@ -120,14 +122,25 @@ cargo run --features remote --example remote_coalition_consumer                 
 
 ## The A/B process: pre-registered decision-strategy evaluation
 
-`examples/strategy_comparison.rs` is the showcase: a head-to-head battery of
-coalition-decision strategies — Active Inference arms built on
-[aif](https://github.com/sustia-llc/tira) vs a categorical (magnitude-based)
-baseline built on [catgraph](https://github.com/sustia-llc/catgraph) — run as
-**pre-registered A/B experiments**. Criteria are fixed and committed *before*
-each run (`docs/prereg-*.md`), verdicts are recorded against them
+The showcase is a head-to-head battery of coalition-decision strategies —
+Active Inference arms built on [aif](https://github.com/sustia-llc/tira) vs a
+categorical (magnitude-based) baseline built on
+[catgraph](https://github.com/sustia-llc/catgraph) — run as **pre-registered
+A/B experiments**. Criteria are fixed and committed *before* each run
+(`docs/prereg-*.md`), verdicts are recorded against them
 (`docs/ab-report-*.md`), and falsified arms stay falsified — the reports are
-never rewritten.
+never rewritten. [`docs/README.md`](docs/README.md) indexes every run and the
+seed ledger; [`docs/PROTOCOL.md`](docs/PROTOCOL.md) is the protocol; the raw
+output of each run of record is committed under
+[`docs/runs/`](docs/runs/README.md).
+
+Two binaries carry it. `examples/strategy_comparison.rs` is the **K4 lineage**
+(Parts 1–11, the table below), frozen as the archive: it changes only through
+`src/`, and a fresh serial run diffed against `docs/runs/K4-archive.log` is the
+drift gate at every dependency re-pin. The **K7 lineage** runs on
+`examples/gauntlet.rs` and one example per registration under `examples/k7/`,
+sharing its plumbing through `src/harness/` (feature `harness`); it has no
+registration yet.
 
 The run history is deliberately adversarial:
 
@@ -171,6 +184,7 @@ cargo test --features remote               # 112 tests (+ gateway event buffer +
 cargo test --features process              # 159 tests (+ process-structured workflows + the unstaffable-residual policy)
 cargo test --features decision,magnitude,process # 239 tests (the full A/B battery surface)
 cargo test --features durable              # + container-backed restart-durability test (needs Docker)
+cargo test --features harness              # 125 tests (+ the K7 harness: rng, instance generation, battery loop, report helpers)
 ```
 
 ## Dependencies

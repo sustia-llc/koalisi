@@ -19,6 +19,100 @@ Planned work — issue-tracked (details in [`CLAUDE.md`](./CLAUDE.md)
 - **[#25]** metrics example, reframed onto the `CoalitionService` decision
   path / topology events.
 
+## [0.33.0] — 2026-09-16
+
+The K7 scaffold — Phase A of the stack's 2026-09-16 K7 round plan. The K4
+lineage is closed and its binary frozen as the archive; the next lineage gets
+its own harness, its own example, a public index, a public protocol, and
+committed raw run outputs. No registration runs here.
+
+### Added
+- **`docs/README.md`** — the index of the A/B showcase trail: the K4 verdict
+  trail (17 rows, every pre-registration and report by path), the K7 lineage
+  section (empty), the **seed ledger** (moved here from `CLAUDE.md`; 90..120
+  reserved for `K7-1`, 150..180 reserved-unconsumed), the immutability rule
+  and the `docs/` layout. Every file under `docs/` is named in it (basename
+  sweep: `fd -t f . docs -x basename {}` against `rg -o -F -f`, nothing
+  missing).
+- **`docs/PROTOCOL.md`** — the run protocol every registration follows:
+  design-lock → pre-registration → three-lens review → serial run on a quiet
+  machine → immutable report; pin-first; the latency-column-stripped diff;
+  review on every PR; the seed rules; naming. `CLAUDE.md` keeps a pointer.
+- **`docs/runs/`** — committed raw outputs. `K4-archive.log` is ONE fresh
+  serial run of `examples/strategy_comparison.rs` at the `v0.32.0` pins
+  (release build, `pgrep -c 'cargo|rustc'` = 0 at start, no suite alongside):
+  2129 lines, 33 lines matching `VERDICT|FALSIFIED|VALIDATED`, every `VERDICT`
+  headline equal to the trail of record. `docs/runs/README.md` states the
+  archive recipe and the re-pin drift check (one fresh run, diffed with the
+  trailing latency column stripped, verdict lines diffed separately).
+- **Feature `harness`** (default off, no dependencies) and **`src/harness/`**
+  — the K7 round's shared plumbing: `rng` (`SplitMix64`, `permutation`,
+  `distinct_bits`), `instance` (`InstanceSpec` with a `Default` of 8 bits /
+  pool 4..=16 / 1..=4 capabilities / trust 20..=99 / 20 tasks / 1..=5
+  required bits → `Instance` over `CapabilityAgent`), `battery` (`SeedRange`,
+  `Arm`, `InstanceResult`, `BatteryResult`, `run_instance`, `run_battery`:
+  bootstrap join, policy-gated arrivals, one leave sweep in arrival order,
+  completion × mean coverage efficiency), `report` (`percentile`,
+  `median_iqr`, `superior_count`, the per-seed and summary tables with latency
+  as the summary's last column only, `Verdict`). 19 unit tests; 15 falsified
+  red-then-green in a `cp -r` copy.
+- **`examples/gauntlet.rs`** (`required-features = ["harness"]`) — the K7
+  harness skeleton: prints the default spec and one smoke arm
+  (`ThresholdPolicy<SynergisticCalculator>`, seeds 0..3), no verdict line,
+  zero registrations. It names none of the K4 helpers (`rg -n -F` over
+  `draw_prefix generate_instance coalition_view best_subset oracle_primary
+  InstanceMetrics Worker SplitMix64 draw_distinct_bits fisher_yates next_unit
+  Scope` on the file → nothing) and uses only `koalisi::harness`,
+  `koalisi::algorithms::SynergisticCalculator` and
+  `koalisi::decision::ThresholdPolicy`. K7 registrations are one
+  `[[example]]` each under `examples/k7/k7_<n>.rs`.
+
+### Changed
+- `examples/strategy_comparison.rs` — header comment naming it the frozen K4
+  archive binary and the X-battery gate; the run line now carries all three
+  required features. One comment hunk, no code change (`git diff --stat`:
+  9 insertions, 2 deletions; `rg -c '^@@'` on the diff → 1).
+- `README.md` — the A/B section names the index, the protocol, the runs
+  directory and the two binaries; `harness` module row; example and test
+  lines.
+- `CLAUDE.md` — the verdict-trail table, seed ledger, standing run protocol
+  and the per-file `docs/` inventory are replaced by pointers to `docs/`;
+  61,387 → 58,417 chars (`wc -c`).
+
+### Gates
+- All twelve suites at baseline, every `test result` line summed: 106 / 162 /
+  135 / 191 / 143 / 126 / 156 / 112 / 159 / 239, `durable` 107; the new
+  `harness` suite 125 (106 + 19).
+- Clippy `--all-targets -- -D warnings` clean from fresh target dirs at
+  default, `decision,magnitude,process,persistence,remote,magnitude-fast`,
+  `harness` and `durable`.
+- `cargo run --features harness --example gauntlet` exits 0.
+- Zero-hit confirmations: `rg -n 'deep_causality|ultragraph' Cargo.lock` →
+  nothing. `rg -n strategy_comparison src/` is **not** a zero-hit: two rustdoc
+  lines in `src/algorithms/population.rs` (60, 82) name the example as the
+  origin of the `SplitMix64` / `next_unit` convention; left as is.
+- Two reds on the **base tree**, neither a gate of record in this repo and
+  neither touching a line this release adds: `cargo fmt --check` under
+  rustfmt 1.9.0 flags 38 files on `main` (`git worktree add` of `54f0855`,
+  exit 1); `RUSTDOCFLAGS=-D warnings cargo doc --no-deps` fails on 8
+  pre-existing intra-doc links (`src/lib.rs:6,18`, `src/algorithms/aipa.rs:19`
+  ×5, `src/subsystems/coalition_actor.rs:137`) at any feature set without
+  `process`. The new `harness` bullet in `src/lib.rs` is plain backticks, not
+  an intra-doc link, so it adds no ninth.
+
+### MSRV — tiers reproduced; `harness` joins the 1.88 tier
+Committed procedure (`rust-version` temporarily 1.85.0, `cargo +<v> check
+--all-targets --locked --features <set>`, restored, manifest diff shows only
+the intended hunks; never `--ignore-rust-version`):
+
+| tier | feature sets | evidence |
+|---|---|---|
+| 1.88 | default · `magnitude` · `persistence` · `remote` · `process` · **`harness`** | 1.87 fails: five `let` chains in the `catgraph 0.23.0` lib (default and `harness` probed at 1.87; the other four contain that lib and passed at 1.88) |
+| 1.89 | `decision` · `magnitude-fast` · `decision,magnitude,process` | 1.88 refused declaratively: nalgebra 0.35.0 / safe_arch 1.0.0 / wide 1.5.0 |
+| 1.92 | `durable` | 1.91 fails compiling `diskann` (lifetime / `Iterator` not general enough) |
+
+`rust-version = "1.93.0"` unchanged (owner decision C-D1).
+
 ## [0.32.0] — 2026-09-14
 
 The catgraph `v0.9.0` → `v0.23.0` re-pin (#87), Phase C of the stack's

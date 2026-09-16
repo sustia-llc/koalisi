@@ -1,0 +1,2129 @@
+Scenario: candidate caps=0b111, coalition union=0b011, required=0b011
+(Coalition already covers all required capabilities; candidate adds only an unrequired bit ⇒ no coverage gain.)
+
+policy                       | decision    | score
+----------------------------------------------------------
+ThresholdPolicy(Synergistic) | act = true  | score = 195.000000
+AifDecisionPolicy (EFE)      | act = false | score =   0.000000
+
+DIVERGENCE: Threshold says JOIN but AIF says DON'T JOIN.
+  The Synergistic calculator rewards the extra member's raw size/capability/trust
+  (positive marginal value => JOIN), while the AIF bridge sees no gain in
+  required-capability coverage (G unchanged => margin ~ 0 => DON'T JOIN).
+
+========================================================================
+
+# koalisi #7 — categorical-magnitude vs Active-Inference A/B report
+
+_2026-07-03 · catgraph backend · `CoalitionEvaluator` hot path (post-#14) · release build_
+
+Pre-registered A/B harness (koalisi #7). AIF expected-free-energy arm
+(`AifDecisionPolicy`) vs categorical-magnitude arm (`MagnitudePolicy`, t = 1).
+
+## Protocol
+
+- **Seeds:** 30 instances, seeds `0..30`, inline SplitMix64 (no `rand`).
+- **Pool:** `n = 4 + next()%13` agents (n ∈ [4,16]); caps = k ∈ [1,4] distinct bits of an 8-bit universe; trust = 20 + next()%80.
+- **Task stream:** T = 20 tasks; required = r ∈ [1,5] distinct bits of the universe.
+- **Decision stream:** seeded Fisher–Yates arrival order (drawn once per task); first arrival joins unconditionally (bootstrap); subsequent arrivals via `should_join`; one leave sweep in arrival order via `should_leave`.
+- **completed(task):** union of members' caps covers `required` fully.
+- **coverage_eff(task):** (covered bits / required bits) / member_count, 0 if empty.
+- **PRIMARY(seed):** completion_rate × mean_cov_eff (stream-level product).
+- **Churn(seed):** total leave-sweep removals over the stream.
+
+## Per-seed results
+
+| seed | n | mag_primary | scalar_primary | mm_primary | mag_churn | scalar_churn | mm_churn | oracle_primary |
+|-----:|--:|------------:|---------------:|-----------:|----------:|-------------:|---------:|---------------:|
+| 0 | 13 | 0.3407 | 0.3100 | 0.3100 | 4 | 158 | 158 | — |
+| 1 | 10 | 0.5462 | 0.2600 | 0.2600 | 7 | 98 | 98 | — |
+| 2 | 12 | 0.3118 | 0.0506 | 0.0506 | 15 | 80 | 80 | — |
+| 3 | 13 | 0.4767 | 0.2042 | 0.2042 | 10 | 141 | 141 | — |
+| 4 | 11 | 0.3847 | 0.2071 | 0.2071 | 6 | 112 | 112 | — |
+| 5 | 14 | 0.4834 | 0.1450 | 0.1450 | 9 | 131 | 131 | — |
+| 6 | 9 | 0.1169 | 0.0425 | 0.0425 | 11 | 76 | 76 | — |
+| 7 | 15 | 0.4793 | 0.3467 | 0.3467 | 4 | 189 | 189 | — |
+| 8 | 15 | 0.4185 | 0.1167 | 0.1167 | 11 | 121 | 121 | — |
+| 9 | 8 | 0.1614 | 0.1161 | 0.1161 | 4 | 84 | 84 | 0.2770 |
+| 10 | 12 | 0.4560 | 0.2113 | 0.2113 | 8 | 119 | 119 | — |
+| 11 | 9 | 0.5259 | 0.1673 | 0.1673 | 12 | 82 | 82 | — |
+| 12 | 10 | 0.4575 | 0.2031 | 0.2031 | 7 | 102 | 102 | — |
+| 13 | 14 | 0.5000 | 0.3400 | 0.3400 | 5 | 178 | 178 | — |
+| 14 | 7 | 0.3455 | 0.0852 | 0.0852 | 10 | 59 | 59 | 0.4608 |
+| 15 | 13 | 0.4400 | 0.1467 | 0.1467 | 9 | 114 | 114 | — |
+| 16 | 8 | 0.4171 | 0.2550 | 0.2550 | 6 | 82 | 82 | 0.7333 |
+| 17 | 5 | 0.0993 | 0.0258 | 0.0258 | 7 | 33 | 33 | 0.1925 |
+| 18 | 15 | 0.3700 | 0.0900 | 0.0900 | 11 | 120 | 120 | — |
+| 19 | 13 | 0.5152 | 0.2562 | 0.2562 | 7 | 153 | 153 | — |
+| 20 | 16 | 0.4537 | 0.2687 | 0.2687 | 8 | 194 | 194 | — |
+| 21 | 13 | 0.6096 | 0.0612 | 0.0612 | 13 | 83 | 83 | — |
+| 22 | 13 | 0.4395 | 0.1896 | 0.1896 | 9 | 137 | 137 | — |
+| 23 | 11 | 0.5363 | 0.0627 | 0.0627 | 14 | 67 | 67 | — |
+| 24 | 6 | 0.3028 | 0.0984 | 0.0984 | 10 | 45 | 45 | 0.5667 |
+| 25 | 11 | 0.5453 | 0.1900 | 0.1900 | 8 | 90 | 90 | — |
+| 26 | 15 | 0.4625 | 0.2140 | 0.2140 | 7 | 156 | 156 | — |
+| 27 | 14 | 0.4562 | 0.0863 | 0.0863 | 11 | 107 | 107 | — |
+| 28 | 13 | 0.4384 | 0.3200 | 0.3200 | 4 | 162 | 162 | — |
+| 29 | 14 | 0.3882 | 0.2375 | 0.2375 | 5 | 168 | 168 | — |
+
+## Aggregates (median · IQR)
+
+| metric | Magnitude | AIF-scalar | AIF-mm |
+|--------|----------:|-----------:|-------:|
+| primary | 0.4469 · 0.1087 | 0.1898 · 0.1585 | 0.1898 · 0.1585 |
+| churn | 8.00 · 4.50 | 113.00 · 67.75 | 113.00 · 67.75 |
+| latency µs | 3.494 · 7.822 | 3.312 · 1.900 | 4.397 · 1.547 |
+
+_Latency: same hardware, both arms warm, sync path — the only machine-varying numbers in this report._
+
+**Oracle regret** (n ≤ 8, 5 eligible seeds): AIF median 0.3757, Magnitude median 0.1156.
+
+## Verdict
+
+### Original criterion (v1)
+
+- Criterion 1 (non-inferiority): mag median 0.4469 ≥ 0.95 × aif median 0.1898 (PASS); mag strictly inferior in 0/30 seeds ≤ 40% (PASS). → PASS
+- Criterion 2 (latency): mag median 3.494 µs < aif median 3.312 µs → FAIL
+
+**VERDICT (v1): FALSIFIED (latency)**
+
+### Amended criterion (v2 — #7 amendment, 2026-07-02)
+
+- Path B.1 (clear superiority): mag median 0.4469 ≥ 1.25 × aif median 0.1898 → PASS
+- Path B.2 (consistency): mag strictly superior in 30/30 seeds ≥ 60% → PASS
+- Path B.3 (bounded latency overhead): mag median 3.494 µs ≤ 10 × aif median 3.312 µs → PASS
+- Path A (v1 speed route): equals the v1 result → FAIL
+
+**VERDICT (v2): VALIDATED (B)**
+
+_Criterion history: run 1 (2026-07-02) was scored under v1 — FALSIFIED (latency) — and that recorded outcome stands; the v2 amendment (quality-dominance Path B with bounded ≤10× latency overhead, OR the original Path A) was posted on #7 before any subsequent run and governs re-runs (K1 backend parity, post-optimization)._
+
+_Falsification is a legitimate result; nothing was tuned to flip it (koalisi #7)._
+
+### K4-v3 confirmatory criteria (multi-modality AIF arm, #43 Part 2)
+
+- **H1 (gap closed):** mag median 0.4469 < 1.25 × mm median 0.1898 → FAIL
+- **H2 (mechanism):** mm median 0.1898 ≥ 1.25 × scalar median 0.1898 (FAIL) AND mm strictly superior in 0/30 seeds ≥ 60% (FAIL) → FAIL
+- **S1 (churn, secondary/non-gating):** mm churn median 113.00 ≤ 0.5 × scalar churn median 113.00 → FAIL
+- **Latency (record-only):** mm median 4.397 µs, scalar median 3.312 µs, mm/scalar ratio 1.33×.
+
+**VERDICT (K4-v3): FALSIFIED (multimodality)**
+
+_Note: the registered `aif-mm` arm is **decision-equivalent** to `aif-scalar` — per-seed primary and churn match seed-for-seed. With binary union coverage and symmetric per-modality preferences the multi-modality `G` is a strictly monotone function of the covered-bit COUNT, the same information the scalar coverage fraction carries; both decision rules depend only on the sign of ΔG, so they make identical join/leave acts. The structure enters the *value* (`G` magnitudes differ) but not the *decision*. This is the mechanism the H2 test probes; it is reported, not tuned._
+
+## t-sweep (exploratory, non-gating)
+
+Magnitude at scales t ∈ {0.5, 1.0, 2.0, 10.0}. t = 1.0 sanity-checks the stable arm (median 0.4469). Example-only policy — the library arm is pinned to t = 1 (catgraph #22).
+
+| t | magnitude primary median |
+|----:|-------------------------:|
+| 0.5 | 0.4490 |
+| 1.0 | 0.4469 |
+| 2.0 | 0.4468 |
+| 10.0 | 0.4428 |
+
+## Reproduce
+
+```sh
+cargo run --release --manifest-path Cargo.toml --target-dir /tmp/koalisi-target \
+  --features decision,magnitude --example strategy_comparison
+```
+
+_Release build required for the latency criterion (optimized code). Debug builds run clean since `catgraph-magnitude v0.1.1` (catgraph #29 fixed the over-strict triangle `debug_assert` that v0.1.0 tripped on this battery's non-dyadic couplings; the pinned dep is `v0.2.0` since koalisi #14)._
+
+========================================================================
+
+# koalisi #46 — feedback-weighted arm vs magnitude (K4 battery)
+
+_2026-07-16 · catgraph backend · release build · base calculator `SynergisticCalculator` · `ThresholdPolicy` thresholds 0.0_
+
+Confirmatory battery (prereg `docs/prereg-feedback-arm-k4.md`). Three arms — `mag` (`MagnitudePolicy`, frozen incumbent), `thr` (feedback-OFF `ThresholdPolicy<Synergistic>`), `fb` (`ThresholdPolicy<FeedbackCalculator<Synergistic>>`, `hw = fw = 0.5`, fresh store per seed) — over two scopes.
+
+## Protocol
+
+- **Shared grammar:** 30 seeds `0..30`, inline SplitMix64; pool `n ∈ [4,16]`, caps `k ∈ [1,4]` bits of an 8-bit universe, trust `20–99`; `T = 20` tasks, required `r ∈ [1,5]` bits; seeded Fisher–Yates arrival; bootstrap-first-arrival; one leave sweep; seed-0 warm-up discarded.
+- **Scope A (null control):** i.i.d.; success ≡ `completed` (union of member caps covers `required`); PRIMARY = completion_rate × mean_cov_eff (the committed Part 2 metric).
+- **Scope B (contest):** per-agent hidden reliability `ρ_i` (bimodal: reliable `ρ=0.05` w.p. 0.7, else flaky `ρ=0.4`) + a pre-drawn arm-independent `perf[t][i]` matrix (`perform` w.p. `1−ρ_i`); success ≡ `completed AND all final members performed`; PRIMARY_B = success_rate × mean_cov_eff.
+- **Feedback write-back:** `fb` records `success` (0/1) for the final coalition once per task, AFTER the leave sweep; `FeedbackStore::new(1.0)` ⇒ any non-success is a failure. `mag`/`thr` record nothing.
+
+## Scope A — i.i.d. null control
+
+| seed | n | mag_primary | thr_primary | fb_primary | mag_churn | thr_churn | fb_churn |
+|-----:|--:|------------:|------------:|-----------:|----------:|----------:|---------:|
+| 0 | 13 | 0.3407 | 0.0769 | 0.0769 | 4 | 0 | 0 |
+| 1 | 10 | 0.5462 | 0.1000 | 0.1000 | 7 | 0 | 0 |
+| 2 | 12 | 0.3118 | 0.0833 | 0.0833 | 15 | 0 | 0 |
+| 3 | 13 | 0.4767 | 0.0769 | 0.0769 | 10 | 0 | 0 |
+| 4 | 11 | 0.3847 | 0.0909 | 0.0909 | 6 | 0 | 0 |
+| 5 | 14 | 0.4834 | 0.0714 | 0.0714 | 9 | 0 | 0 |
+| 6 | 9 | 0.1169 | 0.0245 | 0.0245 | 11 | 0 | 0 |
+| 7 | 15 | 0.4793 | 0.0667 | 0.0667 | 4 | 0 | 0 |
+| 8 | 15 | 0.4185 | 0.0667 | 0.0667 | 11 | 0 | 0 |
+| 9 | 8 | 0.1614 | 0.0398 | 0.0398 | 4 | 0 | 0 |
+| 10 | 12 | 0.4560 | 0.0833 | 0.0833 | 8 | 0 | 0 |
+| 11 | 9 | 0.5259 | 0.1111 | 0.1111 | 12 | 0 | 0 |
+| 12 | 10 | 0.4575 | 0.1000 | 0.1000 | 7 | 0 | 0 |
+| 13 | 14 | 0.5000 | 0.0714 | 0.0714 | 5 | 0 | 0 |
+| 14 | 7 | 0.3455 | 0.0907 | 0.0907 | 10 | 0 | 0 |
+| 15 | 13 | 0.4400 | 0.0769 | 0.0769 | 9 | 0 | 0 |
+| 16 | 8 | 0.4171 | 0.1250 | 0.1250 | 6 | 0 | 0 |
+| 17 | 5 | 0.0993 | 0.0494 | 0.0494 | 7 | 0 | 0 |
+| 18 | 15 | 0.3700 | 0.0667 | 0.0667 | 11 | 0 | 0 |
+| 19 | 13 | 0.5152 | 0.0769 | 0.0769 | 7 | 0 | 0 |
+| 20 | 16 | 0.4537 | 0.0625 | 0.0625 | 8 | 0 | 0 |
+| 21 | 13 | 0.6096 | 0.0769 | 0.0769 | 13 | 0 | 0 |
+| 22 | 13 | 0.4395 | 0.0769 | 0.0769 | 9 | 0 | 0 |
+| 23 | 11 | 0.5363 | 0.0909 | 0.0909 | 14 | 0 | 0 |
+| 24 | 6 | 0.3028 | 0.1667 | 0.1667 | 10 | 0 | 0 |
+| 25 | 11 | 0.5453 | 0.0909 | 0.0909 | 8 | 0 | 0 |
+| 26 | 15 | 0.4625 | 0.0667 | 0.0667 | 7 | 0 | 0 |
+| 27 | 14 | 0.4562 | 0.0714 | 0.0714 | 11 | 0 | 0 |
+| 28 | 13 | 0.4384 | 0.0769 | 0.0769 | 4 | 0 | 0 |
+| 29 | 14 | 0.3882 | 0.0714 | 0.0714 | 5 | 0 | 0 |
+
+**Scope A medians:** mag 0.4469 · thr 0.0769 · fb 0.0769. fb strictly beats thr in 0/30 seeds.
+_Registered prediction: fb ≈ thr and fb does NOT clear H1 (mag 0.4469 < 1.25 × fb 0.0769 is FAIL). A Scope-A fb win is a RED FLAG to investigate (metric/leakage bug), not a success._
+
+## Scope B — reliability-structured contest
+
+| seed | n | mag_primary | thr_primary | fb_primary | mag_churn | thr_churn | fb_churn |
+|-----:|--:|------------:|------------:|-----------:|----------:|----------:|---------:|
+| 0 | 13 | 0.2433 | 0.0077 | 0.0077 | 4 | 0 | 0 |
+| 1 | 10 | 0.4600 | 0.0100 | 0.0100 | 7 | 0 | 0 |
+| 2 | 12 | 0.2004 | 0.0000 | 0.0000 | 15 | 0 | 0 |
+| 3 | 13 | 0.2860 | 0.0231 | 0.0231 | 10 | 0 | 0 |
+| 4 | 11 | 0.2228 | 0.0136 | 0.0136 | 6 | 0 | 0 |
+| 5 | 14 | 0.3222 | 0.0143 | 0.0143 | 9 | 0 | 0 |
+| 6 | 9 | 0.0701 | 0.0041 | 0.0041 | 11 | 0 | 0 |
+| 7 | 15 | 0.2929 | 0.0000 | 0.0000 | 4 | 0 | 0 |
+| 8 | 15 | 0.3952 | 0.0200 | 0.0200 | 11 | 0 | 0 |
+| 9 | 8 | 0.0922 | 0.0149 | 0.0149 | 4 | 0 | 0 |
+| 10 | 12 | 0.2880 | 0.0083 | 0.0083 | 8 | 0 | 0 |
+| 11 | 9 | 0.3713 | 0.0389 | 0.0389 | 12 | 0 | 0 |
+| 12 | 10 | 0.3304 | 0.0400 | 0.0400 | 7 | 0 | 0 |
+| 13 | 14 | 0.2750 | 0.0000 | 0.0000 | 5 | 0 | 0 |
+| 14 | 7 | 0.2591 | 0.0065 | 0.0065 | 10 | 0 | 0 |
+| 15 | 13 | 0.3575 | 0.0154 | 0.0154 | 9 | 0 | 0 |
+| 16 | 8 | 0.2085 | 0.0250 | 0.0250 | 6 | 0 | 0 |
+| 17 | 5 | 0.0993 | 0.0423 | 0.0423 | 7 | 0 | 0 |
+| 18 | 15 | 0.2775 | 0.0000 | 0.0000 | 11 | 0 | 0 |
+| 19 | 13 | 0.3149 | 0.0000 | 0.0000 | 7 | 0 | 0 |
+| 20 | 16 | 0.3781 | 0.0219 | 0.0219 | 8 | 0 | 0 |
+| 21 | 13 | 0.4171 | 0.0000 | 0.0000 | 13 | 0 | 0 |
+| 22 | 13 | 0.2442 | 0.0038 | 0.0038 | 9 | 0 | 0 |
+| 23 | 11 | 0.4767 | 0.0227 | 0.0227 | 14 | 0 | 0 |
+| 24 | 6 | 0.2329 | 0.0667 | 0.0667 | 10 | 0 | 0 |
+| 25 | 11 | 0.3938 | 0.0182 | 0.0182 | 8 | 0 | 0 |
+| 26 | 15 | 0.3700 | 0.0267 | 0.0267 | 7 | 0 | 0 |
+| 27 | 14 | 0.2683 | 0.0071 | 0.0071 | 11 | 0 | 0 |
+| 28 | 13 | 0.1705 | 0.0000 | 0.0000 | 4 | 0 | 0 |
+| 29 | 14 | 0.2283 | 0.0143 | 0.0143 | 5 | 0 | 0 |
+
+**Scope B medians:** mag 0.2818 · thr 0.0140 · fb 0.0140.
+
+### Scope B secondaries (record-only, non-gating)
+
+| metric (median) | mag | thr | fb |
+|-----------------|----:|----:|---:|
+| success_rate | 0.5500 | 0.1500 | 0.1500 |
+| churn | 8.00 | 0.00 | 0.00 |
+| latency µs | 3.356 | 0.260 | 0.614 |
+
+_Expected if H-main holds: fb success_rate > thr ≈ mag (feedback learns to avoid flaky members)._
+
+## Confirmatory verdict (Scope B)
+
+- **H1 (beats magnitude):** mag median 0.2818 < 1.25 × fb median 0.0140 → FAIL
+- **H2 (mechanism):** fb median 0.0140 ≥ 1.25 × thr median 0.0140 (FAIL) AND fb strictly superior to thr in 0/30 seeds ≥ 18 (FAIL) → FAIL
+
+**VERDICT (feedback arm, #46): FALSIFIED (feedback)**
+
+_VALIDATED = H1 ∧ H2 · PARTIAL (mechanism only) = H2 ∧ ¬H1 · FALSIFIED = ¬H2. Thresholds (1.25×, 18/30) inherited from the K4-v2/v3 amendments; falsification is a legitimate result and nothing is tuned to flip it (koalisi #46)._
+
+## E1 — weight sweep (exploratory, non-gating, Scope B)
+
+`fb` `PRIMARY_B` median over 30 seeds by (history_weight `hw`, failure_weight `fw`). `(0, 0)` ≡ the feedback-off `thr` control; `(0.5, 0.5)` = the confirmatory arm.
+
+| hw \ fw | fw=0.0 | fw=0.5 | fw=1.0 | fw=2.0 |
+|--------:|-------:|-------:|-------:|-------:|
+| hw=0.0 | 0.0140 | 0.0477 | 0.0584 | 0.0260 |
+| hw=0.5 | 0.0140 | 0.0140 | 0.0362 | 0.0500 |
+| hw=1.0 | 0.0140 | 0.0140 | 0.0140 | 0.0730 |
+| hw=2.0 | 0.0140 | 0.0140 | 0.0140 | 0.0140 |
+
+
+========================================================================
+
+# koalisi #48 — selective-base feedback arm vs magnitude (K4 battery v2)
+
+_2026-07-17 · catgraph backend · release build · base calculator `SynergisticCalculator` · `join_threshold = 100.0` · `leave_threshold = 0.0` · weights `hw = 0, fw = 1` · prereg `docs/prereg-feedback-arm-k4-v2.md`_
+
+Confirmatory battery decomposing magnitude's edge into **selectivity** (`thr-selective`) and **reliability-gating** (the `fb-selective` increment). Three arms — `mag` (`MagnitudePolicy`, frozen incumbent), `thr-selective` (feedback-OFF `ThresholdPolicy<Synergistic>` at `join_threshold = 100.0`, isolating selectivity), `fb-selective` (`ThresholdPolicy<FeedbackCalculator<Synergistic>>` at `join_threshold = 100.0`, `hw = 0`, `fw = 1`, fresh store per seed) — over two scopes. In the tables below the `thr`/`fb` columns are the `thr-selective`/`fb-selective` arms.
+
+## Protocol
+
+- **Shared grammar:** 30 seeds `0..30`, inline SplitMix64; pool `n ∈ [4,16]`, caps `k ∈ [1,4]` bits of an 8-bit universe, trust `20–99`; `T = 20` tasks, required `r ∈ [1,5]` bits; seeded Fisher–Yates arrival; bootstrap-first-arrival; one leave sweep; seed-0 warm-up discarded.
+- **Scope A (null control):** i.i.d.; success ≡ `completed` (union of member caps covers `required`); PRIMARY = completion_rate × mean_cov_eff.
+- **Scope B (contest):** per-agent hidden reliability `ρ_i` (bimodal: reliable `ρ=0.05` w.p. 0.7, else flaky `ρ=0.4`) + a pre-drawn arm-independent `perf[t][i]` matrix (`perform` w.p. `1−ρ_i`); success ≡ `completed AND all final members performed`; PRIMARY_B = success_rate × mean_cov_eff.
+- **Feedback write-back:** `fb-selective` records `success` (0/1) for the final coalition once per task, AFTER the leave sweep; `FeedbackStore::new(1.0)` ⇒ any non-success is a failure. `mag`/`thr-selective` record nothing.
+
+## Regression gate (run validity)
+
+- **`mag` Scope-A median** 0.4469 must equal 0.4469 (`docs/ab-report-feedback-arm-k4.md`) → PASS
+- **`mag` Scope-B median** 0.2818 must equal 0.2818 (`docs/ab-report-feedback-arm-k4.md`) → PASS
+
+## Scope A — i.i.d. null control
+
+| seed | n | mag_primary | thr_primary | fb_primary | mag_churn | thr_churn | fb_churn |
+|-----:|--:|------------:|------------:|-----------:|----------:|----------:|---------:|
+| 0 | 13 | 0.3407 | 0.1393 | 0.1393 | 4 | 0 | 0 |
+| 1 | 10 | 0.5462 | 0.1395 | 0.1395 | 7 | 0 | 0 |
+| 2 | 12 | 0.3118 | 0.1274 | 0.1274 | 15 | 0 | 0 |
+| 3 | 13 | 0.4767 | 0.1169 | 0.1169 | 10 | 0 | 0 |
+| 4 | 11 | 0.3847 | 0.1238 | 0.1189 | 6 | 0 | 0 |
+| 5 | 14 | 0.4834 | 0.0970 | 0.1110 | 9 | 0 | 0 |
+| 6 | 9 | 0.1169 | 0.0358 | 0.0471 | 11 | 0 | 0 |
+| 7 | 15 | 0.4793 | 0.0937 | 0.0937 | 4 | 0 | 0 |
+| 8 | 15 | 0.4185 | 0.1250 | 0.1250 | 11 | 0 | 0 |
+| 9 | 8 | 0.1614 | 0.0541 | 0.0532 | 4 | 0 | 0 |
+| 10 | 12 | 0.4560 | 0.1174 | 0.1174 | 8 | 0 | 0 |
+| 11 | 9 | 0.5259 | 0.1269 | 0.1269 | 12 | 0 | 0 |
+| 12 | 10 | 0.4575 | 0.1719 | 0.1954 | 7 | 0 | 0 |
+| 13 | 14 | 0.5000 | 0.0911 | 0.0911 | 5 | 0 | 0 |
+| 14 | 7 | 0.3455 | 0.1339 | 0.0707 | 10 | 0 | 0 |
+| 15 | 13 | 0.4400 | 0.1261 | 0.1261 | 9 | 0 | 0 |
+| 16 | 8 | 0.4171 | 0.1971 | 0.1971 | 6 | 0 | 0 |
+| 17 | 5 | 0.0993 | 0.0545 | 0.0355 | 7 | 0 | 1 |
+| 18 | 15 | 0.3700 | 0.0918 | 0.0918 | 11 | 0 | 0 |
+| 19 | 13 | 0.5152 | 0.1078 | 0.1078 | 7 | 0 | 0 |
+| 20 | 16 | 0.4537 | 0.0916 | 0.0916 | 8 | 0 | 0 |
+| 21 | 13 | 0.6096 | 0.1272 | 0.1272 | 13 | 0 | 0 |
+| 22 | 13 | 0.4395 | 0.1092 | 0.1092 | 9 | 0 | 0 |
+| 23 | 11 | 0.5363 | 0.1161 | 0.2110 | 14 | 0 | 0 |
+| 24 | 6 | 0.3028 | 0.2533 | 0.2533 | 10 | 0 | 0 |
+| 25 | 11 | 0.5453 | 0.1531 | 0.1531 | 8 | 0 | 0 |
+| 26 | 15 | 0.4625 | 0.1116 | 0.1116 | 7 | 0 | 0 |
+| 27 | 14 | 0.4562 | 0.1155 | 0.1155 | 11 | 0 | 0 |
+| 28 | 13 | 0.4384 | 0.1047 | 0.1047 | 4 | 0 | 0 |
+| 29 | 14 | 0.3882 | 0.0988 | 0.0988 | 5 | 0 | 0 |
+
+**Scope A medians:** mag 0.4469 · thr-selective 0.1165 · fb-selective 0.1162. fb-selective strictly beats thr-selective in 4/30 seeds.
+_Registered prediction: thr-selective ≈ fb-selective and neither clears H1 (mag 0.4469 < 1.25 × fb 0.1162 is FAIL). A Scope-A fb win is a RED FLAG (metric/leakage bug), not a success._
+
+## Scope B — reliability-structured contest
+
+| seed | n | mag_primary | thr_primary | fb_primary | mag_churn | thr_churn | fb_churn |
+|-----:|--:|------------:|------------:|-----------:|----------:|----------:|---------:|
+| 0 | 13 | 0.2433 | 0.0418 | 0.0484 | 4 | 0 | 0 |
+| 1 | 10 | 0.4600 | 0.0349 | 0.0948 | 7 | 0 | 0 |
+| 2 | 12 | 0.2004 | 0.0191 | 0.0245 | 15 | 0 | 0 |
+| 3 | 13 | 0.2860 | 0.0526 | 0.0783 | 10 | 0 | 0 |
+| 4 | 11 | 0.2228 | 0.0196 | 0.0120 | 6 | 0 | 0 |
+| 5 | 14 | 0.3222 | 0.0306 | 0.0440 | 9 | 0 | 0 |
+| 6 | 9 | 0.0701 | 0.0119 | 0.0113 | 11 | 0 | 0 |
+| 7 | 15 | 0.2929 | 0.0094 | 0.0533 | 4 | 0 | 0 |
+| 8 | 15 | 0.3952 | 0.0813 | 0.1635 | 11 | 0 | 0 |
+| 9 | 8 | 0.0922 | 0.0270 | 0.0355 | 4 | 0 | 0 |
+| 10 | 12 | 0.2880 | 0.0235 | 0.1008 | 8 | 0 | 0 |
+| 11 | 9 | 0.3713 | 0.0444 | 0.0623 | 12 | 0 | 0 |
+| 12 | 10 | 0.3304 | 0.0995 | 0.1600 | 7 | 0 | 0 |
+| 13 | 14 | 0.2750 | 0.0000 | 0.0647 | 5 | 0 | 0 |
+| 14 | 7 | 0.2591 | 0.0096 | 0.0000 | 10 | 0 | 0 |
+| 15 | 13 | 0.3575 | 0.0315 | 0.0730 | 9 | 0 | 0 |
+| 16 | 8 | 0.2085 | 0.0493 | 0.0705 | 6 | 0 | 0 |
+| 17 | 5 | 0.0993 | 0.0467 | 0.0355 | 7 | 0 | 1 |
+| 18 | 15 | 0.2775 | 0.0230 | 0.0848 | 11 | 0 | 0 |
+| 19 | 13 | 0.3149 | 0.0108 | 0.0000 | 7 | 0 | 0 |
+| 20 | 16 | 0.3781 | 0.0733 | 0.1771 | 8 | 0 | 0 |
+| 21 | 13 | 0.4171 | 0.0127 | 0.0203 | 13 | 0 | 0 |
+| 22 | 13 | 0.2442 | 0.0109 | 0.0833 | 9 | 0 | 0 |
+| 23 | 11 | 0.4767 | 0.0794 | 0.0283 | 14 | 0 | 0 |
+| 24 | 6 | 0.2329 | 0.1200 | 0.0253 | 10 | 0 | 0 |
+| 25 | 11 | 0.3938 | 0.0613 | 0.0386 | 8 | 0 | 0 |
+| 26 | 15 | 0.3700 | 0.0614 | 0.1532 | 7 | 0 | 0 |
+| 27 | 14 | 0.2683 | 0.0289 | 0.0251 | 11 | 0 | 0 |
+| 28 | 13 | 0.1705 | 0.0000 | 0.0490 | 4 | 0 | 0 |
+| 29 | 14 | 0.2283 | 0.0296 | 0.0574 | 5 | 0 | 0 |
+
+**Scope B medians:** mag 0.2818 · thr-selective 0.0301 · fb-selective 0.0512.
+
+### Scope B secondaries (record-only, non-gating)
+
+| metric (median) | mag | thr-selective | fb-selective |
+|-----------------|----:|--------------:|-------------:|
+| success_rate | 0.5500 | 0.2500 | 0.1750 |
+| churn | 8.00 | 0.00 | 0.00 |
+| latency µs | 3.420 | 0.214 | 0.185 |
+
+_Expected: fb-selective churn ↑ vs the falsified `join = 0` arms; fb-selective success_rate > thr-selective if H2 holds._
+
+## Confirmatory verdict (Scope B)
+
+- **H1 (beats magnitude):** mag median 0.2818 < 1.25 × fb-selective median 0.0512 → FAIL
+- **H2 (mechanism beyond selectivity):** fb-selective median 0.0512 ≥ 1.25 × thr-selective median 0.0301 (PASS) AND fb-selective strictly superior to thr-selective in 21/30 seeds ≥ 18 (PASS) → PASS
+
+**VERDICT (selective-feedback arm, #48): PARTIAL (mechanism only)**
+
+_VALIDATED = H1 ∧ H2 · PARTIAL (selectivity only) = H1 ∧ ¬H2 · PARTIAL (mechanism only) = H2 ∧ ¬H1 · FALSIFIED = ¬H1 ∧ ¬H2. Thresholds (1.25×, 18/30) inherited from the K4-v2/v3/#46 amendments; falsification is a legitimate result and nothing is tuned to flip it (koalisi #48)._
+
+## E1 — selectivity threshold sweep (exploratory, non-gating, Scope B)
+
+`thr-selective` (feedback-off, `hw = fw = 0`) and `fb-selective` (`hw = 0, fw = 1`) `PRIMARY_B` + churn medians over 30 seeds by `join_threshold`. The `join = 100.0` row matches the confirmatory arms (sanity).
+
+| join_threshold | thr-selective PRIMARY_B | fb-selective PRIMARY_B | thr churn (med) | fb churn (med) |
+|---------------:|------------------------:|-----------------------:|----------------:|---------------:|
+| 50.0 | 0.0140 | 0.0506 | 0.00 | 0.50 |
+| 75.0 | 0.0141 | 0.0446 | 0.00 | 0.00 |
+| 100.0 | 0.0301 | 0.0512 | 0.00 | 0.00 |
+| 125.0 | 0.0906 | 0.0451 | 0.00 | 0.00 |
+| 150.0 | 0.0937 | 0.0413 | 0.00 | 0.00 |
+
+
+========================================================================
+
+# koalisi #44 — scalar-AIF Scope-B baseline (K4-v4 prereg)
+
+_scalar bridge `AifDecisionPolicy::default()` · Scope B (reliability contest) · store = None · additive baseline, non-gating_
+
+Per-seed `PRIMARY_B` + churn for the shipped scalar AIF arm over 30 seeds `0..30`, byte-identical Scope-B instances (`generate_instance_b(seed)`), seed-0 warm-up discarded. Frozen as the K4-v4 baseline (koalisi #44).
+
+| seed | n | primary_B | churn |
+|-----:|--:|----------:|------:|
+| 0 | 13 | 0.1550 | 158 |
+| 1 | 10 | 0.1800 | 98 |
+| 2 | 12 | 0.0422 | 80 |
+| 3 | 13 | 0.1896 | 141 |
+| 4 | 11 | 0.0887 | 112 |
+| 5 | 14 | 0.0967 | 131 |
+| 6 | 9 | 0.0283 | 76 |
+| 7 | 15 | 0.2383 | 189 |
+| 8 | 15 | 0.1050 | 121 |
+| 9 | 8 | 0.0774 | 84 |
+| 10 | 12 | 0.1300 | 119 |
+| 11 | 9 | 0.0912 | 82 |
+| 12 | 10 | 0.1719 | 102 |
+| 13 | 14 | 0.2800 | 178 |
+| 14 | 7 | 0.0365 | 59 |
+| 15 | 13 | 0.0800 | 114 |
+| 16 | 8 | 0.1062 | 82 |
+| 17 | 5 | 0.0258 | 33 |
+| 18 | 15 | 0.0675 | 120 |
+| 19 | 13 | 0.1367 | 153 |
+| 20 | 16 | 0.1971 | 194 |
+| 21 | 13 | 0.0350 | 83 |
+| 22 | 13 | 0.1021 | 137 |
+| 23 | 11 | 0.0448 | 67 |
+| 24 | 6 | 0.0656 | 45 |
+| 25 | 11 | 0.1425 | 90 |
+| 26 | 15 | 0.1810 | 156 |
+| 27 | 14 | 0.0479 | 107 |
+| 28 | 13 | 0.1800 | 162 |
+| 29 | 14 | 0.1583 | 168 |
+
+**Medians:** primary_B 0.1035 · churn 113.00.
+
+
+========================================================================
+
+# koalisi #44 — persistent-agent AIF arm (K4-v4, Amendment 2)
+
+_persistent multimodal AIF (`PersistentAifConfig::default()`, aif-v0.11.0 count injection) · Scope B (reliability contest) · 30 seeds `0..30` · per-seed factory + per-bit outcome hook · confirmatory_
+
+Three arms — `aif-pers` (registered persistent arm), `aif-scalar` (`AifDecisionPolicy::default()`, frozen), `mag` (`MagnitudePolicy`, frozen) — over Scope B. Regression gate: `scalar` median 0.1035 ≡ 0.1035, `mag` median 0.2818 ≡ 0.2818.
+
+## Per-seed PRIMARY_B + churn
+
+| seed | pers_primary | scalar_primary | mag_primary | pers_churn | scalar_churn | acts_differ |
+|-----:|-------------:|---------------:|------------:|-----------:|-------------:|:-----------:|
+| 0 | 0.0171 | 0.1550 | 0.2433 | 20 | 158 | yes |
+| 1 | 0.0720 | 0.1800 | 0.4600 | 14 | 98 | yes |
+| 2 | 0.0120 | 0.0422 | 0.2004 | 20 | 80 | yes |
+| 3 | 0.0291 | 0.1896 | 0.2860 | 20 | 141 | yes |
+| 4 | 0.0275 | 0.0887 | 0.2228 | 17 | 112 | yes |
+| 5 | 0.0158 | 0.0967 | 0.3222 | 26 | 131 | yes |
+| 6 | 0.0000 | 0.0283 | 0.0701 | 15 | 76 | yes |
+| 7 | 0.0893 | 0.2383 | 0.2929 | 25 | 189 | yes |
+| 8 | 0.0348 | 0.1050 | 0.3952 | 24 | 121 | yes |
+| 9 | 0.0371 | 0.0774 | 0.0922 | 13 | 84 | yes |
+| 10 | 0.0515 | 0.1300 | 0.2880 | 18 | 119 | yes |
+| 11 | 0.0705 | 0.0912 | 0.3713 | 15 | 82 | yes |
+| 12 | 0.0537 | 0.1719 | 0.3304 | 16 | 102 | yes |
+| 13 | 0.0967 | 0.2800 | 0.2750 | 24 | 178 | yes |
+| 14 | 0.0000 | 0.0365 | 0.2591 | 10 | 59 | yes |
+| 15 | 0.0655 | 0.0800 | 0.3575 | 22 | 114 | yes |
+| 16 | 0.0469 | 0.1062 | 0.2085 | 10 | 82 | yes |
+| 17 | 0.0260 | 0.0258 | 0.0993 | 6 | 33 | yes |
+| 18 | 0.0097 | 0.0675 | 0.2775 | 26 | 120 | yes |
+| 19 | 0.0181 | 0.1367 | 0.3149 | 21 | 153 | yes |
+| 20 | 0.0689 | 0.1971 | 0.3781 | 28 | 194 | yes |
+| 21 | 0.0275 | 0.0350 | 0.4171 | 21 | 83 | yes |
+| 22 | 0.0215 | 0.1021 | 0.2442 | 24 | 137 | yes |
+| 23 | 0.0519 | 0.0448 | 0.4767 | 20 | 67 | yes |
+| 24 | 0.0191 | 0.0656 | 0.2329 | 7 | 45 | yes |
+| 25 | 0.0323 | 0.1425 | 0.3938 | 18 | 90 | yes |
+| 26 | 0.0567 | 0.1810 | 0.3700 | 25 | 156 | yes |
+| 27 | 0.0159 | 0.0479 | 0.2683 | 24 | 107 | yes |
+| 28 | 0.0416 | 0.1800 | 0.1705 | 22 | 162 | yes |
+| 29 | 0.0328 | 0.1583 | 0.2283 | 23 | 168 | yes |
+
+**Medians:** pers 0.0326 · scalar 0.1035 · mag 0.2818. Churn: pers 20.00 · scalar 113.00. Latency pers 876.534 µs (record-only).
+
+## Confirmatory verdict (Scope B)
+
+- **H1 (gap closed):** mag median 0.2818 < 1.25 × pers median 0.0326 (0.0407) → FAIL
+- **H2 (mechanism):** pers median 0.0326 ≥ 1.25 × scalar median 0.1035 (= 0.129427) (FAIL) AND pers strictly superior to scalar in 2/30 seeds ≥ 18 (FAIL) → FAIL
+- **S1 (act divergence, non-gating):** pers act stream differs from scalar on 30/30 seeds. divergence > 0 ⇒ the arm genuinely escapes the theorem.
+- **S2 (churn, non-gating):** pers churn median 20.00 vs scalar 113.00.
+
+**VERDICT (persistent arm, #44): FALSIFIED (persistence)**
+
+_VALIDATED (gap closed) = H1 ∧ H2 · PARTIAL (mechanism only) = H2 ∧ ¬H1 · FALSIFIED (persistence) = ¬H2. Thresholds (1.25×, 18/30) inherited from v2/v3; falsification is a legitimate result and nothing is tuned to flip it (koalisi #44)._
+
+## Exploratory E4–E8 (non-gating, Scope B, 30 seeds)
+
+| condition | median PRIMARY_B | churn median |
+|-----------|----------------:|-------------:|
+| E4 PerTask (reset each task) | 0.0326 | 20.00 |
+| E5 learning off | 0.1035 | 113.00 |
+| E6 dynamics off (MeanField query) | 0.4042 | 210.00 |
+| E7 novelty off | 0.1342 | 112.50 |
+| E8 initial_precision_b = 1.0 | 0.0326 | 20.00 |
+| E8 initial_precision_b = 4.0 (registered) | 0.0326 | 20.00 |
+| E8 initial_precision_b = 16.0 | 0.0326 | 20.00 |
+
+_Single-toggle ablations off the registered arm; no verdicts (prereg §Exploratory conditions)._
+
+
+========================================================================
+
+# koalisi #53 — E1-only persistent AIF arm, out-of-sample (K4-v5)
+
+_registered `aif-e1` = #44 `PersistentAifArm` (943d139, no code changes) in the v4 E6 configuration (MeanField queries, fixed γ = 16, no `PrecisionDynamics`) · Scope B · seeds **30..60** (out-of-sample) · confirmatory_
+
+Three arms — `aif-e1` (registered), `aif-scalar` (`AifDecisionPolicy::default()`, frozen), `mag` (`MagnitudePolicy`, frozen) — on 30 fresh instances. All thresholds are this run's own 30..60 medians; cross-range numbers (v4 0..30 E6 0.4042, magnitude 0.2818) are context only, never scored.
+
+## Per-seed PRIMARY_B + churn (seeds 30..60)
+
+| seed | e1_primary | scalar_primary | mag_primary | e1_churn | scalar_churn | acts_differ |
+|-----:|-----------:|---------------:|------------:|---------:|-------------:|:-----------:|
+| 30 | 0.4640 | 0.2735 | 0.2833 | 276 | 215 | yes |
+| 31 | 0.4083 | 0.1500 | 0.1772 | 227 | 138 | yes |
+| 32 | 0.6067 | 0.1833 | 0.5000 | 128 | 72 | yes |
+| 33 | 0.2284 | 0.0306 | 0.1885 | 63 | 37 | yes |
+| 34 | 0.2171 | 0.0728 | 0.1642 | 130 | 76 | yes |
+| 35 | 0.4437 | 0.1500 | 0.2225 | 218 | 146 | yes |
+| 36 | 0.6083 | 0.1893 | 0.3402 | 94 | 57 | yes |
+| 37 | 0.4171 | 0.1083 | 0.3541 | 258 | 152 | yes |
+| 38 | 0.4640 | 0.1673 | 0.3910 | 216 | 144 | yes |
+| 39 | 0.1386 | 0.0259 | 0.1316 | 99 | 35 | yes |
+| 40 | 0.3528 | 0.1120 | 0.2640 | 85 | 49 | yes |
+| 41 | 0.4656 | 0.0890 | 0.2987 | 219 | 109 | yes |
+| 42 | 0.2246 | 0.0788 | 0.2367 | 206 | 126 | yes |
+| 43 | 0.3737 | 0.1688 | 0.2892 | 101 | 72 | yes |
+| 44 | 0.4050 | 0.0812 | 0.3346 | 104 | 65 | yes |
+| 45 | 0.4842 | 0.1233 | 0.4090 | 163 | 97 | yes |
+| 46 | 0.4604 | 0.1125 | 0.1682 | 115 | 66 | yes |
+| 47 | 0.5333 | 0.1019 | 0.2205 | 79 | 46 | yes |
+| 48 | 0.3483 | 0.0200 | 0.2113 | 141 | 66 | yes |
+| 49 | 0.5550 | 0.1604 | 0.3850 | 202 | 113 | yes |
+| 50 | 0.1893 | 0.0279 | 0.0511 | 64 | 39 | yes |
+| 51 | 0.4492 | 0.1400 | 0.4040 | 125 | 76 | yes |
+| 52 | 0.4813 | 0.1950 | 0.3055 | 102 | 74 | yes |
+| 53 | 0.4233 | 0.1369 | 0.1939 | 224 | 153 | yes |
+| 54 | 0.4688 | 0.1300 | 0.2524 | 156 | 112 | yes |
+| 55 | 0.4375 | 0.0267 | 0.2800 | 210 | 83 | yes |
+| 56 | 0.5775 | 0.2200 | 0.3806 | 200 | 128 | yes |
+| 57 | 0.3100 | 0.1500 | 0.2365 | 90 | 58 | yes |
+| 58 | 0.6000 | 0.2546 | 0.4263 | 182 | 110 | yes |
+| 59 | 0.0576 | 0.0223 | 0.0945 | 131 | 83 | yes |
+
+**Medians (30..60):** e1 0.4406 · scalar 0.1267 · mag 0.2720. Churn: e1 136.00 · scalar 79.50. Latency e1 63.936 µs (record-only).
+
+## Confirmatory verdict (Scope B, seeds 30..60)
+
+- **H1 (gap closed):** mag median 0.2720 < 1.25 × e1 median 0.4406 (= 0.5508) → PASS
+- **H2 (mechanism):** e1 median 0.4406 ≥ 1.25 × scalar median 0.1267 (= 0.158333) (PASS) AND e1 strictly superior to scalar in 30/30 seeds ≥ 18 (PASS) → PASS
+- **S1 (act divergence, non-gating):** e1 act stream differs from scalar on 30/30 seeds.
+- **S2 (churn, non-gating):** e1 churn median 136.00 vs scalar 79.50 (the 0..30 E6 churn 210 was flagged high — see whether the pattern persists).
+
+**VERDICT (E1 arm, #53): VALIDATED (gap closed)**
+
+_VALIDATED (gap closed) = H1 ∧ H2 · PARTIAL (mechanism only) = H2 ∧ ¬H1 · FALSIFIED (E1) = ¬H2. Thresholds (1.25×, 18/30) inherit the v2→v4 family; baselines are this run's own 30..60 rows; nothing is tuned to flip the verdict (koalisi #53)._
+
+## Exploratory X1–X2 (non-gating; X2 is a determinism gate)
+
+| condition | median PRIMARY_B | churn median |
+|-----------|----------------:|-------------:|
+| X1 novelty off (30..60) | 0.1308 | 82.00 |
+| X2 registered arm re-score (0..30, ≡ v4 E6) | 0.4042 | 210.00 |
+
+_X1 isolates the novelty lever on the out-of-sample seeds. X2 re-scores the registered arm on 0..30 as a determinism/comparability check — it reproduces the v4 E6 numbers 0.4042 / 210.00 exactly (asserted in-code)._
+
+
+========================================================================
+
+# koalisi #54 — arm-choice addendum (unregistered, exploratory)
+
+_additive to the frozen Parts 1–4d; unregistered and exploratory — informs the #54 cost-quality decision memo; no verdict is derived from this section._
+
+## mag churn (seeds 30..60)
+
+| seed | mag_primary | mag_churn |
+|-----:|------------:|----------:|
+| 30 | 0.2833 | 4 |
+| 31 | 0.1772 | 10 |
+| 32 | 0.5000 | 8 |
+| 33 | 0.1885 | 9 |
+| 34 | 0.1642 | 6 |
+| 35 | 0.2225 | 6 |
+| 36 | 0.3402 | 5 |
+| 37 | 0.3541 | 8 |
+| 38 | 0.3910 | 8 |
+| 39 | 0.1316 | 13 |
+| 40 | 0.2640 | 8 |
+| 41 | 0.2987 | 10 |
+| 42 | 0.2367 | 9 |
+| 43 | 0.2892 | 5 |
+| 44 | 0.3346 | 9 |
+| 45 | 0.4090 | 10 |
+| 46 | 0.1682 | 10 |
+| 47 | 0.2205 | 7 |
+| 48 | 0.2113 | 12 |
+| 49 | 0.3850 | 8 |
+| 50 | 0.0511 | 7 |
+| 51 | 0.4040 | 7 |
+| 52 | 0.3055 | 7 |
+| 53 | 0.1939 | 6 |
+| 54 | 0.2524 | 6 |
+| 55 | 0.2800 | 12 |
+| 56 | 0.3806 | 6 |
+| 57 | 0.2365 | 8 |
+| 58 | 0.4263 | 8 |
+| 59 | 0.0945 | 6 |
+
+**Medians:** mag primary_B 0.2720 · mag churn 8.00.
+
+_mag_primary deterministically reproduces the Part 4d `mag_primary` column; it is reprinted here only so this churn table is self-contained._
+
+## degraded outcome signal — e1 (seeds 30..60)
+
+| seed | e1_oracle_primary | e1_degraded_primary | e1_degraded_churn |
+|-----:|------------------:|--------------------:|------------------:|
+| 30 | 0.4640 | 0.4640 | 276 |
+| 31 | 0.4083 | 0.4083 | 229 |
+| 32 | 0.6067 | 0.6067 | 129 |
+| 33 | 0.2284 | 0.1930 | 63 |
+| 34 | 0.2171 | 0.1854 | 134 |
+| 35 | 0.4437 | 0.4437 | 218 |
+| 36 | 0.6083 | 0.6083 | 94 |
+| 37 | 0.4171 | 0.3873 | 259 |
+| 38 | 0.4640 | 0.4640 | 216 |
+| 39 | 0.1386 | 0.1386 | 99 |
+| 40 | 0.3528 | 0.2646 | 88 |
+| 41 | 0.4656 | 0.4656 | 220 |
+| 42 | 0.2246 | 0.0643 | 220 |
+| 43 | 0.3737 | 0.3647 | 105 |
+| 44 | 0.4050 | 0.3028 | 106 |
+| 45 | 0.4842 | 0.4842 | 164 |
+| 46 | 0.4604 | 0.4604 | 118 |
+| 47 | 0.5333 | 0.5333 | 79 |
+| 48 | 0.3483 | 0.2873 | 148 |
+| 49 | 0.5550 | 0.5550 | 202 |
+| 50 | 0.1893 | 0.1227 | 67 |
+| 51 | 0.4492 | 0.4492 | 125 |
+| 52 | 0.4813 | 0.4813 | 103 |
+| 53 | 0.4233 | 0.3969 | 227 |
+| 54 | 0.4688 | 0.4688 | 156 |
+| 55 | 0.4375 | 0.4325 | 213 |
+| 56 | 0.5775 | 0.5775 | 200 |
+| 57 | 0.3100 | 0.2479 | 95 |
+| 58 | 0.6000 | 0.6000 | 184 |
+| 59 | 0.0576 | 0.0168 | 138 |
+
+**Medians:** e1 oracle 0.4406 · e1 degraded 0.4381 · scalar 0.1267. Degraded churn 143.00.
+
+_degraded = whole-coalition `success` smeared across the required bits (the runtime-feasible signal). If degraded ≈ oracle, the runtime needs only a task-completion event; if degraded ≈ scalar, the per-bit oracle signal is load-bearing and e1 stays battery-only pending finer telemetry. Assessed in the #54 design note, not here._
+
+
+========================================================================
+
+# koalisi #54 — Part 4f: churn-mitigation frontier (unregistered, exploratory)
+
+_join margin `p > 0.5 + δ` (wrapper `score > δ`) × leave hysteresis (`score ≥ h` to evict), swept over seeds 30..60 under BOTH the oracle and degraded outcome signals. Unregistered and exploratory: a promising point here is a v6 registration CANDIDATE only — a fresh prereg on seeds 60..90 must precede any quality claim._
+
+**Identity gate:** `MarginE1(δ=0, h=0)` reproduces the bare `aif-e1` arm on all 30 seeds (primary + churn bit-identical; asserted in-code).
+
+## decision-score distribution (identity cell, oracle)
+
+| stream | n | min | p25 | p50 | p75 | max |
+|--------|--:|----:|----:|----:|----:|----:|
+| join | 5240 | -0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 |
+| leave | 5757 | -0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 |
+
+_quantiles by nearest-rank on the sorted scores (`score = p(control 1) − 0.5`). Shows where posterior mass sits: with fixed γ = 16 the query posteriors may saturate near ±0.5, which would bound how much a margin/hysteresis threshold can move._
+
+## frontier — oracle signal (seeds 30..60)
+
+| δ\h | h=0.00 | h=0.05 | h=0.15 | h=0.30 |
+|---|---|---|---|---|
+| δ=0.00 | 0.4406/136 | 0.4406/136 | 0.4406/136 | 0.4406/136 |
+| δ=0.05 | 0.4406/136 | 0.4406/136 | 0.4406/136 | 0.4406/136 |
+| δ=0.15 | 0.4406/136 | 0.4406/136 | 0.4406/136 | 0.4406/136 |
+| δ=0.30 | 0.4406/136 | 0.4406/136 | 0.4406/136 | 0.4406/136 |
+| δ=0.45 | 0.4406/136 | 0.4406/136 | 0.4406/136 | 0.4406/136 |
+
+_cell = median PRIMARY_B / median churn over seeds 30..60._
+
+## frontier — degraded signal (seeds 30..60)
+
+| δ\h | h=0.00 | h=0.05 | h=0.15 | h=0.30 |
+|---|---|---|---|---|
+| δ=0.00 | 0.4381/143 | 0.4381/143 | 0.4381/143 | 0.4381/143 |
+| δ=0.05 | 0.4381/143 | 0.4381/143 | 0.4381/143 | 0.4381/143 |
+| δ=0.15 | 0.4381/143 | 0.4381/143 | 0.4381/143 | 0.4381/143 |
+| δ=0.30 | 0.4381/142 | 0.4381/142 | 0.4381/142 | 0.4381/142 |
+| δ=0.45 | 0.4381/142 | 0.4381/142 | 0.4381/142 | 0.4381/142 |
+
+_cell = median PRIMARY_B / median churn over seeds 30..60._
+
+## Pareto summary
+
+_Reference (this run's Part 4d/4e values, stable under the identity gate; not recomputed here): mag 0.2720 / churn 8 · e1 baseline 0.4406 / churn 136._
+
+**oracle** — cells with median PRIMARY_B ≥ 0.40, by churn ascending:
+
+- **(δ=0.45, h=0.00) 0.4406/136 — v6 candidate (oracle)**
+- (δ=0.45, h=0.05) 0.4406/136
+- (δ=0.45, h=0.15) 0.4406/136
+- (δ=0.45, h=0.30) 0.4406/136
+- (δ=0.00, h=0.00) 0.4406/136
+- (δ=0.00, h=0.05) 0.4406/136
+- (δ=0.00, h=0.15) 0.4406/136
+- (δ=0.00, h=0.30) 0.4406/136
+- (δ=0.05, h=0.00) 0.4406/136
+- (δ=0.05, h=0.05) 0.4406/136
+- (δ=0.05, h=0.15) 0.4406/136
+- (δ=0.05, h=0.30) 0.4406/136
+- (δ=0.15, h=0.00) 0.4406/136
+- (δ=0.15, h=0.05) 0.4406/136
+- (δ=0.15, h=0.15) 0.4406/136
+- (δ=0.15, h=0.30) 0.4406/136
+- (δ=0.30, h=0.00) 0.4406/136
+- (δ=0.30, h=0.05) 0.4406/136
+- (δ=0.30, h=0.15) 0.4406/136
+- (δ=0.30, h=0.30) 0.4406/136
+
+**degraded** — cells with median PRIMARY_B ≥ 0.40, by churn ascending:
+
+- **(δ=0.30, h=0.00) 0.4381/142 — v6 candidate (degraded)**
+- (δ=0.30, h=0.05) 0.4381/142
+- (δ=0.30, h=0.15) 0.4381/142
+- (δ=0.30, h=0.30) 0.4381/142
+- (δ=0.45, h=0.00) 0.4381/142
+- (δ=0.45, h=0.05) 0.4381/142
+- (δ=0.45, h=0.15) 0.4381/142
+- (δ=0.45, h=0.30) 0.4381/142
+- (δ=0.00, h=0.00) 0.4381/143
+- (δ=0.00, h=0.05) 0.4381/143
+- (δ=0.00, h=0.15) 0.4381/143
+- (δ=0.00, h=0.30) 0.4381/143
+- (δ=0.05, h=0.00) 0.4381/143
+- (δ=0.05, h=0.05) 0.4381/143
+- (δ=0.05, h=0.15) 0.4381/143
+- (δ=0.05, h=0.30) 0.4381/143
+- (δ=0.15, h=0.00) 0.4381/143
+- (δ=0.15, h=0.05) 0.4381/143
+- (δ=0.15, h=0.15) 0.4381/143
+- (δ=0.15, h=0.30) 0.4381/143
+
+_Unregistered exploratory sweep — nothing here is a verdict. Any v6 arm must be pre-registered on fresh seeds 60..90 before a quality claim; the (δ, h) grid was fixed before this run, not tuned on its results._
+
+
+========================================================================
+
+# koalisi #54 — Part 4g: reliability-filtered magnitude (unregistered, exploratory)
+
+_the option-C probe: magnitude stays purely STRUCTURAL, reliability gates SEPARATELY via the #41 `FeedbackStore` (a veto), fed ONLY the whole-task success signal (the runtime-feasible L2 task-completion event, #54 Step 2). Folding reliability into the couplings backfires — down-scaling `A(i→j)` for an unreliable agent makes it LESS substitutable, RAISING its Möbius weight — so the two mechanisms are composed, not merged. Unregistered and exploratory; the grid was fixed before the run._
+
+**Identity gate:** `RelFilteredMag(τ=0, n_min=1, filter_leave=false)` reproduces the bare `mag` arm on all 30 seeds (primary + churn bit-identical; asserted in-code).
+
+## grid — filter_leave = false (join veto only)
+
+| τ\n_min | n=1 | n=2 |
+|---|---|---|
+| τ=0.3 | 0.1890/8 | 0.2582/8 |
+| τ=0.5 | 0.1285/7 | 0.1729/8 |
+| τ=0.7 | 0.0819/7 | 0.1105/7 |
+
+_cell = median PRIMARY_B / median churn over seeds 30..60._
+
+## grid — filter_leave = true (join veto + reliability eviction)
+
+| τ\n_min | n=1 | n=2 |
+|---|---|---|
+| τ=0.3 | 0.0764/14 | 0.2314/10 |
+| τ=0.5 | 0.0458/16 | 0.1195/12 |
+| τ=0.7 | 0.0289/16 | 0.0438/15 |
+
+_cell = median PRIMARY_B / median churn over seeds 30..60._
+
+## Summary
+
+_Reference (cited, not recomputed): mag 0.2720/8 · e1 oracle 0.4406/136 · e1 degraded 0.4381/143 · scalar 0.1267/79.5._
+
+Top cells by median PRIMARY_B (descending):
+
+- (τ=0.3, n_min=2, leave=false) 0.2582/8
+- (τ=0.3, n_min=2, leave=true) 0.2314/10
+- (τ=0.3, n_min=1, leave=false) 0.1890/8
+- (τ=0.5, n_min=2, leave=false) 0.1729/8
+- (τ=0.5, n_min=1, leave=false) 0.1285/7
+
+_Unregistered exploratory probe — nothing here is a verdict. If a cell approaches e1's ~0.44 at mag-like churn, option C becomes the v6-registration candidate (fresh prereg, seeds 60..90); otherwise it is ruled out._
+
+
+========================================================================
+
+# koalisi #56 — K4-v6: never-evict E1 arm, dual-signal, out-of-sample (REGISTERED)
+
+_governed by `docs/prereg-K4-v6-never-evict.md` (committed + posted pre-implementation); registered lever = `eviction_cap: Some(0)` (churn 0 by construction) atop the #53 E6 `aif-e1` config; Scope B · seeds **60..90** (out-of-sample, never used by v1–v5 or #54 Parts 4d–4g); BOTH signals gating; all thresholds are THIS run's own 60..90 medians._
+
+**X-A gate:** `e1-k0` (cap `None`, oracle) on seeds 30..60 reproduces the #53 registered numbers 0.4406 / 136.00 exactly (asserted in-code).
+
+## Per-seed PRIMARY_B + churn (seeds 60..90)
+
+| seed | ne_oracle | ne_degraded | e1k0_oracle | scalar | mag | ne_o_churn | ne_d_churn |
+|-----:|----------:|------------:|------------:|-------:|----:|-----------:|-----------:|
+| 60 | 0.0088 | 0.0083 | 0.4521 | 0.1753 | 0.2658 | 0 | 0 |
+| 61 | 0.0369 | 0.0369 | 0.1639 | 0.1251 | 0.1940 | 0 | 0 |
+| 62 | 0.0079 | 0.0077 | 0.5400 | 0.1417 | 0.3447 | 0 | 0 |
+| 63 | 0.0190 | 0.0190 | 0.2631 | 0.1159 | 0.1883 | 0 | 0 |
+| 64 | 0.0391 | 0.0305 | 0.1516 | 0.0678 | 0.1757 | 0 | 0 |
+| 65 | 0.0269 | 0.0269 | 0.1002 | 0.0193 | 0.0935 | 0 | 0 |
+| 66 | 0.0310 | 0.0293 | 0.6133 | 0.1537 | 0.6410 | 0 | 0 |
+| 67 | 0.0199 | 0.0198 | 0.3225 | 0.1519 | 0.2805 | 0 | 0 |
+| 68 | 0.0056 | 0.0056 | 0.3704 | 0.1979 | 0.2458 | 0 | 0 |
+| 69 | 0.0000 | 0.0000 | 0.3552 | 0.1583 | 0.2779 | 0 | 0 |
+| 70 | 0.0036 | 0.0036 | 0.3250 | 0.0775 | 0.3453 | 0 | 0 |
+| 71 | 0.0111 | 0.0108 | 0.4008 | 0.0583 | 0.4282 | 0 | 0 |
+| 72 | 0.0187 | 0.0187 | 0.3400 | 0.1232 | 0.2660 | 0 | 0 |
+| 73 | 0.0227 | 0.0214 | 0.4710 | 0.2025 | 0.3733 | 0 | 0 |
+| 74 | 0.0146 | 0.0146 | 0.0752 | 0.0097 | 0.0564 | 0 | 0 |
+| 75 | 0.0073 | 0.0071 | 0.4933 | 0.1936 | 0.2186 | 0 | 0 |
+| 76 | 0.0072 | 0.0072 | 0.4521 | 0.1802 | 0.3547 | 0 | 0 |
+| 77 | 0.0409 | 0.0409 | 0.3056 | 0.0690 | 0.2833 | 0 | 0 |
+| 78 | 0.0500 | 0.0500 | 0.4563 | 0.2383 | 0.3575 | 0 | 0 |
+| 79 | 0.0201 | 0.0200 | 0.4425 | 0.1238 | 0.4065 | 0 | 0 |
+| 80 | 0.0000 | 0.0000 | 0.2750 | 0.0583 | 0.2392 | 0 | 0 |
+| 81 | 0.0129 | 0.0125 | 0.3975 | 0.0635 | 0.3412 | 0 | 0 |
+| 82 | 0.0391 | 0.0333 | 0.4958 | 0.1469 | 0.3777 | 0 | 0 |
+| 83 | 0.0122 | 0.0078 | 0.3212 | 0.0955 | 0.2848 | 0 | 0 |
+| 84 | 0.0140 | 0.0136 | 0.3146 | 0.1617 | 0.3440 | 0 | 0 |
+| 85 | 0.0051 | 0.0051 | 0.5879 | 0.2017 | 0.2187 | 0 | 0 |
+| 86 | 0.0063 | 0.0063 | 0.5500 | 0.2800 | 0.2050 | 0 | 0 |
+| 87 | 0.0750 | 0.0719 | 0.5277 | 0.0627 | 0.5178 | 0 | 0 |
+| 88 | 0.0500 | 0.0500 | 0.6000 | 0.3033 | 0.3424 | 0 | 0 |
+| 89 | 0.0031 | 0.0031 | 0.3237 | 0.1604 | 0.3515 | 0 | 0 |
+
+**Medians (60..90):** ne-oracle 0.0143 · ne-degraded 0.0141 · e1-k0 0.3840 · scalar 0.1443 · mag 0.2841. Churn: ne-oracle 0.00 · ne-degraded 0.00 · e1-k0 186.50. Latency ne-oracle 0.179 µs (record-only).
+
+## Confirmatory verdict (Scope B, seeds 60..90)
+
+- **H1(oracle) — quality vs mag:** ne-oracle 0.0143 ≥ 1.25 × mag 0.2841 (= 0.3551) → FAIL
+- **H1(degraded) — quality vs mag:** ne-degraded 0.0141 ≥ 1.25 × mag 0.2841 (= 0.3551) → FAIL
+- **H3(oracle) — mechanism vs scalar:** ne-oracle strictly superior to scalar in 3/30 ≥ 18 → FAIL
+- **H3(degraded) — mechanism vs scalar:** ne-degraded strictly superior to scalar in 3/30 ≥ 18 → FAIL
+- **H2 — churn ceiling ≤ 68 (absolute; by construction at c = 0):** ne-oracle 0.00 (PASS) · ne-degraded 0.00 (PASS)
+
+**VERDICT (K4-v6, #56): FALSIFIED (never-evict)**
+
+_VALIDATED (v6) = H1 ∧ H3 under BOTH signals (∧ H2); PARTIAL (signal-limited) = H1 ∧ H3 under exactly one signal; FALSIFIED (never-evict) = anything less. Thresholds (1.25×, 18/30) inherit the v2→v5 family; churn ceiling 68 is absolute; nothing is tuned — lever, signal set, and bar were locked before implementation (prereg `docs/prereg-K4-v6-never-evict.md`)._
+
+## Exploratory (non-gating): eviction-cap interpolation + rejoin lockout (degraded, 60..90)
+
+| condition | median PRIMARY_B | churn median |
+|-----------|----------------:|-------------:|
+| cap c=1 | 0.0201 | 20.00 |
+| cap c=2 | 0.0252 | 40.00 |
+| cap c=4 | 0.0467 | 80.00 |
+| lockout k=1 | 0.3222 | 104.50 |
+| lockout k=2 | 0.2094 | 74.00 |
+
+_non-gating; caps interpolate between never-evict (c = 0) and the k0 arm (unlimited), lockouts are the across-task state alternative (unlimited evictions). Informs whether any interior point merits a future registration — none is implied by this run._
+
+
+========================================================================
+
+# koalisi #61 — Part 5a: battery v2 core, γ × regime × margin factorial (REGISTERED)
+
+_governed by `docs/prereg-K4-battery-v2.md` (committed + posted to #61 pre-implementation); lever 2 = de-saturation, CONFIRMATORY. Factorial γ ∈ {1, 4, 16} × regime ∈ {v1-draw, v2-draw} × join margin δ ∈ {0, 0.15, 0.30} (hysteresis h = 0 everywhere) over the registered `aif-e1` arm, Scope B · seeds **120..150** (out-of-sample; 150..180 held out for replication) · **degraded/L2 signal** confirmatory. The v2 draw is `|required| ∈ 2..=8` (v1: 1..=5) over the same 8-bit universe and the same pool draw. All bars are THIS run's own 120..150 medians._
+
+**X-B(a) gate:** `query_gamma: Some(16.0)` reproduces the identity default `None` on the X-A cell (`aif-e1`, oracle, seeds 30..60) — PRIMARY_B + churn bit-identical on all 30 seeds (asserted in-code).
+
+**X-B(b) gate:** the `MarginE1(δ = 0, h = 0)` wrapper reproduces the unwrapped arm per seed in all 6 (γ, regime) cells (PRIMARY_B + churn bit-identical; asserted in-code).
+
+## Factorial cells — degraded signal, seeds 120..150 (confirmatory)
+
+| regime | arm | δ | median PRIMARY_B | churn median |
+|--------|-----|--:|-----------------:|-------------:|
+| v1-draw | arm-E1g1 | 0.00 | 0.3860 | 181.00 |
+| v1-draw | arm-E1g1 | 0.15 | 0.3860 | 179.50 |
+| v1-draw | arm-E1g1 | 0.30 | 0.3734 | 172.50 |
+| v1-draw | arm-E1g4 | 0.00 | 0.3860 | 181.00 |
+| v1-draw | arm-E1g4 | 0.15 | 0.3860 | 180.50 |
+| v1-draw | arm-E1g4 | 0.30 | 0.3860 | 180.50 |
+| v1-draw | arm-E1g16 | 0.00 | 0.3860 | 181.00 |
+| v1-draw | arm-E1g16 | 0.15 | 0.3860 | 181.00 |
+| v1-draw | arm-E1g16 | 0.30 | 0.3860 | 180.50 |
+| v2-draw | arm-E1g1 | 0.00 | 0.1621 | 175.00 |
+| v2-draw | arm-E1g1 | 0.15 | 0.1573 | 174.50 |
+| v2-draw | arm-E1g1 | 0.30 | 0.1573 | 173.00 |
+| v2-draw | arm-E1g4 | 0.00 | 0.1621 | 175.00 |
+| v2-draw | arm-E1g4 | 0.15 | 0.1621 | 174.50 |
+| v2-draw | arm-E1g4 | 0.30 | 0.1586 | 174.50 |
+| v2-draw | arm-E1g16 | 0.00 | 0.1621 | 175.00 |
+| v2-draw | arm-E1g16 | 0.15 | 0.1621 | 175.00 |
+| v2-draw | arm-E1g16 | 0.30 | 0.1621 | 175.00 |
+
+## In-run baselines on the same instances (context, non-gating)
+
+| regime | arm | median PRIMARY_B | churn median |
+|--------|-----|-----------------:|-------------:|
+| v1-draw | mag | 0.2991 | 9.00 |
+| v1-draw | scalar | 0.1093 | 101.50 |
+| v2-draw | mag | 0.1286 | 10.00 |
+| v2-draw | scalar | 0.1332 | 141.00 |
+
+## Decision-score quantiles at δ = 0 (record-only, non-gating)
+
+| regime | arm | stream | n | p25 | p50 | p75 |
+|--------|-----|--------|--:|----:|----:|----:|
+| v1-draw | arm-E1g1 | join | 5760 | 0.5000 | 0.5000 | 0.5000 |
+| v1-draw | arm-E1g1 | leave | 6290 | 0.4361 | 0.4890 | 0.4981 |
+| v1-draw | arm-E1g4 | join | 5760 | 0.5000 | 0.5000 | 0.5000 |
+| v1-draw | arm-E1g4 | leave | 6290 | 0.5000 | 0.5000 | 0.5000 |
+| v1-draw | arm-E1g16 | join | 5760 | 0.5000 | 0.5000 | 0.5000 |
+| v1-draw | arm-E1g16 | leave | 6290 | 0.5000 | 0.5000 | 0.5000 |
+| v2-draw | arm-E1g1 | join | 5760 | 0.5000 | 0.5000 | 0.5000 |
+| v2-draw | arm-E1g1 | leave | 6343 | 0.1137 | 0.4521 | 0.4989 |
+| v2-draw | arm-E1g4 | join | 5760 | 0.5000 | 0.5000 | 0.5000 |
+| v2-draw | arm-E1g4 | leave | 6343 | 0.3644 | 0.5000 | 0.5000 |
+| v2-draw | arm-E1g16 | join | 5760 | 0.5000 | 0.5000 | 0.5000 |
+| v2-draw | arm-E1g16 | leave | 6343 | 0.4994 | 0.5000 | 0.5000 |
+
+_linear-interpolated quantiles of the arm's raw `score = p(control 1) − 0.5`, collected on the δ = 0 cells. Part 4f measured every v1 γ = 16 quantile from p25 up at exactly 0.5000 (saturated), which is why no sub-0.5 margin could separate decisions there. A |quantile| < 0.4999 in a (γ ∈ {1, 4}, v2-draw) row is the de-saturation this battery set out to create._
+
+## H-S evaluation — lever 2 (γ ∈ {1, 4}, v2-draw, δ > 0 vs its own δ = 0)
+
+| arm | δ | churn med | base churn | ≤ 0.5× | PRIMARY_B med | base | ≥ 0.9× | paired churn↓ | ≥ 18/30 | cell |
+|-----|--:|----------:|-----------:|:------:|--------------:|-----:|:------:|--------------:|:-------:|:----:|
+| arm-E1g1 | 0.15 | 174.50 | 175.00 | FAIL | 0.1573 | 0.1621 | PASS | 17/30 | FAIL | FAIL |
+| arm-E1g1 | 0.30 | 173.00 | 175.00 | FAIL | 0.1573 | 0.1621 | PASS | 23/30 | PASS | FAIL |
+| arm-E1g4 | 0.15 | 174.50 | 175.00 | FAIL | 0.1621 | 0.1621 | PASS | 7/30 | FAIL | FAIL |
+| arm-E1g4 | 0.30 | 174.50 | 175.00 | FAIL | 0.1586 | 0.1621 | PASS | 10/30 | FAIL | FAIL |
+
+**VERDICT (K4 battery v2 — lever 2, #61): FALSIFIED (de-saturation)**
+
+_VALIDATED (de-saturation) = there EXISTS a (γ ∈ {1, 4}, v2-draw, δ > 0) cell whose churn median ≤ 0.5 × its own δ = 0 baseline AND whose PRIMARY_B median ≥ 0.9 × that baseline AND whose per-seed churn reduction holds on ≥ 18/30 paired seeds; FALSIFIED (de-saturation) = anything less. Thresholds (0.5×, 0.9×, 18/30) inherit the v2→v6 family conventions; the grids, draw, signal, and bars were locked in the prereg before implementation._
+
+_Scoping (prereg verdict rule): the δ = 0 scores DID de-saturate in at least one (γ ∈ {1, 4}, v2-draw) row, so the falsification is about the margin lever itself, not about reaching a de-saturated regime._
+
+## Exploratory (non-gating): oracle-signal twins of the Part 5a cells
+
+| regime | arm | δ | median PRIMARY_B | churn median |
+|--------|-----|--:|-----------------:|-------------:|
+| v1-draw | arm-E1g1 | 0.00 | 0.3948 | 177.50 |
+| v1-draw | arm-E1g1 | 0.15 | 0.3948 | 175.50 |
+| v1-draw | arm-E1g1 | 0.30 | 0.3722 | 165.50 |
+| v1-draw | arm-E1g4 | 0.00 | 0.3948 | 177.50 |
+| v1-draw | arm-E1g4 | 0.15 | 0.3948 | 177.00 |
+| v1-draw | arm-E1g4 | 0.30 | 0.3948 | 177.00 |
+| v1-draw | arm-E1g16 | 0.00 | 0.3948 | 177.50 |
+| v1-draw | arm-E1g16 | 0.15 | 0.3948 | 177.50 |
+| v1-draw | arm-E1g16 | 0.30 | 0.3948 | 177.00 |
+| v2-draw | arm-E1g1 | 0.00 | 0.1881 | 163.00 |
+| v2-draw | arm-E1g1 | 0.15 | 0.1877 | 161.00 |
+| v2-draw | arm-E1g1 | 0.30 | 0.1809 | 157.50 |
+| v2-draw | arm-E1g4 | 0.00 | 0.1881 | 163.00 |
+| v2-draw | arm-E1g4 | 0.15 | 0.1881 | 163.00 |
+| v2-draw | arm-E1g4 | 0.30 | 0.1881 | 163.00 |
+| v2-draw | arm-E1g16 | 0.00 | 0.1881 | 163.00 |
+| v2-draw | arm-E1g16 | 0.15 | 0.1881 | 163.00 |
+| v2-draw | arm-E1g16 | 0.30 | 0.1881 | 163.00 |
+
+_lever 3 (oracle-vs-degraded signal fidelity) is EXPLORATORY by registration: these rows price the confirmatory cells against the per-bit oracle signal a runtime cannot emit. Any confirmatory claim about signal fidelity needs its own registration._
+
+
+========================================================================
+
+# koalisi #61 — Part 5b: reliability-routing test (REGISTERED)
+
+_governed by `docs/prereg-K4-battery-v2.md` §"Part 5b" + §H-R; lever 1 = routing, CONFIRMATORY. Value model `TaskCoverageV2` — full-coverage bonus 100, partial per-bit weight `w(m) = 80/m`, member cost 8·N — and its reliability-weighted twin (the `ReliabilityCoverage` shape re-based on these coefficients; the library type is untouched). Per seed: pool `n ∈ 8..=16` (caps 1..=4 bits), `m = |required|` uniform on {7, 8}, one uniformly-chosen required bit `b*` PLANTED at r = 0.15 with every other required bit at 0.9. Both argmaxes come from `search()` at the same pinned `PopulationConfig` and the same seed, differing ONLY in the calculator. Seeds **120..150**._
+
+**Coefficient gate:** at `r ≡ 1` the `search()` optimum is a single full-coverage block for every `m ∈ 2..=8` (`w(m) = 80/m < 100/m`), and the block-level skip condition `8m > 20·Σ_{b≠b*} r_b + 100·r[b*]` is satisfiable for a sufficiently weak pool — both asserted in-code before the run.
+
+## Per-seed argmax comparison (seeds 120..150)
+
+| seed | m | b* | weighted skips b* | REAL_w | REAL_u |
+|-----:|--:|---:|:-----------------:|-------:|-------:|
+| 120 | 7 | 5 | no | 92.4515 | 92.4515 |
+| 121 | 8 | 6 | no | 124.4349 | 124.4349 |
+| 122 | 7 | 0 | no | 113.5943 | 113.5943 |
+| 123 | 8 | 4 | no | 161.9349 | 163.5000 |
+| 124 | 7 | 3 | no | 97.7143 | 97.7143 |
+| 125 | 8 | 7 | no | 103.0000 | 103.0000 |
+| 126 | 7 | 1 | no | 78.7372 | 70.1658 |
+| 127 | 7 | 6 | no | 157.7143 | 157.7143 |
+| 128 | 8 | 1 | no | 95.4349 | 95.4349 |
+| 129 | 8 | 2 | no | 135.3698 | 135.3698 |
+| 130 | 8 | 0 | no | 170.9349 | 154.3698 |
+| 131 | 7 | 0 | no | 142.2857 | 142.2857 |
+| 132 | 8 | 0 | no | 112.4349 | 121.5000 |
+| 133 | 7 | 4 | no | 185.3544 | 195.7601 |
+| 134 | 8 | 3 | no | 148.4349 | 148.4349 |
+| 135 | 8 | 4 | no | 74.0000 | 74.0000 |
+| 136 | 7 | 5 | no | 146.6172 | 156.9029 |
+| 137 | 7 | 7 | no | 171.3086 | 173.0229 |
+| 138 | 7 | 0 | no | 119.8800 | 119.8800 |
+| 139 | 8 | 7 | no | 129.4349 | 129.4349 |
+| 140 | 7 | 6 | no | 46.2857 | 46.2857 |
+| 141 | 7 | 2 | no | 144.3315 | 144.3315 |
+| 142 | 7 | 3 | no | 89.5943 | 89.5943 |
+| 143 | 7 | 6 | no | 117.1429 | 117.1429 |
+| 144 | 7 | 3 | no | 158.6172 | 158.6172 |
+| 145 | 7 | 5 | no | 130.1658 | 130.1658 |
+| 146 | 7 | 5 | no | 156.9029 | 148.2115 |
+| 147 | 7 | 3 | no | 91.3086 | 91.3086 |
+| 148 | 8 | 4 | no | 131.4349 | 131.4349 |
+| 149 | 8 | 5 | no | 211.4349 | 203.9349 |
+
+**Medians (120..150):** REAL_w 129.8003 · REAL_u 129.8003.
+
+## H-R evaluation — lever 1 (routing)
+
+- **Sanity leg (run-invalidating):** the unweighted argmax covers every required bit (incl. `b*`) on 25/30 ≥ 27 → FAIL
+- **Skip leg:** the weighted argmax skips `b*` (no block covers it) on 0/30 ≥ 18 → FAIL
+- **REAL leg:** weighted `REAL` strictly greater on 11/30 ≥ 18 (FAIL) AND median REAL_w 129.8003 ≥ 1.05 × REAL_u 129.8003 (= 136.2903) (FAIL) → FAIL
+
+**VERDICT (K4 battery v2 — lever 1, #61): RUN-INVALID (sanity leg)**
+
+_VALIDATED (routing) = the skip leg AND the REAL leg, with the sanity leg intact; FALSIFIED (routing) = anything less; a sanity-leg failure invalidates the run rather than producing a verdict. Bars (27/30, 18/30, 1.05×) were locked in the prereg before implementation._
+
+## Structural note on the skip leg (observed, non-gating)
+
+`search()` returns a **partition of the entire pool** (`assignment[i]` is defined for every agent index `i`), so the union of the blocks' capabilities is identically the union of the whole pool. "No block covers `b*`" is therefore equivalent to "no agent in the pool provides `b*`" — it cannot depend on the calculator at all. The same identity makes the sanity leg a statement about pool coverage rather than about the argmax, and it makes the two legs **mutually exclusive**: whenever the sanity leg holds (the pool covers every required bit, `b*` included), the skip leg is 0/30 by construction. Measured this run: sanity 25/30, skip 0/30.
+
+Related: over a partition of a fixed pool the `8·N` member-cost term sums to the same constant for every structure, so skipping a bit never buys back a member — the block-level flip condition asserted by the coefficient gate cannot express itself at the partition level. Reliability re-ranks structures only through *which* bits the partial blocks cover.
+
+**Exploratory (non-gating, not a registered criterion):** the weaker block-level reading of the same question — the weighted argmax's single highest-value block omits `b*` while the unweighted argmax's does not — holds on 2/30 seeds.
+
+
+========================================================================
+
+# koalisi #61 — Part 5c: registered exploratory addendum
+
+_registered in `docs/prereg-K4-battery-v2.md` §"Part 5c — exploratory only", which fixes the SCOPE of these items and nothing about their outcome. **Everything below is exploratory and non-gating**: no confirmatory criterion is evaluated, no verdict is derived, and the registered Parts 5a/5b above are untouched (their printed lines are byte-identical to the committed run). Lever 3 — oracle-vs-degraded pricing — is the fifth registered Part 5c item and already ran with Part 5a._
+
+## Item 1 — 12-bit widened slice (`w12-draw`)
+
+_registered cell: `arm-E1g4` (γ = 4), δ = 0, **degraded** signal, seeds 120..150, on a **12-bit** universe — `|required|` uniform 2..=12, worker caps 1..=6, pool `n ∈ 4..=16` as in the v2 draw. The arm runs at `PersistentAifConfig::n_bits = 12` (persistent joint space 4096); at the identity default 8 the same code path is the registered arm bit-for-bit. `mag` / `scalar` context rows run on the SAME 12-bit instances. Exploratory: no bar, no verdict._
+
+| regime | arm | δ | median PRIMARY_B | churn median |
+|--------|-----|--:|-----------------:|-------------:|
+| w12-draw | arm-E1g4 | 0.00 | 0.1657 | 165.50 |
+| w12-draw | mag | — | 0.0607 | 11.50 |
+| w12-draw | scalar | — | 0.1062 | 127.00 |
+
+Latency `arm-E1g4` on the 12-bit slice: 2030.839 µs/decision median (record-only — the query joint space is `2^(|required|+1)`, up to 8192 here vs 512 at the v2 draw).
+
+### Decision-score quantiles on the same cell (mechanism observable)
+
+| stream | n | p25 | p50 | p75 |
+|--------|--:|----:|----:|----:|
+| join | 5760 | 0.5000 | 0.5000 | 0.5000 |
+| leave | 6345 | -0.4999 | 0.4840 | 0.5000 |
+
+_same `score = p(control 1) − 0.5` tap as Part 5a's δ = 0 rows. Gotcha 25 records the 8-bit finding — the JOIN rail sits at exactly +0.5 (p = 1.0) in every measured (γ, regime) cell while γ de-saturates only the LEAVE stream — so these rows say whether a wider universe changes that, which no 8-bit cell could answer._
+
+## Item 2 — leave-side hysteresis h ∈ {0.15, 0.30}
+
+_**Cell selection** (stated because it lands in the report — BOTH restrictions are interpretations of the registered "at the best-performing (γ, δ) cell"): first, the search is restricted to the **v2-draw** regime — v1-draw cells score higher in absolute `PRIMARY_B` (≈ 0.386), but lever 2 (which this lever follows on) was registered and judged on v2-draw, and the v1-draw leave streams barely de-saturate at any γ — and second, at δ = 0 all three γ tie on v2-draw `PRIMARY_B` in the Part 5a table, so the tie is broken by the mechanism this lever acts on: hysteresis raises the bar a LEAVE score must clear, and the most de-saturated LEAVE stream is **γ = 1** (leave p25 well inside ±0.5 while γ = 16 sits on the rail). Cell: `MarginE1(δ = 0, h)` over `arm-E1g1`, v2-draw, degraded, seeds 120..150. The h = 0 row is re-run in-line as this sweep's own paired baseline; it is asserted in-code to reproduce the unwrapped arm, which gate X-B(b) pinned equal to the Part 5a γ = 1, δ = 0 cell. Exploratory: no bar, no verdict._
+
+| arm | h | median PRIMARY_B | churn median | vs base churn | paired churn↓ |
+|-----|--:|-----------------:|-------------:|--------------:|--------------:|
+| arm-E1g1 | 0.00 | 0.1621 | 175.00 | 1.00× | — |
+| arm-E1g1 | 0.15 | 0.1503 | 171.00 | 0.98× | 25/30 |
+| arm-E1g1 | 0.30 | 0.1229 | 148.50 | 0.85× | 29/30 |
+
+_`MarginE1` evicts iff the arm evicts AND `score ≥ h`, so h tightens the leave rail at each individual consult — but churn is NOT monotone in h across the run: a suppressed eviction changes membership, which changes every later decision and the outcome the arm learns from. What the rows measure is the net effect and its PRICE in `PRIMARY_B`. The H-S bars (0.5× churn at ≥ 0.9× quality on ≥ 18/30 paired seeds) are NOT applied here: h was registered as exploratory, and lever 2's verdict is already closed on the join-margin grid._
+
+## Item 3 — expected-outcome value model (degeneracy analysis, then re-run)
+
+_the registered item: re-run the Part 5b comparison with success-probability semantics — a block's fitness IS its expected realized payoff (`w(m)·Σ_{b∈C} r_b − 8|S| + [C = required]·20·Π_{b∈required} r_b`, the closed form the L2 `TaskOutcome` event's success probability induces), so `search()` optimizes REAL directly. **Gated on its own gotcha-21 degeneracy analysis**, which runs first. Same `draw_routing_instance` seeds 120..150 as the registered Part 5b — the pool-coverage gap is deliberately NOT fixed here (that belongs to #63); this is a like-for-like calculator swap._
+
+**Identity gate:** `Σ over blocks of ExpectedOutcomeV2 == real_payoff(structure)` on all 30 argmaxes (asserted in-code) — the search really is maximizing the REAL yardstick, not a proxy for it.
+
+### Degeneracy analysis (gotcha 21, runs BEFORE the comparison)
+
+Structure of the model over a partition of a fixed pool: the member term sums to the partition-constant `−8·N`; the partial term `w(m)·Σ_{b∈C} r_b` is earned **per block**, so merging two blocks with covered sets `C₁, C₂` LOSES `w(m)·Σ_{b∈C₁∩C₂} r_b`; the only counterweight is the full-coverage residual `20·Π_{b∈required} r_b`, earned per full-coverage block. Splitting is therefore weakly optimal unless a merge creates full coverage worth more than the overlap it destroys. At the planted reliabilities `Π r` is tiny, so the prediction is **all-singletons**.
+
+| seed | n | argmax blocks | fitness(all-singletons) | fitness(one block) | fitness(argmax) |
+|-----:|--:|--------------:|------------------------:|-------------------:|----------------:|
+| 120 | 12 | 5 | 90.8571 | -30.9771 | 92.4515 |
+| 121 | 12 | 8 | 132.0000 | -30.0651 | 132.0000 |
+| 122 | 10 | 5 | 113.7143 | -14.9771 | 113.7143 |
+| 123 | 12 | 8 | 163.5000 | -30.0651 | 163.5000 |
+| 124 | 9 | 7 | 97.7143 | -18.8571 | 97.7143 |
+| 125 | 10 | 7 | 103.0000 | -14.0651 | 103.0000 |
+| 126 | 9 | 8 | 78.8571 | -6.9771 | 78.8571 |
+| 127 | 12 | 8 | 157.7143 | -53.1429 | 157.7143 |
+| 128 | 10 | 6 | 103.0000 | -14.0651 | 103.0000 |
+| 129 | 8 | 7 | 141.5000 | 1.9349 | 142.9349 |
+| 130 | 12 | 7 | 169.5000 | -30.0651 | 170.9349 |
+| 131 | 12 | 8 | 142.2857 | -42.8571 | 142.2857 |
+| 132 | 9 | 8 | 121.5000 | -6.0651 | 121.5000 |
+| 133 | 13 | 7 | 194.2857 | -38.9771 | 195.8800 |
+| 134 | 15 | 7 | 156.0000 | -54.0651 | 156.0000 |
+| 135 | 8 | 6 | 74.0000 | -8.5000 | 74.0000 |
+| 136 | 14 | 8 | 153.7143 | -46.9771 | 155.3086 |
+| 137 | 15 | 10 | 181.7143 | -54.9771 | 181.7143 |
+| 138 | 9 | 6 | 128.5714 | -6.9771 | 128.5714 |
+| 139 | 8 | 8 | 137.0000 | 1.9349 | 137.0000 |
+| 140 | 9 | 5 | 46.2857 | -18.8571 | 46.2857 |
+| 141 | 13 | 8 | 141.1429 | -38.9771 | 142.7372 |
+| 142 | 10 | 5 | 88.0000 | -14.9771 | 88.0000 |
+| 143 | 10 | 6 | 117.1429 | -14.9771 | 117.1429 |
+| 144 | 11 | 8 | 167.4286 | -22.9771 | 167.4286 |
+| 145 | 9 | 5 | 128.5714 | -6.9771 | 130.1658 |
+| 146 | 14 | 7 | 153.7143 | -46.9771 | 156.9029 |
+| 147 | 13 | 9 | 100.0000 | -38.9771 | 100.0000 |
+| 148 | 10 | 6 | 139.0000 | -14.0651 | 139.0000 |
+| 149 | 15 | 10 | 211.5000 | -54.0651 | 211.5000 |
+
+**Analysis result:** the `search()` argmax is all-singletons on **1/30** seeds, and all-singletons matches or beats the argmax on **22/30**. Verdict of the analysis: **MOSTLY DEGENERATE — all-singletons is optimal on a strict majority of seeds; the exceptions are the merges whose full-coverage residual outweighs the overlap they destroy**.
+
+_Per the registered gating ("gated on its own gotcha-21 degeneracy analysis"), the comparison below is therefore reported as **degenerate-by-analysis**: the numbers are CONTEXT, not evidence about routing. This model joins `Additive` (constant across partitions) and `Synergistic`/`Multiplicative` (split-favouring) on the gotcha-21 list, by a third mechanism — the per-block partial term double-counts a bit that two blocks both cover, so splitting pays, and the full-coverage residual `20·Π r` is far too small at the planted reliabilities to buy the overlap back. The productive response is a value model with an interior optimum, not a re-run of this one._
+
+### Re-run of the Part 5b comparison (context only)
+
+| seed | m | b* | expected-outcome skips b* | REAL_e | REAL_u |
+|-----:|--:|---:|:-------------------------:|-------:|-------:|
+| 120 | 7 | 5 | no | 92.4515 | 92.4515 |
+| 121 | 8 | 6 | no | 132.0000 | 124.4349 |
+| 122 | 7 | 0 | no | 113.7143 | 113.5943 |
+| 123 | 8 | 4 | no | 163.5000 | 163.5000 |
+| 124 | 7 | 3 | no | 97.7143 | 97.7143 |
+| 125 | 8 | 7 | no | 103.0000 | 103.0000 |
+| 126 | 7 | 1 | no | 78.8571 | 70.1658 |
+| 127 | 7 | 6 | no | 157.7143 | 157.7143 |
+| 128 | 8 | 1 | no | 103.0000 | 95.4349 |
+| 129 | 8 | 2 | no | 142.9349 | 135.3698 |
+| 130 | 8 | 0 | no | 170.9349 | 154.3698 |
+| 131 | 7 | 0 | no | 142.2857 | 142.2857 |
+| 132 | 8 | 0 | no | 121.5000 | 121.5000 |
+| 133 | 7 | 4 | no | 195.8800 | 195.7601 |
+| 134 | 8 | 3 | no | 156.0000 | 148.4349 |
+| 135 | 8 | 4 | no | 74.0000 | 74.0000 |
+| 136 | 7 | 5 | no | 155.3086 | 156.9029 |
+| 137 | 7 | 7 | no | 181.7143 | 173.0229 |
+| 138 | 7 | 0 | no | 128.5714 | 119.8800 |
+| 139 | 8 | 7 | no | 137.0000 | 129.4349 |
+| 140 | 7 | 6 | no | 46.2857 | 46.2857 |
+| 141 | 7 | 2 | no | 142.7372 | 144.3315 |
+| 142 | 7 | 3 | no | 88.0000 | 89.5943 |
+| 143 | 7 | 6 | no | 117.1429 | 117.1429 |
+| 144 | 7 | 3 | no | 167.4286 | 158.6172 |
+| 145 | 7 | 5 | no | 130.1658 | 130.1658 |
+| 146 | 7 | 5 | no | 156.9029 | 148.2115 |
+| 147 | 7 | 3 | no | 100.0000 | 91.3086 |
+| 148 | 8 | 4 | no | 139.0000 | 131.4349 |
+| 149 | 8 | 5 | no | 211.5000 | 203.9349 |
+
+**Medians (120..150):** REAL_e 134.5000 · REAL_u 129.8003. Skips `b*` on 0/30; REAL strictly greater than the unweighted argmax on 20/30.
+
+_the skip column is the same structurally-vacuous quantity Part 5b's structural note describes (`search()` partitions the WHOLE pool, so "no block covers `b*`" ⟺ "no pool agent provides `b*`"), reproduced here only so the two tables read alike. Non-gating; the corrected block-level formulation is #63's._
+
+## Item 4 — learned-posterior routing twins
+
+_the registered item: Part 5b's reliability-weighted argmax, but with `r̂` LEARNED from an outcome stream (the #57 `from_state` path) instead of read off the planted vector — a pipeline test of "could a runtime actually get these weights?", not a second routing test. Per seed: a fresh `aif-e1` `PersistentAifArm` observes 20 tasks of independent per-bit Bernoulli(`r_b`) outcomes at the PLANTED reliabilities (own `SplitMix64` stream, salted off the instance seed, so Part 5b's draw is untouched), then `r̂[b] = beliefs[b][0]`. The weighted twin is `TaskCoverageV2::weighted(required, r̂)` — the example-side v2-coefficient model; the library `ReliabilityCoverage` keeps its registered v1 constants and is not used. The REAL yardstick still uses the PLANTED `r` (ground truth). Exploratory: no bar, no verdict._
+
+| seed | b* | strong bit | r̂[b*] | r̂[strong] | ordered | learned skips b* | REAL_l | REAL_u |
+|-----:|---:|-----------:|------:|----------:|:-------:|:----------------:|-------:|-------:|
+| 120 | 5 | 0 | 0.0145 | 0.5313 | yes | no | 92.4515 | 92.4515 |
+| 121 | 6 | 0 | 0.0008 | 0.7693 | yes | no | 113.9349 | 124.4349 |
+| 122 | 0 | 2 | 0.1728 | 0.6098 | yes | no | 113.5943 | 113.5943 |
+| 123 | 4 | 0 | 0.0057 | 0.7399 | yes | no | 161.9349 | 163.5000 |
+| 124 | 3 | 0 | 0.0238 | 0.8307 | yes | no | 97.7143 | 97.7143 |
+| 125 | 7 | 0 | 0.0049 | 0.9502 | yes | no | 103.0000 | 103.0000 |
+| 126 | 1 | 0 | 0.0056 | 0.8862 | yes | no | 78.7372 | 70.1658 |
+| 127 | 6 | 0 | 0.0407 | 0.8048 | yes | no | 157.7143 | 157.7143 |
+| 128 | 1 | 0 | 0.0085 | 0.9100 | yes | no | 95.4349 | 95.4349 |
+| 129 | 2 | 0 | 0.0006 | 0.9716 | yes | no | 135.3698 | 135.3698 |
+| 130 | 0 | 1 | 0.0065 | 0.9485 | yes | no | 170.9349 | 154.3698 |
+| 131 | 0 | 1 | 0.2357 | 0.6960 | yes | no | 142.2857 | 142.2857 |
+| 132 | 0 | 1 | 0.0128 | 0.6985 | yes | no | 113.9349 | 121.5000 |
+| 133 | 4 | 0 | 0.0043 | 0.9629 | yes | no | 195.7601 | 195.7601 |
+| 134 | 3 | 0 | 0.0407 | 0.7238 | yes | no | 148.4349 | 148.4349 |
+| 135 | 4 | 0 | 0.0148 | 0.9047 | yes | no | 74.0000 | 74.0000 |
+| 136 | 5 | 0 | 0.0134 | 0.7458 | yes | no | 146.6172 | 156.9029 |
+| 137 | 7 | 0 | 0.0154 | 0.8942 | yes | no | 181.5943 | 173.0229 |
+| 138 | 0 | 1 | 0.0255 | 0.7896 | yes | no | 119.8800 | 119.8800 |
+| 139 | 7 | 0 | 0.0251 | 0.7384 | yes | no | 129.4349 | 129.4349 |
+| 140 | 6 | 0 | 0.0574 | 0.3811 | yes | no | 46.2857 | 46.2857 |
+| 141 | 2 | 0 | 0.0030 | 0.9587 | yes | no | 144.3315 | 144.3315 |
+| 142 | 3 | 1 | 0.0157 | 0.7496 | yes | no | 89.5943 | 89.5943 |
+| 143 | 6 | 0 | 0.1222 | 0.8140 | yes | no | 117.1429 | 117.1429 |
+| 144 | 3 | 0 | 0.0084 | 0.8692 | yes | no | 158.6172 | 158.6172 |
+| 145 | 5 | 0 | 0.0617 | 0.9058 | yes | no | 130.1658 | 130.1658 |
+| 146 | 5 | 0 | 0.0023 | 0.9672 | yes | no | 156.7830 | 148.2115 |
+| 147 | 3 | 1 | 0.0290 | 0.8648 | yes | no | 91.3086 | 91.3086 |
+| 148 | 4 | 0 | 0.0101 | 0.9757 | yes | no | 131.4349 | 131.4349 |
+| 149 | 5 | 0 | 0.0196 | 0.6577 | yes | no | 211.4349 | 203.9349 |
+
+**Medians (120..150):** REAL_l 129.8003 · REAL_u 129.8003. Planted `r[b*] = 0.15` vs every other required bit `0.9`; the posterior ranks `b*` below the reference strong bit on **30/30** seeds — the gotcha-24 ordering check, which is the claim the recency-dominated posterior can actually support. Learned-weighted argmax skips `b*` on 0/30 (structurally vacuous, see Item 3); REAL strictly greater on 8/30.
+
+
+========================================================================
+
+# koalisi #63 — Part 6: corrected block-level routing test (REGISTERED)
+
+_governed by `docs/prereg-K4-routing-corrected.md` (registered 2026-07-31, BEFORE any implementation; owner design-lock D1–D6 on #63). The corrected re-formulation of the #61 lever-1 test, which landed `RUN-INVALID (sanity leg)`: the draw now GUARANTEES pool coverage by rejection re-draw, the skip predicate is **block-level** (the highest-value block under each calculator's own value, `max_by`/`partial_cmp`, last-maximal on ties) rather than the structurally-vacuous partition-level one, and the planting sits inside the algebraic flip region. Three legs: **A** (CONFIRMATORY) — `TaskCoverageV2` at the registered v2 coefficients, `r[b*] = 0.02` against `0.35` elsewhere, with a uniform-`0.35` attribution counterfactual; **C** (EXPLORATORY) — the product-form full bonus `100·Π r`, planting `0.15`/`0.98`, gated on its own degeneracy analysis; **L** (EXPLORATORY) — leg A with `r̂` LEARNED from an outcome stream. Seeds **180..210**; structure-level `REAL` is context ONLY (member costs are partition-constant, so no partition-level flip can be bought by dropping a member; the registered flip condition is derived and tested at BLOCK level)._
+
+**Coefficient gate (X-B):** asserted in-code before the loop — leg A's block-level flip `8m > 100·r[b*] + 20·Σ_{b≠b*} r_b`, **on the stylized `m`-specialist configuration** (a full-coverage block of `m` one-bit specialists against the one-member-smaller block that omits `b*`), HOLDS at the planting for both `m ∈ {7, 8}` and FAILS at the uniform counterfactual for every bit; leg C's product form prefers full coverage at `r ≡ 1` with margin for every `m ∈ 2..=8`, flips at the leg-C planting on the equal-size comparison, and does NOT flip at its counterfactual even against the one-member-smaller block.
+
+## Leg C degeneracy gate (runs FIRST, run-and-label-context)
+
+_the registered gate: on the 30 leg-C-planted instances, compare the argmax `P` under `TaskCoverageV2P` against the all-singletons structure under the same calculator. All-singletons tying-or-beating `P` on ≥ 15/30 labels leg C `DEGENERATE (context only)` — its rows then carry no reading beyond the degeneracy mechanism. Either way every leg-C row below is measured and printed._
+
+**Gate result:** all-singletons matches or beats the `P` argmax on **30/30** seeds (bar 15) → leg C is **DEGENERATE (context only)**.
+
+_Two boundary counts alongside it (item 3's pair, context): the `search()` argmax IS all-singletons on **0/30** seeds — the gap between this and the 30 above is PSO shortfall rather than model degeneracy — and the single grand-coalition block ties or beats the argmax on **0/30**._
+
+## Leg A — confirmatory block-level routing (seeds 180..210)
+
+| seed | m | b* | rejects | C1 W-top omits b* | C2 U-top covers b* | C3 W̄-top covers b* | fired | REAL_w | REAL_u | ΔREAL |
+|-----:|--:|---:|--------:|:-----------------:|:------------------:|:-------------------:|:-----:|-------:|-------:|------:|
+| 180 | 8 | 0 | 0 | no | yes | yes | no | -0.5997 | -0.5997 | +0.0000 |
+| 181 | 7 | 1 | 0 | yes | yes | yes | yes | 8.4586 | 8.4586 | +0.0000 |
+| 182 | 8 | 1 | 0 | no | yes | yes | no | -28.1995 | -28.1995 | +0.0000 |
+| 183 | 7 | 0 | 0 | no | yes | yes | no | -3.5414 | -3.5414 | +0.0000 |
+| 184 | 8 | 6 | 0 | no | yes | yes | no | 7.9005 | 7.9005 | +0.0000 |
+| 185 | 8 | 1 | 0 | no | yes | yes | no | -21.3992 | -21.1995 | -0.1997 |
+| 186 | 7 | 1 | 0 | no | yes | yes | no | -3.3128 | -3.3128 | +0.0000 |
+| 187 | 8 | 3 | 0 | yes | yes | yes | yes | -11.1997 | -18.1995 | +6.9997 |
+| 188 | 7 | 2 | 0 | no | yes | yes | no | -23.0850 | -19.0857 | -3.9993 |
+| 189 | 7 | 2 | 0 | no | yes | yes | no | 0.4586 | 0.4586 | +0.0000 |
+| 190 | 7 | 6 | 0 | no | yes | yes | no | -27.5414 | -27.5414 | +0.0000 |
+| 191 | 7 | 4 | 0 | no | yes | yes | no | 13.1443 | 12.9158 | +0.2286 |
+| 192 | 8 | 3 | 1 | no | yes | yes | no | 1.9003 | 1.9003 | +0.0000 |
+| 193 | 7 | 6 | 0 | no | yes | yes | no | 0.6864 | 0.6864 | +0.0000 |
+| 194 | 7 | 3 | 0 | no | yes | yes | no | -6.8564 | -6.8564 | +0.0000 |
+| 195 | 7 | 2 | 0 | yes | yes | yes | yes | -15.3136 | -15.3136 | +0.0000 |
+| 196 | 7 | 2 | 0 | yes | no | no | no | -19.7714 | -19.7714 | +0.0000 |
+| 197 | 8 | 7 | 1 | no | yes | yes | no | 3.1008 | 6.6008 | -3.5000 |
+| 198 | 8 | 6 | 0 | no | yes | yes | no | -25.9997 | -25.9997 | +0.0000 |
+| 199 | 8 | 1 | 0 | no | yes | yes | no | -22.6997 | -26.1997 | +3.5000 |
+| 200 | 8 | 7 | 0 | no | yes | yes | no | -0.8992 | -7.8992 | +7.0000 |
+| 201 | 7 | 5 | 0 | no | yes | yes | no | -27.0850 | -27.0850 | +0.0000 |
+| 202 | 7 | 1 | 0 | no | yes | yes | no | -26.8557 | -22.8557 | -4.0000 |
+| 203 | 8 | 1 | 0 | no | yes | yes | no | -12.3995 | -8.8997 | -3.4997 |
+| 204 | 8 | 0 | 0 | no | yes | yes | no | 11.5003 | 11.5003 | -0.0000 |
+| 205 | 7 | 6 | 0 | yes | yes | no | no | 12.2293 | 8.2293 | +4.0000 |
+| 206 | 8 | 6 | 0 | no | yes | yes | no | -6.8997 | -13.8995 | +6.9997 |
+| 207 | 7 | 7 | 0 | no | yes | yes | no | 0.9172 | 5.1458 | -4.2286 |
+| 208 | 8 | 5 | 0 | no | yes | yes | no | 5.8005 | 2.5005 | +3.3000 |
+| 209 | 7 | 4 | 0 | yes | yes | yes | yes | 4.4586 | 4.4579 | +0.0007 |
+
+**Medians (180..210, leg-A planting):** REAL_w -3.4271 · REAL_u -5.1989. Structure-level `REAL` is CONTEXT (registration structural note 1) — never gated. Note also that `W` is not a `REAL`-maximizer: `TaskCoverageV2::weighted` credits a full-coverage block `(20/m)·Σ_required r` on top of the partial term where `REAL` credits `20·Π r` — 6.06 vs 0.0007 at this planting (m = 7), so the two disagree about how much full coverage is worth. At this planting `REAL` itself prefers full coverage over the `b*`-skip by only ~0.23 per block at equal size.
+
+## Leg A mechanism diagnostics (context)
+
+| seed | m | s | win_lo | win_hi | v_left | j | min_mult | 1.25·m | W full? |
+|-----:|--:|--:|-------:|-------:|-------:|--:|---------:|-------:|:-------:|
+| 180 | 8 | 3 | 6.8750 | 11.0000 | 2.7000 | 4 | 9 | 10.00 | yes |
+| 181 | 7 | 3 | 6.2857 | 11.0000 | 8.0000 | 4 | 8 | 8.75 | yes |
+| 182 | 8 | 3 | 6.8750 | 11.0000 | 6.0000 | 4 | 8 | 10.00 | yes |
+| 183 | 7 | 3 | 6.2857 | 11.0000 | 4.0000 | 3 | 7 | 8.75 | yes |
+| 184 | 8 | 3 | 6.8750 | 11.0000 | 6.0000 | 4 | 8 | 10.00 | yes |
+| 185 | 8 | 3 | 6.8750 | 11.0000 | 6.0000 | 4 | 8 | 10.00 | yes |
+| 186 | 7 | 3 | 6.2857 | 11.0000 | 4.0000 | 3 | 7 | 8.75 | yes |
+| 187 | 8 | 3 | 6.8750 | 11.0000 | 6.0000 | 4 | 8 | 10.00 | yes |
+| 188 | 7 | 2 | -3.7714 | 0.0000 | 4.0000 | 3 | 8 | 8.75 | yes |
+| 189 | 7 | 3 | 6.2857 | 11.0000 | 4.0000 | 3 | 7 | 8.75 | yes |
+| 190 | 7 | 2 | 14.2857 | 19.0000 | 0.0000 | 2 | 7 | 8.75 | yes |
+| 191 | 7 | 2 | 14.2857 | 19.0000 | 8.0000 | 4 | 7 | 8.75 | yes |
+| 192 | 8 | 3 | 6.8750 | 11.0000 | 6.0000 | 4 | 9 | 10.00 | yes |
+| 193 | 7 | 3 | 6.2857 | 11.0000 | 8.0000 | 4 | 8 | 8.75 | yes |
+| 194 | 7 | 3 | 6.2857 | 11.0000 | 4.0000 | 3 | 7 | 8.75 | yes |
+| 195 | 7 | 4 | -1.7143 | 3.0000 | 4.0000 | 3 | 7 | 8.75 | yes |
+| 196 | 7 | 1 | 4.0000 | 4.0000 | 0.0000 | 2 | 9 | 8.75 | no |
+| 197 | 8 | 3 | 6.8750 | 11.0000 | 6.0000 | 4 | 8 | 10.00 | yes |
+| 198 | 8 | 4 | -1.1250 | 3.0000 | 2.7000 | 4 | 8 | 10.00 | yes |
+| 199 | 8 | 3 | 6.8750 | 11.0000 | 6.0000 | 4 | 9 | 10.00 | yes |
+| 200 | 8 | 3 | 6.8750 | 11.0000 | 2.7000 | 4 | 8 | 10.00 | yes |
+| 201 | 7 | 4 | -1.7143 | 3.0000 | 4.0000 | 3 | 8 | 8.75 | yes |
+| 202 | 7 | 3 | 6.2857 | 11.0000 | 4.2286 | 4 | 7 | 8.75 | yes |
+| 203 | 8 | 4 | -1.1250 | 3.0000 | 6.0000 | 4 | 9 | 10.00 | yes |
+| 204 | 8 | 3 | 6.8750 | 11.0000 | 6.0000 | 4 | 8 | 10.00 | yes |
+| 205 | 7 | 3 | 6.2857 | 11.0000 | 8.0000 | 4 | 7 | 8.75 | yes |
+| 206 | 8 | 3 | 6.8750 | 11.0000 | 6.0000 | 4 | 9 | 10.00 | yes |
+| 207 | 7 | 2 | 14.2857 | 19.0000 | 8.0000 | 4 | 7 | 8.75 | yes |
+| 208 | 8 | 3 | 6.8750 | 11.0000 | 2.7000 | 4 | 9 | 10.00 | yes |
+| 209 | 7 | 4 | -1.7143 | 3.0000 | 4.0000 | 3 | 7 | 8.75 | yes |
+
+_Mechanism scope: firing requires the best competing block's value to fall inside a window of width `100·(0.35 − 0.02)/m` (4.71 at m = 7, 4.13 at m = 8) that the b* planting opens between the weighted and counterfactual valuations of the full-coverage block. Competing blocks are singletons whose values sit on a lattice of spacing `w(m)·0.35` (4.00 / 3.50), so at most one leftover capability count can land inside for a given cover size. A low fired count is therefore consistent with "the b*-window is narrower than the resolution of the competing block values" as well as with "no routing"; the per-seed (s, j) columns above are what distinguishes them._
+
+## Leg C — product-form full bonus (EXPLORATORY, DEGENERATE (context only))
+
+| seed | P-top omits b* | P̄-top covers b* | U-top covers b* | REAL_p | REAL_u |
+|-----:|:--------------:|:----------------:|:---------------:|-------:|-------:|
+| 180 | yes | yes | yes | 125.2000 | 118.0044 |
+| 181 | yes | yes | yes | 230.8571 | 232.7436 |
+| 182 | yes | yes | yes | 160.4000 | 146.0088 |
+| 183 | yes | yes | yes | 133.0286 | 127.1436 |
+| 184 | yes | yes | yes | 177.8000 | 173.2088 |
+| 185 | no | yes | yes | 170.2000 | 165.6088 |
+| 186 | yes | yes | yes | 149.1429 | 143.2579 |
+| 187 | yes | yes | yes | 145.2000 | 130.8088 |
+| 188 | no | yes | yes | 123.6571 | 123.6571 |
+| 189 | no | yes | yes | 216.2286 | 210.3436 |
+| 190 | no | yes | yes | 94.6286 | 88.7436 |
+| 191 | yes | yes | yes | 200.5714 | 204.1722 |
+| 192 | yes | yes | yes | 146.6000 | 139.4044 |
+| 193 | yes | yes | yes | 160.3429 | 151.8004 |
+| 194 | no | yes | yes | 173.3714 | 176.0290 |
+| 195 | no | yes | yes | 75.5429 | 78.2004 |
+| 196 | no | no | no | 60.9143 | 60.9143 |
+| 197 | no | yes | yes | 256.9000 | 245.1131 |
+| 198 | no | yes | yes | 119.1000 | 121.7044 |
+| 199 | no | yes | yes | 137.2000 | 120.2044 |
+| 200 | no | yes | yes | 184.4000 | 161.3131 |
+| 201 | no | yes | yes | 112.4571 | 103.9147 |
+| 202 | no | yes | yes | 115.8857 | 119.4865 |
+| 203 | yes | no | yes | 174.9000 | 167.7044 |
+| 204 | yes | yes | yes | 248.3000 | 241.1044 |
+| 205 | yes | yes | yes | 208.1143 | 199.5718 |
+| 206 | yes | yes | yes | 151.7000 | 127.5088 |
+| 207 | no | yes | yes | 263.0857 | 260.8015 |
+| 208 | no | yes | yes | 152.6000 | 146.5088 |
+| 209 | no | yes | yes | 216.2286 | 218.8861 |
+
+**Medians (180..210, leg-C planting):** REAL_p 156.4714 · REAL_u 146.2588. The three-conjunct skip predicate fires on **13/30** seeds. No bar and no verdict — leg C is exploratory in either degeneracy state. `REAL` is the expected payoff at the ORIGINAL v2 coefficients (partial credit per covered bit); `TaskCoverageV2P` maximizes an all-or-nothing success probability instead, and at this planting the two disagree in direction (per block at equal size, REAL prefers full coverage 71.57 vs 67.20 while the product form prefers the skip 67.20 vs 13.29). `REAL_p` below `REAL_u` is therefore expected by construction and carries no reading about routing.
+
+## Leg L — learned-posterior twin of leg A (EXPLORATORY)
+
+_the same leg-A comparison with `r̂` LEARNED instead of read off the planted vector: a fresh `aif-e1` `PersistentAifArm` observes 20 tasks of independent per-bit Bernoulli(`r_b`) outcomes at the leg-A planting (own `SplitMix64` stream, salted off the seed with a Part 6 salt so item 4's stream is untouched), then `r̂[b] = beliefs[b][0]`. The leg-A planting is a harder ordering problem than item 4's for a reason specific to the recency-dominated read (gotcha 24): the absolute gap narrows (0.33 vs 0.75) while the ratio widens (17.5× vs 6.0×), and — the operative change — the reference strong bit is itself only Bernoulli(0.35), so it fails on most recent tasks and reads low too. Whether that degrades the ordering is what this leg measures. REAL still uses the PLANTED `r` (ground truth). No bar, no verdict._
+
+| seed | b* | strong bit | r̂[b*] | r̂[strong] | r̂ spread | ordered | L-top omits b* | U-top covers b* | REAL_l | REAL_u |
+|-----:|---:|-----------:|------:|----------:|---------:|:-------:|:--------------:|:---------------:|-------:|-------:|
+| 180 | 0 | 1 | 0.0002 | 0.0007 | 0.0027 | yes | no | yes | -0.5997 | -0.5997 |
+| 181 | 1 | 0 | 0.0001 | 0.0001 | 0.0030 | yes | yes | yes | 4.6872 | 8.4586 |
+| 182 | 1 | 0 | 0.0000 | 0.0000 | 0.9291 | yes | no | yes | -28.1995 | -28.1995 |
+| 183 | 0 | 1 | 0.0000 | 0.0001 | 0.9784 | yes | yes | yes | -3.5414 | -3.5414 |
+| 184 | 6 | 0 | 0.0017 | 0.0116 | 0.0214 | yes | yes | yes | 7.9005 | 7.9005 |
+| 185 | 1 | 0 | 0.0002 | 0.0002 | 0.0825 | yes | yes | yes | -24.8992 | -21.1995 |
+| 186 | 1 | 0 | 0.0000 | 0.9145 | 0.9145 | yes | yes | yes | -3.3128 | -3.3128 |
+| 187 | 3 | 0 | 0.0001 | 0.8497 | 0.8495 | yes | no | yes | -21.6995 | -18.1995 |
+| 188 | 2 | 0 | 0.0001 | 0.0002 | 0.0672 | yes | yes | yes | -23.0850 | -19.0857 |
+| 189 | 2 | 0 | 0.0000 | 0.0159 | 0.0159 | yes | yes | yes | -3.5421 | 0.4586 |
+| 190 | 6 | 0 | 0.0001 | 0.0001 | 0.0017 | yes | yes | yes | -27.5414 | -27.5414 |
+| 191 | 4 | 0 | 0.0000 | 0.0024 | 0.0024 | yes | yes | yes | 12.9158 | 12.9158 |
+| 192 | 3 | 0 | 0.0029 | 0.7464 | 0.7435 | yes | yes | yes | 1.9003 | 1.9003 |
+| 193 | 6 | 0 | 0.0007 | 0.0065 | 0.5954 | yes | yes | yes | 4.6857 | 0.6864 |
+| 194 | 3 | 1 | 0.0006 | 0.0009 | 0.4621 | yes | yes | yes | -6.8564 | -6.8564 |
+| 195 | 2 | 0 | 0.0007 | 0.0187 | 0.4253 | yes | no | yes | -15.3136 | -15.3136 |
+| 196 | 2 | 0 | 0.0015 | 0.0226 | 0.1436 | yes | yes | no | -27.7707 | -19.7714 |
+| 197 | 7 | 0 | 0.0063 | 0.0793 | 0.2678 | yes | yes | yes | 6.4005 | 6.6008 |
+| 198 | 6 | 0 | 0.0001 | 0.0001 | 0.0019 | yes | no | yes | -25.9997 | -25.9997 |
+| 199 | 1 | 0 | 0.0009 | 0.0110 | 0.9824 | yes | yes | yes | -29.8995 | -26.1997 |
+| 200 | 7 | 0 | 0.0028 | 0.0197 | 0.0561 | yes | no | yes | 2.8005 | -7.8992 |
+| 201 | 5 | 0 | 0.0048 | 0.0428 | 0.1007 | yes | yes | yes | -27.0850 | -27.0850 |
+| 202 | 1 | 0 | 0.0013 | 0.0031 | 0.0122 | yes | yes | yes | -27.0842 | -22.8557 |
+| 203 | 1 | 0 | 0.0000 | 0.9519 | 0.9519 | yes | no | yes | -8.8997 | -8.8997 |
+| 204 | 0 | 1 | 0.0000 | 0.0001 | 0.8612 | yes | yes | yes | -6.3995 | 11.5003 |
+| 205 | 6 | 0 | 0.0001 | 0.0012 | 0.1679 | yes | yes | yes | 8.2293 | 8.2293 |
+| 206 | 6 | 0 | 0.0001 | 0.0001 | 0.0477 | yes | yes | yes | -6.8997 | -13.8995 |
+| 207 | 7 | 0 | 0.0016 | 0.0113 | 0.3620 | yes | no | yes | 5.1451 | 5.1458 |
+| 208 | 5 | 0 | 0.0001 | 0.0130 | 0.0167 | yes | yes | yes | 5.8005 | 2.5005 |
+| 209 | 4 | 1 | 0.0004 | 0.0392 | 0.0461 | yes | yes | yes | 0.4586 | 4.4579 |
+
+**Medians (180..210):** REAL_l -4.9708 · REAL_u -5.1989 · `r̂` spread 0.1222. The posterior ranks `b*` below the reference strong bit on **30/30** seeds (the gotcha-24 ordering check) — that ORDERING is the claim this leg supports. The learned-weighted argmax's top block omits `b*` on 22/30, and omits it while `U`'s covers it on 21/30; the skip column is readable only where the spread is material, since a near-uniform `r̂` collapses `L`'s partition ranking onto `U`'s and leaves only the member-cost-driven top-block shift.
+
+## H-BR evaluation — block-level routing (leg A only)
+
+- **Sanity leg (run-invalidating):** the top block of `U` achieves full required coverage on 28/30 ≥ 27 → PASS
+- **Skip leg:** all three conjuncts hold on 4/30 ≥ 18 → FAIL
+
+**VERDICT (corrected routing — #63): FALSIFIED (block-routing)**
+
+_VALIDATED (block-routing) = sanity ∧ skip; FALSIFIED (block-routing) = sanity ∧ ¬skip; a sanity-leg failure invalidates the run rather than producing a verdict. Bars (27/30 sanity, 18/30 consistency) inherit the family's conventions and were locked in the prereg before implementation. The headline is BLOCK-level only — no structure-level routing claim is available from this design._
+
+_Read this verdict against the mechanism-scope paragraph under the leg-A diagnostics table: a low fired count is consistent with the b*-window being narrower than the spacing of the competing block values, not only with the absence of routing._
+
+## Context (recorded, never gated)
+
+- Per-conjunct raw counts: C1 (weighted top block omits `b*`) 6/30 · C2 (unweighted top block covers `b*`) 29/30 · C3 (counterfactual top block covers `b*`) 28/30; all three together 4/30.
+- C2 is entailed by the sanity leg (`b*` is a required bit, so a top block covering ALL of `required` covers `b*`), so on a valid run the skip leg is effectively C1 ∧ C3.
+- A skip-leg shortfall decomposes into "no flip" (¬C1) and "control failed" (C1 ∧ C3 missing, i.e. C1 ∧ C2 ∧ ¬C3), the latter measured on 1/30 seeds. A control failure is a SIZE effect of the uniform counterfactual — scaling every reliability to 0.35 scales the coverage terms but not the `8`-per-member cost — and is not evidence about routing.
+- **Attribution validity:** `W̄`'s and `U`'s argmax partitions differ on 27/30 seeds. Expected 0 — at a uniform reliability the weighted total is an increasing affine map of the unweighted total, so the two argmaxes coincide up to float ties. Any nonzero count means C1-vs-C3 was an intent-to-treat contrast across DIFFERENT partitions on those seeds. Counted, never asserted, so a float tie cannot panic the registered run.
+- The weighted and unweighted argmax **partitions** differ at all on 28/30 seeds. Member costs sum to the partition-constant −8·N under every calculator here, so member savings can never motivate a partition change; any difference counted here comes from the coverage terms alone.
+- Coverage-guaranteed draw: 2 instance re-draws across the 30 seeds (the #61 draw had no guarantee and missed coverage on 5/30).
+- Leg C degeneracy: all-singletons ties or beats the argmax on 30/30 (bar 15) → **DEGENERATE (context only)**; the argmax IS all-singletons on 0/30 and the grand coalition ties-or-beats it on 0/30.
+
+
+========================================================================
+
+# koalisi #69 — Part 7: EQ3 latency re-match (REGISTERED)
+
+_governed by `docs/prereg-K4-eq3-latency-rematch.md` + its **Amendment 1** (both committed before this code). Report date 2026-08-02. Regime v2-draw · Scope B · seeds **210..240** (fresh; 90..120 and 150..180 stay reserved) · release build. Arms: `scalar` = `AifDecisionPolicy::default()` (the v1 latency comparator, quality context-only), `mag` = `MagnitudePolicy::default()` (**L1 only** — A1.1 parked L2 behind the toggle), `mag-eq3` = the same policy with `.with_eq3_levers(true)` (**L2 + L3**). Latency = the v1 protocol verbatim: `Instant` around every sync `should_join`/`should_leave`, pooled per arm across all seeds._
+
+**SKIPPED — cargo feature `magnitude-fast` is OFF.** The `mag-eq3` arm is the toggle-ON policy, which only exists under that feature, so no leg of this registered battery can run. Re-run with `--features decision,magnitude,magnitude-fast` (the official run's build) to produce the Part 7 rows. Parts 1–6 above are unaffected either way.
+
+
+========================================================================
+
+# koalisi #72 — Part 8: EQ4 typed-roles battery (REGISTERED)
+
+_governed by `docs/prereg-K4-eq4-typed-roles.md` (registered BEFORE this code; owner design-lock D1–D9 on #72). Report date 2026-08-03. World **v2t** (prereg §2): the frozen `draw_prefix_v2` prefix, then `R = 3` worker roles and per-required-bit role tags APPENDED off the same SplitMix64 stream, with a role-feasibility rejection re-draw (≤ 1000 attempts per task). Ground truth is **role-matched coverage** — a required bit `b` tagged `r` counts only if a member of role `r` holds it — and `PRIMARY = success_rate × mean cov_eff` keeps the standing stream-level shape. Seeds **240..270** (fresh; 90..120 and 150..180 stay reserved). Arms: `mag` = frozen `MagnitudePolicy::default()` (control, sees bit masks only), `mag-typed` = the same policy `.with_role_modulation(pool roles, ρ)` at the **oracle `ρ = δ`** (identity matrix: cross-role substitutability exactly 0), `scalar` = `AifDecisionPolicy::default()` and `arm-E1` = the v5 E1 `PersistentAifArm` (untyped context, non-gating). Latency is recorded and NEVER gating (prereg §7)._
+
+_Instance convention: a FRESH policy per seed for every arm. `mag-typed`'s role map keys on the pool, so a per-seed rebuild is structural there; applying the same convention to every arm keeps the arms comparable. It differs from Part 7's one-instance-per-arm choice and costs the untyped control its cross-seed evaluator-cache warmth — which moves latency only: the cache is decision-frozen by the knife-edge fallback (gotcha 15), and latency is non-gating in this registration._
+
+_Metric note: `success ≡ completed` under the typed ground truth (prereg §2 defines `completed(task)` and `PRIMARY = success_rate × mean_cov_eff`, and the v2t draw carries no per-member performance matrix). The Scope-B reliability gate of Parts 3–7 is deliberately NOT layered on top — the registered question is whether role structure converts, not whether reliability does._
+
+## Gates (prereg §6 — any failure ⇒ RUN-INVALID)
+
+- **X-identity cell 1 — PASS.** The identity configuration (no roles supplied) routes STRUCTURALLY to the untyped path, so this is identity by construction, not by measurement; the run asserts it anyway as a determinism check — an independently constructed `MagnitudePolicy::default()` reproduces the `mag` arm's acts AND raw score BIT PATTERNS on all 30 seeds (6830 decisions). Alongside it, the R = 1 identity world (`next() % 1`, same code path) is checked for the metric reduction prereg §2 claims: role-matched coverage equals untyped coverage on all 600 of its tasks.
+- **X-identity cell 2 — PASS.** The typed path at `ρ ≡ 1` (exact `1.0` entries; `1.0·π == π` in IEEE) over the R = 3 world reproduces `mag` on **acts + per-seed PRIMARY (bit-identical) + churn**, all 30 seeds. Raw scores are NOT compared: the typed route evaluates both sides fresh where the untyped arm answers a cached incremental query, which re-associates the low bits — the registered gate is on decisions, not float bit patterns (the EQ3 H-par′ lesson).
+
+### S-fib — role-grid factorization certificate
+
+_Three deterministic `role_space × fiber` shapes built with `role_grid`; each grid coalition is evaluated through the example's own fresh route (`coalition_magnitude_from_couplings` at the pinned `t = 1`, the entry point `magnitude_at_t` uses) and compared against `RoleGrid::proof(1.0).expected_magnitude()` within the **upstream-documented** relative tolerance `1e-9 · max(|a|, |b|, 1)` — the bound catgraph `v0.7.0`'s own `coalition_typed` tests (`rel_close`) and the `proof` doctest use. Upstream documents that tightness as safe only away from near-1 non-merged couplings, so every off-diagonal here sits well inside `(0, 1)`._
+
+| shape | agents | harness magnitude | `expected_magnitude()` | rel Δ | gate |
+|-------|-------:|------------------:|-----------------------:|------:|------|
+| 2 × 2 (symmetric role, asymmetric fiber) | 4 | 1.788617886179 | 1.788617886179 | 1.24e-16 | PASS |
+| 3 × 2 (asymmetric role) | 6 | 2.343876723439 | 2.343876723439 | 3.79e-16 | PASS |
+| 3 × 3 (both non-trivial) | 9 | 2.863892528791 | 2.863892528791 | 3.10e-16 | PASS |
+
+- **S-fib — PASS** (all shapes agree).
+
+- **X-battery** (frozen Parts 1–7 byte-identical on every quality/churn/verdict line) is checked OUTSIDE this binary, by diffing this run's Parts 1–7 against a pre-change baseline; latency-only diffs are the standing exclusion.
+
+## Draw and feasibility (prereg §2)
+
+Rejection re-draws over the 30 seeds: **6908** in total, on **30** seeds, worst seed **1013** (a per-SEED sum over its 20 tasks). Per-seed counts are the `redraws` column of the H-T table below. Role-matched feasibility is strictly stronger than the untyped pool coverage of the #63 draw — the same worker no longer covers a bit for every tag, only for its own role — so this regime rejects heavily where the #63 draw barely did.
+
+- **What a re-draw replaces:** the FULL v2 task draw — the size `r ∈ 2..=8`, the `r` distinct required bits, and then all `r` role tags, all off the same stream. It does NOT re-tag a kept requirement, and it never re-draws the arrival order (which is role-independent and is drawn once in the v2 prefix).
+- **Cap headroom:** the budget is 1000 **total attempts per TASK** — the initial draw is attempt 1, so the budget allows 999 re-draws — and the worst single task in this run needed **220** attempts (22.0% of the budget). Exceeding it panics the run as RUN-INVALID rather than silently biasing the draw.
+- **Induced task-size shift (disclosure, not a deviation):** rejection sampling is not size-neutral — a large requirement is far likelier to contain a bit no worker of that bit's role holds, so it is rejected more often. Realized `|required|` over the 600 v2t tasks: mean **3.27**, median **3.0**; the pure-v2 draw of the SAME seeds has mean 4.94, median 5.0. The registered v2t world IS the post-rejection distribution (prereg §2 fixes the mechanism), so this is the world both arms face — but any cross-part comparison against a v2 number must read it as a different task-size mix, not only a different metric.
+- **Tag conditioning (disclosure):** the re-draw conditions TAGS on the pool as well. A required bit held by workers of exactly ONE role has its tag forced — every feasible tag for it is that role — so on such a bit role-matched coverage coincides with untyped coverage and the bit is contest-dead. Measured here: **19.6%** of required bits across all 600 tasks (per-seed mean 0.0% … 71.9%). The direction is CONSERVATIVE for H-T — the typed arm can only earn its margin on the remaining bits — and re-draw intensity anti-correlates with pool size, so the small-pool seeds carry the most conditioning.
+
+## Arms (pooled over 30 seeds, v2t world)
+
+| arm | median PRIMARY | vs `mag` | superior seeds | median churn | median µs/decision |
+|-----|---------------:|---------:|---------------:|-------------:|-------------------:|
+| `mag` | 0.0501 | 1.00× | 0/30 | 6.00 | 3.331 |
+| `mag-typed` | 0.1810 | 3.61× | 30/30 | 6.00 | 12.551 |
+| `scalar` | 0.0204 | 0.41× | 6/30 | 102.50 | 2.733 |
+| `arm-E1` | 0.0565 | 1.13× | 18/30 | 153.00 | 64.713 |
+
+_`scalar` and `arm-E1` are untyped context baselines, non-gating (prereg §3). `arm-E1` is the v5 E1 configuration (learned per-bit precisions + fixed-γ = 16 MeanField queries) fed the ROLE-MATCHED per-bit outcome after every task — the typed analogue of the oracle signal it was registered on._
+
+## H-T (confirmatory) — typed valuation beats untyped
+
+| seed | n | redraws | mag | mag-typed | Δ | churn mag | churn typed |
+|-----:|--:|--------:|----:|----------:|--:|----------:|------------:|
+| 240 | 14 | 74 | 0.0353 | 0.1747 | +0.1394 | 9 | 10 |
+| 241 | 9 | 243 | 0.0495 | 0.2921 | +0.2426 | 7 | 7 |
+| 242 | 9 | 101 | 0.0000 | 0.1440 | +0.1440 | 6 | 4 |
+| 243 | 16 | 37 | 0.0082 | 0.1005 | +0.0924 | 8 | 10 |
+| 244 | 9 | 114 | 0.0676 | 0.1299 | +0.0623 | 4 | 4 |
+| 245 | 12 | 269 | 0.0350 | 0.1983 | +0.1633 | 6 | 6 |
+| 246 | 10 | 166 | 0.0911 | 0.1799 | +0.0888 | 6 | 6 |
+| 247 | 12 | 83 | 0.0509 | 0.1430 | +0.0921 | 12 | 10 |
+| 248 | 4 | 1013 | 0.2042 | 0.2969 | +0.0927 | 3 | 2 |
+| 249 | 12 | 41 | 0.0277 | 0.1375 | +0.1098 | 11 | 10 |
+| 250 | 11 | 62 | 0.0115 | 0.1895 | +0.1781 | 5 | 7 |
+| 251 | 7 | 96 | 0.0628 | 0.1197 | +0.0568 | 3 | 1 |
+| 252 | 14 | 56 | 0.0078 | 0.1416 | +0.1338 | 11 | 4 |
+| 253 | 5 | 570 | 0.2246 | 0.4037 | +0.1792 | 10 | 10 |
+| 254 | 5 | 236 | 0.0507 | 0.1979 | +0.1471 | 3 | 4 |
+| 255 | 15 | 11 | 0.0153 | 0.1381 | +0.1228 | 9 | 8 |
+| 256 | 10 | 125 | 0.0246 | 0.1560 | +0.1314 | 6 | 6 |
+| 257 | 12 | 28 | 0.0178 | 0.1074 | +0.0897 | 6 | 9 |
+| 258 | 7 | 169 | 0.0227 | 0.1821 | +0.1594 | 6 | 6 |
+| 259 | 7 | 284 | 0.1480 | 0.2092 | +0.0612 | 9 | 9 |
+| 260 | 9 | 288 | 0.0118 | 0.2020 | +0.1902 | 6 | 3 |
+| 261 | 7 | 367 | 0.0943 | 0.1960 | +0.1017 | 7 | 7 |
+| 262 | 11 | 154 | 0.0537 | 0.1500 | +0.0963 | 6 | 6 |
+| 263 | 4 | 923 | 0.2074 | 0.3917 | +0.1843 | 6 | 5 |
+| 264 | 5 | 411 | 0.0877 | 0.2706 | +0.1828 | 4 | 4 |
+| 265 | 15 | 88 | 0.0549 | 0.2056 | +0.1508 | 13 | 8 |
+| 266 | 6 | 276 | 0.2067 | 0.2641 | +0.0574 | 3 | 3 |
+| 267 | 11 | 50 | 0.0180 | 0.1159 | +0.0978 | 10 | 7 |
+| 268 | 7 | 501 | 0.0938 | 0.2098 | +0.1160 | 7 | 7 |
+| 269 | 15 | 72 | 0.0189 | 0.1071 | +0.0883 | 6 | 5 |
+
+- Conjunct 1 (median): `mag-typed` **0.1810** vs bar 1.25 × 0.0501 = **0.0626** ⇒ **PASS**.
+- Conjunct 2 (consistency): strictly superior on **30/30** seeds, bar 18 ⇒ **PASS**.
+- Success-rate context (never gated): `mag` 0.2117 · `mag-typed` 0.7950 (mean over seeds).
+- **Mechanism (what the arm can and cannot do):** `mag-typed` never sees a tag — its relevance masks stay untyped by registration (prereg §4), so it cannot route coverage toward the role a bit asks for. Its ONE lever is refusing to treat cross-role members as substitutes: `ρ = δ` zeroes their coupling, so they never skeletalize into a single effective agent and each keeps its own diversity weight. The arm therefore RETAINS role-diverse redundancy that the untyped arm collapses away, and the win shows up as role-matched completion (mean success 0.21 → 0.79) rather than as smarter coverage selection.
+
+## VERDICT: **VALIDATED (typed roles)**
+
+_Grammar (prereg §7): `VALIDATED (typed roles)` = both H-T conjuncts with every §6 gate holding · `FALSIFIED (typed roles)` = gates hold, either conjunct fails · `RUN-INVALID` = any §6 gate fails. This run: conjunct 1 PASS · conjunct 2 PASS · gates X-identity PASS / S-fib PASS. No bar moves either way, and the v1/v2 K4 verdicts, EQ3's verdict, and the #54 arm question (mag = demonstrated default, FINAL) are untouched regardless of outcome (prereg §7 pre-commitments)._
+
+## E-deg (registered context, non-gating) — ρ mis-specification
+
+_The oracle table's exact-`0` off-diagonal is lifted to `ρ_off ∈ {0.25, 0.5}` (diagonal stays `1.0`), same 30 seeds, same world: how much of any H-T margin survives a mis-specified table (#54 oracle-vs-degraded discipline)._
+
+| arm | median PRIMARY | vs `mag` | superior seeds | median churn | median µs/decision |
+|-----|---------------:|---------:|---------------:|-------------:|-------------------:|
+| `mag-typed (ρ_off = 0, oracle)` | 0.1810 | 3.61× | 30/30 | 6.00 | 12.551 |
+| `mag-typed (ρ_off = 0.25)` | 0.1674 | 3.34× | 30/30 | 9.00 | 13.553 |
+| `mag-typed (ρ_off = 0.5)` | 0.1174 | 2.34× | 29/30 | 14.50 | 12.280 |
+| `mag (control)` | 0.0501 | 1.00× | 0/30 | 6.00 | 3.331 |
+
+## E-ceil (registered exploratory, non-gating) — typed-relevance reference arm
+
+_An example-side arm that re-types the relevance masks themselves — `rel_i = caps_i ∩ (required bits tagged role_i)` — and then runs the ORDINARY untyped substitutability couplings over those masks (no ρ), evaluated fresh through the example's `magnitude_at_t` at the pinned `t = 1`. It is the **fully-informed reference arm within the magnitude family**: it reads the tags the registered lever deliberately withholds. It is NOT a supremum — no oracle anchor exists at these pool sizes, and nothing rules out a non-magnitude arm scoring higher — so read it as a reference margin, not a ceiling on what is achievable._
+
+| arm | median PRIMARY | vs `mag` | superior seeds | median churn | median µs/decision |
+|-----|---------------:|---------:|---------------:|-------------:|-------------------:|
+| `mag` | 0.0501 | 1.00× | 0/30 | 6.00 | 3.331 |
+| `mag-typed` | 0.1810 | 3.61× | 30/30 | 6.00 | 12.551 |
+| `E-ceil` | 0.3513 | 7.01× | 30/30 | 11.00 | 3.858 |
+
+- **Conversion fraction:** `(mag-typed − mag) / (E-ceil − mag)` = (0.1810 − 0.0501) / (0.3513 − 0.0501) = **43.5%**. The ρ-modulation lever converts that fraction of the tag-informed reference margin; the remainder requires tag knowledge the registered lever deliberately withholds (prereg §4 keeps the relevance masks untyped precisely so the test can fail). Medians, so the ratio is a summary contrast, not a per-seed decomposition.
+
+## E-ρq (registered exploratory, non-gating) — the ρ-structured quality world
+
+_Same pool and same tasks, a different WORLD (prereg §5, D1c): coverage is UNTYPED and task quality is `cov_eff × mean pairwise ρ_world(role_i, role_j)` over the final members (singleton ⇒ `1.0`), with `ρ_world` the planted symmetric table (`ρ(r,r) = 1`, `ρ_off = 0.25`). `mag-typed` here carries THAT table as its oracle — and per **Amendment A1.2** that configuration is structurally **ANTI-aligned**, not friendly: a `ρ < 1` entry WEAKENS the cross-role coupling, magnitude rewards diversity, so weakly-coupled cross-role candidates look MORE additive and are MORE likely to be admitted — while this world's quality term rewards role COHESION. The leg measures that anti-alignment (the gotcha-23 lesson restated: magnitude scores diversity, not dependability, and a table that reads as 'these two are unlike' is an argument to keep both)._
+
+_The **E-ρq-inv** cell (Amendment 2, owner-approved) flips the modulation direction to test whether alignment is recoverable INSIDE T2: `ρ(r,r) = 0.25` on the diagonal and `ρ(r ≠ r′) = 1.0` off it, so cross-role members now look fully substitutable and same-role members look only partly so — magnitude should then favour role-cohesive coalitions, which is what this world pays for. The world's quality table is unchanged; only the arm's table is inverted._
+
+| arm | median PRIMARY_ρq | vs `mag` | superior seeds | median churn | median µs/decision |
+|-----|------------------:|---------:|---------------:|-------------:|-------------------:|
+| `mag` | 0.2451 | 1.00× | 0/30 | 6.00 | 3.399 |
+| `mag-typed (ρ_world)` | 0.0875 | 0.36× | 0/30 | 9.00 | 13.332 |
+| `mag-typed-inv (ρ flipped)` | 0.1926 | 0.79× | 9/30 | 7.00 | 8.882 |
+
+## E-T3 (registered exploratory, non-gating) — channel-valued couplings
+
+_`C = R = 3` channels; channel `c` carries the role-`c`-restricted substitutability `A_c(i → j) = |rel_i ∩ rel_j ∩ tagged(c)| / |rel_i ∩ tagged(c)|` over UNTYPED relevance, collapsed with the registered uniform `θ = (1/3, 1/3, 1/3)` (D3) through `ChannelCouplings::collapse`, then evaluated fresh at `t = 1`. **REGISTERED CAVEAT** (prereg §5): an empty denominator collapses to the neutral `1.0`, so the product collapse makes 'no evidence' neutral-HIGH and biases cross-role coupling upward — one reason this leg is exploratory. A second float trap upstream names: `powf` can round up to exactly `1.0`, so a collapsed table can carry exact-`1.0` couplings and hence skeletal merges between agents no single channel perfectly couples._
+
+| arm | median PRIMARY | vs `mag` | superior seeds | median churn | median µs/decision |
+|-----|---------------:|---------:|---------------:|-------------:|-------------------:|
+| `mag` | 0.0501 | 1.00× | 0/30 | 6.00 | 3.331 |
+| `E-T3` | 0.0416 | 0.83× | 9/30 | 7.00 | 6.550 |
+
+- **Caveat incidence (measured, decision-inert counters):** of **207480** channel entries built across the leg's evaluations, **104570** (50.4%) took the neutral `1.0` for an empty `rel_i ∩ tagged(c)` denominator. Exactly-`1.0` collapsed couplings — each of which forces a skeletal merge — split into **0** where EVERY channel was neutral (the registered caveat's pure 'no evidence anywhere' case) and **5265** where at least one channel was non-neutral, i.e. `powf` rounded a strictly-sub-1 product up to exactly `1.0` (the upstream trap). Counted per EVALUATION, not per decision (`should_join` pays two, `should_leave` two), and written only after each value was already fixed — the counters cannot move a decision.
+
+## T1 instrumentation (non-gating) — role shares of the final coalitions
+
+_`CoalitionEvaluator::role_shares` (upstream T1) on every task's final `mag-typed` coalition, constructed fresh OFF the decision path over the same ρ-modulated couplings the arm evaluated, with roles indexed by member-local position. Weights are read, never moved: `Mag = Σ_c w_c` (Leinster 2013 Lemma 1.1.4) bucketed by role, and a role-mixed skeletal class is reported rather than split._
+
+- Samples: **600** decomposed coalitions (0 tasks skipped — no relevance-surviving member; 0 upstream errors).
+- **Mixed classes: 0** across 600 samples (600 samples exact, i.e. every skeletal class single-role). Expected 0 under the oracle `ρ = δ`: a cross-role coupling is modulated to exactly `0`, so two agents of different roles can never reach mutual closure `1.0` and never share a class — the only merges left are same-role clones, which are single-role by construction. A nonzero count would mean the modulation is not reaching the closure, and is printed either way.
+- `Σ_r share(r)` vs `base_value()` on exact samples: largest relative gap **3.77e-16** (upstream contracts these as equal up to float re-association, not bit-identity).
+
+| role | samples | p25 | median | p75 |
+|-----:|--------:|----:|-------:|----:|
+| 0 | 523 | 1.0000 | 1.0000 | 2.0000 |
+| 1 | 562 | 1.0000 | 1.5000 | 2.0000 |
+| 2 | 557 | 1.0000 | 1.5714 | 2.0000 |
+
+_A role present only inside mixed classes still appears with share `0.0`; a role that never appeared in a coalition's partition contributes no sample at all (upstream's `Some(0.0)` vs `None` distinction)._
+
+
+========================================================================
+
+# koalisi #76 — Part 9: EQ5a process-structured battery (REGISTERED)
+
+_governed by `docs/prereg-K4-eq5a-process-structured.md` (registered BEFORE this code; owner design-lock D1–D11 on #76, Amendment 1 pinning the rule theory / fuel / staffing price / λ / draw parameters, Amendment 2 voiding §4's "3–5 rules" numeral in favour of the schema closure, **Amendment 3** re-reading valuation-only as the unstaffable residual (A3.1) and widening the fusion schema to every same-role ordered pair (A3.2)). Report date 2026-08-05. World **v2w** (prereg §2): the Part 8 `v2t` prefix VERBATIM — `draw_prefix_v2`, then `R = 3` worker roles and per-required-bit role tags with the role-feasibility rejection re-draw — and the workflow SHAPE draw APPENDED off the same SplitMix64 stream. Each tagged required bit `(b, r)` is a step generator `s_{b,r} : r → r`; steps chain per role (`Free::compose`), roles combine with `Free::tensor`, and every diagram is pinned through `ColoredExpr::new` (Amendment A2.3 — `Free::compose` checks WIDTHS, not colors, so the pin is the only color gate). Seeds **270..300** (fresh; 90..120 and 150..180 stay reserved). Latency is recorded and NEVER gating (prereg §7)._
+
+_**The declared-writing mechanic** (prereg §4 fairness clause, as CORRECTED by Amendment A5.1): each arm declares the writing it staffs — the control declares the as-written workflow, a rewriting arm declares `optimize(...).best()` — and the scorer scores each arm's DECLARED writing. Every declared writing that is not the as-written one is `replay`-verified against the registered rules and `content_eq`-checked against the reported representative BEFORE it is scored (§6 S-sound), so an arm cannot grade its own homework and the control is not penalised for a legitimate alternative it did not take. **Consequence, stated because it is by design:** `cov_eff` denominators differ across arms — when both complete, the ratio term is `1.0` for both and the contrast comes through **member count**, which is the claimed advantage (the clause's narrow, checkable half — verified true). The policy itself only ever sees a `required: u32` mask (the OR over the declared writing's distinct demand) plus the worker role map; the arm never sees a tag, exactly as in EQ4._
+
+_**What "sound" means here, and what it does not** (Amendment A5.1 — §4's original wording overclaimed and is corrected): BGKSZ **Thm 5.6** certifies **theory-relative derivability** — the optimizer's output is a legal derivation under THE RULES IT WAS GIVEN. It certifies nothing about whether those rules preserve task semantics, and the rules here are **hand-authored for this experiment** (A1.1/A3.2) with no independent capability-semantics content. So "sound" means "derivable from axioms this harness itself declared", the rules are **stipulated** equivalences, and the sameness the comparison trades on is **theory-internal, not externally validated**. Scoping sentence, binding on the report: a `VALIDATED (process structure)` verdict would read "**a sound-by-stipulation process transformation can unlock staffing value in this world**" — NOT "process reorganisation is generically valuable"._
+
+_**Coverage is per DISTINCT `(bit, role)` pair** — multiplicity prices the process, it does not add coverage demand. So if one bit is demanded under two roles the OR-mask the policy sees carries it once while the scorer counts two demands; that asymmetry is what the rewrite theory acts on (prereg §2)._
+
+## The pinned rule theory (Amendment A1.1, widened by A3.2 — printed in full)
+
+_Three SCHEMAS closed over the `(bit, role)` index set; at the registered `bits = 8, roles = 3` the closure is **174 instances** (24 idempotence + 126 fusion + 24 spider absorption). Amendment A2.1: §4's "3–5 rules" is an ERRATUM — the numeral refers to schemas and is void; the closure governs, and every instance constructs through `RewriteRule::new` so nothing is silently dropped. **Amendment A3.2** widened fusion from one designated pair per role to every role × every ordered pair of distinct bits `(b, b')`, target `b'' = (b + b' + 4) mod bits`, the instance NOT built when `b'' ∈ {b, b'}` — at `bits = 8` that skip excludes exactly the pairs involving bit 4, leaving 42 per role. The skip is the two-sidedness guarantee A1.1 stated as a global condition, now enforced per instance: had a target been a consumed bit, every application would strictly shrink distinct demand and the rewriting cells would win BY CONSTRUCTION. A trace binds rule INDICES, so this order is part of the registered theory._
+
+| # | schema | rule |
+|--:|--------|------|
+| 0 | Idempotence | `s0_r0 ; s0_r0 ⇒ s0_r0` |
+| 1 | Idempotence | `s1_r0 ; s1_r0 ⇒ s1_r0` |
+| 2 | Idempotence | `s2_r0 ; s2_r0 ⇒ s2_r0` |
+| 3 | Idempotence | `s3_r0 ; s3_r0 ⇒ s3_r0` |
+| 4 | Idempotence | `s4_r0 ; s4_r0 ⇒ s4_r0` |
+| 5 | Idempotence | `s5_r0 ; s5_r0 ⇒ s5_r0` |
+| 6 | Idempotence | `s6_r0 ; s6_r0 ⇒ s6_r0` |
+| 7 | Idempotence | `s7_r0 ; s7_r0 ⇒ s7_r0` |
+| 8 | Idempotence | `s0_r1 ; s0_r1 ⇒ s0_r1` |
+| 9 | Idempotence | `s1_r1 ; s1_r1 ⇒ s1_r1` |
+| 10 | Idempotence | `s2_r1 ; s2_r1 ⇒ s2_r1` |
+| 11 | Idempotence | `s3_r1 ; s3_r1 ⇒ s3_r1` |
+| 12 | Idempotence | `s4_r1 ; s4_r1 ⇒ s4_r1` |
+| 13 | Idempotence | `s5_r1 ; s5_r1 ⇒ s5_r1` |
+| 14 | Idempotence | `s6_r1 ; s6_r1 ⇒ s6_r1` |
+| 15 | Idempotence | `s7_r1 ; s7_r1 ⇒ s7_r1` |
+| 16 | Idempotence | `s0_r2 ; s0_r2 ⇒ s0_r2` |
+| 17 | Idempotence | `s1_r2 ; s1_r2 ⇒ s1_r2` |
+| 18 | Idempotence | `s2_r2 ; s2_r2 ⇒ s2_r2` |
+| 19 | Idempotence | `s3_r2 ; s3_r2 ⇒ s3_r2` |
+| 20 | Idempotence | `s4_r2 ; s4_r2 ⇒ s4_r2` |
+| 21 | Idempotence | `s5_r2 ; s5_r2 ⇒ s5_r2` |
+| 22 | Idempotence | `s6_r2 ; s6_r2 ⇒ s6_r2` |
+| 23 | Idempotence | `s7_r2 ; s7_r2 ⇒ s7_r2` |
+| 24 | Fusion | `s0_r0 ; s1_r0 ⇒ s5_r0` |
+| 25 | Fusion | `s0_r0 ; s2_r0 ⇒ s6_r0` |
+| 26 | Fusion | `s0_r0 ; s3_r0 ⇒ s7_r0` |
+| 27 | Fusion | `s0_r0 ; s5_r0 ⇒ s1_r0` |
+| 28 | Fusion | `s0_r0 ; s6_r0 ⇒ s2_r0` |
+| 29 | Fusion | `s0_r0 ; s7_r0 ⇒ s3_r0` |
+| 30 | Fusion | `s1_r0 ; s0_r0 ⇒ s5_r0` |
+| 31 | Fusion | `s1_r0 ; s2_r0 ⇒ s7_r0` |
+| 32 | Fusion | `s1_r0 ; s3_r0 ⇒ s0_r0` |
+| 33 | Fusion | `s1_r0 ; s5_r0 ⇒ s2_r0` |
+| 34 | Fusion | `s1_r0 ; s6_r0 ⇒ s3_r0` |
+| 35 | Fusion | `s1_r0 ; s7_r0 ⇒ s4_r0` |
+| 36 | Fusion | `s2_r0 ; s0_r0 ⇒ s6_r0` |
+| 37 | Fusion | `s2_r0 ; s1_r0 ⇒ s7_r0` |
+| 38 | Fusion | `s2_r0 ; s3_r0 ⇒ s1_r0` |
+| 39 | Fusion | `s2_r0 ; s5_r0 ⇒ s3_r0` |
+| 40 | Fusion | `s2_r0 ; s6_r0 ⇒ s4_r0` |
+| 41 | Fusion | `s2_r0 ; s7_r0 ⇒ s5_r0` |
+| 42 | Fusion | `s3_r0 ; s0_r0 ⇒ s7_r0` |
+| 43 | Fusion | `s3_r0 ; s1_r0 ⇒ s0_r0` |
+| 44 | Fusion | `s3_r0 ; s2_r0 ⇒ s1_r0` |
+| 45 | Fusion | `s3_r0 ; s5_r0 ⇒ s4_r0` |
+| 46 | Fusion | `s3_r0 ; s6_r0 ⇒ s5_r0` |
+| 47 | Fusion | `s3_r0 ; s7_r0 ⇒ s6_r0` |
+| 48 | Fusion | `s5_r0 ; s0_r0 ⇒ s1_r0` |
+| 49 | Fusion | `s5_r0 ; s1_r0 ⇒ s2_r0` |
+| 50 | Fusion | `s5_r0 ; s2_r0 ⇒ s3_r0` |
+| 51 | Fusion | `s5_r0 ; s3_r0 ⇒ s4_r0` |
+| 52 | Fusion | `s5_r0 ; s6_r0 ⇒ s7_r0` |
+| 53 | Fusion | `s5_r0 ; s7_r0 ⇒ s0_r0` |
+| 54 | Fusion | `s6_r0 ; s0_r0 ⇒ s2_r0` |
+| 55 | Fusion | `s6_r0 ; s1_r0 ⇒ s3_r0` |
+| 56 | Fusion | `s6_r0 ; s2_r0 ⇒ s4_r0` |
+| 57 | Fusion | `s6_r0 ; s3_r0 ⇒ s5_r0` |
+| 58 | Fusion | `s6_r0 ; s5_r0 ⇒ s7_r0` |
+| 59 | Fusion | `s6_r0 ; s7_r0 ⇒ s1_r0` |
+| 60 | Fusion | `s7_r0 ; s0_r0 ⇒ s3_r0` |
+| 61 | Fusion | `s7_r0 ; s1_r0 ⇒ s4_r0` |
+| 62 | Fusion | `s7_r0 ; s2_r0 ⇒ s5_r0` |
+| 63 | Fusion | `s7_r0 ; s3_r0 ⇒ s6_r0` |
+| 64 | Fusion | `s7_r0 ; s5_r0 ⇒ s0_r0` |
+| 65 | Fusion | `s7_r0 ; s6_r0 ⇒ s1_r0` |
+| 66 | Fusion | `s0_r1 ; s1_r1 ⇒ s5_r1` |
+| 67 | Fusion | `s0_r1 ; s2_r1 ⇒ s6_r1` |
+| 68 | Fusion | `s0_r1 ; s3_r1 ⇒ s7_r1` |
+| 69 | Fusion | `s0_r1 ; s5_r1 ⇒ s1_r1` |
+| 70 | Fusion | `s0_r1 ; s6_r1 ⇒ s2_r1` |
+| 71 | Fusion | `s0_r1 ; s7_r1 ⇒ s3_r1` |
+| 72 | Fusion | `s1_r1 ; s0_r1 ⇒ s5_r1` |
+| 73 | Fusion | `s1_r1 ; s2_r1 ⇒ s7_r1` |
+| 74 | Fusion | `s1_r1 ; s3_r1 ⇒ s0_r1` |
+| 75 | Fusion | `s1_r1 ; s5_r1 ⇒ s2_r1` |
+| 76 | Fusion | `s1_r1 ; s6_r1 ⇒ s3_r1` |
+| 77 | Fusion | `s1_r1 ; s7_r1 ⇒ s4_r1` |
+| 78 | Fusion | `s2_r1 ; s0_r1 ⇒ s6_r1` |
+| 79 | Fusion | `s2_r1 ; s1_r1 ⇒ s7_r1` |
+| 80 | Fusion | `s2_r1 ; s3_r1 ⇒ s1_r1` |
+| 81 | Fusion | `s2_r1 ; s5_r1 ⇒ s3_r1` |
+| 82 | Fusion | `s2_r1 ; s6_r1 ⇒ s4_r1` |
+| 83 | Fusion | `s2_r1 ; s7_r1 ⇒ s5_r1` |
+| 84 | Fusion | `s3_r1 ; s0_r1 ⇒ s7_r1` |
+| 85 | Fusion | `s3_r1 ; s1_r1 ⇒ s0_r1` |
+| 86 | Fusion | `s3_r1 ; s2_r1 ⇒ s1_r1` |
+| 87 | Fusion | `s3_r1 ; s5_r1 ⇒ s4_r1` |
+| 88 | Fusion | `s3_r1 ; s6_r1 ⇒ s5_r1` |
+| 89 | Fusion | `s3_r1 ; s7_r1 ⇒ s6_r1` |
+| 90 | Fusion | `s5_r1 ; s0_r1 ⇒ s1_r1` |
+| 91 | Fusion | `s5_r1 ; s1_r1 ⇒ s2_r1` |
+| 92 | Fusion | `s5_r1 ; s2_r1 ⇒ s3_r1` |
+| 93 | Fusion | `s5_r1 ; s3_r1 ⇒ s4_r1` |
+| 94 | Fusion | `s5_r1 ; s6_r1 ⇒ s7_r1` |
+| 95 | Fusion | `s5_r1 ; s7_r1 ⇒ s0_r1` |
+| 96 | Fusion | `s6_r1 ; s0_r1 ⇒ s2_r1` |
+| 97 | Fusion | `s6_r1 ; s1_r1 ⇒ s3_r1` |
+| 98 | Fusion | `s6_r1 ; s2_r1 ⇒ s4_r1` |
+| 99 | Fusion | `s6_r1 ; s3_r1 ⇒ s5_r1` |
+| 100 | Fusion | `s6_r1 ; s5_r1 ⇒ s7_r1` |
+| 101 | Fusion | `s6_r1 ; s7_r1 ⇒ s1_r1` |
+| 102 | Fusion | `s7_r1 ; s0_r1 ⇒ s3_r1` |
+| 103 | Fusion | `s7_r1 ; s1_r1 ⇒ s4_r1` |
+| 104 | Fusion | `s7_r1 ; s2_r1 ⇒ s5_r1` |
+| 105 | Fusion | `s7_r1 ; s3_r1 ⇒ s6_r1` |
+| 106 | Fusion | `s7_r1 ; s5_r1 ⇒ s0_r1` |
+| 107 | Fusion | `s7_r1 ; s6_r1 ⇒ s1_r1` |
+| 108 | Fusion | `s0_r2 ; s1_r2 ⇒ s5_r2` |
+| 109 | Fusion | `s0_r2 ; s2_r2 ⇒ s6_r2` |
+| 110 | Fusion | `s0_r2 ; s3_r2 ⇒ s7_r2` |
+| 111 | Fusion | `s0_r2 ; s5_r2 ⇒ s1_r2` |
+| 112 | Fusion | `s0_r2 ; s6_r2 ⇒ s2_r2` |
+| 113 | Fusion | `s0_r2 ; s7_r2 ⇒ s3_r2` |
+| 114 | Fusion | `s1_r2 ; s0_r2 ⇒ s5_r2` |
+| 115 | Fusion | `s1_r2 ; s2_r2 ⇒ s7_r2` |
+| 116 | Fusion | `s1_r2 ; s3_r2 ⇒ s0_r2` |
+| 117 | Fusion | `s1_r2 ; s5_r2 ⇒ s2_r2` |
+| 118 | Fusion | `s1_r2 ; s6_r2 ⇒ s3_r2` |
+| 119 | Fusion | `s1_r2 ; s7_r2 ⇒ s4_r2` |
+| 120 | Fusion | `s2_r2 ; s0_r2 ⇒ s6_r2` |
+| 121 | Fusion | `s2_r2 ; s1_r2 ⇒ s7_r2` |
+| 122 | Fusion | `s2_r2 ; s3_r2 ⇒ s1_r2` |
+| 123 | Fusion | `s2_r2 ; s5_r2 ⇒ s3_r2` |
+| 124 | Fusion | `s2_r2 ; s6_r2 ⇒ s4_r2` |
+| 125 | Fusion | `s2_r2 ; s7_r2 ⇒ s5_r2` |
+| 126 | Fusion | `s3_r2 ; s0_r2 ⇒ s7_r2` |
+| 127 | Fusion | `s3_r2 ; s1_r2 ⇒ s0_r2` |
+| 128 | Fusion | `s3_r2 ; s2_r2 ⇒ s1_r2` |
+| 129 | Fusion | `s3_r2 ; s5_r2 ⇒ s4_r2` |
+| 130 | Fusion | `s3_r2 ; s6_r2 ⇒ s5_r2` |
+| 131 | Fusion | `s3_r2 ; s7_r2 ⇒ s6_r2` |
+| 132 | Fusion | `s5_r2 ; s0_r2 ⇒ s1_r2` |
+| 133 | Fusion | `s5_r2 ; s1_r2 ⇒ s2_r2` |
+| 134 | Fusion | `s5_r2 ; s2_r2 ⇒ s3_r2` |
+| 135 | Fusion | `s5_r2 ; s3_r2 ⇒ s4_r2` |
+| 136 | Fusion | `s5_r2 ; s6_r2 ⇒ s7_r2` |
+| 137 | Fusion | `s5_r2 ; s7_r2 ⇒ s0_r2` |
+| 138 | Fusion | `s6_r2 ; s0_r2 ⇒ s2_r2` |
+| 139 | Fusion | `s6_r2 ; s1_r2 ⇒ s3_r2` |
+| 140 | Fusion | `s6_r2 ; s2_r2 ⇒ s4_r2` |
+| 141 | Fusion | `s6_r2 ; s3_r2 ⇒ s5_r2` |
+| 142 | Fusion | `s6_r2 ; s5_r2 ⇒ s7_r2` |
+| 143 | Fusion | `s6_r2 ; s7_r2 ⇒ s1_r2` |
+| 144 | Fusion | `s7_r2 ; s0_r2 ⇒ s3_r2` |
+| 145 | Fusion | `s7_r2 ; s1_r2 ⇒ s4_r2` |
+| 146 | Fusion | `s7_r2 ; s2_r2 ⇒ s5_r2` |
+| 147 | Fusion | `s7_r2 ; s3_r2 ⇒ s6_r2` |
+| 148 | Fusion | `s7_r2 ; s5_r2 ⇒ s0_r2` |
+| 149 | Fusion | `s7_r2 ; s6_r2 ⇒ s1_r2` |
+| 150 | SpiderAbsorption | `delta@r0 ; (s0_r0 ⊗ s0_r0) ; mu@r0 ⇒ s0_r0` |
+| 151 | SpiderAbsorption | `delta@r0 ; (s1_r0 ⊗ s1_r0) ; mu@r0 ⇒ s1_r0` |
+| 152 | SpiderAbsorption | `delta@r0 ; (s2_r0 ⊗ s2_r0) ; mu@r0 ⇒ s2_r0` |
+| 153 | SpiderAbsorption | `delta@r0 ; (s3_r0 ⊗ s3_r0) ; mu@r0 ⇒ s3_r0` |
+| 154 | SpiderAbsorption | `delta@r0 ; (s4_r0 ⊗ s4_r0) ; mu@r0 ⇒ s4_r0` |
+| 155 | SpiderAbsorption | `delta@r0 ; (s5_r0 ⊗ s5_r0) ; mu@r0 ⇒ s5_r0` |
+| 156 | SpiderAbsorption | `delta@r0 ; (s6_r0 ⊗ s6_r0) ; mu@r0 ⇒ s6_r0` |
+| 157 | SpiderAbsorption | `delta@r0 ; (s7_r0 ⊗ s7_r0) ; mu@r0 ⇒ s7_r0` |
+| 158 | SpiderAbsorption | `delta@r1 ; (s0_r1 ⊗ s0_r1) ; mu@r1 ⇒ s0_r1` |
+| 159 | SpiderAbsorption | `delta@r1 ; (s1_r1 ⊗ s1_r1) ; mu@r1 ⇒ s1_r1` |
+| 160 | SpiderAbsorption | `delta@r1 ; (s2_r1 ⊗ s2_r1) ; mu@r1 ⇒ s2_r1` |
+| 161 | SpiderAbsorption | `delta@r1 ; (s3_r1 ⊗ s3_r1) ; mu@r1 ⇒ s3_r1` |
+| 162 | SpiderAbsorption | `delta@r1 ; (s4_r1 ⊗ s4_r1) ; mu@r1 ⇒ s4_r1` |
+| 163 | SpiderAbsorption | `delta@r1 ; (s5_r1 ⊗ s5_r1) ; mu@r1 ⇒ s5_r1` |
+| 164 | SpiderAbsorption | `delta@r1 ; (s6_r1 ⊗ s6_r1) ; mu@r1 ⇒ s6_r1` |
+| 165 | SpiderAbsorption | `delta@r1 ; (s7_r1 ⊗ s7_r1) ; mu@r1 ⇒ s7_r1` |
+| 166 | SpiderAbsorption | `delta@r2 ; (s0_r2 ⊗ s0_r2) ; mu@r2 ⇒ s0_r2` |
+| 167 | SpiderAbsorption | `delta@r2 ; (s1_r2 ⊗ s1_r2) ; mu@r2 ⇒ s1_r2` |
+| 168 | SpiderAbsorption | `delta@r2 ; (s2_r2 ⊗ s2_r2) ; mu@r2 ⇒ s2_r2` |
+| 169 | SpiderAbsorption | `delta@r2 ; (s3_r2 ⊗ s3_r2) ; mu@r2 ⇒ s3_r2` |
+| 170 | SpiderAbsorption | `delta@r2 ; (s4_r2 ⊗ s4_r2) ; mu@r2 ⇒ s4_r2` |
+| 171 | SpiderAbsorption | `delta@r2 ; (s5_r2 ⊗ s5_r2) ; mu@r2 ⇒ s5_r2` |
+| 172 | SpiderAbsorption | `delta@r2 ; (s6_r2 ⊗ s6_r2) ; mu@r2 ⇒ s6_r2` |
+| 173 | SpiderAbsorption | `delta@r2 ; (s7_r2 ⊗ s7_r2) ; mu@r2 ⇒ s7_r2` |
+
+## Gates (prereg §6 — any failure ⇒ RUN-INVALID)
+
+- **S-sound — PASS.** Every declared writing the run produces `replay`s under the registered 174 rules and the replayed content `content_eq`s the reported representative: **6600** verified across **11** declaring cells (30 seeds × 20 tasks each), **0** unsound. **Amendment A5.3 scope fix:** the gate previously asserted over the two confirmatory rewriting cells only, while the E-fuel sweep's eight cells and E-ceil leg (i) computed an `unsound` count that was discarded — §6 says "every declared writing… all tasks, all seeds", so all eleven are now asserted. (An unsound writing could never be SCORED as legitimate — `p9_declare` declines-and-counts it — but the gate must have the scope §6 states.) It is also strictly stronger than the registration asks in the other direction: writings the search left content-equal to the as-written one are verified too, rather than exempted on the grounds that nothing changed. The as-written control and the valuation cells declare the writing the world drew, so no verification is owed there (prereg §4). Amendment A2.4: `RewriteStep` has no public constructor, so the negative direction is exercised upstream and by the library's own tamper tests (empty rules slice, mismatched `start`, reordered rules) rather than by a forged step here.
+- **S-dedup — PASS.** `canonical_key(a) == canonical_key(b)` ⟺ `content_eq(a, b)` on all **179700** unordered pairs of the **600**-workflow drawn corpus: **0** disagreements. Like-with-like holds by construction — every key in every table comes from `content_of_colored`, and `content_of` appears exactly once, in the mono-vs-colored measurement below, where it feeds no table. `ContentKey` is deliberately NOT `Ord`, so the tables are hash-keyed and every reported figure is order-free (counts, and a histogram sorted by SIZE, never by key).
+  - Mono-vs-colored seam, MEASURED not assumed: **0** of 600 workflows have `canonical_key(content_of(expr)) != canonical_key(content_of_colored(w))`. Mixing the two entry points in one table would split or merge exactly those buckets.
+- **X-reduce — PASS.** On the degenerate world (every task the all-parallel `tensor` of its distinct steps, fan-out 0, and — load-bearing — **zero stream draws**, so its instances are bit-for-bit the v2t instances of the same seed), `wf-asis` reproduces the EQ4 typed arm's **acts + per-seed PRIMARY (bit-identical) + churn** on all 30 seeds, and both rewriting cells with an EMPTY rule set reproduce `wf-asis` bit-identically on the same three. Raw score bits are NOT compared: the gate is on DECISIONS, not float bit patterns (the EQ3 H-par′ lesson).
+- **X-battery** (frozen Parts 1–8 byte-identical on every quality/ratio/superiority/churn/verdict line) is checked OUTSIDE this binary, by diffing this run's Parts 1–8 against a pre-change baseline; latency-only diffs are the standing exclusion.
+
+## Draw, shape, and feasibility (prereg §2, Amendment A1.5)
+
+- **Shape.** Per-role chain length is that role's tagged-bit count (A1.5 — no free parameter); the spider fan-out probability is **0.25** per same-role ADJACENT pair, drawn as `next_u64() % 4 == 0` (one draw per pair, exactly a quarter of the range, no float comparison inside a seeded draw). Over the 600 tasks: median step **occurrences** 3.0, median **distinct** `(bit, role)` 3.0, and **170** tasks (28.3 %) carry at least one fan-out.
+- **Fan-out SHAPE (disclosure — a draw choice the registration did not spell out).** A firing pair writes the later step as `δ_r ; (s ⊗ s) ; μ_r`, which is EXACTLY the left-hand side of the pinned spider-absorption schema. prereg §2 phrases fan-out as "a step may feed two same-role successors"; a generic split feeding two DIFFERENT successors would leave the absorption schema dead on drawn traffic — 24 of the theory's 174 instances would never match anything and the `catgraph-syntax` dependency A1.1 justifies would be decorative. The reachable shape is used so the registered schema is testable.
+- **How much of the stream the confirmatory lever can act on — MANDATORY disclosure, Amendment A3.2 as RE-ANCHORED by A5.2.** Coverage is per DISTINCT `(bit, role)`, so idempotence and spider absorption — 48 of the theory's 174 instances — change OCCURRENCE count only and are staffing-INVISIBLE by construction: a task they alone touch scores bit-identically to the control. **Fusion is the only schema that can move a decision.** The evidence that the leg is powered is therefore the MEASURED **`demand_moved`** counter — tasks whose declared distinct demand actually differs from the as-written one, i.e. real search results: **337/600 (56.2 %)** for `wf-rw-u` and **337/600 (56.2 %)** for `wf-rw-p`. Under the NARROW Amendment 1 schema (one designated pair per role) the recorded Stage-2 eligibility was **43/600 (7.2 %)** — a recorded prior, since the narrow schema no longer exists to re-measure — over a stream where ~93 % of tasks were consequently identical across arms, which no stream-level bar could clear on merit.
+  - **Eligibility heuristic, printed as the LOOSE upper bound it is:** a task is counted eligible iff some role's tagged bits contain both members of one surviving fusion pair — **358** of 600 tasks (**59.7 %**). It is a NECESSARY condition only; the verdict never reads it.
+  - **The bit-4 void — why the bound is loose, and PERMANENTLY so (Amendment A5.2, mandatory line).** `b'' = (b + b' + 4) mod 8` equals `b` exactly when `b' = 4`, and equals `b'` exactly when `b = 4`, so every pair touching bit 4 is skipped and **bit 4 appears in no fusion instance at all** (bits with no fusion partner, computed from the theory's own pair set: **[4]**). An unfusable bit can never be consumed, so wherever it sits between two otherwise-fusable steps of the same role — `s1 ; s4 ; s5` — the counted-eligible pair `(1, 5)` can NEVER be brought adjacent. That is a permanent obstruction, not the merely probabilistic "a fan-out has to be absorbed first"; the gap between eligibility and `demand_moved` above is partly structural and irreducible. **The schema is deliberately not re-tuned:** re-targeting the instrument after outcomes have been seen would be worse than disclosing the bound.
+- **Feasibility (gotcha 25 / #63).** The v2t prefix carries the registered role-matched rejection re-draw (8168 re-draws over the 30 seeds; worst single task **267** of the 1000-attempt budget). The AS-WRITTEN demand is then re-checked in full: **0** infeasible, which is structural — the shape draw repeats and fans steps but never introduces a new `(bit, role)`, so as-written feasibility is exactly the v2t feasibility the prefix already guarantees. **The OPTIMIZED demand is NOT re-drawn** (prereg §2): an optimizer that concentrates demand on an absent `(bit, role)` is the registered failure mode, counted in E-conc below and never a draw condition.
+
+## Arms (pooled over 30 seeds, v2w world)
+
+| arm | median PRIMARY | vs `wf-asis` | superior seeds | median churn | median µs/decision |
+|-----|---------------:|-------------:|---------------:|-------------:|-------------------:|
+| `wf-asis` | 0.1989 | 1.00× | 0/30 | 6.50 | 11.642 |
+| `wf-rw-u` | 0.2104 | 1.06× | 17/30 | 8.00 | 7.495 |
+| `wf-rw-p` | 0.2112 | 1.06× | 19/30 | 8.00 | 7.578 |
+| `wf-val-u` | 0.2484 | 1.25× | 30/30 | 10.50 | 24.240 |
+| `wf-val-p` | 0.2484 | 1.25× | 30/30 | 10.50 | 24.527 |
+| `mag` | 0.0461 | 0.23× | 0/30 | 6.50 | 3.446 |
+| `scalar` | 0.0197 | 0.10× | 0/30 | 119.50 | 2.802 |
+| `arm-E1` | 0.0558 | 0.28× | 2/30 | 169.50 | 67.268 |
+
+_`wf-asis` is the control: the **EQ4-validated typed arm** (`with_role_modulation`, oracle `ρ = δ`) staffing the workflow as written. EQ5a therefore measures process signal BEYOND role signal and cannot re-harvest EQ4's margin (prereg §1). `mag` (frozen untyped `MagnitudePolicy` over the flattened demand), `scalar` and `arm-E1` are context, non-gating (prereg §3); all three staff the as-written writing._
+
+### A3.1 liveness: the valuation-only cells price the UNSTAFFABLE RESIDUAL
+
+_prereg §4 D3b originally scored `value(S) = Mag(S) − λ · cost_of(writing, per_gen)` while ALSO fixing the declared writing to be independent of `S`. That term is a per-task CONSTANT, so it cancelled exactly from every join/leave margin, and Stage 2 measured both valuation cells bit-identical to the control at every registered λ — two of the four confirmatory cells could not move. **Amendment A3.1** re-reads the mechanism as the residual process the coalition cannot execute:_
+
+```
+value(S) = Mag(S) − λ · Σ per_gen(g)   over step occurrences g of the declared
+                         writing whose (bit, role) is NOT covered by S
+```
+
+_This depends on `S`, so it no longer cancels: admitting an agent that covers previously-unstaffable steps improves the score by `λ` times those steps' price, and a member holding otherwise-unstaffable steps becomes less likely to be swept out. It is not a rescaling of the magnitude signal either — the penalty is weighted by `per_gen`, so **occurrence multiplicity and step scarcity enter a decision for the first time**, neither of which magnitude can see (it gets only the OR-mask of distinct demand). **Spiders are excluded** from the residual: they are priced by `cost_of` but name no `(bit, role)`, so "uncovered" is undefined for them and counting them would re-introduce exactly the cancelling constant A3.1 removed. Demand and the declared writing are unchanged — this is still valuation-only, not rewriting. λ stays 0.05 with the exploratory grid `[0.01, 0.05, 0.25]`._
+
+- **Liveness, MEASURED against the control** (the regression the original formulation would have failed silently): `wf-val-u` diverges on **30/30** seeds, **2724** decisions by ACT and **5303** by raw score bits; `wf-val-p` on **30/30** seeds, **2638** acts and **5260** score bits. Cell is live ⇒ **PASS**.
+
+- **Upstream-evaluation declines (Amendment A5.3, reported not asserted): `wf-val-u` 0 · `wf-val-p` 0.** The library reports an upstream decline as `Decision { act: false, score: 0.0 }` — the SAME value a legitimate exact-zero margin carries, and this lineage knows exact-zero margins to be a large population (EQ3 measured knife-edge decisions at ~43 % of the stream). Inferring a decline from the score would therefore either suppress a great many real corrections or flip a genuine decline into an accept. The wrapper instead **detects evaluation failure independently**, before folding: it runs the harness's own `relevant_masks` + `magnitude_at_t(t = 1)` over both member sets a decision compares and, on `Err`, declines-and-counts. Every other zero score is then known to be a genuine margin and the correction folds safely. Residual, disclosed: the probe's couplings are UNTYPED where the arm's are ρ-modulated, so it detects the structural failure modes exactly but a failure only the ρ-modulated coupling matrix could trigger would slip past — the library exposes no typed-evaluation probe to close that.
+
+- **λ grid** `[0.01, 0.05, 0.25]` (§5, exploratory and non-gating), on the priced cell — λ = 0.01: median PRIMARY 0.2484, median full term 0.260, diverging 30/30 seeds (2726 acts), probe declines 0 · λ = 0.05: median PRIMARY 0.2484, median full term 1.300, diverging 30/30 seeds (2638 acts), probe declines 0 · λ = 0.25: median PRIMARY 0.2484, median full term 6.500, diverging 30/30 seeds (2684 acts), probe declines 0. A1.4 pinned λ so the process term would be "a tiebreaker between otherwise close candidates rather than the dominant term" against O(1) magnitude margins; the sweep is the check on that reasoning.
+
+## H-P (confirmatory, family-wise) — optimizing the process before staffing it
+
+_Four cells against `wf-asis`, seeds 270..300: PRIMARY median ≥ **1.4×** the control's AND strictly superior on ≥ **21/30** seeds (70 %). Both conjuncts, in the SAME cell. The bar is raised from the lineage's standing 1.25× / 60 % to pay for the four looks and was pinned pre-run. Any cell may carry the verdict; **all four report regardless** — no cell-shopping, no post-hoc bar movement._
+
+| seed | n | wf-asis | wf-rw-u | wf-rw-p | wf-val-u | wf-val-p | churn asis | churn rw-u |
+|-----:|--:|--------:|--------:|--------:|---------:|---------:|-----------:|-----------:|
+| 270 | 13 | 0.1827 | 0.1410 | 0.1410 | 0.1939 | 0.1939 | 10 | 7 |
+| 271 | 7 | 0.2404 | 0.2356 | 0.2356 | 0.3575 | 0.3575 | 5 | 8 |
+| 272 | 7 | 0.1966 | 0.1760 | 0.1925 | 0.2607 | 0.2742 | 6 | 4 |
+| 273 | 6 | 0.3018 | 0.2187 | 0.2733 | 0.3208 | 0.3208 | 8 | 14 |
+| 274 | 4 | 0.2758 | 0.2615 | 0.2802 | 0.4167 | 0.4167 | 2 | 4 |
+| 275 | 15 | 0.1210 | 0.1470 | 0.1464 | 0.1806 | 0.2043 | 8 | 13 |
+| 276 | 16 | 0.1033 | 0.1767 | 0.1753 | 0.1594 | 0.1691 | 14 | 6 |
+| 277 | 13 | 0.1668 | 0.2117 | 0.2117 | 0.1887 | 0.1887 | 7 | 8 |
+| 278 | 6 | 0.2180 | 0.1634 | 0.1634 | 0.2925 | 0.2925 | 1 | 3 |
+| 279 | 15 | 0.0873 | 0.1400 | 0.1302 | 0.1429 | 0.1595 | 13 | 10 |
+| 280 | 13 | 0.0566 | 0.1497 | 0.1622 | 0.1819 | 0.1944 | 3 | 9 |
+| 281 | 8 | 0.2899 | 0.2100 | 0.2100 | 0.3533 | 0.3533 | 6 | 11 |
+| 282 | 16 | 0.2050 | 0.2303 | 0.2303 | 0.2071 | 0.2071 | 8 | 5 |
+| 283 | 5 | 0.4592 | 0.4000 | 0.4000 | 0.5083 | 0.5083 | 7 | 8 |
+| 284 | 12 | 0.1547 | 0.1768 | 0.1768 | 0.2003 | 0.2003 | 5 | 9 |
+| 285 | 15 | 0.2148 | 0.1994 | 0.2172 | 0.2182 | 0.2182 | 12 | 11 |
+| 286 | 14 | 0.1992 | 0.2247 | 0.2247 | 0.2472 | 0.2472 | 9 | 13 |
+| 287 | 6 | 0.2004 | 0.1171 | 0.1171 | 0.2562 | 0.2562 | 4 | 8 |
+| 288 | 5 | 0.3444 | 0.2333 | 0.2333 | 0.3750 | 0.3750 | 4 | 4 |
+| 289 | 15 | 0.1815 | 0.1875 | 0.1858 | 0.2447 | 0.2447 | 7 | 9 |
+| 290 | 11 | 0.2955 | 0.3021 | 0.3021 | 0.3533 | 0.3533 | 2 | 6 |
+| 291 | 8 | 0.1701 | 0.1220 | 0.1342 | 0.2842 | 0.2842 | 8 | 7 |
+| 292 | 10 | 0.1586 | 0.1635 | 0.1610 | 0.2108 | 0.2108 | 3 | 6 |
+| 293 | 4 | 0.3440 | 0.2175 | 0.2175 | 0.6250 | 0.6250 | 5 | 5 |
+| 294 | 9 | 0.1647 | 0.2107 | 0.2107 | 0.2221 | 0.2221 | 6 | 6 |
+| 295 | 7 | 0.2985 | 0.3400 | 0.3400 | 0.3267 | 0.3267 | 9 | 11 |
+| 296 | 14 | 0.1987 | 0.2376 | 0.2376 | 0.2496 | 0.2496 | 6 | 8 |
+| 297 | 6 | 0.2197 | 0.2907 | 0.2907 | 0.3667 | 0.3667 | 5 | 8 |
+| 298 | 15 | 0.0837 | 0.1281 | 0.1281 | 0.0999 | 0.1261 | 24 | 7 |
+| 299 | 12 | 0.1555 | 0.2170 | 0.2170 | 0.1758 | 0.2086 | 7 | 9 |
+
+- `wf-rw-u`: median **0.2104** vs bar 1.4 × 0.1989 = **0.2785** ⇒ **FAIL** · strictly superior **17/30**, bar 21 ⇒ **FAIL** · cell ⇒ **FAIL**.
+- `wf-rw-p`: median **0.2112** vs bar 1.4 × 0.1989 = **0.2785** ⇒ **FAIL** · strictly superior **19/30**, bar 21 ⇒ **FAIL** · cell ⇒ **FAIL**.
+- `wf-val-u`: median **0.2484** vs bar 1.4 × 0.1989 = **0.2785** ⇒ **FAIL** · strictly superior **30/30**, bar 21 ⇒ **PASS** · cell ⇒ **FAIL**.
+- `wf-val-p`: median **0.2484** vs bar 1.4 × 0.1989 = **0.2785** ⇒ **FAIL** · strictly superior **30/30**, bar 21 ⇒ **PASS** · cell ⇒ **FAIL**.
+
+- Success-rate context (never gated): `wf-asis` 0.8050 · `wf-rw-u` 0.7150 · `wf-rw-p` 0.7250 (mean over seeds). Optimizer declines across both rewriting cells: **0** (a declined task forms no coalition and scores zero — never a silent as-written fallback).
+
+## VERDICT: **FALSIFIED (process structure)**
+
+_Grammar (prereg §7): `VALIDATED (process structure)` = at least one H-P cell passes BOTH conjuncts at the family-wise bar with every §6 gate holding · `FALSIFIED (process structure)` = gates hold, no cell clears the bar · `RUN-INVALID` = any §6 gate fails. This run: carrying cell none · gates X-reduce PASS / S-sound PASS / S-dedup PASS. E-ceil / E-conc / E-fuel mechanism-scoping is reported below but cannot upgrade the verdict. **Scope of a `VALIDATED` reading (Amendment A5.1, binding):** it would read "**a sound-by-stipulation process transformation can unlock staffing value in this world**" — the rewrite rules are hand-authored for this experiment and BGKSZ Thm 5.6 certifies only that the optimizer stayed inside them, so the claim is NOT "process reorganisation is generically valuable". The v1/v2 K4 verdicts, EQ3's and EQ4's verdicts, and the #54 arm question (mag = demonstrated default, FINAL) are UNTOUCHED regardless of outcome, and a `VALIDATED` result would speak to the process-vs-as-written contrast within the typed magnitude family — not to the mag-vs-aif arm question, which is EQ5b's (prereg §7 pre-commitments)._
+
+## E-fuel (registered exploratory, non-gating) — how much of any margin is fuel-bought
+
+_The registered sweep `[32, 128, 512, 2048]` on the rewriting cells (confirmatory fuel is F = 256), a direct probe of catgraph's registered no-termination posture. `fuel_exhausted()` counts are a MANDATORY disclosure (A1.2), never a RUN-INVALID condition._
+
+| cell | fuel | median PRIMARY | vs `wf-asis` | superior seeds | fuel-exhausted tasks | median `states_explored` | median `best_cost` | declare wall s |
+|------|-----:|---------------:|-------------:|---------------:|---------------------:|-------------------------:|-------------------:|---------------:|
+| `wf-rw-u` (uniform) | 32 | 0.2104 | 1.06× | 17/30 | 24 | 2.0 | 2.0 | 0.2 |
+| `wf-rw-u` (uniform) | 128 | 0.2104 | 1.06× | 17/30 | 1 | 2.0 | 2.0 | 0.3 |
+| `wf-rw-u` (uniform) | 512 | 0.2104 | 1.06× | 17/30 | 0 | 2.0 | 2.0 | 0.3 |
+| `wf-rw-u` (uniform) | 2048 | 0.2104 | 1.06× | 17/30 | 0 | 2.0 | 2.0 | 0.3 |
+| `wf-rw-p` (priced) | 32 | 0.2112 | 1.06× | 19/30 | 24 | 2.0 | 20.0 | 0.2 |
+| `wf-rw-p` (priced) | 128 | 0.2112 | 1.06× | 19/30 | 1 | 2.0 | 20.0 | 0.3 |
+| `wf-rw-p` (priced) | 512 | 0.2112 | 1.06× | 19/30 | 0 | 2.0 | 20.0 | 0.3 |
+| `wf-rw-p` (priced) | 2048 | 0.2112 | 1.06× | 19/30 | 0 | 2.0 | 20.0 | 0.3 |
+
+- **Search-cost disclosure (Amendment A3.2 (ii), MANDATORY).** `optimize` matches every rule against every state, so widening the theory from 51 to 174 instances (3.4×) raises search cost directly. Measured on this run: the confirmatory declare (F = 256, 30 seeds × 20 tasks) took **0.3 s** uniform / **0.3 s** priced, and the whole registered sweep `[32, 128, 512, 2048]` × 2 cost models took **2.2 s**. **The sweep ran IN FULL — no fuel point was dropped, so there is no reduction to disclose.** Had runtime forced one, A3.2 requires it be reported here rather than silently trimmed.
+
+## E-conc (registered disclosure, non-gating) — demand concentration onto absent `(bit, role)`
+
+_The registered failure mode, MEASURED: a cheaper writing may concentrate demand on a `(bit, role)` no pool worker holds. Such a task is COUNTED, never re-drawn (prereg §2). `PRIMARY = success_rate × mean cov_eff` is not additive over tasks, so the contribution below decomposes the **mean-quality** factor: `Δ_infeasible` is the part of the per-seed `mean cov_eff` gap that comes from POOL-INFEASIBLE tasks, and `Δ_feasible` the rest._
+
+_**Cause separation (Amendment A5.3).** A task with no declared writing at all — `optimize` errored, or the writing failed S-sound, so it was declined-and-counted — used to be folded into the same "not feasible" bucket as a genuinely pool-infeasible declared demand, which could inflate the concentration rate with events that concentrated nothing. The two are now counted apart and **the rate below is the pool-infeasible one only**; the decline count is printed beside it._
+
+| cell | pool-infeasible tasks | rate | declined tasks | mean `cov_eff` there (cell / control) | Δ_infeasible | Δ_feasible |
+|------|----------------------:|-----:|---------------:|--------------------------------------:|-------------:|-----------:|
+| `wf-rw-u` | 100 | 16.7 % | 0 | 0.1739 / 0.2411 | -0.0112 | +0.0446 |
+| `wf-rw-p` | 96 | 16.0 % | 0 | 0.1738 / 0.2427 | -0.0110 | +0.0457 |
+
+## E-dedup (registered exploratory, non-gating) — content vs writing over the corpus
+
+_Reported as a corpus fact and a latency fact; it cannot carry the verdict (EQ3 spent this lineage's appetite for latency legs)._
+
+- Corpus: **600** as-written workflows (30 seeds × 20 tasks). Distinct as **written** (expression tree + pinned source word): **492**. Distinct as **content** (`canonical_key`): **492**. So **0** arrivals are distinct as written but equal as content — what a content-keyed table buys over a writing-keyed one, at these draws.
+- Bucket-size distribution: largest **6**, median **1.0**, **419** singleton buckets of 492 (sorted by SIZE — `ContentKey` is not `Ord`, so nothing here depends on key order).
+- Same pass over the **`wf-rw-u` DECLARED** corpus (600 writings): distinct as written **364**, distinct as content **364**, collapsed **0**. Rewriting is a normalizing pass, so the writing-vs-content gap is expected to close relative to the as-written corpus above; the two numbers side by side are what the leg reports.
+- **Latency fact:** the median `states_explored` of the confirmatory rewriting cells — 2.0 (uniform) / 2.0 (priced) — is the number of DISTINCT contents the search kept, which is exactly what `canonical_key` dedup bought inside `optimize`; a writing-keyed visited set would have revisited every re-association of each of them.
+
+## E-ceil (registered exploratory, non-gating) — a reference arm WITHIN the rewriting family
+
+_NOT a supremum (the #72 A2.5 correction). `cost_of` sums per-generator weights over OCCURRENCES, so "minimise DISTINCT `(bit, role)` demand" — the staffing question — is not expressible as a `per_gen` at all; E-ceil therefore runs as (i) a large-fuel scarcity-priced cell and (ii) a harness-side minimum-distinct-demand search on a pinned subsample._
+
+| arm | median PRIMARY | vs `wf-asis` | superior seeds | median churn | median µs/decision |
+|-----|---------------:|-------------:|---------------:|-------------:|-------------------:|
+| `wf-asis` | 0.1989 | 1.00× | 0/30 | 6.50 | 11.642 |
+| `wf-rw-p` | 0.2112 | 1.06× | 19/30 | 8.00 | 7.578 |
+| `E-ceil (i): priced, fuel 2048` | 0.2112 | 1.06× | 19/30 | 8.00 | 7.735 |
+
+- **Conversion fraction (leg i):** `(best confirmatory cell − wf-asis) / (E-ceil − wf-asis)` = **100.0 %**. Medians, so this is a summary contrast, not a per-seed decomposition.
+  Fuel-exhausted tasks at fuel 2048: **0**; median `states_explored` **2.0**.
+- **Leg (ii), pinned subsample (seeds 270..276, 120 tasks):** median DISTINCT `(bit, role)` demand — as written **3.0**, `wf-rw-u` at F = 256 **2.0**, reference **2.0**.
+  _What the reference actually searches, stated plainly: `optimize` returns only `best()` — its visited set is private — so the class it enumerates is not readable through the public API. The reference is a pinned MULTI-OBJECTIVE sweep over that class at fuel 2048: the uniform and priced optima, plus one optimum per distinct as-written step under an objective that prices THAT step at 1000 and everything else at 1 — which is how a per-generator weight can ask the search to route around a specific `(bit, role)`. The minimum over those optima is an UPPER bound on the true minimum-distinct demand, and a reference within the rewriting family; it is not a supremum on what any arm could achieve._
+
+## Instrumentation (non-gating)
+
+| cell | median `initial_cost` | median `best_cost` | median steps | median `states_explored` | unchanged writings | **demand moved** | idem / fusion / absorption fires |
+|------|----------------------:|-------------------:|-------------:|-------------------------:|-------------------:|-----------------:|--------------------------------:|
+| `wf-asis` | 3.0 | 3.0 | 0.0 | 1.0 | 600 | 0 | 0 / 0 / 0 |
+| `wf-rw-u` | 3.0 | 2.0 | 1.0 | 2.0 | 235 | 337 | 23 / 510 / 210 |
+| `wf-rw-p` | 26.0 | 20.0 | 1.0 | 2.0 | 235 | 337 | 26 / 507 / 210 |
+| `wf-val-u` | 3.0 | 3.0 | 0.0 | 1.0 | 600 | 0 | 0 / 0 / 0 |
+| `wf-val-p` | 26.0 | 26.0 | 0.0 | 1.0 | 600 | 0 | 0 / 0 / 0 |
+
+- **`demand moved`** counts tasks whose declared DISTINCT `(bit, role)` demand differs from the as-written one — the only way a rewrite can change a score, since coverage is per distinct pair. Every other task in a rewriting cell scores bit-identically to `wf-asis` no matter how much cheaper its writing got. Against the fusion-eligibility bound printed in the draw section, this is the leg's whole causal budget: `wf-rw-u` **337**/600, `wf-rw-p` **337**/600.
+
+- **Distinct-demand reduction** (`as written − declared`, per task): `wf-rw-u` p25 0.0 / median 1.0 / p75 1.0 / max 5.0; `wf-rw-p` p25 0.0 / median 1.0 / p75 1.0 / max 5.0. A NEGATIVE value is the two-sided fusion lever working against the arm — the fused step demands a bit neither consumed step required.
+- **The residual term** (λ = 0.05, Amendment A3.1): median FULL residual `λ · Σ per_gen` at an empty coalition — the largest the penalty can be — is **0.150** uniform / **1.300** staffing-priced; it falls to zero as the coalition covers the writing. A1.4's rationale pins λ so the process term is "a tiebreaker between otherwise close candidates rather than the dominant term" against O(1) magnitude margins; these magnitudes plus the liveness divergence counts above are the check on that reasoning.
+
+
+========================================================================
+
+# koalisi #80 — Part 10: is the unstaffable residual process-specific? (REGISTERED)
+
+_governed by `docs/prereg-K4-residual-process-specificity.md` (committed BEFORE this code; design-lock of record [koalisi #80](https://github.com/sustia-llc/koalisi/issues/80)). Report date 2026-08-05. Seeds **300..330** (fresh; 90..120 and 150..180 stay reserved). EQ5a measured the unstaffable-residual lever at median PRIMARY 0.2484 vs control 0.1989 (**1.25×, strictly superior on 30/30 seeds**) — the strongest paired consistency in this lineage since v5 — under a family-wise bar raised to 1.4× for four looks, so it carried **no verdict**. EQ5a measured the margin and cannot explain it. **H-PS (confirmatory):** the advantage is process-specific — materially larger on the workflow world than on a structurally flat world carrying the same coverage demand. **The null is (B), and it is the favourite:** the residual is a monotone penalty on uncovered demand, i.e. a coverage proxy in process clothing, which would work identically on flat tasks._
+
+_**The sharpened question** (prereg §2). The v2w shape draw repeats and fans steps but NEVER introduces a new `(bit, role)`, so v2w and v2t carry **identical distinct demand per task** (asserted below as X-pair's second conjunct). The two worlds pose the same coverage problem and differ only in **occurrence multiplicity**. So (A) is not "workflows help" in some diffuse sense; it reduces to: occurrence multiplicity and/or scarcity weighting carry decision-relevant signal beyond the distinct uncovered set. (B) is its exact negation — the lever reads only how much distinct demand is uncovered, which magnitude's own coverage term already tracks._
+
+_**Falsifiability posture** (prereg §1). Two independent EQ5a measurements already point at (B): λ across a 25× range and BOTH cost models all produced the identical median 0.2484 while act counts differed. If the weight of a scarcity-weighted term does not move the outcome, the weighting is probably not the mechanism. This registration is built so the unglamorous answer can win, and `FALSIFIED (coverage proxy)` is a **real finding to be stated plainly** (prereg §6), not a lever failure to be dressed up._
+
+_**The lever, unchanged from EQ5a Amendment A3.1 and now a library type** (prereg §7, lock D6 — `koalisi::process::ResidualPolicy`, feature `process`; the harness consumes it and no second copy lives example-side):_
+
+```
+value(S) = Mag(S) − λ · Σ per_gen(g)   over demand elements g of the declared
+                         writing whose (bit, role) is NOT covered by S
+```
+
+_**Spiders are excluded**: they name no `(bit, role)`, so "uncovered" is undefined for them and counting them would re-introduce the cancelling constant A3.1 removed. **A zero score is NOT inferred to be a decline**: the library reports an upstream evaluation failure as `Decision { act: false, score: 0.0 }`, the same value a legitimate exact-zero margin carries — a population EQ3 measured at ~43 % of the stream — so `ResidualPolicy` detects evaluation failure INDEPENDENTLY (its own `relevant_masks` + pinned-`t = 1` magnitude over both member sets) before folding, and declines-and-counts on `Err`. λ = 0.05, cost model **uniform** for the confirmatory cells (metric-blind, EQ5a A1.4's reasoning)._
+
+## Gates (prereg §5 — any failure ⇒ `RUN-INVALID`)
+
+- **X-pair — PASS.** The two worlds' instances share the v2t prefix **bit-for-bit** on **30/30** seeds (pool masks, trust, worker roles, per-task `required` + tags + arrival order, and the rejection-re-draw bookkeeping, compared field by field rather than by a derive that could silently stop covering a new field), and carry **identical distinct `(bit, role)` demand** on **600/600** tasks. Both halves are load-bearing: without the first, H-PS conjunct 2's pairing is meaningless; without the second, `res-flat` is not a control for `res-wf` at all — the worlds would pose different coverage problems and any margin difference could be demand rather than process. The flat world is drawn by calling Part 8's `draw_typed_instance` verbatim and dressing it with the all-parallel degenerate shape (zero stream draws), so the agreement is structural; it is asserted anyway.
+  - **The one axis the worlds differ on, quantified:** **178** of 600 v2w tasks (29.7 %) repeat at least one step, and the corpus carries **2265** step occurrences on v2w against **2045** on v2t (1.11× multiplicity). That excess IS the process signal on offer — H-PS conjunct 2 can only separate the worlds on seeds where it is nonzero.
+- **X-identity (λ = 0) — PASS.** Each `res-*` arm at λ = 0 reproduces its own control **bit-identically on acts and raw score bits** (and on per-seed PRIMARY bits and churn), all 30 seeds: `res-wf` PASS · `res-flat` PASS · `res-distinct` PASS. This is the causality pin for the entire lever, promoted from EQ5a's `part9_valuation_is_live_a3_1` test to a run gate. It is what makes every divergence below attributable to the residual rather than to the wrapper — the exact defect EQ5a's original formulation hid, where a per-task constant cancelled out of every margin and the cell passed every test it had by being a no-op.
+- **S-live — PASS.** Each `res-*` arm at λ = 0.05 diverges from its control on at least one seed: `res-wf` 30/30 seeds, 2739 acts, 5425 score bits · `res-flat` 30/30 seeds, 2739 acts, 5425 score bits · `res-distinct` 30/30 seeds, 2739 acts, 5425 score bits. **A cell that cannot move is `RUN-INVALID`, not a null result** — that is the regression EQ5a's inert formulation passed silently, and a flat-world cell that is algebraically incapable of moving would make conjunct 1 pass for the wrong reason.
+- **S-probe (Amendment A1.1) — PASS.** Decisions declined by the wrapper's independent evaluation probe, per registered `res-*` cell: `res-wf` 0 · `res-flat` 0 · `res-distinct` 0. **Nonzero is `RUN-INVALID`, not a footnote.** The probe runs the **untyped** `relevant_masks` + `magnitude_or_zero` path while every Part 10 inner policy is **typed** (oracle `ρ = δ`), so a typed evaluation that errors where the untyped probe succeeds hands the wrapper `Decision { act: false, score: 0.0 }` — indistinguishable from a legitimate exact-zero margin — and a correction folds onto a genuine decline, corrupting PRIMARY and act counts **without tripping any other §5 gate**. EQ5a measured 0/0 and disclosed the gap; Part 10 exercises it across three cells × 30 fresh seeds, so it is gated here. Closing the gap properly needs a typed-evaluation probe that does not exist upstream — a catgraph-side surface, deliberately not improvised here.
+  - The λ = 0 identity cells are covered TRANSITIVELY rather than separately: a probe decline there returns `{ act: false, score: 0.0 }` where the inner policy would return its genuine margin, so **X-identity would already fail**. Measured there anyway: `res-wf` 0 · `res-flat` 0 · `res-distinct` 0. The exploratory E-price / E-λ cells report their counts in their own sections and are **not** gated — §4 makes those legs non-gating, and gating them here would quietly promote a leg the registration fixed as exploratory.
+- **X-battery** (frozen Parts 1–9 byte-identical on every quality/ratio/superiority/churn/verdict line) is checked OUTSIDE this binary, by diffing this run's Parts 1–9 against a pre-change baseline; latency-only diffs are the standing exclusion. It is also the regression gate on the prereg §7 promotion: EQ5a's example-side `P9ValuationPolicy` is gone and Part 9 now runs the library's `ResidualPolicy`, so Part 9 reproducing byte-identically is what certifies the move changed no decision.
+
+## Arms (pooled over 30 seeds; λ = 0.05, uniform cost)
+
+| arm | world | median PRIMARY | vs `ctl-wf` | superior seeds | median churn | median µs/decision |
+|-----|-------|---------------:|-------------:|---------------:|-------------:|-------------------:|
+| `ctl-wf` | v2w | 0.1817 | 1.00× | 0/30 | 7.00 | 12.790 |
+| `ctl-flat` | v2t | 0.1817 | 1.00× | 0/30 | 7.00 | 12.614 |
+| `res-wf` | v2w | 0.2426 | 1.34× | 30/30 | 12.00 | 27.602 |
+| `res-flat` | v2t | 0.2426 | 1.34× | 30/30 | 12.00 | 26.815 |
+| `res-distinct` | v2w | 0.2426 | 1.34× | 30/30 | 12.00 | 26.475 |
+
+_`ctl-wf` and `ctl-flat` are the SAME policy — the EQ4-validated typed arm (`with_role_modulation`, oracle `ρ = δ`) — on the two worlds. **Measured: they are bit-identical ⇒ PASS.** That is expected and worth stating, because it is what makes the decomposition clean: the policy sees only the OR-mask of distinct demand (identical by X-pair) and the scorer counts only distinct `(bit, role)` coverage (identical by X-pair), so multiplicity is invisible to BOTH. The controls therefore contribute no world difference of their own, and every `res-wf` − `res-flat` gap is the residual weighting alone. `res-*` rows are shown against `ctl-wf` so the whole table shares one denominator; the per-world ratios `r_wf` / `r_flat` below are each computed against that world's OWN control, as registered._
+
+## S-repl (registered sanity leg — must hold, prereg §4)
+
+- `r_wf` = median PRIMARY(`res-wf`) / median PRIMARY(`ctl-wf`) = **1.3355×** against the bar **1.25×** ⇒ **PASS**. The lever must first replicate EQ5a's margin out-of-sample on seeds 300..330; if it does not, the discrimination is moot and the run reports `NOT REPLICATED` and produces **no** process-specificity verdict. (This is where #80's D2 replication option lands — as a precondition, not a parallel leg.) EQ5a's in-sample figure was 1.25× on seeds 270..300.
+
+## H-PS (confirmatory — BOTH conjuncts required, prereg §4)
+
+- **Conjunct 1 — FAIL.** `lift_w = r_w − 1`: `lift_wf` **+0.3355**, `lift_flat` **+0.3355** (`r_flat` 1.3355×). Bar: `lift_wf ≥ 1.25 × max(lift_flat, 0)` = **0.4194**. **The floor is load-bearing** (#80 formalism pin): a raw `lift_wf / lift_flat` blows up as `lift_flat → 0` and FLIPS SIGN when the lever hurts on flat, which would let a mediocre `res-wf` pass on a negative denominator. Flooring at 0 also means that if the lever does nothing on flat, any positive workflow lift satisfies this conjunct — which is *correct* (no flat lift ⇒ process-specific) and is exactly why S-repl carries the "and the effect is real" half.
+  - **Floor condition (Amendment A1.2/A1.3): contested.** `lift_flat` is measured and positive (+0.3355), so `bar_c1` = **0.4194** is a real bar and conjunct 1 is a **contested** test — both conjuncts are doing discriminating work.
+- **Conjunct 2 — FAIL.** Paired per-seed `margin_wf > margin_flat` on **0/30** seeds against the bar **18**, where `margin_w` = per-seed PRIMARY(`res-w`) − PRIMARY(`ctl-w`) — a **difference, not a ratio**, because differences are well-behaved at zero. Exact ties (`margin_wf == margin_flat`, i.e. the residual weighting made no difference at all on that seed): **30**; a tie is not a win and counts against the bar, which is the honest reading on a seed whose writing repeats nothing.
+- Margin distributions (per seed): `margin_wf` p25 +0.0312 / median +0.0586 / p75 +0.0929; `margin_flat` p25 +0.0312 / median +0.0586 / p75 +0.0929.
+
+## E-mult (registered exploratory, NON-GATING — prereg §4)
+
+- **`res-distinct` vs `res-wf` on v2w — the multiplicity-only contrast.** Same world, same declared writings, same λ and cost model; the ONLY difference is that `res-distinct` prices each uncovered `(bit, role)` once instead of once per occurrence. Medians **0.2426** vs **0.2426**; they differ on **0** decisions by ACT and **355** by raw score bits, with **0/30** seeds carrying any act difference at all. Whatever multiplicity is worth, it is worth exactly this.
+- **`res-wf` vs `res-flat` — the same contrast by the other route, and the number the verdict turns on.** They differ on **0** decisions by ACT and **355** by raw score bits, **0/30** seeds carrying any act difference. **Read the two columns against each other:** a nonzero score-bit count with a zero ACT count says the multiplicity weighting genuinely reaches the margin and genuinely never crosses a threshold. That is a mechanism statement, not a null — the term is live (S-live), it is simply too small at these λ to change what anyone decides, so it cannot produce a per-seed PRIMARY difference for H-PS conjunct 2 to detect. Reported here because the confirmatory legs above see only PRIMARY, where this distinction is invisible.
+- **Internal consistency check (prereg §3): `res-distinct` vs `res-flat` — measured bit-identical ⇒ PASS.** The registration expects them to land "near" each other; on this world the coincidence is **exact, and structural**. By X-pair the two worlds carry the same distinct demand and the same pool, so `res-distinct`'s residual (each distinct step once, uniform price) IS `res-flat`'s residual element for element, over an identical control. Reported either way, as registered: an inequality here would have meant one of X-pair's conjuncts was doing less work than it claims.
+
+## E-price (registered exploratory, NON-GATING — prereg §4)
+
+| cost model | `r_wf` | `r_flat` | `lift_wf` | `lift_flat` | conjunct-1 bar | floor condition | conjunct 1 |
+|---|---:|---:|---:|---:|---:|---|---|
+| uniform (confirmatory) | 1.3355× | 1.3355× | +0.3355 | +0.3355 | 0.4194 | contested | FAIL |
+| staffing-priced | 1.3869× | 1.3869× | +0.3869 | +0.3869 | 0.4836 | contested | FAIL |
+
+_EQ5a measured uniform and priced as median-identical on v2w; whether that survives the flat world is the question this leg asks. Non-gating: the confirmatory cells are the uniform row, fixed before the run, and a priced row that behaved differently would be mechanism evidence, not a second look at the bar. The `floor condition` column carries Amendment A1.2/A1.3 through this table too — a `trivial` or `UNDEFINED` row's conjunct-1 PASS costs nothing. **Probe declines (A1.1, reported here, NOT gated — §4 fixes this leg as exploratory): `res-wf` priced 0 · `res-flat` priced 0.** Median full residual `λ · Σ per_gen` at an empty coalition — the largest the penalty can be — is 0.150 (v2w uniform) / 0.150 (v2t uniform) / 1.300 (v2w priced) / 1.200 (v2t priced)._
+
+## E-λ (registered exploratory, NON-GATING — prereg §4)
+
+| λ | `r_wf` | `r_flat` | `lift_wf` | `lift_flat` | conjunct-1 bar | floor condition | conjunct 1 | conjunct 2 |
+|---:|---:|---:|---:|---:|---:|---|---|---|
+| 0.01 | 1.3355× | 1.3355× | +0.3355 | +0.3355 | 0.4194 | contested | FAIL | 0/30 |
+| 0.05 | 1.3355× | 1.3355× | +0.3355 | +0.3355 | 0.4194 | contested | FAIL | 0/30 |
+| 0.25 | 1.3682× | 1.3682× | +0.3682 | +0.3682 | 0.4603 | contested | FAIL | 0/30 |
+
+_EQ5a found the median flat across this 25× λ range on v2w. If it is flat on v2t too, that is further (B) evidence — a weighting whose weight does not matter is probably not the mechanism. Non-gating: no row here can move the verdict, which reads the λ = 0.05 cells fixed before the run; the `floor condition` column carries A1.2/A1.3 through this table too. **Probe declines (A1.1, reported here, NOT gated — v2w / v2t): λ = 0.01: 0 / 0 · λ = 0.05: 0 / 0 · λ = 0.25: 0 / 0.**_
+
+## Context (non-gating — prereg §4)
+
+| arm | world | median PRIMARY | vs `ctl-wf` | superior seeds | median churn | median µs/decision |
+|-----|-------|---------------:|-------------:|---------------:|-------------:|-------------------:|
+| `mag` | v2w | 0.0421 | 0.23× | 0/30 | 8.00 | 3.531 |
+| `mag` | v2t | 0.0421 | 0.23× | 0/30 | 8.00 | 3.676 |
+| `scalar` | v2w | 0.0193 | 0.11× | 0/30 | 94.00 | 2.768 |
+| `scalar` | v2t | 0.0193 | 0.11× | 0/30 | 94.00 | 2.799 |
+| `arm-E1` | v2w | 0.0602 | 0.33× | 4/30 | 160.50 | 68.464 |
+| `arm-E1` | v2t | 0.0602 | 0.33× | 4/30 | 160.50 | 68.038 |
+
+_The untyped `mag`, the scalar AIF arm and the persistent `arm-E1` staff the same declared writings; all three are context and none can move the verdict (prereg §4). **Churn** (D4): control 7.00 · `res-wf` 12.00 · `res-flat` 12.00 · `res-distinct` 12.00 — EQ5a measured the lever's churn at 10.5 vs 6.5, a 1.6× cost, and whether that cost is world-dependent is worth a line. **Latency** (D5) is report-only and NEVER gating: the ~2× the residual cells carry is the independent evaluation probe (two extra magnitude evaluations per decision — a harness safety device, not intrinsic to the lever). **Upstream-evaluation declines** (reported, never asserted): `res-wf` 0 · `res-flat` 0 · `res-distinct` 0._
+
+## Verdict (prereg §6 — pre-committed labels)
+
+**VERDICT: `FALSIFIED (coverage proxy)`**
+
+- `VALIDATED (process-specific)` — S-repl holds, H-PS passes both conjuncts, all §5 gates hold.
+- `FALSIFIED (coverage proxy)` — S-repl holds, gates hold, H-PS fails either conjunct. **This is the (B) outcome and it is a REAL FINDING**: it says EQ5a's valuation result was a coverage penalty, not a process signal, and it is to be stated plainly rather than presented as a lever failure.
+- `NOT REPLICATED` — S-repl fails; no process-specificity verdict is produced.
+- `RUN-INVALID` — any §5 gate fails, **including a nonzero probe-decline count on any registered `res-*` cell** (Amendment A1.1).
+
+_Gates PASS (X-pair PASS · X-identity PASS · S-live PASS · S-probe PASS) · S-repl PASS · H-PS conjunct 1 FAIL (contested) · conjunct 2 FAIL. Pre-committed interpretations (prereg §6): the v1/v2 K4 verdicts, EQ3's, EQ4's and EQ5a's verdicts, and the **koa#54 arm question (mag = demonstrated default, FINAL)** are UNTOUCHED regardless of outcome. **Shipping the policy to the library (D6) is not adopting it** — adoption would be a separate decision this registration does not license in either direction. No post-hoc bar movement. Latency is never gating._
+
+========================================================================
+
+# koalisi #78 — Part 11: the typed two-engine contest (REGISTERED)
+
+_governed by `docs/prereg-K4-eq5b-typed-two-engine.md` **including Amendments 1–5** (committed BEFORE this code; design-lock of record [koalisi #78](https://github.com/sustia-llc/koalisi/issues/78)). Report date 2026-08-08. Seeds **330..360** (fresh; 90..120 and 150..180 stay reserved). **H-G (confirmatory):** an active-inference engine deciding over role-restricted coverage queries — `aif::GroupAgent`, R ≤ 3 role internals over arm-E1's persistent world model, `CertaintyWeighted` active slot, `n_actions = 2` — beats the EQ4-validated typed magnitude arm staffing the same workflows. The control is that validated arm, so EQ5b cannot re-harvest EQ4's margin._
+
+_**READ THIS BEFORE THE TABLE — Amendment A5.1, the review's central finding.** This arm is **not** "a group of role specialists deliberating about a candidate". It is **a group of role-restricted coverage queries, of which only the candidate's own role internal is candidate-sensitive; the remainder vote on their role's coalition coverage.** Under A2.1's registered role-matched masks the candidate's capabilities reach only its own role's internal, so for every other internal `cfg0 == cfg1` **exactly** on the leave path and the candidate appears in neither mask on the join path — measured, two candidates of a non-rostered role produce **bit-identical scores**. **And the blind internals do not abstain:** `run_replay` records control 0 before every observation, so only the membership-0 columns of `pA` accumulate, A-novelty rewards switching, and indifference resolves to `p(act) = 1.0` at **zero entropy — the MAXIMUM `CertaintyWeighted` weight**. A1.3's `[0.5, 0.5]`-at-weight-0.5 rationale is **WITHDRAWN as measurably false and inverted in sign**; its decision to drop empty-demand roles stands. **The arm is NOT re-specified**: restricting the roster to candidate-sensitive internals would force R = 1 on every decision, i.e. under role-matched masks a group deliberating about one candidate is structurally impossible — and that IS the finding. It is disclosed and measured below, per cell._
+
+_**Amendment 1**: the arm as first registered was unbuildable — SP1's arm-E1 query construction bakes the per-decision candidate into each member's matrices, while `POMDPAgent` exposes no setter for `A`/`B`/`C`/`D` and `GroupAgent` no way to replace a member, so D2a's "persistent internals" and SP1 were mutually exclusive. A1.1 relocates D2a's contrast from member continuity to **world-model topology**: confirmatory cells own **R = 3 role-specialised** persistent models, the reference cells read **one shared** model through three role-restricted views. Members are single-use on every leg, **D4a is struck** (there is nothing for a commit to advance), and the MMP double-update hazard of gotcha 32 is DESIGNED OUT rather than gated — which is why S-learn below is thinner than the 2026-08-08 correction described. **Amendment 2**: the coverage masks are registered **role-matched** (the world's own `p9_step_covered` is role-matched), with `grp-role-blind` as a single non-gating reference isolating that mechanism, and SP3 applies **uniformly to join and leave** — this arm declines on a tie where arm-E1 leaves on one._
+
+_**Amendment 3**, made with off-block smoke visible and recorded as such: D2 pinned `CertaintyWeighted` as **forced** because only it was thought to carry a continuous margin at R ≤ 3 over 2 actions. **That premise is measured false on this world** — the E-agree margin median sits at 0.5, so the mixture is itself a delta and SP3's threshold is never contested. Two sources, and **A5.1 corrects which dominates**: the group propagates arm-E1's inherited gotcha-25 saturation **and adds a second source** — an internal whose two coverage configurations are identical is not undecided but maximally confident for "act" — and **on this roster the second source is the larger one**. **The confirmatory cells are NOT re-specified** (post-hoc instrument re-targeting, refused at EQ5a A5.2); the cost is MEASURED by the non-gating `grp-role-det` leg. **Amendment 4** replaces A3.1's expectation that `grp-role-det` would land near `grp-role`: saturated *members* do not make a confidence-weighted mixture and a winner-set vote agree, because CW weights by `exp(−H)` while the tally is one-member-one-vote — which at R = 2 makes SP3 a **unanimity** rule. A3.2 promotes a `grp-mult` vs `grp-role` act-and-score-bit line to a **mandatory** disclosure._
+
+_**Amendment 5 — the 3-lens review**: five blocking, ~15 important, ~30 minor findings, every one dispositioned. Beyond A5.1 above: **A5.2** adds a pre-committed scoped claim against `arm-E1`, the single-agent shape of the very engine this wraps, recorded at 1.62× magnitude in v5 and run here on identical instances. **A5.3** implements S-learn (iii) as the non-gating `grp-role-nonov` cell. **A5.4** repairs S-learn (i): the tolerance is prereg-pinned at 1e-9, `expected` is re-derived independently from the task stream so a **surplus** is reachable at all, and the non-vacuity guard is per-model `all` rather than `any`. **A5.5** relabels S-live a disclosure — as implemented it cannot fail. **A5.6** corrects the `Deterministic` read to uniform-over-winners `{0, 0.5, 1}`. **A5.7** withdraws A2.3's "purely": with novelty off the read still moves (`0.500000000 → 0.500002287`), because `update_a` re-derives `A` after an unscaled `η·joint`, so SP2 moves concentration **predominantly**, not purely. **A5.8**: SP2's registered sign is **BACKWARDS** — concentration is evidence **possessed**, so higher multiplicity means **less** epistemic pull, and a repeated step makes the arm markedly **less** willing to staff it (`p(act)` `0.999999991 → 0.501759150` as `m` goes 1 → 3); the word "demand" is withdrawn and the mechanism is unchanged. **A5.9**: "changes the engine, not the criterion" is narrowed — three things differ from arm-E1, so EQ5b changes the engine **and the aggregation**, and only the threshold is held fixed._
+
+_**Smoke disclosure (A5.10 L2-20), stated plainly rather than as an aside:** Amendments 3, 4 and 5 were all written with off-block smoke showing the confirmatory cell **apparently passing** — `grp-role` at 1.379× on 2 seeds, above conjunct 1's bar. None of them moves the bar, adds a confirmatory cell, or re-specifies the arm; the reader is entitled to know they were made with a favourable number visible._
+
+## Gates (prereg §5 — any failure ⇒ `RUN-INVALID`)
+
+_**Two senses of "gating", separated (Amendment A5.10 L2-5).** A **validity-gating** item is one whose failure makes the run `RUN-INVALID`: the four below. A **verdict-gating** item is one that can change the verdict *label*: only H-G, in a confirmatory cell, against the bar D6 fixed at lock time. No non-gating leg can move either, and the bar cannot be relitigated after the numbers are visible._
+
+- **X-identity — PASS.** At the identity configuration `m ≡ 1` the multiplicity channel reproduces its base **bit-identically on acts and raw score bits** (and on per-seed PRIMARY bits and churn), all 30 seeds: role-specialised PASS · shared PASS (A5.10 L2-19 — the gate covered only the confirmatory pair before). Asked on the all-parallel degenerate world, which carries `m ≡ 1` everywhere and consumes ZERO extra stream draws, so its base prefix is bit-for-bit the v2w instance of the same seed. This is what keeps SP2 from being a free parameter — the scale is `m(b, r)` or it is nothing.
+  - **Scale alignment — PASS** (A5.10 L2-16). An SP2 scale vector permuted against the query's modality order is invisible to the identity above, because every entry is 1 there. Checked directly: with per-bit multiplicities that differ, swapping which bit carries which must move the read, and it does.
+- **S-determinism — PASS.** Every **model** cell re-run from scratch and compared per seed on acts, raw score bits, PRIMARY bits and churn: `grp-role` 30/30 · `grp-mult` 30/30 · `grp-role-shared` 30/30 · `grp-mult-shared` 30/30 · `grp-role-blind` 30/30 · `grp-role-nonov` 30/30. Extended from the confirmatory pair to all five (A5.10 L2-3), since A4.2 gates model-variations.
+  - **Seed invariance — PASS** (30/30). Reproducibility alone would be passed by a seeded sampler, so the real claim is that the deterministic read consumes no randomness at all: re-running `grp-role` with a **different** `battery_seed` must reproduce it bit-for-bit. Valid because the seed reaches the engine only as `AgentParams { seed }` — the world models, the per-decision query seed, the `VotingAgent` and the group RNG. (A5.10 L2-4 struck the old rationale, which claimed a slip to `act` would surface here; the `grp-seed` cell in this very run refutes that.)
+- **S-learn (i) — PASS.** Per seed, each world model must record **exactly one** update per task in which its role had demand — **counted, not inferred from state movement**, because under MMP a missing commit makes an update apply TWICE rather than not at all, so "did the state move?" passes a double-updating arm. Deficit and surplus are both `RUN-INVALID`. Seeds with an exact ledger, and seeds whose every **in-scope** world model moved off initialization by more than 1e-9 (the prereg-pinned non-vacuity tolerance — necessary, explicitly NOT sufficient): `grp-role` 30/30 exact, 30/30 moved · `grp-mult` 30/30 exact, 30/30 moved · `grp-role-shared` 30/30 exact, 30/30 moved · `grp-mult-shared` 30/30 exact, 30/30 moved · `grp-role-blind` 30/30 exact, 30/30 moved · `grp-role-nonov` 30/30 exact, 30/30 moved · `grp-role-det` (reported, not gated) 30/30 exact, 30/30 moved · `grp-seed` (reported, not gated) 30/30 exact, 30/30 moved. **Amendment A6.1 scopes non-vacuity to models with `expected > 0`.** The first official run (`7e265fe`) returned `RUN-INVALID` here with the counted ledger 30/30 exact on every cell: seeds **354** and **355** each carried a role model at `expected == 0, updates == 0, max |pA delta| == 0e0` — never asked to learn, because `p8_task_feasible` requires a pool worker **of the tagged role** holding each required bit, so a role absent from the pool can never be legally tagged (354 is `n = 5` with worker-role counts `[3, 0, 2]`; 355 is `n = 4` with `[2, 0, 2]`). At `P(role absent) = 3·(2/3)^n − 3·(1/3)^n` — 0.553 at `n = 4`, 12.5 % of seeds, ≈ 3.76 expected failures per 30-seed block — **no seed block passes the uncorrected guard**, so the guard is what changed and not the block. **Exempt models, disclosed per cell and per seed:** `grp-role` 2 model(s) on 2/30 seeds — (354, r1), (355, r1) · `grp-mult` 2 model(s) on 2/30 seeds — (354, r1), (355, r1) · `grp-role-shared` none · `grp-mult-shared` none · `grp-role-blind` 2 model(s) on 2/30 seeds — (354, r1), (355, r1) · `grp-role-nonov` 2 model(s) on 2/30 seeds — (354, r1), (355, r1) · `grp-role-det` 2 model(s) on 2/30 seeds — (354, r1), (355, r1) · `grp-seed` 2 model(s) on 2/30 seeds — (354, r1), (355, r1). A5.4's `all` stands **within** that scope, so a model that WAS asked and stayed frozen still fails, and "everything exempt" is not a pass.
+  - **Amendment A5.4 repaired two things here.** The tolerance is now **prereg-pinned** rather than a harness local that §5 twice described as registered. And `expected` is re-derived **independently from the task stream** — `begin_task` writes it, `observe_outcome` writes only `updates` — so a **surplus is reachable at all**: before, `expected` was incremented immediately beside the guarded `updates` on the same path, which made `updates > expected` impossible and the RUN-INVALID surplus condition near-tautological. The non-vacuity guard is per-model **`all`**, not `any`; under `RoleSpecialised` a role model that never moved used to pass because a sibling did.
+  - `begin_task` rejections across the **gated** cells: **0** (read-probe cells, reported separately: 0). A rejection means the world names a role or a bit the arm is not configured for — a harness fault, and a **registered** RUN-INVALID condition since A5.10 L2-11, which also scoped this total to the cells it actually gates. **S-learn (ii) and the member-advance conjunct are STRUCK as vacuous** by A1.4: members are single-use on every leg and there is no commit on the decision path, so neither has a referent.
+- **X-battery** (frozen Parts 1–10 byte-identical on every quality/ratio/superiority/churn/verdict line) is checked OUTSIDE this binary, by diffing this run's Parts 1–10 against a `main` baseline captured before HEAD is run; latency-only diffs are the standing exclusion. Part 11 is purely additive, and the one thing that could disturb it is the arm-E1 seam the group arm reuses: `build_query` gained an `Option<&[f64]>` count scale that is `None` on every pre-existing call site (the scaling block is skipped, not multiplied by one), and `observe_outcome` became a delegation to a flag-returning twin with an identical body. Structural, and still **owed** as a measurement.
+
+## Arms (pooled over 30 seeds)
+
+| arm | role | median PRIMARY | vs `wf-asis` | superior seeds | median churn | median µs/decision |
+|-----|------|---------------:|-------------:|---------------:|-------------:|-------------------:|
+| `wf-asis` | **control** | 0.1806 | 1.00× | 0/30 | 7.50 | 13.385 |
+| `grp-role` | confirmatory | 0.2270 | 1.26× | 22/30 | 173.00 | 51.596 |
+| `grp-mult` | confirmatory | 0.2266 | 1.25× | 22/30 | 173.00 | 50.299 |
+| `grp-role-shared` | reference | 0.2409 | 1.33× | 21/30 | 165.50 | 51.730 |
+| `grp-mult-shared` | reference | 0.2404 | 1.33× | 19/30 | 169.00 | 51.765 |
+| `grp-role-blind` | reference | 0.0268 | 0.15× | 0/30 | 185.50 | 50.876 |
+| `grp-role-nonov` | reference | 0.1125 | 0.62× | 5/30 | 140.00 | 43.189 |
+| `grp-role-det` | read-probe | 0.2409 | 1.33× | 24/30 | 147.50 | 49.710 |
+| `grp-seed` | read-probe | 0.0877 | 0.49× | 1/30 | 171.00 | 49.901 |
+| `wf-val-p` | reference | 0.2435 | 1.35× | 28/30 | 12.00 | 27.178 |
+
+_`wf-asis` is the EQ4-validated typed magnitude arm (`with_role_modulation`, oracle `ρ = δ`) staffing the as-written workflow — EQ5a's own control. `wf-val-p` is EQ5a's strongest cell, the library `ResidualPolicy` at EQ5a's pinned λ = 0.05 and the staffing-priced cost model; it is a **mandatory non-gating disclosure**, and the pre-committed interpretation binds: a PASS that does not also exceed its median is reported as **"beats the typed control, not the strongest process cell"**. `grp-seed` is the exploratory seeded-sampling cell (E-seed) and reports **no margin** — its score encodes the draw, so read its `act` column only._
+
+## H-G (confirmatory — BOTH conjuncts in the SAME cell, prereg §5)
+
+| cell | median PRIMARY | ratio vs `wf-asis` | conjunct 1 (≥ 1.25×) | superior seeds | conjunct 2 (≥ 18) | H-G |
+|---|---:|---:|---|---:|---|---|
+| `grp-role` | 0.2270 | 1.2567× | PASS | 22/30 | PASS | PASS |
+| `grp-mult` | 0.2266 | 1.2544× | PASS | 22/30 | PASS | PASS |
+
+- **SP2 liveness against its own base — MANDATORY (Amendment A3.2), reported here because H-G cannot see it.** `grp-mult` vs `grp-role` differ on **181** decisions by ACT and **1526** by raw score bits, across **22/30** seeds. **Read the two numbers against each other**: equal medians with a nonzero score-bit count and a zero act count says the multiplicity weighting reaches the margin and never crosses a threshold — live in the score, dead at the decision, which is #80's 355-bits/0-acts result in a new costume and a mechanism statement rather than a null. Equal medians with BOTH counts zero would instead mean the channel is inert on this world, which X-identity alone cannot distinguish. **Pre-committed reading (A3.2):** if the acts agree, `grp-mult` carries **no independent look**, the 2-cell bar applies to what is effectively one, and that is **conservative, not permissive** — so the bar does not move. **Caveat (A5.7):** some fraction of the score-bit count may be renormalisation ulp noise — `A = column_normalize(pA)` is scale-invariant in ℝ but only ulp-accurate in `f64` — so the score-bit column is an upper bound on the channel's reach.
+- **SP2's measured sign — LESS willing, as A5.8 predicts (Amendment A5.8).** Acts taken: `grp-role` **10741**, `grp-mult` **10732** (-9 decisions). SP2's registered justification read "three occurrences carry three observations' worth of evidence **demand**" — that has the sign **backwards**, and "demand" is withdrawn. Dirichlet concentration is evidence **possessed**, so a higher `m` leaves *less* parameter-information-gain to collect and therefore **less** epistemic pull: a repeated step makes the arm **less** willing to staff it. Also disclosed: the scale multiplies the **whole** modality block, including the uncovered configuration's flat `[1, 1, 1]` prior — asserting pseudo-observations never made, in precisely the block whose novelty drives v5's mechanism. The mechanism is unchanged; only its justification was wrong.
+
+_Both cells report regardless of outcome — no cell-shopping, no post-hoc bar movement. The bar follows D6's cell-count rule, pinned at lock time before the cells were fixed: ≤ 2 confirmatory cells ⇒ the lineage's standing **1.25× / ≥ 18-of-30**. The bar is computed against `wf-asis` and **only** `wf-asis`. Two pre-committed scoped claims constrain how a PASS reads, and neither is a second conjunct: `wf-val-p`'s median is **0.2435** (§6), and **`arm-E1`'s** is the other (A5.2, computed below in Context) — the single-agent shape of the very engine this wraps, recorded at 1.62× magnitude in v5 and run here on identical instances._
+
+## E-life (registered exploratory, NON-GATING — prereg §5)
+
+_**Leg names (A5.10 L2-17 / L3-9).** These were registered as `grp-role-fresh` / `grp-mult-fresh`, naming **member freshness** — a referent Amendment A1.1 SUPERSEDED when it relocated D2a's contrast to world-model topology and made members single-use on every leg. §3's rows are struck; the legs are **`grp-role-shared` / `grp-mult-shared`**, which names what actually varies._
+
+- **role-restricted channel.** R = 3 role-specialised models **0.2270** vs one shared model **0.2409**; they differ on **1284** decisions by ACT and **5450** by raw score bits, with **30/30** seeds carrying any act difference, and the specialised cell is superior on **15/30** seeds. This is how much comes from each role learning ONLY its own bits, rather than from three role-restricted views of one model. (Scope note, A5.10 L3-14: "only its own bits" holds because the as-written v2w world gives each required bit exactly one role tag; a rewriting arm that let a bit carry two roles would break the disjointness.)
+- **multiplicity-weighted channel.** R = 3 role-specialised models **0.2266** vs one shared model **0.2404**; they differ on **1316** decisions by ACT and **5637** by raw score bits, with **30/30** seeds carrying any act difference, and the specialised cell is superior on **13/30** seeds. This is how much comes from each role learning ONLY its own bits, rather than from three role-restricted views of one model. (Scope note, A5.10 L3-14: "only its own bits" holds because the as-written v2w world gives each required bit exactly one role tag; a rewriting arm that let a bit carry two roles would break the disjointness.)
+- **`grp-role-blind` (Amendment A2.1 reference).** Role-blind coverage masks at the role-restricted channel: median **0.0268** against `grp-role`'s **0.2270**, differing on **1470** acts and **5355** score bits across **30/30** seeds. It isolates **role-matched coverage** from **role-restricted demand alone**; under blind masks the three internals differ only in `required_r`. One blind leg, not two — disclosed scoping, since the masks are SP1 machinery shared by both channels.
+- **`grp-role-det` (Amendment A3.1 reference) — what `CertaintyWeighted` actually bought.** D2 pinned CW as *forced* on the argument that only it carries a continuous margin at R ≤ 3 over 2 actions. The E-agree margins below measure that premise: a median at 0.5 means the mixture is itself a delta — from arm-E1's inherited gotcha-25 saturation **and**, per A5.1 the larger source, from structural indifference resolving to a maximally-confident "act". This leg swaps the active slot to `Deterministic` and changes nothing else. Median PRIMARY **0.2409** against `grp-role`'s **0.2270** (Δ **+0.0139**), differing on **2212** decisions by ACT across **30/30** seeds. **Reported as acts and PRIMARY only, never as margins:** under a discrete mode the read is **uniform mass over the max-count winner set** — support `{0, 0.5, 1}` at `n_actions = 2`, **not** `k/R` (Amendment **A5.6** corrected this in three places, including A4.1's parenthetical) — so SP3 over it acts iff `winners == {act}`, i.e. strict majority at R = 3 and **unanimity at R = 2**, and its score is a winner-set indicator that is not commensurable with a CW margin. **The confirmatory cells are NOT switched**: re-specifying a registered arm on smoke data is the post-hoc instrument re-targeting refused at EQ5a A5.2. D2 stands; its rationale is corrected in public and its cost is measured.
+  - **Amendment 4's replacement expectation, and its pre-committed reading (A5.10 L2-6).** A3.1 predicted this cell's acts would land near `grp-role`'s *because* the mixture is a delta. **That inference does not go through** — saturated *members* do not make the two aggregation rules agree, since CW weights each member by `exp(−H)` while the tally is one-member-one-vote against a threshold that becomes **unanimity** at R = 2, which the realised roster reaches often. A4 therefore records the expectation as **unknown, and this leg as what measures it**. Pre-committed: **a large divergence here RESTORES D2's conclusion on new grounds** — CW is load-bearing after all, just not for the reason D2 gave — and must not be presented post-hoc as a vindication of the original argument, which stays measured false. A4.1's conclusions about the act rule (majority at R = 3, unanimity at R = 2) **stand** under A5.6's correction; only the `k/R` arithmetic was wrong.
+- **`grp-role-nonov` — S-learn (iii), the causal pin (Amendment A5.3).** Registered in §5, retained by A1.4, and **absent from the harness** until the review found it. It is the only registered instrument tying EQ5b to the v5 mechanism it claims to inherit: v5's X1 measured that novelty-off collapses arm-E1 to ≈ scalar, so if this arm carries that mechanism, suppressing novelty must degrade it. Median **0.1125** against `grp-role`'s **0.2270**, differing on **3601** acts and **10829** score bits across **30/30** seeds. **A5.1 makes it sharper still:** novelty-off collapses the candidate-blind internal's read from `1.0` to `0.5`, so this cell also prices the candidate-blind bias directly — a large gap is partly the mechanism and partly the bias, and the two are not separated here.
+
+## Candidate reach (Amendment A5.1 — MANDATORY per-cell disclosures)
+
+| cell | zero candidate-sensitive | mean blind internals | blind CW weight share | leave `cfg0 == cfg1` | act rate: sensitive / blind |
+|---|---:|---:|---:|---:|---|
+| `grp-role` | 23.0 % | 1.35 | 0.626 | 9671 of 13107 (73.8 %) | 80.4 % / **95.1 %** |
+| `grp-mult` | 22.9 % | 1.35 | 0.626 | 9658 of 13093 (73.8 %) | 80.5 % / **94.9 %** |
+| `grp-role-shared` | 23.0 % | 1.34 | 0.625 | 9463 of 12858 (73.6 %) | 79.5 % / **92.2 %** |
+| `grp-mult-shared` | 23.0 % | 1.34 | 0.626 | 9458 of 12857 (73.6 %) | 79.6 % / **92.1 %** |
+| `grp-role-blind` | 0.0 % | 0.00 | 0.000 | 8100 of 13306 (60.9 %) | 93.4 % / **n/a** |
+| `grp-role-nonov` | 23.0 % | 1.35 | 0.621 | 8201 of 11173 (73.4 %) | 67.1 % / **73.6 %** |
+| `grp-role-det` | 22.9 % | 1.35 | 0.626 | 8999 of 12195 (73.8 %) | 80.3 % / **93.9 %** |
+| `grp-seed` | n/a (no mixture) | n/a | n/a | 9411 of 12834 (73.3 %) | n/a / **n/a** |
+
+_Read the last two columns together. **The act-rate split** is the sign check: A5.1 predicts the candidate-blind internals vote "act" at a rate far above the candidate-sensitive ones, at zero entropy and therefore **maximum** `CertaintyWeighted` weight, because `run_replay` records control 0 before every observation so only the membership-0 columns of `pA` accumulate and A-novelty rewards switching. If the blind rate is high and the blind weight share is a majority, the group's decision is **dominated by members that cannot see the candidate**. `grp-role-blind` is the contrast: role-blind masks make every internal candidate-sensitive **by construction**, so its first, second and third columns collapse to zero._
+_**The two blindness measures are not the same thing, and the table keeps them apart.** "Candidate-sensitive" is **structural** — does the candidate's capability mask enter this internal's `cfg0`/`cfg1` at all — and under role-matched masks it is `1` exactly when the candidate's role is on the roster. **`leave cfg0 == cfg1`** is **value-dependent**: it also fires when the candidate's capabilities are *subsumed* by the remaining members' union, which is why `grp-role-blind`'s count is reduced but **not** zero. A query with identical masks carries literally zero information about the candidate whichever way it got there. The seeded-sampling cell exposes no distribution and contributes no sample._
+
+## E-agree and the realised roster (registered disclosures — prereg §5, A1.3)
+
+| cell | roster 1 / 2 / 3 | empty role-slots | unanimous reads | margin p25 / median / p75 |
+|---|---|---:|---:|---|
+| `grp-role` | 99 / 368 / 133 | 566 of 1800 | 81.4 % of 11896 | 0.5000 / 0.5000 / 0.5000 |
+| `grp-mult` | 99 / 368 / 133 | 566 of 1800 | 81.3 % of 11887 | 0.5000 / 0.5000 / 0.5000 |
+| `grp-role-shared` | 99 / 368 / 133 | 566 of 1800 | 78.6 % of 11795 | 0.4993 / 0.5000 / 0.5000 |
+| `grp-mult-shared` | 99 / 368 / 133 | 566 of 1800 | 78.7 % of 11795 | 0.4993 / 0.5000 / 0.5000 |
+| `grp-role-blind` | 99 / 368 / 133 | 566 of 1800 | 90.1 % of 11992 | 0.5000 / 0.5000 / 0.5000 |
+| `grp-role-nonov` | 99 / 368 / 133 | 566 of 1800 | 62.5 % of 10959 | 0.1726 / 0.4999 / 0.5000 |
+| `grp-role-det` | 99 / 368 / 133 | 566 of 1800 | 81.8 % of 11436 | 0.5000 / 0.5000 / 0.5000 (winner-set) |
+| `grp-seed` | 99 / 368 / 133 | 566 of 1800 | n/a (no mixture) | n/a |
+
+_Per-seed realised roster on `grp-role` (A1.3 as registered, A5.10 L2-8) — `mean R (empty slots)` in seed order: 2.20 (16) · 2.20 (16) · 1.95 (21) · 2.00 (20) · 2.15 (17) · 2.50 (10) · 2.10 (18) · 1.85 (23) · 1.95 (21) · 2.00 (20) · 2.00 (20) · 2.05 (19) · 1.85 (23) · 2.30 (14) · 2.15 (17) · 2.05 (19) · 2.20 (16) · 2.15 (17) · 2.00 (20) · 2.10 (18) · 1.35 (33) · 2.30 (14) · 2.25 (15) · 1.95 (21) · 1.70 (26) · 1.65 (27) · 2.35 (13) · 2.50 (10) · 1.80 (24) · 2.10 (18)._
+
+_**A1.3**: a role with no `(bit, role)` demand in a task does not vote in it — it leaves the roster, so the realised `R` varies 3 → 2 → 1. A task where EVERY role is empty cannot occur (`|required| ≥ 2`). **A1.3's original rationale is WITHDRAWN as measurably false (A5.1)**: it argued that an abstaining member reads `[0.5, 0.5]` at weight `exp(−ln 2) = 0.5` and would drag `p(act)` toward the threshold. A member with no candidate-discriminating coverage reads ≈ 1.0 at weight 1.0, and its bias is toward **act**, not toward the threshold — wrong in size and **inverted in sign**. The decision to drop empty-demand roles stands; the hazard was real and dropping is still right._
+_**E-agree** reads each internal's own argmax back off the roster after the read — a disclosure, never a decision input — and is split by candidate-sensitivity in the A5.1 table above. The **votes and roster columns are commensurable across every cell**; the **margin column is not**: it is `|p(act) − 0.5|`, the CW mixture's distance from the threshold on CW cells and a **winner-set indicator** on `grp-role-det` (marked, A5.6). The seeded-sampling cell exposes no distribution and so records no sample at all. A margin median at 0.5 means the read is a delta and SP3's threshold is never contested — see Amendment 3, as corrected by A5.1 on which source dominates._
+
+## S-live (DISCLOSURE, not a gate — Amendment A5.5)
+
+- Divergence from `wf-asis`, reported as **acts AND raw score bits separately**: `grp-role` 30/30 seeds, 8948 acts, 11705 score bits · `grp-mult` 30/30 seeds, 8949 acts, 11699 score bits · `grp-role-shared` 30/30 seeds, 8827 acts, 11612 score bits · `grp-mult-shared` 30/30 seeds, 8825 acts, 11608 score bits · `grp-role-blind` 30/30 seeds, 9115 acts, 11861 score bits · `grp-role-nonov` 30/30 seeds, 7631 acts, 10936 score bits · `grp-role-det` 30/30 seeds, 8270 acts, 11117 score bits · `grp-seed` 30/30 seeds, 8848 acts, 11751 score bits. This is the #80 lesson (gotcha 31): a term can be live in the score and dead at the decision, and a leg reading only PRIMARY sees a flat null where the truth is "it reached the margin and never crossed a threshold". Read the two columns against each other before reading any median.
+- **Why it is no longer listed as a gate.** As implemented it asks whether ≥ 1 of 30 seeds shows ≥ 1 differing act **versus a different engine** — not falsifiable in any realistic world, so presenting it under "any failure ⇒ RUN-INVALID" overstated the run's validity checking. The #80 lesson it cites is about a lever versus **its own base**, and the only such comparison here is A3.2's `grp-mult` vs `grp-role`, which the registration fixes as non-gating. Moved to the disclosures verbatim, with nothing about what it measures changed (A5.5).
+
+## E-seed (registered exploratory, NON-GATING — prereg §5)
+
+- Deciding by the shipped `act()` draw instead of the deterministic read: median **0.0877** against `grp-role`'s **0.2270** (2 superior seeds), differing on **1850** decisions by ACT across **30/30** seeds. **That difference IS what the draw costs against argmax.** Constructible because under `CertaintyWeighted` upstream's `Agent::act` polls members through `action_probabilities` and samples with the GROUP's seeded RNG — it never calls a member's own `act`, which the read-only wrapper deliberately refuses. Score bits are not compared: this cell reports no margin.
+- S-learn for the two **read-probe** cells, reported and **not gated**: `grp-seed` 30/30 exact ledgers, 30/30 moved (overall PASS) · `grp-role-det` 30/30, 30/30 (overall PASS). Both replace D4's registered `group_distribution`-under-CW surface, so gating the arm's behaviour on them would gate an instrument the registration did not fix; cells that vary the *model* — topology, precision channel, coverage masks — decide through the registered surface and ARE gated.
+
+## Context (non-gating — prereg §3)
+
+| arm | role | median PRIMARY | vs `wf-asis` | superior seeds | median churn | median µs/decision |
+|-----|------|---------------:|-------------:|---------------:|-------------:|-------------------:|
+| `mag` | context | 0.0366 | 0.20× | 0/30 | 8.00 | 3.623 |
+| `scalar` | context | 0.0167 | 0.09× | 0/30 | 112.00 | 2.766 |
+| `arm-E1` | context | 0.0403 | 0.22× | 1/30 | 167.00 | 68.445 |
+
+_The untyped `mag`, the scalar AIF bridge and the single-agent persistent `arm-E1` staff the same declared writings; all three are context and none can move the verdict. **`arm-E1` is the single-agent shape of the very engine the group cells wrap** — the same v5 E1 configuration (learned per-bit precisions, MeanField queries at fixed γ = 16, novelty on), built from the library's `v5_e1_base()` now that A5.10 L2-14 removed the harness's duplicate definition. Its median here is **0.0403**, and A5.2 makes that a **pre-committed reading constraint**, not a conjunct — see the verdict. **Latency** (E-lat, D10) is record-only and NEVER gating, and the figures in this table are the measurement: A3.3's "~37 µs/decision" is **WITHDRAWN** (A5.10 L2-15 — it does not reproduce), while its conclusion is unaffected, since no leg was trimmed for cost and none is now. A group decision builds up to R ≤ 3 arm-E1 queries where the single-agent arm builds one, and that ratio is the visible cost of the shape. **Inherited quirk, disclosed and adjudicated-not-fixed** (A5.10 L2-18): `p9_e1_battery` derives its per-seed arm seed from `P9_SEED_START`, not this part's range — fixing it would edit frozen Part 9 code, and it is inert because the persistent world model is single-control, has no precision dynamics, and never samples. **Upstream-evaluation declines** across the group cells: `grp-role` 0 · `grp-mult` 0 · `grp-role-shared` 0 · `grp-mult-shared` 0 · `grp-role-blind` 0 · `grp-role-nonov` 0 · `grp-role-det` 0 · `grp-seed` 0. **`wf-val-p`'s probe declines: 0** (A5.10 L1-17 — #80 A1.1 made this gated for the residual lever, so it must not vanish here; reported, since §5 does not gate it in this part)._
+
+## Verdict (prereg §6 — pre-committed labels)
+
+**VERDICT: `VALIDATED (two-engine)`**
+
+- `VALIDATED (two-engine)` — H-G passes both conjuncts in at least one confirmatory cell, all §5 gates hold.
+- `FALSIFIED (two-engine)` — gates hold, no confirmatory cell passes both conjuncts.
+- `RUN-INVALID` — any gate fails.
+
+_Gates PASS (X-identity PASS · S-determinism PASS · S-learn PASS) — **S-live is a disclosure, not a gate** (A5.5), and is reported in its own section. A confirmatory cell carried but did NOT exceed `wf-val-p`'s median (0.2435) — reported, as pre-committed, as **"beats the typed control, not the strongest process cell"**. It also exceeded **`arm-E1`'s** median (0.0403), so the group shape is doing measurable work beyond the single-agent engine (A5.2). Pre-committed interpretations (§6/§7), binding: a `VALIDATED` here means **"on this world, a role-structured active-inference group outperforms the typed magnitude arm"** — NOT that aif beats magnitude generally, and NOT anything about **koa#54 (mag = demonstrated default, FINAL)**, which no EQ5b outcome reopens. The v1/v2 K4 verdicts, EQ3's, EQ4's, EQ5a's and #80's are all untouched. And per **A5.9**, "EQ5b changes the engine, not the criterion" is too strong: SP3 keeps arm-E1's **threshold form**, but it thresholds a confidence-weighted mixture of R posteriors rather than one, declines on ties where arm-E1 leaves, and — per A5.1 — asks a candidate-free question of R − 1 internals. **EQ5b changes the engine AND the aggregation; only the threshold is held fixed.** Whether any advantage transfers off the v2w world is unsettled — one world, one draw family, 30 seeds — and whether the deterministic read is the RIGHT group decision rule is likewise unsettled._
