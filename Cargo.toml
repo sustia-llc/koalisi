@@ -1,6 +1,6 @@
 [package]
 name = "koalisi"
-version = "0.32.0"
+version = "0.33.0"
 edition = "2024"
 # 1.93 is the DECLARED floor — owner decision C-D1, 2026-09-14: KEEP 1.93.
 # It is no longer the measured cross-feature maximum (that is 1.92 since the
@@ -12,9 +12,10 @@ edition = "2024"
 # The floor is feature-conditional, with THREE tiers (measured 2026-09-14 at
 # catgraph v0.23.0, `cargo +<v> check --all-targets --locked --features <set>`
 # with `rust-version` temporarily 1.85.0):
-#   1.88  default, `magnitude`, `persistence`, `remote`, `process`
+#   1.88  default, `magnitude`, `persistence`, `remote`, `process`, `harness`
 #         (1.87 fails: let-chains inside the `catgraph 0.23.0` lib, which
-#         declares no rust-version — not koalisi's own source)
+#         declares no rust-version — not koalisi's own source; `harness`
+#         re-measured 2026-09-16 at v0.33.0, 1.87 fail / 1.88 pass)
 #   1.89  + `decision`, `magnitude-fast`, and the showcase set
 #         `decision,magnitude,process`  (cargo refuses 1.88 declaratively:
 #         nalgebra 0.35.0 / safe_arch 1.0.0 / wide 1.5.0 require 1.89)
@@ -201,6 +202,10 @@ remote = ["dep:libp2p"]
 # `magnitude` — the arm the registration's control staffs a workflow with — and
 # gates the `catgraph-syntax` dependency.
 process = ["magnitude", "dep:catgraph-syntax"]
+# K7 harness: seeded instance generation, the battery loop, report helpers
+# (`src/harness/`, off by default, no dependencies). Registrations are examples
+# gated on it.
+harness = []
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "test-util"] }
@@ -224,6 +229,10 @@ required-features = ["decision"]
 [[example]]
 name = "remote_coalition_consumer"
 required-features = ["remote"]
+
+[[example]]
+name = "gauntlet"
+required-features = ["harness"]
 
 [[test]]
 name = "magnitude_trajectory"
