@@ -49,6 +49,20 @@ pub struct Demand {
 }
 
 impl Demand {
+    /// The demand with one occurrence per yielded step, in yield order.
+    pub fn from_steps(steps: impl IntoIterator<Item = Step>) -> Self {
+        let mut occurrences = Vec::new();
+        let mut counts: BTreeMap<Step, usize> = BTreeMap::new();
+        for step in steps {
+            occurrences.push(step);
+            *counts.entry(step).or_insert(0) += 1;
+        }
+        Self {
+            occurrences,
+            counts,
+        }
+    }
+
     /// Every step occurrence, as a multiset flattened into a `Vec`.
     ///
     /// # Order is a property of the writing, not of the process
@@ -224,5 +238,48 @@ mod tests {
 
         assert!(tensored.eq_colored(&interchanged));
         assert_eq!(demand(&tensored).counts(), demand(&interchanged).counts());
+    }
+
+    #[test]
+    fn from_steps_keeps_one_occurrence_per_yielded_step() {
+        let s0_r1 = Step::new(0, Role::new(1));
+        let s2_r0 = Step::new(2, Role::new(0));
+        let d = Demand::from_steps([s0_r1, s0_r1, s2_r0]);
+        assert_eq!(d.total(), 3, "total: observed {}", d.total());
+        assert_eq!(
+            d.distinct_len(),
+            2,
+            "distinct_len: observed {}",
+            d.distinct_len()
+        );
+        assert_eq!(
+            d.multiplicity(s0_r1),
+            2,
+            "multiplicity(s0_r1): observed {}",
+            d.multiplicity(s0_r1)
+        );
+        assert_eq!(d.multiplicity(s2_r0), 1);
+        assert_eq!(d.occurrences(), &[s0_r1, s0_r1, s2_r0], "yield order");
+        assert_eq!(
+            d.distinct().collect::<Vec<_>>(),
+            vec![s0_r1, s2_r0],
+            "distinct is Step-ordered (bit first)"
+        );
+        assert!(Demand::from_steps(std::iter::empty()).is_empty());
+    }
+
+    #[test]
+    fn from_steps_of_a_workflow_demand_round_trips() {
+        let role = Role::new(0);
+        let a = Step::new(1, role);
+        let b = Step::new(4, role);
+        let w = ColoredExpr::new(
+            vec![role],
+            chain(vec![step_expr(a), step_expr(b), step_expr(a)]).unwrap(),
+        )
+        .unwrap();
+        let d = demand(&w);
+        let rebuilt = Demand::from_steps(d.occurrences().iter().copied());
+        assert_eq!(rebuilt, d, "rebuilt {rebuilt:?} != demand {d:?}");
     }
 }

@@ -38,6 +38,14 @@
 //!   current members **excluding** `agent`. `act == true` means *join*.
 //! - [`CoalitionDecisionPolicy::should_leave`] — `coalition` is the set of
 //!   current members **including** `agent`. `act == true` means *leave*.
+//!
+//! # Task lifecycle
+//!
+//! A battery brackets each task's decisions with two default-no-op hooks:
+//! [`CoalitionDecisionPolicy::begin_task`] once before the task's first
+//! `should_join`, with a [`TaskStart`], and
+//! [`CoalitionDecisionPolicy::observe_outcome`] once after its leave sweep,
+//! with the task's required mask and a per-bit success signal.
 
 use crate::algorithms::{AgentCapabilities, ValueCalculator};
 use std::future::Future;
@@ -67,6 +75,18 @@ pub struct Decision {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DecisionContext {
     pub required_capabilities: u32,
+}
+
+/// What a task declares when it begins, handed to
+/// [`CoalitionDecisionPolicy::begin_task`].
+///
+/// `required` is the task's capability bitmask. `steps` is the task's
+/// distinct `(bit, role)` demand in ascending order, empty for a task that
+/// declares no roles.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TaskStart<'a> {
+    pub required: u32,
+    pub steps: &'a [(u8, u8)],
 }
 
 /// A strategy for deciding whether an agent should join or leave a coalition.
@@ -140,6 +160,19 @@ pub trait CoalitionDecisionPolicy: Send + Sync {
         let decision = self.should_leave(agent, coalition, ctx);
         Box::pin(async move { decision })
     }
+
+    /// Called once per task before its first `should_join`, with the task's
+    /// required mask and distinct `(bit, role)` steps.
+    ///
+    /// The default does nothing.
+    fn begin_task(&self, _task: &TaskStart<'_>) {}
+
+    /// Called once per task after its leave sweep. `required` is the task's
+    /// capability bitmask; `per_bit_success[b]` is the task's success signal
+    /// for bit `b`.
+    ///
+    /// The default does nothing.
+    fn observe_outcome(&self, _required: u32, _per_bit_success: &[bool]) {}
 }
 
 /// Marginal-value decision policy backed by a

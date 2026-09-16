@@ -172,3 +172,7 @@ required-features = ["persistence", "magnitude"]
 [[test]]
 name = "remote_integration"
 required-features = ["remote"]
+
+[[test]]
+name = "harness_workflow"
+required-features = ["harness", "process"]

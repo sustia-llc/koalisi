@@ -66,25 +66,37 @@ pub struct Instance {
 }
 
 impl InstanceSpec {
-    /// Generate the instance for `seed`. Draw schedule on one `SplitMix64`
-    /// stream seeded with `seed`: pool size; per agent its capability count,
-    /// mask (`distinct_bits`) and trust; per task its required-bit count, mask
-    /// (`distinct_bits`) and arrival permutation.
+    /// Generate the instance for `seed`: [`draw`](Self::draw) on a fresh
+    /// `SplitMix64` stream seeded with `seed`.
     #[must_use]
     pub fn generate(&self, seed: u64) -> Instance {
         let mut rng = SplitMix64::new(seed);
+        let (agents, tasks) = self.draw(&mut rng);
+        Instance {
+            seed,
+            agents,
+            tasks,
+        }
+    }
 
-        let n = draw_in(&mut rng, *self.pool.start() as u64, *self.pool.end() as u64) as usize;
+    /// Draw the agent pool and task list off `rng`, leaving the stream
+    /// positioned after the last task's arrival permutation. Draw schedule:
+    /// pool size; per agent its capability count, mask (`distinct_bits`) and
+    /// trust; per task its required-bit count, mask (`distinct_bits`) and
+    /// arrival permutation.
+    #[must_use]
+    pub fn draw(&self, rng: &mut SplitMix64) -> (Vec<CapabilityAgent>, Vec<Task>) {
+        let n = draw_in(rng, *self.pool.start() as u64, *self.pool.end() as u64) as usize;
         let agents = (0..n)
             .map(|id| {
                 let k = draw_in(
-                    &mut rng,
+                    rng,
                     u64::from(*self.caps_per_agent.start()),
                     u64::from(*self.caps_per_agent.end()),
                 ) as u32;
-                let mask = distinct_bits(&mut rng, k, self.universe_bits);
+                let mask = distinct_bits(rng, k, self.universe_bits);
                 let trust = draw_in(
-                    &mut rng,
+                    rng,
                     u64::from(*self.trust.start()),
                     u64::from(*self.trust.end()),
                 ) as u32;
@@ -94,22 +106,24 @@ impl InstanceSpec {
 
         let tasks = (0..self.tasks)
             .map(|_| {
-                let r = draw_in(
-                    &mut rng,
-                    u64::from(*self.required_bits.start()),
-                    u64::from(*self.required_bits.end()),
-                ) as u32;
-                let required = distinct_bits(&mut rng, r, self.universe_bits);
-                let arrival = permutation(&mut rng, n);
+                let required = self.draw_required(rng);
+                let arrival = permutation(rng, n);
                 Task { required, arrival }
             })
             .collect();
 
-        Instance {
-            seed,
-            agents,
-            tasks,
-        }
+        (agents, tasks)
+    }
+
+    /// One task's required mask off `rng`: the required-bit count from
+    /// `required_bits`, then `distinct_bits` over the universe.
+    pub(crate) fn draw_required(&self, rng: &mut SplitMix64) -> u32 {
+        let r = draw_in(
+            rng,
+            u64::from(*self.required_bits.start()),
+            u64::from(*self.required_bits.end()),
+        ) as u32;
+        distinct_bits(rng, r, self.universe_bits)
     }
 }
 

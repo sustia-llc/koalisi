@@ -19,8 +19,9 @@
 //!   workflows as colored string diagrams, `(bit, role)` demand extraction, the
 //!   pinned rewrite theory, and the bounded convex-DPO optimize hook (EQ5a).
 //! - `harness` *(feature `harness`)* — the K7 round's shared plumbing: seeded
-//!   instance generation, the battery loop over a seed range, and the report
-//!   helpers; registrations live in `examples/`, not here.
+//!   instance generation (process-structured under `process`), the battery
+//!   loop over a seed range, and the report helpers; registrations live in
+//!   `examples/`, not here.
 //! - [`llm`] — Phase 5/6 LLM provider stub (real backends land later).
 //! - [`subsystems`] — the [`CoalitionService`](subsystems::coalition_actor::CoalitionService)
 //!   policy-gated membership seam (plus, behind feature `durable`, an optional
@@ -54,5 +55,7 @@ pub mod subsystems {
 }
 
 pub use core::CoalitionRuntime;
-pub use decision::{CoalitionDecisionPolicy, Decision, DecisionContext, ThresholdPolicy};
+pub use decision::{
+    CoalitionDecisionPolicy, Decision, DecisionContext, TaskStart, ThresholdPolicy,
+};
 pub use ingest::{DataSource, Sample, SampleMonitor, SampleUpdate};

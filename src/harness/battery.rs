@@ -5,9 +5,13 @@ use std::fmt;
 use std::time::Instant;
 
 use crate::algorithms::{AgentCapabilities, CapabilityAgent};
-use crate::decision::{CoalitionDecisionPolicy, DecisionContext};
+use crate::decision::{CoalitionDecisionPolicy, DecisionContext, TaskStart};
 
 use super::instance::{Instance, InstanceSpec};
+
+/// Width of the flat path's per-bit outcome signal: every bit index of a
+/// `u32` capability mask.
+pub const FLAT_SIGNAL_WIDTH: usize = u32::BITS as usize;
 
 /// A half-open seed range `start..end`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,17 +67,20 @@ pub struct InstanceResult {
     pub churn: usize,
 }
 
-/// Run `policy` over every task of `instance`. Per task: the first arrival
-/// joins unconditionally; each later arrival joins iff `should_join` acts
-/// (the coalition shown excludes the candidate); then one leave sweep in
-/// arrival order over the post-join membership, where `should_leave` (the
-/// coalition shown is the current membership including the agent) acting
-/// removes the agent and counts one churn. A task is completed iff the union
-/// of the final members' capabilities covers `required`; its coverage
-/// efficiency is the fraction of required bits covered (`1` for an empty
-/// requirement) divided by the final member count, `0` for an empty coalition.
-/// Every `should_join` / `should_leave` call's wall time in microseconds is
-/// appended to `latencies_us`.
+/// Run `policy` over every task of `instance`. Per task: `begin_task` with
+/// the required mask and no steps; the first arrival joins unconditionally;
+/// each later arrival joins iff `should_join` acts (the coalition shown
+/// excludes the candidate); then one leave sweep in arrival order over the
+/// post-join membership, where `should_leave` (the coalition shown is the
+/// current membership including the agent) acting removes the agent and
+/// counts one churn; then `observe_outcome` with the required mask and
+/// [`FLAT_SIGNAL_WIDTH`] entries, `per_bit[b]` true iff some final member
+/// holds bit `b`. A task is completed iff the union of the final members'
+/// capabilities covers `required`; its coverage efficiency is the fraction of
+/// required bits covered (`1` for an empty requirement) divided by the final
+/// member count, `0` for an empty coalition. Every `should_join` /
+/// `should_leave` call's wall time in microseconds is appended to
+/// `latencies_us`.
 pub fn run_instance(
     policy: &dyn CoalitionDecisionPolicy,
     instance: &Instance,
@@ -85,6 +92,10 @@ pub fn run_instance(
     let mut churn = 0usize;
 
     for task in &instance.tasks {
+        policy.begin_task(&TaskStart {
+            required: task.required,
+            steps: &[],
+        });
         let ctx = DecisionContext {
             required_capabilities: task.required,
         };
@@ -122,6 +133,10 @@ pub fn run_instance(
             completed += 1;
         }
         cov_eff_sum += cov_eff(union, task.required, members.len());
+        let per_bit: Vec<bool> = (0..FLAT_SIGNAL_WIDTH)
+            .map(|b| (union >> b) & 1 == 1)
+            .collect();
+        policy.observe_outcome(task.required, &per_bit);
     }
 
     let n_tasks = instance.tasks.len();
@@ -221,15 +236,27 @@ mod tests {
     use super::*;
     use crate::algorithms::SynergisticCalculator;
     use crate::decision::{Decision, ThresholdPolicy};
+    use crate::harness::instance::Task;
     use std::sync::Mutex;
 
+    /// One policy call, in call order.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    enum Event {
+        BeginTask { required: u32, steps: Vec<(u8, u8)> },
+        Join,
+        Leave,
+        ObserveOutcome { required: u32, per_bit: Vec<bool> },
+    }
+
     /// Acts on join and on leave per the two flags; records every coalition
-    /// (as agent ids) it is shown, per call kind.
+    /// (as agent ids) it is shown, per call kind, and every call as an
+    /// [`Event`].
     struct Fixed {
         join: bool,
         leave: bool,
         seen_join: Mutex<Vec<Vec<usize>>>,
         seen_leave: Mutex<Vec<(usize, Vec<usize>)>>,
+        events: Mutex<Vec<Event>>,
     }
 
     impl Fixed {
@@ -239,6 +266,7 @@ mod tests {
                 leave,
                 seen_join: Mutex::new(Vec::new()),
                 seen_leave: Mutex::new(Vec::new()),
+                events: Mutex::new(Vec::new()),
             }
         }
     }
@@ -255,6 +283,7 @@ mod tests {
             _ctx: &DecisionContext,
         ) -> Decision {
             self.seen_join.lock().unwrap().push(ids(coalition));
+            self.events.lock().unwrap().push(Event::Join);
             Decision {
                 act: self.join,
                 score: 0.0,
@@ -271,11 +300,45 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push((agent.agent_id(), ids(coalition)));
+            self.events.lock().unwrap().push(Event::Leave);
             Decision {
                 act: self.leave,
                 score: 0.0,
             }
         }
+
+        fn begin_task(&self, task: &TaskStart<'_>) {
+            self.events.lock().unwrap().push(Event::BeginTask {
+                required: task.required,
+                steps: task.steps.to_vec(),
+            });
+        }
+
+        fn observe_outcome(&self, required: u32, per_bit_success: &[bool]) {
+            self.events.lock().unwrap().push(Event::ObserveOutcome {
+                required,
+                per_bit: per_bit_success.to_vec(),
+            });
+        }
+    }
+
+    /// The expected event sequence of one task: `BeginTask` with no steps,
+    /// `n - 1` joins, `leaves` leaves, `ObserveOutcome` with `union`'s bits
+    /// over [`FLAT_SIGNAL_WIDTH`] entries.
+    fn expected_task_events(required: u32, n: usize, leaves: usize, union: u32) -> Vec<Event> {
+        let mut out = vec![Event::BeginTask {
+            required,
+            steps: Vec::new(),
+        }];
+        out.extend(std::iter::repeat_n(Event::Join, n - 1));
+        out.extend(std::iter::repeat_n(Event::Leave, leaves));
+        out.push(Event::ObserveOutcome {
+            required,
+            per_bit: (0..FLAT_SIGNAL_WIDTH)
+                .map(|b| (union >> b) & 1 == 1)
+                .collect(),
+        });
+        out
     }
 
     fn pool_union(instance: &Instance) -> u32 {
@@ -466,6 +529,50 @@ mod tests {
     }
 
     #[test]
+    fn hooks_bracket_each_task_and_flat_per_bit_is_the_final_union() {
+        let spec = InstanceSpec::default();
+        for seed in 0..20u64 {
+            let instance = spec.generate(seed);
+            let n = instance.agents.len();
+            // (join, leave, final members after the sweep, leave calls)
+            type FinalMembers = fn(&Instance, &Task) -> Vec<usize>;
+            let cases: [(bool, bool, FinalMembers, usize); 3] = [
+                (true, false, |inst, _| (0..inst.agents.len()).collect(), n),
+                (true, true, |_, _| Vec::new(), n),
+                (false, false, |_, task| vec![task.arrival[0]], 1),
+            ];
+            for (join, leave, final_members, leaves) in cases {
+                let policy = Fixed::new(join, leave);
+                let mut latencies = Vec::new();
+                run_instance(&policy, &instance, &mut latencies);
+                let events = policy.events.lock().unwrap();
+                let mut expected = Vec::new();
+                for task in &instance.tasks {
+                    let union = final_members(&instance, task)
+                        .iter()
+                        .fold(0u32, |acc, &m| acc | instance.agents[m].capabilities());
+                    expected.extend(expected_task_events(task.required, n, leaves, union));
+                }
+                assert_eq!(
+                    events.len(),
+                    expected.len(),
+                    "seed {seed}, join {join}, leave {leave}: {} events, expected {}",
+                    events.len(),
+                    expected.len()
+                );
+                let first_diff = events.iter().zip(&expected).position(|(a, b)| a != b);
+                assert!(
+                    first_diff.is_none(),
+                    "seed {seed}, join {join}, leave {leave}: event {} is {:?}, expected {:?}",
+                    first_diff.unwrap_or(0),
+                    events.get(first_diff.unwrap_or(0)),
+                    expected.get(first_diff.unwrap_or(0))
+                );
+            }
+        }
+    }
+
+    #[test]
     fn empty_task_list_gives_zero_metrics() {
         let spec = InstanceSpec {
             tasks: 0,
@@ -479,5 +586,9 @@ mod tests {
         assert_eq!(result.mean_cov_eff, 0.0);
         assert_eq!(result.primary, 0.0);
         assert!(latencies.is_empty());
+        assert!(
+            policy.events.lock().unwrap().is_empty(),
+            "no task, so no hook call"
+        );
     }
 }
