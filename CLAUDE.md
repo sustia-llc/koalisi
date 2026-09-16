@@ -91,7 +91,7 @@ touching anything with a frozen battery, a pinned decision, or a registered doc.
 
 ### Latest three
 
-- **Housekeeping re-pin + trim — v0.34.0 (2026-09-16, PR #90)**: `sha2`
+- **Housekeeping re-pin + trim — v0.34.0 (2026-09-16, PR #91)**: `sha2`
   0.10 → 0.11, `libp2p` 0.56 → 0.57, `surrealdb-types` 3.2.1 → 3.2.4, lock
   refreshed (+22/−7 stanzas; `sha2`/`digest` 0.10 and 0.11 now coexist —
   koalisi on 0.11, the surrealdb stack on 0.10). Whole tree rustfmt-clean
