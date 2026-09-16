@@ -8,9 +8,9 @@ use super::events::TemporalEvent;
 use super::queries::TemporalQueries;
 use super::temporal::TemporalHypergraph;
 use super::timestamp::{TimeRange, Timestamp};
+use super::{HyperedgeTrait, VertexTrait};
 use crate::algorithms::{AgentCapabilities, FeedbackStore};
 use crate::decision::{CoalitionDecisionPolicy, Decision, DecisionContext};
-use super::{HyperedgeTrait, VertexTrait};
 use catgraph_applied::{HyperedgeIndex, VertexIndex};
 use std::collections::HashMap;
 
@@ -98,11 +98,7 @@ where
     }
 
     /// Update an agent's weight/data.
-    pub async fn update_agent(
-        &self,
-        agent: VertexIndex,
-        new_data: V,
-    ) -> TemporalResult<()> {
+    pub async fn update_agent(&self, agent: VertexIndex, new_data: V) -> TemporalResult<()> {
         self.graph.update_vertex_weight(agent, new_data).await
     }
 
@@ -124,10 +120,7 @@ where
     /// Dissolve a coalition (remove the hyperedge).
     ///
     /// The agents remain in the system but are no longer part of this coalition.
-    pub async fn dissolve_coalition(
-        &self,
-        coalition: HyperedgeIndex,
-    ) -> TemporalResult<()> {
+    pub async fn dissolve_coalition(&self, coalition: HyperedgeIndex) -> TemporalResult<()> {
         self.graph.remove_hyperedge(coalition).await
     }
 
@@ -201,10 +194,7 @@ where
     ///
     /// The first coalition in the list becomes the target; others are dissolved.
     /// All members from all coalitions become members of the target coalition.
-    pub async fn merge_coalitions(
-        &self,
-        coalitions: Vec<HyperedgeIndex>,
-    ) -> TemporalResult<()> {
+    pub async fn merge_coalitions(&self, coalitions: Vec<HyperedgeIndex>) -> TemporalResult<()> {
         self.graph.join_hyperedges(coalitions).await
     }
 
@@ -251,10 +241,9 @@ where
                     index,
                     vertices,
                     ..
+                } if vertices.contains(&agent) => {
+                    membership_start.insert(*index, *timestamp);
                 }
-                    if vertices.contains(&agent) => {
-                        membership_start.insert(*index, *timestamp);
-                    }
                 TemporalEvent::HyperedgeRemoved {
                     timestamp, index, ..
                 } => {
@@ -277,10 +266,8 @@ where
                         }
                         (true, false) => {
                             if let Some(start) = membership_start.remove(index) {
-                                history.push((
-                                    *index,
-                                    TimeRange::new(Some(start), Some(*timestamp)),
-                                ));
+                                history
+                                    .push((*index, TimeRange::new(Some(start), Some(*timestamp))));
                             }
                         }
                         _ => {}
@@ -295,10 +282,7 @@ where
                 } => {
                     for source in source_indices {
                         if let Some(start) = membership_start.remove(source) {
-                            history.push((
-                                *source,
-                                TimeRange::new(Some(start), Some(*timestamp)),
-                            ));
+                            history.push((*source, TimeRange::new(Some(start), Some(*timestamp))));
                         }
                     }
                     if new_vertices.contains(&agent) {
@@ -361,7 +345,10 @@ where
 
     /// Get when a coalition was dissolved (if it was).
     #[allow(dead_code)]
-    pub(crate) async fn coalition_dissolved_at(&self, coalition: HyperedgeIndex) -> Option<Timestamp> {
+    pub(crate) async fn coalition_dissolved_at(
+        &self,
+        coalition: HyperedgeIndex,
+    ) -> Option<Timestamp> {
         TemporalQueries::hyperedge_removed_at(self.graph.events_ref(), coalition).await
     }
 
@@ -491,12 +478,12 @@ where
             .filter(|&m| m != agent)
             .collect();
         let weights = self.agent_weights(&members).await?;
-        let views: Vec<&dyn AgentCapabilities> =
-            weights.iter().map(|w| w as &dyn AgentCapabilities).collect();
+        let views: Vec<&dyn AgentCapabilities> = weights
+            .iter()
+            .map(|w| w as &dyn AgentCapabilities)
+            .collect();
 
-        let decision = policy
-            .should_join_async(&agent_weight, &views, ctx)
-            .await;
+        let decision = policy.should_join_async(&agent_weight, &views, ctx).await;
 
         if decision.act {
             self.join_coalition(agent, coalition).await?;
@@ -527,13 +514,18 @@ where
         // `should_leave` convention: `coalition` includes the agent.
         let members = self.coalition_members(coalition).await?;
         let weights = self.agent_weights(&members).await?;
-        let views: Vec<&dyn AgentCapabilities> =
-            weights.iter().map(|w| w as &dyn AgentCapabilities).collect();
+        let views: Vec<&dyn AgentCapabilities> = weights
+            .iter()
+            .map(|w| w as &dyn AgentCapabilities)
+            .collect();
 
         // The candidate's view is whichever member equals `agent`; if it is not
         // currently a member there is nothing to leave.
         let Some(pos) = members.iter().position(|&m| m == agent) else {
-            return Ok(Decision { act: false, score: 0.0 });
+            return Ok(Decision {
+                act: false,
+                score: 0.0,
+            });
         };
         let agent_view = views[pos];
 

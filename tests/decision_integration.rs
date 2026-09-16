@@ -246,11 +246,7 @@ async fn aif_policy_join_non_degenerate_through_actor() {
             .add_agent(Worker::new(1, 0b001, 80))
             .await
             .expect("add candidate");
-        let service = CoalitionService::spawn(
-            manager,
-            Box::new(AifDecisionPolicy::default()),
-            ctx,
-        );
+        let service = CoalitionService::spawn(manager, Box::new(AifDecisionPolicy::default()), ctx);
         let decision = service.join(candidate, coalition).await.expect("decision");
         assert!(decision.act, "covering a new required bit lowers G ⇒ join");
         let members = service.members(coalition).await.expect("members");
@@ -265,11 +261,7 @@ async fn aif_policy_join_non_degenerate_through_actor() {
             .add_agent(Worker::new(9, 0b010, 80))
             .await
             .expect("add redundant");
-        let service = CoalitionService::spawn(
-            manager,
-            Box::new(AifDecisionPolicy::default()),
-            ctx,
-        );
+        let service = CoalitionService::spawn(manager, Box::new(AifDecisionPolicy::default()), ctx);
         let decision = service.join(redundant, coalition).await.expect("decision");
         assert!(!decision.act, "redundant coverage ⇒ decline");
         let members = service.members(coalition).await.expect("members");
@@ -285,7 +277,7 @@ async fn aif_policy_join_non_degenerate_through_actor() {
 #[tokio::test]
 async fn belief_aware_join_through_actor() {
     use koalisi::decision::{
-        AifDecisionPolicy, BridgeParams, CompatibilityBeliefs, CoalitionHistory, TrustBeliefs,
+        AifDecisionPolicy, BridgeParams, CoalitionHistory, CompatibilityBeliefs, TrustBeliefs,
     };
 
     let ctx = DecisionContext {

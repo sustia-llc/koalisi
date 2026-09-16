@@ -19,6 +19,70 @@ Planned work — issue-tracked (details in [`CLAUDE.md`](./CLAUDE.md)
 - **[#25]** metrics example, reframed onto the `CoalitionService` decision
   path / topology events.
 
+## [0.34.0] — 2026-09-16
+
+Housekeeping re-pin: three direct dependencies move, the whole tree is
+rustfmt-clean, `cargo doc` is warning-free at every feature set, and the
+manifest and the two working-state documents are trimmed to what they state.
+No behaviour change.
+
+### Changed
+- **Dependencies**: `sha2` 0.10 → **0.11**, `libp2p` 0.56 → **0.57**,
+  `surrealdb-types` 3.2.1 → **3.2.4**; lock refreshed (22 package stanzas
+  added, 7 removed; the libp2p 0.5x sub-crates, hickory 0.26, curve25519 /
+  ed25519-dalek 3–5, and the digest 0.11 stack move with them). The lock now
+  carries `sha2` 0.10.9 and 0.11.0 and `digest` 0.10.7 and 0.11.3 side by
+  side: koalisi's `persistence` uses 0.11, the surrealdb stack still pulls
+  0.10 (`cargo tree -i sha2@0.10.9 --features durable`).
+- **rustfmt** applied to the whole tree under rustfmt 1.9.0 (38 files,
+  whitespace and line-wrapping only; `cargo fmt --check` was red on `main`
+  since the toolchain moved). This includes `examples/strategy_comparison.rs`
+  (100 hunks): the frozen K4 archive binary is reformatted, not changed — the
+  drift check below is the evidence.
+- **Intra-doc links**: 18 rustdoc links fixed so `RUSTDOCFLAGS='-D warnings'
+  cargo doc --no-deps` is green at default and at every feature set
+  (`decision,magnitude,process,persistence,remote,magnitude-fast,harness,durable`):
+  8 at default (`src/lib.rs`, `src/algorithms/aipa.rs`,
+  `src/subsystems/coalition_actor.rs`) and 10 feature-gated
+  (`aif_persistent_policy.rs`, `magnitude_policy.rs`, `durable.rs`,
+  `remote.rs`) — links to private items become plain code spans, redundant
+  explicit targets are dropped, one unresolved name gets its full path.
+- **`Cargo.toml` trimmed**: the 80-line MSRV comment becomes 14 lines (the
+  tiers, the procedure, the resolver-3 ground, a pointer to gotcha 34);
+  dependency and feature comments state what each is for, without history.
+- **`CLAUDE.md` refreshed**: review protocol and record-location paragraphs
+  shortened, the mission and tooling sections rewritten to the current tree,
+  the v0.32.0 and v0.31.0 entries compressed (full text in the private
+  ledger), gotcha 34 reduced to its contracts, a lint + docs row in the gate
+  table.
+- **`README.md` refreshed**: dependency list (libp2p 0.57, sha2 0.11 +
+  ciborium row, history dropped), the `durable` test count.
+
+### Gates
+- All twelve suites at baseline: 106 / 162 / 135 / 191 / 143 / 126 / 156 /
+  112 / 159 / 239, `durable` 107, `harness` 125.
+- `cargo fmt --check` clean; clippy `--all-targets -- -D warnings` clean at
+  default, the six-feature set, `harness` and `durable`; `cargo doc` with
+  `-D warnings` clean at default and at all eight features;
+  `remote_coalition_consumer` example exits 0 on libp2p 0.57.
+- **X-battery PASS — zero non-latency diffs.** One serial release run of the
+  reformatted binary on the new lock (`pgrep -c 'cargo|rustc'` = 0 at start,
+  nothing alongside), 2129 lines, diffed against `docs/runs/K4-archive.log`
+  per `docs/runs/README.md`: 61 raw differing lines; with the trailing
+  latency column stripped, 11 survive and every one reports latency or
+  wall-clock time (three `latency µs` rows, Criterion 2 / Path B.3 with their
+  FAIL / PASS outcomes unchanged, the mm/scalar latency ratio 1.33× on both
+  sides, three `Medians … Latency … (record-only)` lines whose median and churn
+  fields are identical, the 12-bit `arm-E1g4` latency, the A3.2 sweep time
+  2.2 s → 2.3 s). All 33 `VERDICT|FALSIFIED|VALIDATED` lines identical
+  (`diff` exit 0). The committed log stays the artifact of record.
+- **MSRV tiers unchanged on the new lock** (procedure of gotcha 34): 1.88
+  (default; `magnitude,persistence,remote,process,harness` together — 1.87
+  fails on the catgraph let-chains) · 1.89
+  (`decision,magnitude,process,magnitude-fast`; 1.88 refused: nalgebra /
+  safe_arch / wide) · 1.92 (`durable`; 1.91 fails compiling `diskann`).
+  `rust-version` stays 1.93.0.
+
 ## [0.33.0] — 2026-09-16
 
 The K7 scaffold — Phase A of the stack's 2026-09-16 K7 round plan. The K4

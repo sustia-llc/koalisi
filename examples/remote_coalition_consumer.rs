@@ -74,7 +74,11 @@ async fn main() -> Result<()> {
     // =====================================================================
     let manager = CoalitionManager::<Worker, ()>::empty();
     let seed = manager
-        .add_agent(Worker { id: 0, caps: 0b0001, trust: 90 })
+        .add_agent(Worker {
+            id: 0,
+            caps: 0b0001,
+            trust: 90,
+        })
         .await
         .context("add seed")?;
     let coalition = manager
@@ -90,7 +94,11 @@ async fn main() -> Result<()> {
     for (id, caps) in [(1usize, 0b0010u32), (2, 0b0100), (3, 0b0001)] {
         candidates.push(
             manager
-                .add_agent(Worker { id, caps, trust: 80 })
+                .add_agent(Worker {
+                    id,
+                    caps,
+                    trust: 80,
+                })
                 .await
                 .context("add candidate")?,
         );
@@ -144,10 +152,7 @@ async fn main() -> Result<()> {
             .context("join candidate")?;
         println!("  join candidate {i}: act={} score={:.3}", d.act, d.score);
     }
-    let d = service
-        .leave(seed, coalition)
-        .await
-        .context("leave seed")?;
+    let d = service.leave(seed, coalition).await.context("leave seed")?;
     println!("  leave seed: act={} score={:.3}", d.act, d.score);
 
     // =====================================================================
@@ -207,7 +212,10 @@ async fn main() -> Result<()> {
             e.seq, e.kind, e.agent_id, e.act, e.score, e.coalition
         );
     }
-    println!("gateway head_seq={head_after} (cursor {cursor} + {} events)", second.len());
+    println!(
+        "gateway head_seq={head_after} (cursor {cursor} + {} events)",
+        second.len()
+    );
 
     // =====================================================================
     // 6. Shutdown — prompt teardown: cancel → close → drain.

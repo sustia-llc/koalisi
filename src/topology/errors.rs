@@ -27,16 +27,10 @@ pub enum TemporalError {
     SnapshotNotFound(SnapshotId),
 
     /// Cannot replay events: inconsistent state.
-    ReplayError {
-        event_index: usize,
-        message: String,
-    },
+    ReplayError { event_index: usize, message: String },
 
     /// The time range is invalid (start > end).
-    InvalidTimeRange {
-        start: Timestamp,
-        end: Timestamp,
-    },
+    InvalidTimeRange { start: Timestamp, end: Timestamp },
 
     /// Event log is corrupted or inconsistent.
     EventLogCorrupted(String),
@@ -70,16 +64,15 @@ impl std::fmt::Display for TemporalError {
                 write!(f, "Error replaying event {}: {}", event_index, message)
             }
             Self::InvalidTimeRange { start, end } => {
-                write!(
-                    f,
-                    "Invalid time range: start ({}) > end ({})",
-                    start, end
-                )
+                write!(f, "Invalid time range: start ({}) > end ({})", start, end)
             }
             Self::EventLogCorrupted(msg) => write!(f, "Event log corrupted: {}", msg),
             Self::ConcurrentModification => write!(f, "Concurrent modification detected"),
             Self::EmptyCoalition => {
-                write!(f, "Cannot leave coalition: would become empty (use dissolve instead)")
+                write!(
+                    f,
+                    "Cannot leave coalition: would become empty (use dissolve instead)"
+                )
             }
         }
     }

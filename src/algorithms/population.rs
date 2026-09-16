@@ -52,8 +52,8 @@
 
 use std::collections::HashMap;
 
-use super::{AgentCapabilities, ValueCalculator};
 use super::aipa::generate_integer_partitions;
+use super::{AgentCapabilities, ValueCalculator};
 use crate::topology::{CoalitionManager, HyperedgeTrait, TemporalResult, VertexIndex, VertexTrait};
 
 /// `SplitMix64` — the reference constant-schedule PRNG shared across koalisi's
@@ -140,7 +140,13 @@ impl PopulationConfig {
     /// Construct a config from explicit parameters.
     #[must_use]
     #[allow(clippy::similar_names)] // p_gbest / p_pbest are the documented field names
-    pub fn new(population: usize, iterations: usize, p_gbest: f64, p_pbest: f64, seed: u64) -> Self {
+    pub fn new(
+        population: usize,
+        iterations: usize,
+        p_gbest: f64,
+        p_pbest: f64,
+        seed: u64,
+    ) -> Self {
         Self {
             population,
             iterations,
@@ -224,8 +230,10 @@ where
     assignment_blocks(assignment)
         .iter()
         .map(|block| {
-            let views: Vec<&dyn AgentCapabilities> =
-                block.iter().map(|&i| &agents[i] as &dyn AgentCapabilities).collect();
+            let views: Vec<&dyn AgentCapabilities> = block
+                .iter()
+                .map(|&i| &agents[i] as &dyn AgentCapabilities)
+                .collect();
             calc.calculate_value(&views)
         })
         .sum()
@@ -481,17 +489,14 @@ mod tests {
     #[test]
     fn seeded_particles_realise_aipa_shapes() {
         let n = 5;
-        let shapes: HashSet<Vec<usize>> =
-            generate_integer_partitions(n).into_iter().collect();
+        let shapes: HashSet<Vec<usize>> = generate_integer_partitions(n).into_iter().collect();
         let mut rng = SplitMix64::new(123);
         let seeds = seed_assignments(n, 32, &mut rng);
 
         for assignment in &seeds {
             // Recover the block-size multiset, non-increasing (partition form).
-            let mut sizes: Vec<usize> = assignment_blocks(assignment)
-                .iter()
-                .map(Vec::len)
-                .collect();
+            let mut sizes: Vec<usize> =
+                assignment_blocks(assignment).iter().map(Vec::len).collect();
             sizes.sort_unstable_by(|a, b| b.cmp(a));
             assert!(
                 shapes.contains(&sizes),
@@ -504,7 +509,11 @@ mod tests {
     #[test]
     fn single_agent_is_one_block() {
         let agents = vec![CapabilityAgent::new(0, 0b1, 50)];
-        let outcome = search(&agents, &SynergisticCalculator, &PopulationConfig::default());
+        let outcome = search(
+            &agents,
+            &SynergisticCalculator,
+            &PopulationConfig::default(),
+        );
         assert_eq!(outcome.best.assignment, vec![0]);
         assert_eq!(outcome.best.blocks(), vec![vec![0]]);
         assert_eq!(outcome.lineage.len(), 1);
@@ -513,7 +522,11 @@ mod tests {
     #[test]
     fn lineage_is_strictly_increasing() {
         let agents = demo_agents();
-        let outcome = search(&agents, &SynergisticCalculator, &PopulationConfig::default());
+        let outcome = search(
+            &agents,
+            &SynergisticCalculator,
+            &PopulationConfig::default(),
+        );
         for pair in outcome.lineage.windows(2) {
             assert!(
                 pair[1].fitness > pair[0].fitness,

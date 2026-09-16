@@ -108,16 +108,28 @@ async fn durable_decisions_survive_restart_through_the_seam() {
     // --- koalisi service with a decision tap + forwarder (recorder → decision_log). ---
     let manager = CoalitionManager::<Worker, ()>::empty();
     let seed = manager
-        .add_agent(Worker { id: 2, caps: 0b010, trust: 90 })
+        .add_agent(Worker {
+            id: 2,
+            caps: 0b010,
+            trust: 90,
+        })
         .await
         .expect("add seed");
     let coalition = manager.form_coalition(vec![seed], ()).await.expect("form");
     let c1 = manager
-        .add_agent(Worker { id: 1, caps: 0b001, trust: 80 })
+        .add_agent(Worker {
+            id: 1,
+            caps: 0b001,
+            trust: 80,
+        })
         .await
         .expect("add c1");
     let c2 = manager
-        .add_agent(Worker { id: 3, caps: 0b100, trust: 70 })
+        .add_agent(Worker {
+            id: 3,
+            caps: 0b100,
+            trust: 70,
+        })
         .await
         .expect("add c2");
 
@@ -162,7 +174,10 @@ async fn durable_decisions_survive_restart_through_the_seam() {
             .await
             .expect("durable replay timed out — a decision sent while down was lost")
             .expect("inbox bus closed unexpectedly");
-        assert_eq!(d.recipient, DECISION_LOG, "events are addressed to the log sink");
+        assert_eq!(
+            d.recipient, DECISION_LOG,
+            "events are addressed to the log sink"
+        );
         let e = &d.message.payload;
         seen.insert(e.agent_id, (e.kind.clone(), e.act));
     }

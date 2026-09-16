@@ -273,7 +273,9 @@ mod tests {
     }
 
     fn block<'a>(agents: &'a [CapabilityAgent], idx: &[usize]) -> Vec<&'a dyn AgentCapabilities> {
-        idx.iter().map(|&i| &agents[i] as &dyn AgentCapabilities).collect()
+        idx.iter()
+            .map(|&i| &agents[i] as &dyn AgentCapabilities)
+            .collect()
     }
 
     #[test]
@@ -304,9 +306,9 @@ mod tests {
         let calc = ReliabilityCoverage::new(0b1111, [1.0; N_BITS]);
 
         let cases: [&[usize]; 4] = [
-            &[],           // empty
-            &[0, 1],       // partial (0b0011)
-            &[4, 5],       // full coverage, minimal team
+            &[],                 // empty
+            &[0, 1],             // partial (0b0011)
+            &[4, 5],             // full coverage, minimal team
             &[0, 1, 2, 3, 4, 5], // full coverage, oversized team
         ];
         for idx in cases {
@@ -349,7 +351,10 @@ mod tests {
         let calc = ReliabilityCoverage::from_state(0b1111, &arm.state_snapshot());
         for (bit, &r) in calc.reliability().iter().enumerate() {
             assert!(r.is_finite(), "bit {bit} reliability must be finite");
-            assert!((0.0..=1.0).contains(&r), "bit {bit} reliability out of range: {r}");
+            assert!(
+                (0.0..=1.0).contains(&r),
+                "bit {bit} reliability out of range: {r}"
+            );
         }
 
         // A short / ragged snapshot falls back to the uniform prior, never panics.
@@ -365,7 +370,10 @@ mod tests {
             trial_boundary: TrialBoundary::PerStream,
         };
         let calc = ReliabilityCoverage::from_state(0b1111, &ragged);
-        assert!((calc.reliability()[0] - 0.8).abs() < 1e-12, "present belief is used");
+        assert!(
+            (calc.reliability()[0] - 0.8).abs() < 1e-12,
+            "present belief is used"
+        );
         assert!(
             calc.reliability()[1..]
                 .iter()

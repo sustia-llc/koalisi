@@ -16,9 +16,10 @@ use std::collections::HashMap;
 /// Integer partition representation
 ///
 /// An integer partition of n is a way of writing n as a sum of positive integers.
-/// For example, partitions of 4 are: [4], [3,1], [2,2], [2,1,1], [1,1,1,1]
+/// For example, partitions of 4 are: `[4]`, `[3,1]`, `[2,2]`, `[2,1,1]`,
+/// `[1,1,1,1]`.
 ///
-/// In coalition formation, a partition [3, 2, 2, 1] represents a coalition
+/// In coalition formation, a partition `[3, 2, 2, 1]` represents a coalition
 /// structure with one coalition of size 3, two of size 2, and one of size 1.
 pub type IntegerPartition = Vec<usize>;
 
@@ -133,14 +134,12 @@ pub fn compute_partition_upper_bound(
     partition
         .iter()
         .filter_map(|&size| {
-            values_by_size
-                .get(&size)
-                .and_then(|values| {
-                    values
-                        .iter()
-                        .copied()
-                        .max_by(|a, b| a.partial_cmp(b).unwrap())
-                })
+            values_by_size.get(&size).and_then(|values| {
+                values
+                    .iter()
+                    .copied()
+                    .max_by(|a, b| a.partial_cmp(b).unwrap())
+            })
         })
         .sum()
 }
@@ -189,14 +188,12 @@ pub fn compute_partition_min_bound(
     partition
         .iter()
         .filter_map(|&size| {
-            values_by_size
-                .get(&size)
-                .and_then(|values| {
-                    values
-                        .iter()
-                        .copied()
-                        .min_by(|a, b| a.partial_cmp(b).unwrap())
-                })
+            values_by_size.get(&size).and_then(|values| {
+                values
+                    .iter()
+                    .copied()
+                    .min_by(|a, b| a.partial_cmp(b).unwrap())
+            })
         })
         .sum()
 }
@@ -209,10 +206,7 @@ fn aggregate_per_size(
     let max_per_size: HashMap<usize, f64> = values_by_size
         .iter()
         .map(|(&size, values)| {
-            let max = values
-                .iter()
-                .copied()
-                .fold(f64::NEG_INFINITY, f64::max);
+            let max = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
             (size, max)
         })
         .collect();

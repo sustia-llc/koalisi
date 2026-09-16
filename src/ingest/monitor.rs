@@ -374,8 +374,13 @@ mod tests {
         let token = CancellationToken::new();
         let (bus, mut rx) = broadcast::channel::<SampleUpdate<NumericSample>>(16);
 
-        let h =
-            spawn_sample_monitor::<NumericSample>(&tracker, token.child_token(), "load".into(), 8, bus);
+        let h = spawn_sample_monitor::<NumericSample>(
+            &tracker,
+            token.child_token(),
+            "load".into(),
+            8,
+            bus,
+        );
 
         // feed acks only after the update is published, so recv must succeed.
         h.feed(s("load", 1.10, 5)).await.unwrap();

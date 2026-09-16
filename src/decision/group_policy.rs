@@ -502,9 +502,9 @@ impl std::error::Error for GroupAifError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Aif(inner) => Some(inner),
-            Self::RoleOutOfRange { .. }
-            | Self::EmptyDemand { .. }
-            | Self::UnsupportedReadVote => None,
+            Self::RoleOutOfRange { .. } | Self::EmptyDemand { .. } | Self::UnsupportedReadVote => {
+                None
+            }
         }
     }
 }
@@ -961,7 +961,8 @@ impl GroupAifPolicy {
         config: GroupAifConfig,
         agent_roles: HashMap<usize, Role>,
     ) -> Result<Self, GroupAifError> {
-        if config.read == DecisionRead::SeededSampling && config.vote != GroupVote::CertaintyWeighted
+        if config.read == DecisionRead::SeededSampling
+            && config.vote != GroupVote::CertaintyWeighted
         {
             return Err(GroupAifError::UnsupportedReadVote);
         }
@@ -1270,7 +1271,10 @@ impl GroupAifPolicy {
             let Some(model) = self.models.view(role) else {
                 self.count_upstream_decline();
                 self.record_leave_masks(leave_queries, leave_identical);
-                tracing::warn!(role = role.index(), "group arm has no world model for the role");
+                tracing::warn!(
+                    role = role.index(),
+                    "group arm has no world model for the role"
+                );
                 return Self::declined();
             };
             let member_seed = seed ^ splitmix64(u64::from(role.index()) + 1);
@@ -1541,8 +1545,10 @@ mod tests {
     }
 
     /// A single-role chain of `steps`, as a `Workflow`.
-    fn leg(role: Role, bits: &[u8]) -> catgraph_applied::prop::PropExpr<crate::process::WorkflowGen>
-    {
+    fn leg(
+        role: Role,
+        bits: &[u8],
+    ) -> catgraph_applied::prop::PropExpr<crate::process::WorkflowGen> {
         chain(
             bits.iter()
                 .map(|&b| step_expr(Step::new(b, role)))
@@ -1576,10 +1582,7 @@ mod tests {
     }
 
     fn roles_map(pairs: &[(usize, u8)]) -> HashMap<usize, Role> {
-        pairs
-            .iter()
-            .map(|&(id, r)| (id, Role::new(r)))
-            .collect()
+        pairs.iter().map(|&(id, r)| (id, Role::new(r))).collect()
     }
 
     fn policy(config: GroupAifConfig, roles: &[(usize, u8)]) -> GroupAifPolicy {
@@ -1631,12 +1634,26 @@ mod tests {
     /// They must not.
     #[test]
     fn read_is_rng_free_shown_by_seed_invariance() {
-        let a0 = TestAgent { id: 0, caps: 0b001, trust: 50 };
-        let a1 = TestAgent { id: 1, caps: 0b010, trust: 50 };
-        let a2 = TestAgent { id: 2, caps: 0b100, trust: 50 };
+        let a0 = TestAgent {
+            id: 0,
+            caps: 0b001,
+            trust: 50,
+        };
+        let a1 = TestAgent {
+            id: 1,
+            caps: 0b010,
+            trust: 50,
+        };
+        let a2 = TestAgent {
+            id: 2,
+            caps: 0b100,
+            trust: 50,
+        };
         let coalition: [&dyn AgentCapabilities; 2] = [&a1, &a2];
         let full: [&dyn AgentCapabilities; 3] = [&a0, &a1, &a2];
-        let ctx = DecisionContext { required_capabilities: 0b111 };
+        let ctx = DecisionContext {
+            required_capabilities: 0b111,
+        };
         let map = roles_map(&[(0, 0), (1, 1), (2, 2)]);
 
         let run = |seed: u64| {
@@ -1700,7 +1717,9 @@ mod tests {
     /// passing vacuously.
     #[test]
     fn sp3_declines_a_live_tie() {
-        let ctx = DecisionContext { required_capabilities: 0b111 };
+        let ctx = DecisionContext {
+            required_capabilities: 0b111,
+        };
         // Novelty off, for the reason `novelty_off` documents: with it on, every
         // indifferent internal votes act at maximum confidence and a split never
         // occurs — the tie would be untestable, which is A5.1's finding and not a
@@ -1716,9 +1735,21 @@ mod tests {
         'outer: for seed in 0..24u64 {
             let map = roles_map(&[(0, 0), (1, 1), (2, 1)]);
             let p = GroupAifPolicy::new(seed, cfg, map).unwrap();
-            let a0 = TestAgent { id: 0, caps: 0b001, trust: 50 };
-            let a1 = TestAgent { id: 1, caps: 0b010, trust: 50 };
-            let a2 = TestAgent { id: 2, caps: 0b100, trust: 50 };
+            let a0 = TestAgent {
+                id: 0,
+                caps: 0b001,
+                trust: 50,
+            };
+            let a1 = TestAgent {
+                id: 1,
+                caps: 0b010,
+                trust: 50,
+            };
+            let a2 = TestAgent {
+                id: 2,
+                caps: 0b100,
+                trust: 50,
+            };
             let coalition: [&dyn AgentCapabilities; 2] = [&a1, &a2];
             for t in 0..6 {
                 p.begin_task(&two_role).unwrap();
@@ -1734,7 +1765,16 @@ mod tests {
                     found = true;
                     break 'outer;
                 }
-                let succ = [t % 2 == 0, t % 3 == 0, true, false, false, false, false, false];
+                let succ = [
+                    t % 2 == 0,
+                    t % 3 == 0,
+                    true,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                ];
                 p.observe_outcome(&succ);
             }
         }
@@ -1749,8 +1789,16 @@ mod tests {
     /// invents a decision (gotcha 28's typed-arm contract).
     #[test]
     fn missing_role_map_entry_declines_and_counts() {
-        let a0 = TestAgent { id: 0, caps: 0b001, trust: 50 };
-        let stranger = TestAgent { id: 9, caps: 0b010, trust: 50 };
+        let a0 = TestAgent {
+            id: 0,
+            caps: 0b001,
+            trust: 50,
+        };
+        let stranger = TestAgent {
+            id: 9,
+            caps: 0b010,
+            trust: 50,
+        };
         let ctx = DecisionContext::default();
 
         // The candidate is unmapped.
@@ -1801,9 +1849,16 @@ mod tests {
         let err = p.begin_task(&demand(&workflow(&[(Role::new(7), &[0])])));
         assert!(matches!(
             err,
-            Err(GroupAifError::RoleOutOfRange { role: 7, n_roles: 3 })
+            Err(GroupAifError::RoleOutOfRange {
+                role: 7,
+                n_roles: 3
+            })
         ));
-        let a0 = TestAgent { id: 0, caps: 0b001, trust: 50 };
+        let a0 = TestAgent {
+            id: 0,
+            caps: 0b001,
+            trust: 50,
+        };
         let d = p.should_join(&a0, &[], &DecisionContext::default());
         assert!(!d.act);
         assert_eq!(p.counters().declines_no_demand, 1);
@@ -1814,11 +1869,25 @@ mod tests {
     /// X-identity, and the pin that keeps the channel from being a free parameter.
     #[test]
     fn unit_multiplicity_is_bit_identical_to_the_role_restricted_channel() {
-        let a0 = TestAgent { id: 0, caps: 0b001, trust: 50 };
-        let a1 = TestAgent { id: 1, caps: 0b010, trust: 50 };
-        let a2 = TestAgent { id: 2, caps: 0b100, trust: 50 };
+        let a0 = TestAgent {
+            id: 0,
+            caps: 0b001,
+            trust: 50,
+        };
+        let a1 = TestAgent {
+            id: 1,
+            caps: 0b010,
+            trust: 50,
+        };
+        let a2 = TestAgent {
+            id: 2,
+            caps: 0b100,
+            trust: 50,
+        };
         let coalition: [&dyn AgentCapabilities; 2] = [&a1, &a2];
-        let ctx = DecisionContext { required_capabilities: 0b111 };
+        let ctx = DecisionContext {
+            required_capabilities: 0b111,
+        };
         let map = [(0usize, 0u8), (1, 1), (2, 2)];
 
         // Every step occurs exactly once ⇒ m(b, r) == 1 everywhere.
@@ -1855,10 +1924,20 @@ mod tests {
     /// repetition adds no coverage demand (the whole point of the channel).
     #[test]
     fn repeated_steps_move_the_multiplicity_channel() {
-        let a0 = TestAgent { id: 0, caps: 0b001, trust: 50 };
-        let a1 = TestAgent { id: 1, caps: 0b010, trust: 50 };
+        let a0 = TestAgent {
+            id: 0,
+            caps: 0b001,
+            trust: 50,
+        };
+        let a1 = TestAgent {
+            id: 1,
+            caps: 0b010,
+            trust: 50,
+        };
         let coalition: [&dyn AgentCapabilities; 1] = [&a1];
-        let ctx = DecisionContext { required_capabilities: 0b011 };
+        let ctx = DecisionContext {
+            required_capabilities: 0b011,
+        };
         let map = [(0usize, 0u8), (1, 1)];
 
         // Same DISTINCT demand, different multiplicity.
@@ -1914,11 +1993,25 @@ mod tests {
     /// one shared model over a task stream.
     #[test]
     fn topologies_diverge_over_a_stream() {
-        let a0 = TestAgent { id: 0, caps: 0b001, trust: 50 };
-        let a1 = TestAgent { id: 1, caps: 0b010, trust: 50 };
-        let a2 = TestAgent { id: 2, caps: 0b100, trust: 50 };
+        let a0 = TestAgent {
+            id: 0,
+            caps: 0b001,
+            trust: 50,
+        };
+        let a1 = TestAgent {
+            id: 1,
+            caps: 0b010,
+            trust: 50,
+        };
+        let a2 = TestAgent {
+            id: 2,
+            caps: 0b100,
+            trust: 50,
+        };
         let coalition: [&dyn AgentCapabilities; 2] = [&a1, &a2];
-        let ctx = DecisionContext { required_capabilities: 0b111 };
+        let ctx = DecisionContext {
+            required_capabilities: 0b111,
+        };
         let map = [(0usize, 0u8), (1, 1), (2, 2)];
 
         let run = |topology| {
@@ -1963,7 +2056,10 @@ mod tests {
 
         let c = p.counters();
         assert_eq!(c.tasks_observed, 2);
-        assert!(c.s_learn_exact(), "every model advanced exactly as expected");
+        assert!(
+            c.s_learn_exact(),
+            "every model advanced exactly as expected"
+        );
         let by_role: Vec<(ModelLabel, u64, u64)> = c
             .model_updates
             .iter()
@@ -1998,21 +2094,32 @@ mod tests {
     /// catching the second would gut the guard.
     #[test]
     fn non_vacuity_exempts_only_never_asked_models() {
-        let a0 = TestAgent { id: 0, caps: 0b001, trust: 50 };
-        let a1 = TestAgent { id: 1, caps: 0b010, trust: 50 };
-        let a2 = TestAgent { id: 2, caps: 0b100, trust: 50 };
+        let a0 = TestAgent {
+            id: 0,
+            caps: 0b001,
+            trust: 50,
+        };
+        let a1 = TestAgent {
+            id: 1,
+            caps: 0b010,
+            trust: 50,
+        };
+        let a2 = TestAgent {
+            id: 2,
+            caps: 0b100,
+            trust: 50,
+        };
         let coalition: [&dyn AgentCapabilities; 2] = [&a1, &a2];
-        let ctx = DecisionContext { required_capabilities: 0b111 };
+        let ctx = DecisionContext {
+            required_capabilities: 0b111,
+        };
         let succ = [true, true, true, false, false, false, false, false];
 
         // R = 3 configured, but the world only ever demands roles 0 and 2 —
         // exactly seeds 354/355, where no pool worker carries role 1.
         let arm = policy(GroupAifConfig::default(), &[(0, 0), (1, 2), (2, 0)]);
         let reference = policy(GroupAifConfig::default(), &[(0, 0), (1, 2), (2, 0)]);
-        let d = demand(&workflow(&[
-            (Role::new(0), &[0, 1]),
-            (Role::new(2), &[2]),
-        ]));
+        let d = demand(&workflow(&[(Role::new(0), &[0, 1]), (Role::new(2), &[2])]));
         for _ in 0..4 {
             arm.begin_task(&d).unwrap();
             let _ = arm.should_join(&a0, &coalition, &ctx);
@@ -2021,7 +2128,11 @@ mod tests {
 
         let c = arm.counters();
         // The counted ledger is untouched by A6.1 and still exact.
-        assert!(c.s_learn_exact(), "the ledger stays exact: {:?}", c.model_updates);
+        assert!(
+            c.s_learn_exact(),
+            "the ledger stays exact: {:?}",
+            c.model_updates
+        );
         assert_eq!(
             c.model_updates[1].expected, 0,
             "role 1 was never asked to learn"
@@ -2046,7 +2157,11 @@ mod tests {
         // The other half: a model that WAS asked and did not move still fails.
         // Constructed by handing the guard the arm's own audits against its own
         // post-run snapshots, so every in-scope model has zero delta.
-        let frozen = models_moved(&arm.model_snapshots(), &arm.model_snapshots(), &c.model_updates);
+        let frozen = models_moved(
+            &arm.model_snapshots(),
+            &arm.model_snapshots(),
+            &c.model_updates,
+        );
         assert!(
             !frozen.ok,
             "an asked-and-frozen model must STILL fail — A5.4's `all` stands \
@@ -2085,7 +2200,11 @@ mod tests {
         // Open a second task and observe it with the WRONG width, so the engine
         // update is skipped whole while the task stream has already advanced.
         p.begin_task(&three_role_demand()).unwrap();
-        assert_eq!(p.observe_outcome(&[true; 3]), 0, "a width mismatch applies nothing");
+        assert_eq!(
+            p.observe_outcome(&[true; 3]),
+            0,
+            "a width mismatch applies nothing"
+        );
 
         let c = p.counters();
         assert!(
@@ -2124,7 +2243,12 @@ mod tests {
             "a doubled observation is a SURPLUS and must be RUN-INVALID"
         );
         for a in &c.model_updates {
-            assert_eq!((a.updates, a.expected), (2, 1), "{:?} advanced twice", a.label);
+            assert_eq!(
+                (a.updates, a.expected),
+                (2, 1),
+                "{:?} advanced twice",
+                a.label
+            );
         }
         assert_eq!(c.tasks_observed, 2);
         assert_eq!(c.roster_sizes.len(), 1, "only one task was ever opened");
@@ -2185,23 +2309,26 @@ mod tests {
             }
         };
         let probs = <RoleMember as aif::InternalAgent>::action_probabilities(&mut member, 0);
-        assert_eq!(probs.len(), 0, "a failed replay reports an empty distribution");
+        assert_eq!(
+            probs.len(),
+            0,
+            "a failed replay reports an empty distribution"
+        );
 
         // …and that empty distribution becomes a counted decline at the group.
         let mut group = aif::GroupAgent::with_slots_seeded(
             aif::CopyAgent,
             vec![member],
-            aif::VotingAgent::with_seed(
-                GROUP_N_ACTIONS,
-                aif::VotingMode::CertaintyWeighted,
-                1,
-            ),
+            aif::VotingAgent::with_seed(GROUP_N_ACTIONS, aif::VotingMode::CertaintyWeighted, 1),
             GROUP_N_ACTIONS,
             1,
         );
         assert!(matches!(
             group.group_distribution(SENSORY_OBSERVATION),
-            Err(aif::AifError::InvalidLength { expected: 2, got: 0 })
+            Err(aif::AifError::InvalidLength {
+                expected: 2,
+                got: 0
+            })
         ));
 
         // The read-only slot refuses to act rather than sampling something.
@@ -2241,7 +2368,11 @@ mod tests {
     #[test]
     fn no_task_in_force_declines_and_counts() {
         let p = policy(GroupAifConfig::default(), &[(0, 0)]);
-        let a0 = TestAgent { id: 0, caps: 0b001, trust: 50 };
+        let a0 = TestAgent {
+            id: 0,
+            caps: 0b001,
+            trust: 50,
+        };
         let d = p.should_join(&a0, &[], &DecisionContext::default());
         assert!(!d.act && d.score == 0.0);
         let c = p.counters();
@@ -2255,19 +2386,26 @@ mod tests {
     /// role-matched one.
     #[test]
     fn coverage_is_role_matched() {
-        let ctx = DecisionContext { required_capabilities: 0b011 };
+        let ctx = DecisionContext {
+            required_capabilities: 0b011,
+        };
         let d2 = demand(&workflow(&[(Role::new(0), &[0]), (Role::new(1), &[1])]));
 
         // `matched` holds bit 1 and IS role 1; `mismatched` holds bit 1 but is role 2.
-        let candidate = TestAgent { id: 0, caps: 0b010, trust: 50 };
-        let anchor = TestAgent { id: 1, caps: 0b001, trust: 50 };
+        let candidate = TestAgent {
+            id: 0,
+            caps: 0b010,
+            trust: 50,
+        };
+        let anchor = TestAgent {
+            id: 1,
+            caps: 0b001,
+            trust: 50,
+        };
         let coalition: [&dyn AgentCapabilities; 1] = [&anchor];
 
         let run = |candidate_role: u8| {
-            let p = policy(
-                GroupAifConfig::default(),
-                &[(0, candidate_role), (1, 0)],
-            );
+            let p = policy(GroupAifConfig::default(), &[(0, candidate_role), (1, 0)]);
             p.begin_task(&d2).unwrap();
             p.should_join(&candidate, &coalition, &ctx).score.to_bits()
         };
@@ -2283,14 +2421,24 @@ mod tests {
     /// cross-role capability leaking into a role's coverage masks.
     #[test]
     fn role_blind_masks_diverge_from_role_matched() {
-        let ctx = DecisionContext { required_capabilities: 0b011 };
+        let ctx = DecisionContext {
+            required_capabilities: 0b011,
+        };
         let d2 = demand(&workflow(&[(Role::new(0), &[0]), (Role::new(1), &[1])]));
 
         // The candidate is role 0 and holds bit 1 — which role 1 needs and role 0
         // does not. Role-matched: it contributes nothing to r1's masks. Role-blind:
         // it "covers" r1's step.
-        let candidate = TestAgent { id: 0, caps: 0b010, trust: 50 };
-        let anchor = TestAgent { id: 1, caps: 0b001, trust: 50 };
+        let candidate = TestAgent {
+            id: 0,
+            caps: 0b010,
+            trust: 50,
+        };
+        let anchor = TestAgent {
+            id: 1,
+            caps: 0b001,
+            trust: 50,
+        };
         let coalition: [&dyn AgentCapabilities; 1] = [&anchor];
         let map = [(0usize, 0u8), (1, 0)];
 
@@ -2331,11 +2479,25 @@ mod tests {
     /// Every assertion below can fail on a real regression.
     #[test]
     fn agreement_samples_measure_candidate_reach() {
-        let a0 = TestAgent { id: 0, caps: 0b001, trust: 50 };
-        let a1 = TestAgent { id: 1, caps: 0b010, trust: 50 };
-        let a2 = TestAgent { id: 2, caps: 0b100, trust: 50 };
+        let a0 = TestAgent {
+            id: 0,
+            caps: 0b001,
+            trust: 50,
+        };
+        let a1 = TestAgent {
+            id: 1,
+            caps: 0b010,
+            trust: 50,
+        };
+        let a2 = TestAgent {
+            id: 2,
+            caps: 0b100,
+            trust: 50,
+        };
         let coalition: [&dyn AgentCapabilities; 2] = [&a1, &a2];
-        let ctx = DecisionContext { required_capabilities: 0b111 };
+        let ctx = DecisionContext {
+            required_capabilities: 0b111,
+        };
 
         // The candidate is role 0, and all three roles demand ⇒ exactly ONE
         // candidate-sensitive internal out of three (A5.1's central claim).
@@ -2344,7 +2506,11 @@ mod tests {
         let decision = arm.should_join(&a0, &coalition, &ctx);
 
         let counters = arm.counters();
-        assert_eq!(counters.agreement.len(), 1, "one sample per successful read");
+        assert_eq!(
+            counters.agreement.len(),
+            1,
+            "one sample per successful read"
+        );
         assert_eq!(
             u64::try_from(counters.agreement.len()).unwrap(),
             counters.reads
@@ -2411,15 +2577,25 @@ mod tests {
     /// code, and it must stay visible if the mask rule is ever touched.
     #[test]
     fn a_non_rostered_candidate_is_invisible_to_the_group() {
-        let ctx = DecisionContext { required_capabilities: 0b111 };
+        let ctx = DecisionContext {
+            required_capabilities: 0b111,
+        };
         // Roster is roles 0 and 1; both candidates are role 2, so neither reaches
         // an internal under the registered masks. The coalition deliberately leaves
         // bit 1 UNCOVERED, so a candidate holding it is decision-relevant to
         // internal r1 the moment the masks stop filtering by role — without that
         // the role-blind contrast below would be swamped by saturation.
         let two_role = demand(&workflow(&[(Role::new(0), &[0]), (Role::new(1), &[1])]));
-        let anchor_a = TestAgent { id: 1, caps: 0b001, trust: 50 };
-        let anchor_b = TestAgent { id: 2, caps: 0b001, trust: 50 };
+        let anchor_a = TestAgent {
+            id: 1,
+            caps: 0b001,
+            trust: 50,
+        };
+        let anchor_b = TestAgent {
+            id: 2,
+            caps: 0b001,
+            trust: 50,
+        };
         let coalition: [&dyn AgentCapabilities; 2] = [&anchor_a, &anchor_b];
         let roles = [(0usize, 2u8), (1, 0), (2, 1)];
 
@@ -2432,7 +2608,11 @@ mod tests {
                 &roles,
             );
             p.begin_task(&two_role).unwrap();
-            let cand = TestAgent { id: 0, caps, trust: 50 };
+            let cand = TestAgent {
+                id: 0,
+                caps,
+                trust: 50,
+            };
             p.should_join(&cand, &coalition, &ctx).score.to_bits()
         };
         assert_eq!(
@@ -2454,10 +2634,24 @@ mod tests {
     /// The leave path's `cfg0 == cfg1` disclosure counts what A5.1 says it counts.
     #[test]
     fn leave_path_identical_masks_are_counted() {
-        let ctx = DecisionContext { required_capabilities: 0b111 };
-        let a0 = TestAgent { id: 0, caps: 0b001, trust: 50 };
-        let a1 = TestAgent { id: 1, caps: 0b010, trust: 50 };
-        let a2 = TestAgent { id: 2, caps: 0b100, trust: 50 };
+        let ctx = DecisionContext {
+            required_capabilities: 0b111,
+        };
+        let a0 = TestAgent {
+            id: 0,
+            caps: 0b001,
+            trust: 50,
+        };
+        let a1 = TestAgent {
+            id: 1,
+            caps: 0b010,
+            trust: 50,
+        };
+        let a2 = TestAgent {
+            id: 2,
+            caps: 0b100,
+            trust: 50,
+        };
         let full: [&dyn AgentCapabilities; 3] = [&a0, &a1, &a2];
 
         let p = policy(GroupAifConfig::default(), &[(0, 0), (1, 1), (2, 2)]);
@@ -2482,11 +2676,25 @@ mod tests {
     /// reports the draw rather than a fabricated margin.
     #[test]
     fn seeded_sampling_cell_runs_and_reports_the_draw_not_a_margin() {
-        let a0 = TestAgent { id: 0, caps: 0b001, trust: 50 };
-        let a1 = TestAgent { id: 1, caps: 0b010, trust: 50 };
-        let a2 = TestAgent { id: 2, caps: 0b100, trust: 50 };
+        let a0 = TestAgent {
+            id: 0,
+            caps: 0b001,
+            trust: 50,
+        };
+        let a1 = TestAgent {
+            id: 1,
+            caps: 0b010,
+            trust: 50,
+        };
+        let a2 = TestAgent {
+            id: 2,
+            caps: 0b100,
+            trust: 50,
+        };
         let coalition: [&dyn AgentCapabilities; 2] = [&a1, &a2];
-        let ctx = DecisionContext { required_capabilities: 0b111 };
+        let ctx = DecisionContext {
+            required_capabilities: 0b111,
+        };
         let map = [(0usize, 0u8), (1, 1), (2, 2)];
         let cfg = GroupAifConfig {
             read: DecisionRead::SeededSampling,
@@ -2509,7 +2717,11 @@ mod tests {
         assert_eq!(a, b, "the seeded draw must still be a function of the seed");
         for (act, bits) in &a {
             let expected = if *act { 0.5f64 } else { -0.5f64 };
-            assert_eq!(*bits, expected.to_bits(), "score encodes the draw, not a margin");
+            assert_eq!(
+                *bits,
+                expected.to_bits(),
+                "score encodes the draw, not a margin"
+            );
         }
         assert_eq!(ca.declines_upstream, 0, "the sampled path must not error");
         assert!(
@@ -2529,11 +2741,25 @@ mod tests {
     /// cannot pass by only exercising the easy case.
     #[test]
     fn deterministic_vote_reads_uniform_over_winners() {
-        let a0 = TestAgent { id: 0, caps: 0b001, trust: 50 };
-        let a1 = TestAgent { id: 1, caps: 0b010, trust: 50 };
-        let a2 = TestAgent { id: 2, caps: 0b100, trust: 50 };
+        let a0 = TestAgent {
+            id: 0,
+            caps: 0b001,
+            trust: 50,
+        };
+        let a1 = TestAgent {
+            id: 1,
+            caps: 0b010,
+            trust: 50,
+        };
+        let a2 = TestAgent {
+            id: 2,
+            caps: 0b100,
+            trust: 50,
+        };
         let coalition: [&dyn AgentCapabilities; 2] = [&a1, &a2];
-        let ctx = DecisionContext { required_capabilities: 0b111 };
+        let ctx = DecisionContext {
+            required_capabilities: 0b111,
+        };
         let map = [(0usize, 0u8), (1, 1), (2, 2)];
         // Novelty off so a non-unanimous read is reachable at all — see
         // `novelty_off`. The winner-set arithmetic under test is independent of it.
@@ -2549,7 +2775,16 @@ mod tests {
                 p.begin_task(&three_role_demand()).unwrap();
                 let d = p.should_join(&a0, &coalition, &ctx);
                 out.push((d.act, d.score.to_bits()));
-                let succ = [t % 2 == 0, t % 3 == 0, true, false, false, false, false, false];
+                let succ = [
+                    t % 2 == 0,
+                    t % 3 == 0,
+                    true,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                ];
                 p.observe_outcome(&succ);
             }
             (out, p.counters())
@@ -2598,10 +2833,7 @@ mod tests {
         );
 
         // …and the registered default is still `CertaintyWeighted` (D2 stands).
-        assert_eq!(
-            GroupAifConfig::default().vote,
-            GroupVote::CertaintyWeighted
-        );
+        assert_eq!(GroupAifConfig::default().vote, GroupVote::CertaintyWeighted);
     }
 
     /// **X-identity's alignment conjunct (Amendment A5.10 L2-16).** SP2's scale
@@ -2614,7 +2846,9 @@ mod tests {
     /// anything else reads the two identically.
     #[test]
     fn sp2_scale_is_indexed_by_modality_order() {
-        let ctx = DecisionContext { required_capabilities: 0b111 };
+        let ctx = DecisionContext {
+            required_capabilities: 0b111,
+        };
         let cfg = GroupAifConfig {
             channel: PrecisionChannel::MultiplicityWeighted,
             ..GroupAifConfig::default()
@@ -2638,8 +2872,16 @@ mod tests {
         // saturate the read to `p(act) = 1.0` in both arrangements (A5.1) and the
         // probe would report a false FAIL — measured, not guessed: with
         // `caps = 0b101` both reads are exactly `0.5` score bits.
-        let cand = TestAgent { id: 0, caps: 0b001, trust: 50 };
-        let other = TestAgent { id: 1, caps: 0b010, trust: 50 };
+        let cand = TestAgent {
+            id: 0,
+            caps: 0b001,
+            trust: 50,
+        };
+        let other = TestAgent {
+            id: 1,
+            caps: 0b010,
+            trust: 50,
+        };
         let coalition: [&dyn AgentCapabilities; 1] = [&other];
         let read = |d: &Demand| {
             let p = policy(cfg, &[(0, 0), (1, 1)]);

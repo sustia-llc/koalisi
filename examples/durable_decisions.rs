@@ -103,16 +103,31 @@ async fn main() -> Result<()> {
     // 3) koalisi coalition service with a decision tap + forwarder.
     let manager = CoalitionManager::<Worker, ()>::empty();
     let seed = manager
-        .add_agent(Worker { id: 2, caps: 0b010, trust: 90 })
+        .add_agent(Worker {
+            id: 2,
+            caps: 0b010,
+            trust: 90,
+        })
         .await
         .context("add seed")?;
-    let coalition = manager.form_coalition(vec![seed], ()).await.context("form")?;
+    let coalition = manager
+        .form_coalition(vec![seed], ())
+        .await
+        .context("form")?;
     let c1 = manager
-        .add_agent(Worker { id: 1, caps: 0b001, trust: 80 })
+        .add_agent(Worker {
+            id: 1,
+            caps: 0b001,
+            trust: 80,
+        })
         .await
         .context("add c1")?;
     let c2 = manager
-        .add_agent(Worker { id: 3, caps: 0b100, trust: 70 })
+        .add_agent(Worker {
+            id: 3,
+            caps: 0b100,
+            trust: 70,
+        })
         .await
         .context("add c2")?;
 
@@ -134,7 +149,10 @@ async fn main() -> Result<()> {
     // 4) Drive policy-gated joins; each consulted decision is tapped + forwarded.
     let d1 = service.join(c1, coalition).await.context("join c1")?;
     let d2 = service.join(c2, coalition).await.context("join c2")?;
-    println!("drove 2 join decisions: c1.act={} c2.act={}", d1.act, d2.act);
+    println!(
+        "drove 2 join decisions: c1.act={} c2.act={}",
+        d1.act, d2.act
+    );
 
     // Read the durable decision events back off the log inbox.
     println!("--- replayed decision log (durable tier) ---");

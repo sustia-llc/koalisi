@@ -138,13 +138,19 @@ mod tests {
         let runs = Arc::new(AtomicUsize::new(0));
 
         let runs2 = runs.clone();
-        spawn_supervised(&tracker, child.clone(), 3, Duration::from_secs(60), move |_grandchild| {
-            let runs = runs2.clone();
-            async move {
-                runs.fetch_add(1, Ordering::SeqCst);
-                panic!("boom");
-            }
-        });
+        spawn_supervised(
+            &tracker,
+            child.clone(),
+            3,
+            Duration::from_secs(60),
+            move |_grandchild| {
+                let runs = runs2.clone();
+                async move {
+                    runs.fetch_add(1, Ordering::SeqCst);
+                    panic!("boom");
+                }
+            },
+        );
 
         tracker.close();
         tracker.wait().await;
@@ -163,13 +169,19 @@ mod tests {
         let runs = Arc::new(AtomicUsize::new(0));
 
         let runs2 = runs.clone();
-        spawn_supervised(&tracker, token.child_token(), 5, Duration::from_secs(60), move |child| {
-            let runs = runs2.clone();
-            async move {
-                runs.fetch_add(1, Ordering::SeqCst);
-                child.cancelled().await; // wait to be cancelled, then return
-            }
-        });
+        spawn_supervised(
+            &tracker,
+            token.child_token(),
+            5,
+            Duration::from_secs(60),
+            move |child| {
+                let runs = runs2.clone();
+                async move {
+                    runs.fetch_add(1, Ordering::SeqCst);
+                    child.cancelled().await; // wait to be cancelled, then return
+                }
+            },
+        );
 
         // Let it start, then cancel.
         tokio::time::sleep(Duration::from_millis(20)).await;
@@ -177,7 +189,11 @@ mod tests {
         tracker.close();
         tracker.wait().await;
 
-        assert_eq!(runs.load(Ordering::SeqCst), 1, "cancellation is not a failure");
+        assert_eq!(
+            runs.load(Ordering::SeqCst),
+            1,
+            "cancellation is not a failure"
+        );
     }
 
     /// A healthy long-running task is left untouched.
@@ -188,16 +204,26 @@ mod tests {
         let runs = Arc::new(AtomicUsize::new(0));
 
         let runs2 = runs.clone();
-        spawn_supervised(&tracker, token.child_token(), 3, Duration::from_secs(60), move |child| {
-            let runs = runs2.clone();
-            async move {
-                runs.fetch_add(1, Ordering::SeqCst);
-                child.cancelled().await;
-            }
-        });
+        spawn_supervised(
+            &tracker,
+            token.child_token(),
+            3,
+            Duration::from_secs(60),
+            move |child| {
+                let runs = runs2.clone();
+                async move {
+                    runs.fetch_add(1, Ordering::SeqCst);
+                    child.cancelled().await;
+                }
+            },
+        );
 
         tokio::time::sleep(Duration::from_millis(30)).await;
-        assert_eq!(runs.load(Ordering::SeqCst), 1, "healthy task runs exactly once");
+        assert_eq!(
+            runs.load(Ordering::SeqCst),
+            1,
+            "healthy task runs exactly once"
+        );
 
         token.cancel();
         tracker.close();

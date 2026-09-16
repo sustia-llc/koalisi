@@ -60,7 +60,7 @@ use surrealdb_live_message::subsystems::agents::{Agent, Coalition};
 use crate::subsystems::coalition_actor::DecisionRecord;
 
 /// Durable, serializable mirror of a core
-/// [`DecisionRecord`](crate::subsystems::coalition_actor::DecisionRecord).
+/// [`crate::subsystems::coalition_actor::DecisionRecord`].
 ///
 /// Derives [`SurrealValue`] so it can be the payload `T` of an upstream
 /// [`Coalition<T>`]. Field types are deliberately plain scalars/strings — no

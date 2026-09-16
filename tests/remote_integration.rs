@@ -98,16 +98,28 @@ async fn remote_gateway_publishes_coalition_decisions() {
         // ---------- Producer: manager + service with a decision tap ----------
         let manager = CoalitionManager::<Worker, ()>::empty();
         let seed = manager
-            .add_agent(Worker { id: 2, caps: 0b010, trust: 90 })
+            .add_agent(Worker {
+                id: 2,
+                caps: 0b010,
+                trust: 90,
+            })
             .await
             .expect("add seed");
         let coalition = manager.form_coalition(vec![seed], ()).await.expect("form");
         let c1 = manager
-            .add_agent(Worker { id: 1, caps: 0b001, trust: 80 })
+            .add_agent(Worker {
+                id: 1,
+                caps: 0b001,
+                trust: 80,
+            })
             .await
             .expect("add c1");
         let c2 = manager
-            .add_agent(Worker { id: 3, caps: 0b100, trust: 70 })
+            .add_agent(Worker {
+                id: 3,
+                caps: 0b100,
+                trust: 70,
+            })
             .await
             .expect("add c2");
 

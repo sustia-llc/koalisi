@@ -272,9 +272,9 @@ use catgraph_magnitude::{CatgraphError, CoalitionEvaluator, EvalScratch};
 // on `catgraph-magnitude` directly — the same courtesy the `decision` feature
 // extends to the `aif` belief structures (issue #2). Both are plain data:
 // `RoleId` is a `usize` alias, `RoleModulation` a validated `[0, 1]` table.
-pub use catgraph_magnitude::{RoleId, RoleModulation};
 #[cfg(feature = "magnitude-fast")]
 use catgraph_magnitude::{Coalition, HomMap, LawvereMetricSpace, UnitInterval, ZeroDiversityProof};
+pub use catgraph_magnitude::{RoleId, RoleModulation};
 
 use crate::algorithms::{AgentCapabilities, ValueCalculator};
 
@@ -1081,7 +1081,7 @@ pub struct JoinProbe {
     /// The exact zero-diversity certificate, when one of the three decidable
     /// classes fired: `Some(_)` ⇒ the real increment is exactly `0`.
     pub zero_proof: Option<ZeroDiversityProof>,
-    /// Whether `with − base` lands inside [`KNIFE_EDGE_REL_BAND`] of the
+    /// Whether `with − base` lands inside `KNIFE_EDGE_REL_BAND` of the
     /// policy's `join_margin` — i.e. whether the frozen arm pays a fresh
     /// recompute here.
     pub knife_edge: bool,
@@ -1097,7 +1097,7 @@ pub struct JoinProbe {
 /// makes this exact: upstream's `t`-scaling multiplies every distance by `t`,
 /// and `d * 1.0 == d` bitwise for finite and infinite `d` alike, so factoring
 /// the unscaled space is factoring the scaled one. The returned magnitude is
-/// asserted equal to [`magnitude_of_masks_f64`]'s in the module tests.)
+/// asserted equal to `magnitude_of_masks_f64`'s in the module tests.)
 ///
 /// The path is reported **independently of whether the magnitude succeeds** —
 /// the route is decided at construction, before any solve — so a singular ζ
@@ -1105,7 +1105,7 @@ pub struct JoinProbe {
 /// cases would silently undercount the Gauss–Jordan share, since that is the
 /// route an exact singularity surfaces on.
 ///
-/// Returns `None` only when nothing task-relevant survives [`relevant_masks`]
+/// Returns `None` only when nothing task-relevant survives `relevant_masks`
 /// (an empty coalition has no ζ to factor) or when the coalition itself cannot
 /// be built.
 #[cfg(feature = "magnitude-fast")]
@@ -1391,7 +1391,7 @@ impl MagnitudePolicy {
 
     /// Switch the policy to the **EQ3 arm** (koalisi #69, feature
     /// `magnitude-fast`): both opt-in levers at once — see the
-    /// [module docs](self#the-opt-in-eq3-arm-koalisi-69-feature-magnitude-fast).
+    /// module docs, section "The opt-in EQ3 arm".
     ///
     /// - **L2**, the exact zero-diversity proof branch on the cached candidate
     ///   query. **Decision-changing by design** on the profile-duplicate
@@ -3673,7 +3673,10 @@ mod tests {
         // private cache), so a decision taken after probing still matches the
         // fresh reference.
         let after = policy.should_join(&cand, &coalition, &ctx);
-        assert!(decisions_match(after, ref_join(&cand, &coalition, 0b111, 0.0)));
+        assert!(decisions_match(
+            after,
+            ref_join(&cand, &coalition, 0b111, 0.0)
+        ));
 
         // The factorization shortcut agrees with the fresh f64 route, and skips
         // task-irrelevant agents through `relevant_masks`.

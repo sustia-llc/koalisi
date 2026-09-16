@@ -1,87 +1,21 @@
 [package]
 name = "koalisi"
-version = "0.33.0"
+version = "0.34.0"
 edition = "2024"
-# 1.93 is the DECLARED floor — owner decision C-D1, 2026-09-14: KEEP 1.93.
-# It is no longer the measured cross-feature maximum (that is 1.92 since the
-# catgraph v0.23.0 re-pin, v0.32.0); the tiers below are documentation, and
-# the resolver-3 ground from the 2026-08-09 decision (keep 1.93, lowering
-# tried and REVERTED) is the reason the declaration stays put. Do not lower
-# it in passing; a change needs a new owner decision.
-#
-# The floor is feature-conditional, with THREE tiers (measured 2026-09-14 at
-# catgraph v0.23.0, `cargo +<v> check --all-targets --locked --features <set>`
-# with `rust-version` temporarily 1.85.0):
+# Declared floor 1.93.0 — owner decision C-D1 (2026-09-14): KEEP; do not lower
+# in passing. Edition 2024 means resolver 3, so this value also bounds
+# dependency resolution (`cargo update` selects versions compatible with it).
+# The measured floor is feature-conditional and lies below the declaration
+# (measured 2026-09-16 on the current lock):
 #   1.88  default, `magnitude`, `persistence`, `remote`, `process`, `harness`
-#         (1.87 fails: let-chains inside the `catgraph 0.23.0` lib, which
-#         declares no rust-version — not koalisi's own source; `harness`
-#         re-measured 2026-09-16 at v0.33.0, 1.87 fail / 1.88 pass)
-#   1.89  + `decision`, `magnitude-fast`, and the showcase set
-#         `decision,magnitude,process`  (cargo refuses 1.88 declaratively:
-#         nalgebra 0.35.0 / safe_arch 1.0.0 / wide 1.5.0 require 1.89)
-#   1.92  + `durable`  (1.91 fails to compile `diskann` in the surrealdb stack
-#         — lifetime / Iterator-not-general-enough errors — so the effective
-#         floor is 1.92; at v0.31.0 1.90 was measured failing too)
-#   The former 1.93 tier (`process`, via `catgraph-syntax` -> deep_causality
-#   haft -> algebra -> num) is GONE: cg#222 made the syntax crate's Arrow seam
-#   crate-owned, and no `deep_causality_*` package is in the lock
-#   (`rg -n deep_causality Cargo.lock` -> nothing).
-#
-# ⚠ HOW TO RE-MEASURE THESE TIERS — the obvious command does NOT work.
-#   Because this package declares 1.93, cargo refuses any toolchain below it
-#   BEFORE evaluating a single dependency:
-#     $ cargo +1.89 check --no-default-features --features decision
-#     error: rustc 1.89.0 is not supported by the following packages:
-#       koalisi@0.32.0 requires rustc 1.93.0
-#   So every sub-1.93 tier is unmeasurable from the committed manifest.
-#   PROCEDURE: temporarily set `rust-version` low (e.g. 1.85.0), run
-#   `cargo +<v> check --all-targets --locked --features <set>`, then RESTORE
-#   1.93.0 and diff the manifest to prove the probe left no trace.
-#   Do NOT reach for `--ignore-rust-version` instead: it suppresses the dep
-#   rust-version checks too, so it cannot see a dependency floor at all — that
-#   flag is what produced retired claim (d).
-#
-# THE 2026-08-09 GROUNDS FOR KEEPING THE DECLARATION AT THE MAXIMUM (both
-# measured then; re-read against the v0.23.0 tiers):
-#   - Showcase ground: `examples/strategy_comparison.rs` has
-#     `required-features = [decision, magnitude, process]`. At v0.9.0 that set
-#     needed 1.93, so lowering bought nothing for the showcase. At v0.23.0 the
-#     same set checks on 1.89 — this ground NO LONGER HOLDS.
-#   - Resolver ground: edition 2024 => resolver 3, so the declared value
-#     CONSTRAINS RESOLUTION. With 1.88 declared, `cargo update --dry-run`
-#     reported `Locking 107 packages to latest Rust 1.88.0 compatible versions`
-#     and held back nalgebra, roaring, safe_arch, wide and the deep_causality
-#     crates (2026-08-09). Calibration: cargo ANNOUNCES that line, and
-#     MSRV-aware selection has an opt-out — per invocation
-#     `cargo update --ignore-rust-version`, or per repo
-#     `[resolver] incompatible-rust-versions = "allow"` in `.cargo/config.toml`.
-#     This ground applies unchanged to any declaration below 1.93.
-#   Consequence of the current value: a downstream on 1.88..1.92 wanting only
-#   default features is refused by this line even though that build compiles.
-#
-# ⚠ THE MEASUREMENT TRAP that produced retired claim (d):
-#   `--ignore-rust-version` bypasses the gate a downstream hits, and it does so
-#   for DEPENDENCIES too — which is why it cannot measure a dependency floor.
-#   Worked example (reproducible only with `rust-version` temporarily lowered to
-#   1.88, per the procedure above): `cargo +1.88 check --features decision`
-#   COMPILES under the flag, and without it cargo refuses with
-#   "nalgebra@0.35.0 requires rustc 1.89.0". On the COMMITTED manifest that same
-#   command refuses with "koalisi@0.32.0 requires rustc 1.93.0" instead, never
-#   reaching nalgebra.
-#
-# FOUR retired claims, all wrong, all from measuring a chosen subset:
-#   (a) pre-v0.31.0: "the floor is deep_causality_num alone, propagating through
-#       catgraph; v0.9.0 removes it." v0.9.0 retires only catgraph's DIRECT dep;
-#       num survived beneath haft -> algebra until v0.23.0.
-#   (b) v0.31.0: "no catgraph re-pin can lift it; the DeepCausality substrate
-#       must move." The `process` tier was koalisi's own optional feature, and
-#       the v0.23.0 re-pin lifted it.
-#   (c) v0.31.0: "only `process` needs more than the default floor." `durable`
-#       needs 1.92.
-#   (d) the reverted lowering: "the default floor is 1.88 FOR EVERYTHING BUT
-#       durable/process." The 1.88 tier itself is right; what was wrong is its
-#       extent — `decision` and `magnitude-fast` need 1.89. Hidden by
-#       `--ignore-rust-version`.
+#         (1.87 fails on let-chains in the `catgraph 0.23.0` lib)
+#   1.89  + `decision`, `magnitude-fast`, `decision,magnitude,process`
+#         (nalgebra 0.35 / safe_arch 1.0 / wide 1.5 declare 1.89)
+#   1.92  + `durable` (1.91 fails to compile `diskann`)
+# To re-measure: set `rust-version` to 1.85.0 temporarily, run
+# `cargo +<v> check --all-targets --locked --features <set>` per feature set,
+# restore 1.93.0, diff the manifest. Never `--ignore-rust-version`: it also
+# suppresses the dependency checks. Full record: CLAUDE.md gotcha 34.
 rust-version = "1.93.0"
 description = "Reference implementation of agentic coalitions in Rust — tokio::sync task seams, temporal hypergraph topology, coalition algorithms, and optional Active Inference decision-making"
 license = "MIT OR Apache-2.0"
@@ -100,68 +34,54 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 config = { version = "0.15", default-features = false, features = ["toml"] }
 serde = { version = "1.0", features = ["derive"] }
 
-# Topology backend: catgraph's CRUD hypergraph container (the K1 re-back,
-# catgraph#23 design). HTTPS URL since catgraph went public (was SSH while
-# private). Tag kept in lockstep with `catgraph-magnitude` AND `catgraph-syntax`
-# — all THREE move together (one repo, one
-# checkout — a tag split duplicates catgraph/catgraph-applied/itertools
-# compile units).
+# Topology backend: catgraph's CRUD hypergraph container. Tag kept in lockstep
+# with `catgraph-magnitude` and `catgraph-syntax` — all three move together
+# (one repo, one checkout; a tag split duplicates the catgraph compile units).
 catgraph-applied = { git = "https://github.com/sustia-llc/catgraph", tag = "v0.23.0" }
 rayon = "1.12"
 tokio-rayon = "2.1"
 
-# Optional: Active Inference decision strategy (expected free energy).
-# Engine crate from the `tira` repo. When the `decision` feature is off, none
-# of this (and none of its nalgebra dependency) is compiled — the non-AIF
-# ThresholdPolicy / ValueCalculator path is always available without it.
-# HTTPS since tira went public (2026-07-27; was SSH while private).
+# Optional: Active Inference decision strategy (expected free energy), the
+# engine crate from the `tira` repo. Feature `decision` off compiles none of it
+# nor nalgebra; `ThresholdPolicy` / `ValueCalculator` need neither.
 aif = { git = "https://github.com/sustia-llc/tira", tag = "aif-v0.13.0", optional = true }
-# The multi-modality AIF bridge (`aif-mm`, prereg K4-v3) constructs a
-# `GenerativeModel` directly, which is expressed over `nalgebra::DMatrix`. Version
-# unifies with the one `aif` already pulls transitively (0.35), so no new build.
-# Only compiled under `decision`.
+# The multimodal AIF bridge builds a `GenerativeModel` over `nalgebra::DMatrix`;
+# the version unifies with the one `aif` pulls. Only compiled under `decision`.
 nalgebra = { version = "0.35", optional = true }
 
 # Optional: categorical magnitude decision strategy (coalition diversity via
-# catgraph's enriched-category magnitude). HTTPS since catgraph went public;
-# tag in lockstep with `catgraph-applied` above.
+# catgraph's enriched-category magnitude). Tag in lockstep with
+# `catgraph-applied` above.
 catgraph-magnitude = { git = "https://github.com/sustia-llc/catgraph", tag = "v0.23.0", optional = true }
 
 # Optional: the colored-syntax layer over catgraph-applied's free-prop term
-# engine — the `FrobeniusOr` spider family and the textual presentation surface.
-# Consumed by the EQ5a process-structured task surface (`src/process/`, feature
-# `process`, issue #76). Tag in LOCKSTEP with the two catgraph deps above (one
-# repo, one checkout — a tag split duplicates the catgraph/catgraph-applied
-# compile units). Feature-off builds do not pull it. Since `v0.23.0` its
-# runtime dependency set is catgraph + catgraph-applied + thiserror (cg#222
-# made the Arrow seam crate-owned; the `deep_causality_haft` edge is gone).
+# engine — the `FrobeniusOr` spider family and the presentation surface —
+# consumed by `src/process/` (feature `process`). Tag in lockstep with the two
+# catgraph deps above. Its dependency set is catgraph + catgraph-applied +
+# thiserror; no DeepCausality crate enters the graph through it.
 catgraph-syntax = { git = "https://github.com/sustia-llc/catgraph", tag = "v0.23.0", optional = true }
 
 # Optional: durable coalition decision messaging (two-tier SurrealDB bus:
 # CHANGEFEED log + LIVE wake-up + cursor catch-up; at-least-once,
-# restart-durable). Enabled via `--features durable`. Feature-off builds pull
-# NONE of this (and none of surrealdb/nalgebra). HTTPS — the repo is public.
-# Upstream's package name is `surrealdb_live_message`
-# (underscores); the readable hyphen key is remapped via `package = ...`.
+# restart-durable), feature `durable`. Upstream's package name is
+# `surrealdb_live_message`; the hyphenated key is remapped via `package`.
 surrealdb-live-message = { git = "https://github.com/sustia-llc/surrealdb-live-message", tag = "v0.2.1", package = "surrealdb_live_message", optional = true }
-# `#[derive(SurrealValue)]` on koalisi's durable `DecisionEvent` emits absolute
-# `::surrealdb_types` paths, so the trait crate must be a direct dep. Version
-# unifies with the one `surrealdb-live-message` pulls (3.2.1 since its v0.2.1) so the
-# derived impl satisfies its `Coalition<T>: SurrealValue` bound. Pure-value types crate,
+# `#[derive(SurrealValue)]` on the durable `DecisionEvent` emits absolute
+# `::surrealdb_types` paths, so the trait crate is a direct dep; the version
+# unifies with the one `surrealdb-live-message` pulls. Pure-value types crate,
 # no DB engine; only compiled under `durable`.
-surrealdb-types = { version = "3.2.1", optional = true }
+surrealdb-types = { version = "3.2.4", optional = true }
 
 # Optional: Phase 7 persistence core (feature `persistence`). CBOR frames via
 # ciborium + SHA-256 chaining via sha2. Feature-off builds pull neither.
 ciborium = { version = "0.2", optional = true }
-sha2 = { version = "0.10", optional = true }
+sha2 = { version = "0.11", optional = true }
 
-# Optional: transport for the domain-neutral remote coalition-event gateway
-# (feature `remote`, issue #38). Raw libp2p `request-response` over TCP + noise
-# + yamux, with mDNS discovery and CBOR codecs. This is the
-# publish-to-outside-world boundary only — never the hot path. Feature-off
-# builds pull NONE of it.
-libp2p = { version = "0.56", features = [
+# Optional: transport for the remote coalition-event gateway (feature
+# `remote`): libp2p `request-response` over TCP + noise + yamux, mDNS
+# discovery, CBOR codecs. The publish-to-outside-world boundary, never the hot
+# path.
+libp2p = { version = "0.57", features = [
     "macros",
     "noise",
     "mdns",
@@ -178,29 +98,25 @@ default = []
 decision = ["dep:aif", "dep:nalgebra"]
 # Categorical-magnitude coalition-decision strategy (pluggable, off by default).
 magnitude = ["dep:catgraph-magnitude"]
-# EQ3 levers L2 + L3 (#69, prereg Amendment 1): compile the upstream `f64-fast`
-# factorization and expose `MagnitudePolicy::with_eq3_levers`, the opt-in toggle
-# carrying BOTH levers. L3 routes FRESH full-coalition magnitudes through the
-# `f64` factorization handle; L2 is the exact zero-diversity proof branch, which
-# is **deliberately decision-changing** — it declines certified exact-zero joins
-# that the frozen arm takes on positive float roundoff (~0.8% of certified
-# candidates measured). Implies `magnitude`. The toggle defaults OFF, so merely
-# enabling this feature changes no decision (the registered X-B identity gate);
-# turning it ON selects the `mag-eq3` arm, not a faster `mag`.
+# EQ3 levers L2 + L3: compiles the upstream `f64-fast` factorization and
+# exposes `MagnitudePolicy::with_eq3_levers`, an opt-in toggle carrying both.
+# L3 routes fresh full-coalition magnitudes through the `f64` handle; L2 is the
+# exact zero-diversity proof branch, which is decision-changing (it declines
+# certified exact-zero joins the frozen arm takes on float roundoff). Implies
+# `magnitude`. The toggle defaults off, so enabling the feature alone changes
+# no decision; turning it on selects the `mag-eq3` arm, not a faster `mag`.
 magnitude-fast = ["magnitude", "catgraph-magnitude/f64-fast"]
 # Durable coalition decision-event bus on surrealdb-live-message (off by default).
 durable = ["dep:surrealdb-live-message", "dep:surrealdb-types"]
 # Phase 7 persistence core: portable hash-chained event log (off by default).
 persistence = ["dep:ciborium", "dep:sha2"]
-# Domain-neutral remote coalition-event gateway over raw libp2p
-# `request-response` (off by default, issue #38).
+# Domain-neutral remote coalition-event gateway over libp2p `request-response`
+# (off by default).
 remote = ["dep:libp2p"]
-# EQ5a (#76, prereg `docs/prereg-K4-eq5a-process-structured.md` D6/D8):
-# process-structured coalition tasks. Workflows as colored string diagrams over
-# `FrobeniusOr<Step>`, demand extraction, the pinned rewrite theory (Amendment
-# 1), the staffing price, and the bounded convex-DPO `optimize` hook. Implies
-# `magnitude` — the arm the registration's control staffs a workflow with — and
-# gates the `catgraph-syntax` dependency.
+# Process-structured coalition tasks: workflows as colored string diagrams over
+# `FrobeniusOr<Step>`, demand extraction, the pinned rewrite theory, the
+# staffing price, and the bounded convex-DPO `optimize` hook. Implies
+# `magnitude` and gates the `catgraph-syntax` dependency.
 process = ["magnitude", "dep:catgraph-syntax"]
 # K7 harness: seeded instance generation, the battery loop, report helpers
 # (`src/harness/`, off by default, no dependencies). Registrations are examples
@@ -213,9 +129,8 @@ futures = "0.3"
 
 [[example]]
 name = "strategy_comparison"
-# `process` joins the list at EQ5a (#76 Stage 2): Part 9 staffs colored string
-# diagrams through `koalisi::process`. CONSEQUENCE: the example — and the frozen
-# Parts 1–8 battery with it — now builds only with all THREE features on.
+# The frozen K4 archive binary (Parts 1–11); Part 9 staffs colored string
+# diagrams through `koalisi::process`, so all three features are required.
 required-features = ["decision", "magnitude", "process"]
 
 [[example]]

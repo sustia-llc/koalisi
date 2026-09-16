@@ -14,8 +14,7 @@ use rayon::ThreadPoolBuilder;
 use std::sync::LazyLock;
 use tokio_rayon::AsyncThreadPool;
 
-pub(crate) static EXEC: LazyLock<HypergraphExecutor> =
-    LazyLock::new(HypergraphExecutor::new);
+pub(crate) static EXEC: LazyLock<HypergraphExecutor> = LazyLock::new(HypergraphExecutor::new);
 
 /// Bridges synchronous graph operations onto a rayon thread pool so
 /// async callers can `.await` them without blocking the tokio runtime.

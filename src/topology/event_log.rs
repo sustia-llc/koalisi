@@ -80,8 +80,7 @@ where
         }
 
         if let TemporalEvent::SnapshotMarker { snapshot_id, .. } = &event {
-            self.snapshot_index
-                .insert(timestamp, (*snapshot_id, index));
+            self.snapshot_index.insert(timestamp, (*snapshot_id, index));
         }
 
         self.stats.count(&event);

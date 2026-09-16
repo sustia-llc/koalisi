@@ -183,20 +183,21 @@ cargo test --features persistence,magnitude # 156 tests (incl. the live-vs-repla
 cargo test --features remote               # 112 tests (+ gateway event buffer + loopback round-trip)
 cargo test --features process              # 159 tests (+ process-structured workflows + the unstaffable-residual policy)
 cargo test --features decision,magnitude,process # 239 tests (the full A/B battery surface)
-cargo test --features durable              # + container-backed restart-durability test (needs Docker)
+cargo test --features durable              # 107 tests (+ container-backed restart-durability test; needs Docker)
 cargo test --features harness              # 125 tests (+ the K7 harness: rng, instance generation, battery loop, report helpers)
 ```
 
 ## Dependencies
 
-- [catgraph-applied](https://github.com/sustia-llc/catgraph) (tag `v0.23.0`, kept in lockstep with catgraph-magnitude and catgraph-syntax — one repo, one checkout, all three move together) — CRUD hypergraph container backing the topology layer (the K1 re-back; replaced yamafaktory `hypergraph` v4.2.0)
+- [catgraph-applied](https://github.com/sustia-llc/catgraph) (tag `v0.23.0`, kept in lockstep with catgraph-magnitude and catgraph-syntax — one repo, one checkout, all three move together) — CRUD hypergraph container backing the topology layer
 - tokio + tokio-util — async runtime + lifecycle primitives
 - rayon + tokio-rayon — CPU-bound graph operations bridge
 - [surrealdb-live-message](https://github.com/sustia-llc/surrealdb-live-message) (tag `v0.2.1`, **optional**, feature `durable`) — two-tier restart-durable message bus for the coalition decision log
 - [aif](https://github.com/sustia-llc/tira) (tag `aif-v0.13.0`, **optional**, feature `decision`) — active-inference engine for the AIF decision strategies (scalar, multimodal, persistent); `nalgebra` is only compiled when the feature is enabled
 - [catgraph-magnitude](https://github.com/sustia-llc/catgraph) (tag `v0.23.0`, **optional**, feature `magnitude`) — enriched-category coalition magnitude for the categorical decision strategy
-- [catgraph-syntax](https://github.com/sustia-llc/catgraph) (tag `v0.23.0`, **optional**, feature `process`) — colored-syntax layer over the free-prop term surface (EQ5a, #76); since `v0.23.0` it depends on catgraph + catgraph-applied + thiserror only, so no DeepCausality crate is in the dependency graph under any feature
-- libp2p 0.56 (**optional**, feature `remote`) — TCP+noise+yamux `request-response` transport for the remote coalition-event gateway
+- [catgraph-syntax](https://github.com/sustia-llc/catgraph) (tag `v0.23.0`, **optional**, feature `process`) — colored-syntax layer over the free-prop term surface for process-structured tasks; depends on catgraph + catgraph-applied + thiserror only, so no DeepCausality crate is in the dependency graph under any feature
+- ciborium 0.2 + sha2 0.11 (**optional**, feature `persistence`) — CBOR frames and SHA-256 chaining for the append-only event store
+- libp2p 0.57 (**optional**, feature `remote`) — TCP+noise+yamux `request-response` transport for the remote coalition-event gateway
 
 ## References
 

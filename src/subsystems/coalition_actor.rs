@@ -134,7 +134,7 @@ fn emit_decision(
 ///
 /// ## Delivery contract: at-most-once, one MORE lossy hop
 ///
-/// The tap itself is already best-effort (see [`emit_decision`] — `try_send`,
+/// The tap itself is already best-effort (see `emit_decision` — `try_send`,
 /// drop-with-warn). This tee adds a second such hop: each sink receives a clone
 /// via non-blocking [`try_send`](mpsc::Sender::try_send), and a full or closed
 /// sink drops that record with a `warn`. A slow sink therefore thins its OWN
@@ -386,7 +386,13 @@ async fn service_loop<V, HE>(
                     .await
                     .map_err(|e| e.to_string());
                 if let Ok(decision) = &r {
-                    emit_decision(tap.as_ref(), coalition, agent, DecisionKind::Leave, decision);
+                    emit_decision(
+                        tap.as_ref(),
+                        coalition,
+                        agent,
+                        DecisionKind::Leave,
+                        decision,
+                    );
                 }
                 let _ = reply.send(r);
             }
@@ -475,7 +481,10 @@ mod tests {
         // The reply returns only after the tap emit, so the record is buffered.
         let record = tap_rx.recv().await.expect("tap record");
         assert_eq!(record.agent_id, usize::from(candidate));
-        assert_eq!(record.coalition, format!("coalition-{}", usize::from(coalition)));
+        assert_eq!(
+            record.coalition,
+            format!("coalition-{}", usize::from(coalition))
+        );
         assert_eq!(record.kind, DecisionKind::Join);
         assert!(record.act);
         assert_eq!(record.score, decision.score);

@@ -177,7 +177,7 @@ pub struct PersistentAifConfig {
     /// arm-E1 itself stays `None`.
     pub query_gamma: Option<f64>,
     /// Capability-bit width of the persistent world model (koalisi #61, Part 5c).
-    /// **Identity default [`N_BITS`] = 8** — the registered universe every K4
+    /// **Identity default `N_BITS` = 8** — the registered universe every K4
     /// battery through v2 runs on; at `8` the arm is bit-for-bit the #53 arm.
     ///
     /// The width sets the number of persistent factors/modalities, the persistent
@@ -286,7 +286,8 @@ struct Inner {
 /// The decision rule (Amendment A1.1) reads the deterministic marginal action
 /// posterior of a fresh membership-factor query: join iff `p(control 1) > 0.5`;
 /// leave iff `p(control 1) ≥ 0.5` (ties leave). Engine errors decline the join /
-/// keep the member (score `0.0`), mirroring [`AifMmDecisionPolicy`].
+/// keep the member (score `0.0`), mirroring
+/// [`AifMmDecisionPolicy`](crate::decision::AifMmDecisionPolicy).
 pub struct PersistentAifArm {
     inner: Arc<Mutex<Inner>>,
     config: PersistentAifConfig,
@@ -330,7 +331,7 @@ impl PersistentAifArm {
     /// [`TrialBoundary::PerTask`] the window is reset afterwards.
     ///
     /// The `n_bits`-length observation is also pushed into the replay deque (cap
-    /// [`REPLAY_CAP`], oldest evicted) for the query replay (A1.4).
+    /// `REPLAY_CAP`, oldest evicted) for the query replay (A1.4).
     ///
     /// `per_bit_success` must have exactly [`PersistentAifConfig::n_bits`] entries
     /// (a `&[bool; 8]` coerces at the default width). A mismatched length is warned
@@ -447,7 +448,15 @@ impl PersistentAifArm {
         count_scale: Option<&[f64]>,
     ) -> Result<(aif::POMDPAgent, Vec<Vec<usize>>), aif::AifError> {
         let inner = self.inner.lock().expect("persistent arm mutex poisoned");
-        build_query(&inner, &self.config, seed, required, cfg0, cfg1, count_scale)
+        build_query(
+            &inner,
+            &self.config,
+            seed,
+            required,
+            cfg0,
+            cfg1,
+            count_scale,
+        )
     }
 
     /// Snapshot the persistent world model (design note §5 serialization seam).
@@ -475,7 +484,10 @@ impl PersistentAifArm {
         let required = required & low_mask(self.config.n_bits);
         // required == 0 ⇒ nothing to cover ⇒ no-op (mirrors the mm/scalar arms).
         if required == 0 {
-            return Decision { act: false, score: 0.0 };
+            return Decision {
+                act: false,
+                score: 0.0,
+            };
         }
 
         let mut inner = self.inner.lock().expect("persistent arm mutex poisoned");
@@ -487,7 +499,10 @@ impl PersistentAifArm {
                 Ok(q) => q,
                 Err(e) => {
                     tracing::warn!(error = %e, "persistent query construction failed");
-                    return Decision { act: false, score: 0.0 };
+                    return Decision {
+                        act: false,
+                        score: 0.0,
+                    };
                 }
             };
 
@@ -496,17 +511,26 @@ impl PersistentAifArm {
             Ok(d) => d,
             Err(e) => {
                 tracing::warn!(error = %e, "persistent query replay failed");
-                return Decision { act: false, score: 0.0 };
+                return Decision {
+                    act: false,
+                    score: 0.0,
+                };
             }
         };
 
         // p(control 1) — switch to config1 (join / leave).
         let p1 = dist.get(1).copied().unwrap_or(f64::NAN);
         if !p1.is_finite() {
-            return Decision { act: false, score: 0.0 };
+            return Decision {
+                act: false,
+                score: 0.0,
+            };
         }
         let act = if leave { p1 >= 0.5 } else { p1 > 0.5 };
-        Decision { act, score: p1 - 0.5 }
+        Decision {
+            act,
+            score: p1 - 0.5,
+        }
     }
 }
 
@@ -528,7 +552,10 @@ impl CoalitionDecisionPolicy for PersistentAifArm {
             if let Some(&t) = inner.evicted_at.get(&agent.agent_id()) {
                 let now = inner.tasks_observed;
                 if now > t && (now as u64) <= t as u64 + self.config.rejoin_lockout_tasks {
-                    return Decision { act: false, score: 0.0 };
+                    return Decision {
+                        act: false,
+                        score: 0.0,
+                    };
                 }
             }
         }
@@ -558,7 +585,10 @@ impl CoalitionDecisionPolicy for PersistentAifArm {
         if let Some(cap) = self.config.eviction_cap {
             let inner = self.inner.lock().expect("persistent arm mutex poisoned");
             if inner.evictions_this_task >= cap as usize {
-                return Decision { act: false, score: 0.0 };
+                return Decision {
+                    act: false,
+                    score: 0.0,
+                };
             }
         }
 
@@ -967,7 +997,10 @@ mod tests {
             assert!((b[0] - 0.5).abs() < 1e-12 && (b[1] - 0.5).abs() < 1e-12);
         }
         assert!(snap.pa.is_some(), "learning on ⇒ pa present");
-        assert!(snap.beta.is_none(), "no precision dynamics on the persistent agent");
+        assert!(
+            snap.beta.is_none(),
+            "no precision dynamics on the persistent agent"
+        );
     }
 
     /// Query-construction shape (r = 2): joint sizes, A dims 3×8, membership B
@@ -1008,10 +1041,24 @@ mod tests {
     fn deterministic_acts() {
         let run = || {
             let arm = PersistentAifArm::new(42, PersistentAifConfig::default()).unwrap();
-            let ctx = DecisionContext { required_capabilities: 0b0111 };
-            let a0 = TestAgent { id: 0, caps: 0b0001, trust: 50 };
-            let a1 = TestAgent { id: 1, caps: 0b0010, trust: 50 };
-            let a2 = TestAgent { id: 2, caps: 0b0100, trust: 50 };
+            let ctx = DecisionContext {
+                required_capabilities: 0b0111,
+            };
+            let a0 = TestAgent {
+                id: 0,
+                caps: 0b0001,
+                trust: 50,
+            };
+            let a1 = TestAgent {
+                id: 1,
+                caps: 0b0010,
+                trust: 50,
+            };
+            let a2 = TestAgent {
+                id: 2,
+                caps: 0b0100,
+                trust: 50,
+            };
             let coalition: [&dyn AgentCapabilities; 2] = [&a1, &a2];
 
             let mut acts = Vec::new();
@@ -1047,7 +1094,10 @@ mod tests {
 
         let per_task = PersistentAifArm::new(
             1,
-            PersistentAifConfig { trial_boundary: TrialBoundary::PerTask, ..Default::default() },
+            PersistentAifConfig {
+                trial_boundary: TrialBoundary::PerTask,
+                ..Default::default()
+            },
         )
         .unwrap();
         per_task.observe_outcome(0b0001, &succ);
@@ -1073,7 +1123,10 @@ mod tests {
             .iter()
             .zip(&after)
             .any(|(x, y)| (x - y).iter().any(|d| d.abs() > 1e-9));
-        assert!(changed, "observing an outcome must update pA (learning is real)");
+        assert!(
+            changed,
+            "observing an outcome must update pA (learning is real)"
+        );
     }
 
     /// Neutral-read (A1.2 likelihood-neutrality): an all-no-obs observation leaves
@@ -1105,12 +1158,30 @@ mod tests {
     /// must favour real coverage over a clone.
     #[test]
     fn registered_config_discriminates_coverage() {
-        let ctx = DecisionContext { required_capabilities: 0b0111 };
-        let a0 = TestAgent { id: 0, caps: 0b0001, trust: 50 };
-        let a1 = TestAgent { id: 1, caps: 0b0010, trust: 50 };
-        let a2 = TestAgent { id: 2, caps: 0b0100, trust: 50 };
+        let ctx = DecisionContext {
+            required_capabilities: 0b0111,
+        };
+        let a0 = TestAgent {
+            id: 0,
+            caps: 0b0001,
+            trust: 50,
+        };
+        let a1 = TestAgent {
+            id: 1,
+            caps: 0b0010,
+            trust: 50,
+        };
+        let a2 = TestAgent {
+            id: 2,
+            caps: 0b0100,
+            trust: 50,
+        };
         let coalition: [&dyn AgentCapabilities; 2] = [&a1, &a2]; // join → 3/3
-        let clone_agent = TestAgent { id: 3, caps: 0b0001, trust: 50 };
+        let clone_agent = TestAgent {
+            id: 3,
+            caps: 0b0001,
+            trust: 50,
+        };
         let redundant: [&dyn AgentCapabilities; 1] = [&clone_agent]; // join → still 1/3
 
         // Registered config (learn_a + novelty + dynamics ON): counts are injected,
@@ -1118,7 +1189,11 @@ mod tests {
         let arm = PersistentAifArm::new(11, PersistentAifConfig::default()).unwrap();
         let gain = arm.should_join(&a0, &coalition, &ctx);
         let clone = arm.should_join(&a0, &redundant, &ctx);
-        assert!(gain.act, "coverage-improving join must fire (score={})", gain.score);
+        assert!(
+            gain.act,
+            "coverage-improving join must fire (score={})",
+            gain.score
+        );
         assert!(
             gain.score > clone.score + 1e-6,
             "registered config must favour coverage gain over a redundant clone: {} vs {}",
@@ -1147,9 +1222,19 @@ mod tests {
     #[test]
     fn required_zero_is_noop() {
         let arm = PersistentAifArm::new(5, PersistentAifConfig::default()).unwrap();
-        let ctx = DecisionContext { required_capabilities: 0 };
-        let a0 = TestAgent { id: 0, caps: 0b0001, trust: 50 };
-        let a1 = TestAgent { id: 1, caps: 0b0010, trust: 50 };
+        let ctx = DecisionContext {
+            required_capabilities: 0,
+        };
+        let a0 = TestAgent {
+            id: 0,
+            caps: 0b0001,
+            trust: 50,
+        };
+        let a1 = TestAgent {
+            id: 1,
+            caps: 0b0010,
+            trust: 50,
+        };
         let coalition: [&dyn AgentCapabilities; 1] = [&a1];
         let d = arm.should_join(&a0, &coalition, &ctx);
         assert!(!d.act && d.score == 0.0);
@@ -1158,18 +1243,43 @@ mod tests {
     /// The exploratory toggles all build and decide without error.
     #[test]
     fn exploratory_toggles_run() {
-        let ctx = DecisionContext { required_capabilities: 0b0011 };
-        let a0 = TestAgent { id: 0, caps: 0b0001, trust: 50 };
-        let a1 = TestAgent { id: 1, caps: 0b0010, trust: 50 };
+        let ctx = DecisionContext {
+            required_capabilities: 0b0011,
+        };
+        let a0 = TestAgent {
+            id: 0,
+            caps: 0b0001,
+            trust: 50,
+        };
+        let a1 = TestAgent {
+            id: 1,
+            caps: 0b0010,
+            trust: 50,
+        };
         let coalition: [&dyn AgentCapabilities; 1] = [&a1];
         let succ = [true, true, false, false, false, false, false, false];
 
         let configs = [
-            PersistentAifConfig { trial_boundary: TrialBoundary::PerTask, ..Default::default() },
-            PersistentAifConfig { persistent_learning: false, ..Default::default() },
-            PersistentAifConfig { query_dynamics: false, ..Default::default() },
-            PersistentAifConfig { query_novelty: false, ..Default::default() },
-            PersistentAifConfig { initial_precision_b: 16.0, ..Default::default() },
+            PersistentAifConfig {
+                trial_boundary: TrialBoundary::PerTask,
+                ..Default::default()
+            },
+            PersistentAifConfig {
+                persistent_learning: false,
+                ..Default::default()
+            },
+            PersistentAifConfig {
+                query_dynamics: false,
+                ..Default::default()
+            },
+            PersistentAifConfig {
+                query_novelty: false,
+                ..Default::default()
+            },
+            PersistentAifConfig {
+                initial_precision_b: 16.0,
+                ..Default::default()
+            },
         ];
         for cfg in configs {
             let arm = PersistentAifArm::new(2, cfg).unwrap();
@@ -1185,10 +1295,24 @@ mod tests {
     /// leave tie removes), the capped arm declines with score `0.0` (no query built).
     #[test]
     fn eviction_cap_zero_never_evicts() {
-        let ctx = DecisionContext { required_capabilities: 0b0011 };
-        let a0 = TestAgent { id: 0, caps: 0b0001, trust: 50 };
-        let a1 = TestAgent { id: 1, caps: 0b0010, trust: 50 };
-        let clone = TestAgent { id: 2, caps: 0b0001, trust: 50 }; // redundant with a0
+        let ctx = DecisionContext {
+            required_capabilities: 0b0011,
+        };
+        let a0 = TestAgent {
+            id: 0,
+            caps: 0b0001,
+            trust: 50,
+        };
+        let a1 = TestAgent {
+            id: 1,
+            caps: 0b0010,
+            trust: 50,
+        };
+        let clone = TestAgent {
+            id: 2,
+            caps: 0b0001,
+            trust: 50,
+        }; // redundant with a0
         let full: [&dyn AgentCapabilities; 3] = [&a0, &a1, &clone];
 
         let def = PersistentAifArm::new(0, PersistentAifConfig::default()).unwrap();
@@ -1199,11 +1323,17 @@ mod tests {
 
         let ne = PersistentAifArm::new(
             0,
-            PersistentAifConfig { eviction_cap: Some(0), ..Default::default() },
+            PersistentAifConfig {
+                eviction_cap: Some(0),
+                ..Default::default()
+            },
         )
         .unwrap();
         let d = ne.should_leave(&clone, &full, &ctx);
-        assert!(!d.act && d.score == 0.0, "eviction_cap Some(0) must decline with score 0.0");
+        assert!(
+            !d.act && d.score == 0.0,
+            "eviction_cap Some(0) must decline with score 0.0"
+        );
     }
 
     /// #56: the rejoin lockout bars an evicted agent from rejoining for the next `k`
@@ -1211,12 +1341,29 @@ mod tests {
     /// coverage-improving (would-fire) join, so barred = declined, unbarred = fires.
     #[test]
     fn rejoin_lockout_bars_then_reallows() {
-        let cfg = PersistentAifConfig { rejoin_lockout_tasks: 2, ..Default::default() };
+        let cfg = PersistentAifConfig {
+            rejoin_lockout_tasks: 2,
+            ..Default::default()
+        };
         let arm = PersistentAifArm::new(0, cfg).unwrap();
-        let ctx = DecisionContext { required_capabilities: 0b0011 };
-        let a0 = TestAgent { id: 0, caps: 0b0001, trust: 50 };
-        let a1 = TestAgent { id: 1, caps: 0b0010, trust: 50 };
-        let x = TestAgent { id: 2, caps: 0b0001, trust: 50 };
+        let ctx = DecisionContext {
+            required_capabilities: 0b0011,
+        };
+        let a0 = TestAgent {
+            id: 0,
+            caps: 0b0001,
+            trust: 50,
+        };
+        let a1 = TestAgent {
+            id: 1,
+            caps: 0b0010,
+            trust: 50,
+        };
+        let x = TestAgent {
+            id: 2,
+            caps: 0b0001,
+            trust: 50,
+        };
         let full: [&dyn AgentCapabilities; 3] = [&a0, &a1, &x]; // x redundant here
         let solo: [&dyn AgentCapabilities; 1] = [&a1]; // x is coverage-improving vs a1
         let succ = [true, true, false, false, false, false, false, false];
@@ -1252,10 +1399,24 @@ mod tests {
     /// `..Default::default()` over a fixed join/leave/observe stream.
     #[test]
     fn defaults_are_identity() {
-        let ctx = DecisionContext { required_capabilities: 0b0111 };
-        let a0 = TestAgent { id: 0, caps: 0b0001, trust: 50 };
-        let a1 = TestAgent { id: 1, caps: 0b0010, trust: 50 };
-        let a2 = TestAgent { id: 2, caps: 0b0100, trust: 50 };
+        let ctx = DecisionContext {
+            required_capabilities: 0b0111,
+        };
+        let a0 = TestAgent {
+            id: 0,
+            caps: 0b0001,
+            trust: 50,
+        };
+        let a1 = TestAgent {
+            id: 1,
+            caps: 0b0010,
+            trust: 50,
+        };
+        let a2 = TestAgent {
+            id: 2,
+            caps: 0b0100,
+            trust: 50,
+        };
         let coalition: [&dyn AgentCapabilities; 2] = [&a1, &a2];
         let full: [&dyn AgentCapabilities; 3] = [&a0, &a1, &a2];
 
@@ -1288,10 +1449,24 @@ mod tests {
     /// A fixed join/leave/observe stream under `cfg`, as `(act, score bits)` pairs.
     /// The base config is arm-E1 (K4-v5): MeanField queries, where γ is live.
     fn e1_stream(query_gamma: Option<f64>) -> Vec<(bool, u64)> {
-        let ctx = DecisionContext { required_capabilities: 0b0111 };
-        let a0 = TestAgent { id: 0, caps: 0b0001, trust: 50 };
-        let a1 = TestAgent { id: 1, caps: 0b0010, trust: 50 };
-        let a2 = TestAgent { id: 2, caps: 0b0100, trust: 50 };
+        let ctx = DecisionContext {
+            required_capabilities: 0b0111,
+        };
+        let a0 = TestAgent {
+            id: 0,
+            caps: 0b0001,
+            trust: 50,
+        };
+        let a1 = TestAgent {
+            id: 1,
+            caps: 0b0010,
+            trust: 50,
+        };
+        let a2 = TestAgent {
+            id: 2,
+            caps: 0b0100,
+            trust: 50,
+        };
         let coalition: [&dyn AgentCapabilities; 2] = [&a1, &a2];
         let full: [&dyn AgentCapabilities; 3] = [&a0, &a1, &a2];
 
@@ -1338,10 +1513,24 @@ mod tests {
     /// half of the X-A/X-C "8 bits is bit-for-bit today" constraint.
     #[test]
     fn n_bits_eight_is_identity() {
-        let ctx = DecisionContext { required_capabilities: 0b0111 };
-        let a0 = TestAgent { id: 0, caps: 0b0001, trust: 50 };
-        let a1 = TestAgent { id: 1, caps: 0b0010, trust: 50 };
-        let a2 = TestAgent { id: 2, caps: 0b0100, trust: 50 };
+        let ctx = DecisionContext {
+            required_capabilities: 0b0111,
+        };
+        let a0 = TestAgent {
+            id: 0,
+            caps: 0b0001,
+            trust: 50,
+        };
+        let a1 = TestAgent {
+            id: 1,
+            caps: 0b0010,
+            trust: 50,
+        };
+        let a2 = TestAgent {
+            id: 2,
+            caps: 0b0100,
+            trust: 50,
+        };
         let coalition: [&dyn AgentCapabilities; 2] = [&a1, &a2];
         let full: [&dyn AgentCapabilities; 3] = [&a0, &a1, &a2];
 
@@ -1353,13 +1542,19 @@ mod tests {
                 out.push((j.act, j.score.to_bits()));
                 let l = arm.should_leave(&a0, &full, &ctx);
                 out.push((l.act, l.score.to_bits()));
-                arm.observe_outcome(0b0111, &[false, true, true, false, false, false, false, false]);
+                arm.observe_outcome(
+                    0b0111,
+                    &[false, true, true, false, false, false, false, false],
+                );
             }
             out
         };
 
         assert_eq!(
-            run(PersistentAifConfig { n_bits: 8, ..Default::default() }),
+            run(PersistentAifConfig {
+                n_bits: 8,
+                ..Default::default()
+            }),
             run(PersistentAifConfig::default()),
             "an explicit n_bits = 8 must decide identically to the default"
         );
@@ -1369,7 +1564,10 @@ mod tests {
     /// produces finite in-range decisions over 12-bit requirement masks.
     #[test]
     fn twelve_bit_arm_observes_and_decides() {
-        let cfg = PersistentAifConfig { n_bits: 12, ..Default::default() };
+        let cfg = PersistentAifConfig {
+            n_bits: 12,
+            ..Default::default()
+        };
         let arm = PersistentAifArm::new(7, cfg).unwrap();
 
         let before = arm.state_snapshot().pa.unwrap();
@@ -1379,16 +1577,33 @@ mod tests {
         arm.observe_outcome(0b1011_0000_0011, &succ);
         let after = arm.state_snapshot().pa.unwrap();
         assert!(
-            before.iter().zip(&after).any(|(x, y)| (x - y).iter().any(|d| d.abs() > 1e-9)),
+            before
+                .iter()
+                .zip(&after)
+                .any(|(x, y)| (x - y).iter().any(|d| d.abs() > 1e-9)),
             "a 12-wide outcome must update the 12-modality pA"
         );
 
         // Bits 9 and 11 are above the 8-bit universe — reachable only because the
         // arm is 12 bits wide.
-        let ctx = DecisionContext { required_capabilities: 0b1010_0000_0001 };
-        let a0 = TestAgent { id: 0, caps: 0b0000_0000_0001, trust: 50 };
-        let a1 = TestAgent { id: 1, caps: 0b0010_0000_0000, trust: 50 };
-        let a2 = TestAgent { id: 2, caps: 0b1000_0000_0000, trust: 50 };
+        let ctx = DecisionContext {
+            required_capabilities: 0b1010_0000_0001,
+        };
+        let a0 = TestAgent {
+            id: 0,
+            caps: 0b0000_0000_0001,
+            trust: 50,
+        };
+        let a1 = TestAgent {
+            id: 1,
+            caps: 0b0010_0000_0000,
+            trust: 50,
+        };
+        let a2 = TestAgent {
+            id: 2,
+            caps: 0b1000_0000_0000,
+            trust: 50,
+        };
         let coalition: [&dyn AgentCapabilities; 2] = [&a1, &a2];
         let full: [&dyn AgentCapabilities; 3] = [&a0, &a1, &a2];
 
@@ -1411,10 +1626,17 @@ mod tests {
         for n in [1usize, 4, 8, 12] {
             let arm = PersistentAifArm::new(
                 1,
-                PersistentAifConfig { n_bits: n, ..Default::default() },
+                PersistentAifConfig {
+                    n_bits: n,
+                    ..Default::default()
+                },
             )
             .unwrap();
-            assert_eq!(arm.state_snapshot().beliefs.len(), n, "beliefs.len() == n_bits (n = {n})");
+            assert_eq!(
+                arm.state_snapshot().beliefs.len(),
+                n,
+                "beliefs.len() == n_bits (n = {n})"
+            );
         }
     }
 
@@ -1441,16 +1663,33 @@ mod tests {
     /// low-end clamp is additionally carried through a real construction.
     #[test]
     fn n_bits_out_of_range_is_clamped() {
-        let low = PersistentAifConfig { n_bits: 0, ..Default::default() }.clamped();
+        let low = PersistentAifConfig {
+            n_bits: 0,
+            ..Default::default()
+        }
+        .clamped();
         assert_eq!(low.n_bits, MIN_N_BITS);
-        let high = PersistentAifConfig { n_bits: 40, ..Default::default() }.clamped();
+        let high = PersistentAifConfig {
+            n_bits: 40,
+            ..Default::default()
+        }
+        .clamped();
         assert_eq!(high.n_bits, MAX_N_BITS);
-        let in_range = PersistentAifConfig { n_bits: 12, ..Default::default() }.clamped();
+        let in_range = PersistentAifConfig {
+            n_bits: 12,
+            ..Default::default()
+        }
+        .clamped();
         assert_eq!(in_range.n_bits, 12, "an in-range width is left alone");
 
-        let arm =
-            PersistentAifArm::new(0, PersistentAifConfig { n_bits: 0, ..Default::default() })
-                .unwrap();
+        let arm = PersistentAifArm::new(
+            0,
+            PersistentAifConfig {
+                n_bits: 0,
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert_eq!(arm.state_snapshot().beliefs.len(), MIN_N_BITS);
     }
 
@@ -1461,5 +1700,3 @@ mod tests {
         let _: Box<dyn CoalitionDecisionPolicy> = Box::new(arm);
     }
 }
-
-

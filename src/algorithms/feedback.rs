@@ -117,7 +117,10 @@ impl FeedbackStore {
 
         // The store holds plain counters that are consistent at every point, so
         // recovering a poisoned lock is safe.
-        let mut inner = self.inner.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut inner = self
+            .inner
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         // Strict `<`: an outcome exactly at the threshold is not a failure.
         let is_failure = value < inner.failure_threshold;
         for &id in members {
@@ -142,21 +145,30 @@ impl FeedbackStore {
     /// [`CoalitionManager::seed_feedback_history`]: crate::topology::CoalitionManager::seed_feedback_history
     pub fn add_history(&self, agent_id: usize, episodes: u64) {
         // See `record_outcome` for the poison-recovery rationale.
-        let mut inner = self.inner.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut inner = self
+            .inner
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         inner.records.entry(agent_id).or_default().history += episodes;
     }
 
     /// The recorded episode count for `agent_id` (0 for an unknown agent).
     #[must_use]
     pub fn history(&self, agent_id: usize) -> u64 {
-        let inner = self.inner.read().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let inner = self
+            .inner
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         inner.records.get(&agent_id).map_or(0, |r| r.history)
     }
 
     /// The recorded failure count for `agent_id` (0 for an unknown agent).
     #[must_use]
     pub fn failures(&self, agent_id: usize) -> u64 {
-        let inner = self.inner.read().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let inner = self
+            .inner
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         inner.records.get(&agent_id).map_or(0, |r| r.failures)
     }
 }

@@ -6,8 +6,8 @@
 //! ```
 
 use koalisi::algorithms::{
-    AdditiveCalculator, AgentCapabilities, DCVCDistributor, SynergisticCalculator,
-    ValueCalculator, WeightedCalculator, compute_all_partition_bounds, find_best_partition,
+    AdditiveCalculator, AgentCapabilities, DCVCDistributor, SynergisticCalculator, ValueCalculator,
+    WeightedCalculator, compute_all_partition_bounds, find_best_partition,
     generate_integer_partitions,
 };
 use std::collections::HashMap;
@@ -21,14 +21,24 @@ struct Agent {
 
 impl Agent {
     fn new(id: usize, capabilities: u32, trust_level: u32) -> Self {
-        Self { id, capabilities, trust_level }
+        Self {
+            id,
+            capabilities,
+            trust_level,
+        }
     }
 }
 
 impl AgentCapabilities for Agent {
-    fn agent_id(&self) -> usize { self.id }
-    fn capabilities(&self) -> u32 { self.capabilities }
-    fn trust_level(&self) -> u32 { self.trust_level }
+    fn agent_id(&self) -> usize {
+        self.id
+    }
+    fn capabilities(&self) -> u32 {
+        self.capabilities
+    }
+    fn trust_level(&self) -> u32 {
+        self.trust_level
+    }
 }
 
 fn as_caps(agents: &[Agent]) -> Vec<&dyn AgentCapabilities> {
@@ -37,11 +47,11 @@ fn as_caps(agents: &[Agent]) -> Vec<&dyn AgentCapabilities> {
 
 fn main() {
     let agents = vec![
-        Agent::new(1, 0b001, 85),  // sensing
-        Agent::new(2, 0b010, 90),  // processing
-        Agent::new(3, 0b100, 75),  // communication
-        Agent::new(4, 0b011, 80),  // sensing + processing
-        Agent::new(5, 0b110, 95),  // processing + communication
+        Agent::new(1, 0b001, 85), // sensing
+        Agent::new(2, 0b010, 90), // processing
+        Agent::new(3, 0b100, 75), // communication
+        Agent::new(4, 0b011, 80), // sensing + processing
+        Agent::new(5, 0b110, 95), // processing + communication
     ];
     let refs = as_caps(&agents);
 
@@ -56,20 +66,26 @@ fn main() {
     let team_abc = as_caps(&agents[0..3]);
     let team_all = as_caps(&agents);
 
-    println!("Team [1,2]   additive={:.0} synergistic={:.0} weighted={:.0}",
+    println!(
+        "Team [1,2]   additive={:.0} synergistic={:.0} weighted={:.0}",
         additive.calculate_value(&team_ab),
         synergistic.calculate_value(&team_ab),
-        weighted.calculate_value(&team_ab));
+        weighted.calculate_value(&team_ab)
+    );
 
-    println!("Team [1,2,3] additive={:.0} synergistic={:.0} weighted={:.0}",
+    println!(
+        "Team [1,2,3] additive={:.0} synergistic={:.0} weighted={:.0}",
         additive.calculate_value(&team_abc),
         synergistic.calculate_value(&team_abc),
-        weighted.calculate_value(&team_abc));
+        weighted.calculate_value(&team_abc)
+    );
 
-    println!("Team [all]   additive={:.0} synergistic={:.0} weighted={:.0}",
+    println!(
+        "Team [all]   additive={:.0} synergistic={:.0} weighted={:.0}",
         additive.calculate_value(&team_all),
         synergistic.calculate_value(&team_all),
-        weighted.calculate_value(&team_all));
+        weighted.calculate_value(&team_all)
+    );
 
     // --- DCVC workload distribution ---
     println!("\n=== DCVC Workload Distribution (100 coalitions) ===\n");
@@ -77,8 +93,12 @@ fn main() {
     let dist = DCVCDistributor::distribute_workload(&refs, 100);
     for id in 1..=5 {
         let share = dist.get_agent_share(id).unwrap();
-        println!("  Agent {} (trust={}): {} coalitions",
-            id, agents[id - 1].trust_level, share.share_size);
+        println!(
+            "  Agent {} (trust={}): {} coalitions",
+            id,
+            agents[id - 1].trust_level,
+            share.share_size
+        );
     }
 
     let stats = dist.calculate_statistics();
@@ -106,9 +126,15 @@ fn main() {
     println!("\n  partition bounds (sorted by upper bound):");
     let bounds = compute_all_partition_bounds(5, &values_by_size);
     for b in bounds.iter().take(5) {
-        println!("    {:?} upper={:.0} lower={:.0}", b.partition, b.upper_bound, b.lower_bound);
+        println!(
+            "    {:?} upper={:.0} lower={:.0}",
+            b.partition, b.upper_bound, b.lower_bound
+        );
     }
 
     let best = find_best_partition(5, &values_by_size).unwrap();
-    println!("\n  best partition: {:?} (upper bound={:.0})", best.partition, best.upper_bound);
+    println!(
+        "\n  best partition: {:?} (upper bound={:.0})",
+        best.partition, best.upper_bound
+    );
 }

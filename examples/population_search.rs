@@ -80,10 +80,15 @@ async fn main() -> Result<()> {
         cfg.iterations,
         cfg.seed
     );
-    println!("\nBest coalition structure (fitness = {:.1}):", outcome.best.fitness);
+    println!(
+        "\nBest coalition structure (fitness = {:.1}):",
+        outcome.best.fitness
+    );
     for (id, block) in outcome.best.blocks().iter().enumerate() {
         let ids: Vec<usize> = block.iter().map(|&i| agents[i].agent_id()).collect();
-        let union = block.iter().fold(0u32, |acc, &i| acc | agents[i].capabilities());
+        let union = block
+            .iter()
+            .fold(0u32, |acc, &i| acc | agents[i].capabilities());
         println!("  block {id}: agents {ids:?}  covers 0b{union:04b}");
     }
 
@@ -93,7 +98,11 @@ async fn main() -> Result<()> {
         outcome.iterations_run
     );
     for (epoch, cs) in outcome.lineage.iter().enumerate() {
-        println!("  epoch {epoch}: fitness {:.1}  blocks={:?}", cs.fitness, cs.blocks());
+        println!(
+            "  epoch {epoch}: fitness {:.1}  blocks={:?}",
+            cs.fitness,
+            cs.blocks()
+        );
     }
 
     // --- Execute the discovered structure on the runtime ---
