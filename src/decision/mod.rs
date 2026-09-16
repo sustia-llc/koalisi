@@ -281,6 +281,11 @@ pub use reliability_value::ReliabilityCoverage;
 mod magnitude_policy;
 #[cfg(feature = "magnitude")]
 pub use magnitude_policy::{CouplingModel, MagnitudePolicy, MagnitudeValueCalculator};
+/// EQ3 instrumentation surface (koalisi #69, feature `magnitude-fast`): the
+/// read-only probes the registered battery's non-gating rows are measured with.
+/// Neither is on a decision path and neither mutates policy state.
+#[cfg(feature = "magnitude-fast")]
+pub use magnitude_policy::{JoinProbe, probe_fresh_factorization};
 /// EQ4 typed-arm configuration (koalisi #72): the caller-owned role identifier
 /// and the validated `ρ : R × R → [0, 1]` interaction table that
 /// [`MagnitudePolicy::with_role_modulation`] takes. Re-exported from
@@ -288,11 +293,6 @@ pub use magnitude_policy::{CouplingModel, MagnitudePolicy, MagnitudeValueCalcula
 /// `aif` belief-structure precedent (issue #2).
 #[cfg(feature = "magnitude")]
 pub use magnitude_policy::{RoleId, RoleModulation};
-/// EQ3 instrumentation surface (koalisi #69, feature `magnitude-fast`): the
-/// read-only probes the registered battery's non-gating rows are measured with.
-/// Neither is on a decision path and neither mutates policy state.
-#[cfg(feature = "magnitude-fast")]
-pub use magnitude_policy::{JoinProbe, probe_fresh_factorization};
 #[cfg(feature = "magnitude")]
 pub(crate) use magnitude_policy::{magnitude_or_zero, relevant_masks};
 

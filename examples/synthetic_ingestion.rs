@@ -34,7 +34,9 @@ use koalisi::ingest::{
     SensorSpec, SeriesSpec, spawn_sample_monitor, spawn_source_pump,
 };
 use koalisi::subsystems::coalition_actor::CoalitionService;
-use koalisi::subsystems::outcome::{OutcomeSink, TaskOutcome, emit_outcome, spawn_outcome_forwarder};
+use koalisi::subsystems::outcome::{
+    OutcomeSink, TaskOutcome, emit_outcome, spawn_outcome_forwarder,
+};
 use koalisi::topology::CoalitionManager;
 
 /// A minimal coalition label (satisfies the topology `HyperedgeTrait` bound).

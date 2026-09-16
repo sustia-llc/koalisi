@@ -114,7 +114,10 @@ fn feedback_failures_close_the_decision_loop() {
     // A clean candidate with identical caps/trust but no failure record joins.
     let clean = CapabilityAgent::new(10, 0b1000, 50);
     let clean_decision = policy.should_join(&clean, &coalition, &ctx);
-    assert!(clean_decision.act, "clean candidate joins on positive marginal");
+    assert!(
+        clean_decision.act,
+        "clean candidate joins on positive marginal"
+    );
     assert_eq!(clean_decision.score, 110.0);
 }
 
@@ -147,8 +150,7 @@ fn feedback_marginal_decomposition() {
     let base_with = AdditiveCalculator.calculate_value(&with);
     let base_marginal = base_with - base_without;
 
-    let expected = base_marginal
-        + hw * koalisi::algorithms::HISTORY_UNIT * store.history(9) as f64
+    let expected = base_marginal + hw * koalisi::algorithms::HISTORY_UNIT * store.history(9) as f64
         - fw * koalisi::algorithms::FAILURE_UNIT * store.failures(9) as f64;
 
     let policy = ThresholdPolicy::new(

@@ -62,12 +62,10 @@ async fn point_in_time_queries() {
     let count_at_1 = TemporalQueries::count_vertices_at(events_ref, Timestamp::new(1)).await;
     assert_eq!(count_at_1, 2);
 
-    let he_count_at_2 =
-        TemporalQueries::count_hyperedges_at(events_ref, Timestamp::new(2)).await;
+    let he_count_at_2 = TemporalQueries::count_hyperedges_at(events_ref, Timestamp::new(2)).await;
     assert_eq!(he_count_at_2, 1);
 
-    let he_count_at_1 =
-        TemporalQueries::count_hyperedges_at(events_ref, Timestamp::new(1)).await;
+    let he_count_at_1 = TemporalQueries::count_hyperedges_at(events_ref, Timestamp::new(1)).await;
     assert_eq!(he_count_at_1, 0);
 }
 
@@ -129,13 +127,11 @@ async fn vertex_weight_at() {
 
     let events_ref = graph.events_ref();
 
-    let weight_at_0 =
-        TemporalQueries::vertex_weight_at(events_ref, a1, Timestamp::new(0)).await;
+    let weight_at_0 = TemporalQueries::vertex_weight_at(events_ref, a1, Timestamp::new(0)).await;
     assert!(weight_at_0.is_some());
     assert_eq!(weight_at_0.unwrap().capabilities, 5);
 
-    let weight_at_1 =
-        TemporalQueries::vertex_weight_at(events_ref, a1, Timestamp::new(1)).await;
+    let weight_at_1 = TemporalQueries::vertex_weight_at(events_ref, a1, Timestamp::new(1)).await;
     assert!(weight_at_1.is_some());
     assert_eq!(weight_at_1.unwrap().capabilities, 10);
 }
@@ -232,7 +228,10 @@ async fn rejoin_existing_member_is_idempotent() {
     manager.join_coalition(a1, c1).await.unwrap();
 
     let after = manager.coalition_members(c1).await.unwrap();
-    assert_eq!(after, before, "re-join of an existing member must not mutate membership");
+    assert_eq!(
+        after, before,
+        "re-join of an existing member must not mutate membership"
+    );
 }
 
 #[tokio::test]
@@ -290,7 +289,6 @@ async fn analytics_event_count() {
         .unwrap();
 
     let range = TimeRange::all();
-    let count =
-        TemporalAnalytics::event_count_in_range(graph.events_ref(), &range).await;
+    let count = TemporalAnalytics::event_count_in_range(graph.events_ref(), &range).await;
     assert_eq!(count, 3);
 }

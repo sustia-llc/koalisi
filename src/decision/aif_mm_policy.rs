@@ -196,7 +196,10 @@ impl AifMmDecisionPolicy {
         // `g_at` returns +∞ on engine error, so `∞ − ∞` can be NaN. Never join on
         // an untrustworthy margin, and never propagate NaN/±∞ as a score.
         if !margin.is_finite() {
-            return Decision { act: false, score: 0.0 };
+            return Decision {
+                act: false,
+                score: 0.0,
+            };
         }
         Decision {
             act: margin > join_margin,
@@ -206,12 +209,20 @@ impl AifMmDecisionPolicy {
 
     /// Pure leave decision over owned coverage masks. Leave iff removing the agent
     /// does not raise `G` (`g_out − g_in <= 0`).
-    fn leave_decision(required: u32, in_mask: u32, out_mask: u32, params: BridgeParams) -> Decision {
+    fn leave_decision(
+        required: u32,
+        in_mask: u32,
+        out_mask: u32,
+        params: BridgeParams,
+    ) -> Decision {
         let g_in = Self::g_at(required, in_mask, params);
         let g_out = Self::g_at(required, out_mask, params);
         let delta = g_out - g_in;
         if !delta.is_finite() {
-            return Decision { act: false, score: 0.0 };
+            return Decision {
+                act: false,
+                score: 0.0,
+            };
         }
         Decision {
             act: delta <= 0.0,
@@ -221,7 +232,10 @@ impl AifMmDecisionPolicy {
 
     /// Coverage masks `(alone, coalition)` for a join decision. `coalition`
     /// excludes `agent`.
-    fn join_masks(agent: &dyn AgentCapabilities, coalition: &[&dyn AgentCapabilities]) -> (u32, u32) {
+    fn join_masks(
+        agent: &dyn AgentCapabilities,
+        coalition: &[&dyn AgentCapabilities],
+    ) -> (u32, u32) {
         let alone = agent.capabilities();
         (alone, union_caps(coalition) | alone)
     }
@@ -229,7 +243,10 @@ impl AifMmDecisionPolicy {
     /// Coverage masks `(in, out)` for a leave decision. `coalition` includes
     /// `agent`; `out` removes the agent by id (distinct ids assumed, as in the
     /// scalar arm).
-    fn leave_masks(agent: &dyn AgentCapabilities, coalition: &[&dyn AgentCapabilities]) -> (u32, u32) {
+    fn leave_masks(
+        agent: &dyn AgentCapabilities,
+        coalition: &[&dyn AgentCapabilities],
+    ) -> (u32, u32) {
         let agent_id = agent.agent_id();
         let in_mask = union_caps(coalition);
         let without: Vec<&dyn AgentCapabilities> = coalition
@@ -362,16 +379,33 @@ mod tests {
         let a = MultiModalModel::efe_for_coverage(req, 0b001, params).unwrap();
         let b = MultiModalModel::efe_for_coverage(req, 0b010, params).unwrap();
         let c = MultiModalModel::efe_for_coverage(req, 0b100, params).unwrap();
-        assert!((a - b).abs() < 1e-12 && (b - c).abs() < 1e-12, "{a} {b} {c}");
+        assert!(
+            (a - b).abs() < 1e-12 && (b - c).abs() < 1e-12,
+            "{a} {b} {c}"
+        );
     }
 
     #[test]
     fn mm_join_is_non_degenerate() {
         let policy = AifMmDecisionPolicy::default();
-        let ctx = DecisionContext { required_capabilities: 0b111 };
-        let a0 = TestAgent { id: 0, caps: 0b001, trust: 50 };
-        let a1 = TestAgent { id: 1, caps: 0b010, trust: 50 };
-        let a2 = TestAgent { id: 2, caps: 0b100, trust: 50 };
+        let ctx = DecisionContext {
+            required_capabilities: 0b111,
+        };
+        let a0 = TestAgent {
+            id: 0,
+            caps: 0b001,
+            trust: 50,
+        };
+        let a1 = TestAgent {
+            id: 1,
+            caps: 0b010,
+            trust: 50,
+        };
+        let a2 = TestAgent {
+            id: 2,
+            caps: 0b100,
+            trust: 50,
+        };
         let coalition: [&dyn AgentCapabilities; 2] = [&a1, &a2];
         let d = policy.should_join(&a0, &coalition, &ctx);
         assert!(d.act, "coverage 1/3 → 3/3 must join (score={})", d.score);
@@ -381,9 +415,19 @@ mod tests {
     #[test]
     fn mm_join_clone_is_degenerate_no_op() {
         let policy = AifMmDecisionPolicy::default();
-        let ctx = DecisionContext { required_capabilities: 0b111 };
-        let a0 = TestAgent { id: 0, caps: 0b001, trust: 50 };
-        let clone = TestAgent { id: 1, caps: 0b001, trust: 50 };
+        let ctx = DecisionContext {
+            required_capabilities: 0b111,
+        };
+        let a0 = TestAgent {
+            id: 0,
+            caps: 0b001,
+            trust: 50,
+        };
+        let clone = TestAgent {
+            id: 1,
+            caps: 0b001,
+            trust: 50,
+        };
         let coalition: [&dyn AgentCapabilities; 1] = [&clone];
         let d = policy.should_join(&a0, &coalition, &ctx);
         assert!(!d.act, "redundant clone must not help (score={})", d.score);
@@ -393,16 +437,40 @@ mod tests {
     #[test]
     fn mm_leave_when_redundant_else_stay() {
         let policy = AifMmDecisionPolicy::default();
-        let ctx = DecisionContext { required_capabilities: 0b111 };
-        let a0 = TestAgent { id: 0, caps: 0b001, trust: 50 };
-        let a1 = TestAgent { id: 1, caps: 0b010, trust: 50 };
-        let a2 = TestAgent { id: 2, caps: 0b100, trust: 50 };
+        let ctx = DecisionContext {
+            required_capabilities: 0b111,
+        };
+        let a0 = TestAgent {
+            id: 0,
+            caps: 0b001,
+            trust: 50,
+        };
+        let a1 = TestAgent {
+            id: 1,
+            caps: 0b010,
+            trust: 50,
+        };
+        let a2 = TestAgent {
+            id: 2,
+            caps: 0b100,
+            trust: 50,
+        };
         let full: [&dyn AgentCapabilities; 3] = [&a0, &a1, &a2];
-        assert!(!policy.should_leave(&a0, &full, &ctx).act, "unique coverage stays");
+        assert!(
+            !policy.should_leave(&a0, &full, &ctx).act,
+            "unique coverage stays"
+        );
 
-        let redundant = TestAgent { id: 3, caps: 0b001, trust: 50 };
+        let redundant = TestAgent {
+            id: 3,
+            caps: 0b001,
+            trust: 50,
+        };
         let with_clone: [&dyn AgentCapabilities; 4] = [&a0, &a1, &a2, &redundant];
-        assert!(policy.should_leave(&redundant, &with_clone, &ctx).act, "redundant leaves");
+        assert!(
+            policy.should_leave(&redundant, &with_clone, &ctx).act,
+            "redundant leaves"
+        );
     }
 
     #[test]
@@ -411,9 +479,21 @@ mod tests {
             required_capabilities: 0b111,
             params: BridgeParams::default(),
         };
-        let a0 = TestAgent { id: 0, caps: 0b001, trust: 50 };
-        let a1 = TestAgent { id: 1, caps: 0b010, trust: 50 };
-        let a2 = TestAgent { id: 2, caps: 0b100, trust: 50 };
+        let a0 = TestAgent {
+            id: 0,
+            caps: 0b001,
+            trust: 50,
+        };
+        let a1 = TestAgent {
+            id: 1,
+            caps: 0b010,
+            trust: 50,
+        };
+        let a2 = TestAgent {
+            id: 2,
+            caps: 0b100,
+            trust: 50,
+        };
         let one: [&dyn AgentCapabilities; 1] = [&a0];
         let all: [&dyn AgentCapabilities; 3] = [&a0, &a1, &a2];
         assert!(calc.calculate_value(&all) > calc.calculate_value(&one));
@@ -423,12 +503,26 @@ mod tests {
     #[test]
     fn mm_required_zero_is_no_op() {
         let policy = AifMmDecisionPolicy::default();
-        let ctx = DecisionContext { required_capabilities: 0 };
-        let a0 = TestAgent { id: 0, caps: 0b001, trust: 50 };
-        let a1 = TestAgent { id: 1, caps: 0b010, trust: 50 };
+        let ctx = DecisionContext {
+            required_capabilities: 0,
+        };
+        let a0 = TestAgent {
+            id: 0,
+            caps: 0b001,
+            trust: 50,
+        };
+        let a1 = TestAgent {
+            id: 1,
+            caps: 0b010,
+            trust: 50,
+        };
         let coalition: [&dyn AgentCapabilities; 1] = [&a1];
         let d = policy.should_join(&a0, &coalition, &ctx);
-        assert!(!d.act && d.score.abs() < 1e-9, "no requirements ⇒ no join, got {}", d.score);
+        assert!(
+            !d.act && d.score.abs() < 1e-9,
+            "no requirements ⇒ no join, got {}",
+            d.score
+        );
     }
 
     /// Characterization (K4-v3 mechanism): with binary union coverage and
@@ -443,13 +537,31 @@ mod tests {
     fn mm_and_scalar_agree_on_acts() {
         let mm = AifMmDecisionPolicy::default();
         let scalar = AifDecisionPolicy::default();
-        let a0 = TestAgent { id: 0, caps: 0b0001, trust: 50 };
-        let a1 = TestAgent { id: 1, caps: 0b0010, trust: 50 };
-        let a2 = TestAgent { id: 2, caps: 0b0001, trust: 50 }; // clone of a0's bit
-        let a3 = TestAgent { id: 3, caps: 0b1000, trust: 50 };
+        let a0 = TestAgent {
+            id: 0,
+            caps: 0b0001,
+            trust: 50,
+        };
+        let a1 = TestAgent {
+            id: 1,
+            caps: 0b0010,
+            trust: 50,
+        };
+        let a2 = TestAgent {
+            id: 2,
+            caps: 0b0001,
+            trust: 50,
+        }; // clone of a0's bit
+        let a3 = TestAgent {
+            id: 3,
+            caps: 0b1000,
+            trust: 50,
+        };
 
         for &required in &[0b0001u32, 0b0011, 0b0111, 0b1011, 0b1111] {
-            let ctx = DecisionContext { required_capabilities: required };
+            let ctx = DecisionContext {
+                required_capabilities: required,
+            };
             // Join cases against a few coalitions.
             for coalition in [
                 vec![&a1 as &dyn AgentCapabilities],
@@ -496,11 +608,23 @@ mod tests {
         };
         let g_cov = MultiModalModel::efe_for_coverage(0b1, 0b1, bp).unwrap();
         let g_unc = MultiModalModel::efe_for_coverage(0b1, 0b0, bp).unwrap();
-        assert!((g_cov - ce(1.0)).abs() < 1e-12, "covered mm == competence_efe(1.0): {g_cov}");
-        assert!((g_unc - ce(0.0)).abs() < 1e-12, "uncovered mm == competence_efe(0.0): {g_unc}");
+        assert!(
+            (g_cov - ce(1.0)).abs() < 1e-12,
+            "covered mm == competence_efe(1.0): {g_cov}"
+        );
+        assert!(
+            (g_unc - ce(0.0)).abs() < 1e-12,
+            "uncovered mm == competence_efe(0.0): {g_unc}"
+        );
         // Documented tira anchors.
-        assert!((g_cov - 0.215).abs() < 1e-3, "covered anchor ≈ 0.215, got {g_cov}");
-        assert!((g_unc - 1.204).abs() < 1e-3, "uncovered anchor ≈ 1.204, got {g_unc}");
+        assert!(
+            (g_cov - 0.215).abs() < 1e-3,
+            "covered anchor ≈ 0.215, got {g_cov}"
+        );
+        assert!(
+            (g_unc - 1.204).abs() < 1e-3,
+            "uncovered anchor ≈ 1.204, got {g_unc}"
+        );
     }
 
     /// Additivity characterization (brief deliverable — the actual relationship,
@@ -559,10 +683,24 @@ mod tests {
     #[tokio::test]
     async fn mm_async_matches_sync() {
         let policy: Box<dyn CoalitionDecisionPolicy> = Box::new(AifMmDecisionPolicy::default());
-        let ctx = DecisionContext { required_capabilities: 0b111 };
-        let a0 = TestAgent { id: 0, caps: 0b001, trust: 50 };
-        let a1 = TestAgent { id: 1, caps: 0b010, trust: 50 };
-        let a2 = TestAgent { id: 2, caps: 0b100, trust: 50 };
+        let ctx = DecisionContext {
+            required_capabilities: 0b111,
+        };
+        let a0 = TestAgent {
+            id: 0,
+            caps: 0b001,
+            trust: 50,
+        };
+        let a1 = TestAgent {
+            id: 1,
+            caps: 0b010,
+            trust: 50,
+        };
+        let a2 = TestAgent {
+            id: 2,
+            caps: 0b100,
+            trust: 50,
+        };
         let coalition: [&dyn AgentCapabilities; 2] = [&a1, &a2];
 
         let sync = policy.should_join(&a0, &coalition, &ctx);

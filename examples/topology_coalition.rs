@@ -95,18 +95,23 @@ async fn main() -> anyhow::Result<()> {
 
     let coalitions_at_t4 =
         TemporalQueries::count_hyperedges_at(events_ref, Timestamp::new(4)).await;
-    println!("  coalitions at T=4 (before formation): {}", coalitions_at_t4);
+    println!(
+        "  coalitions at T=4 (before formation): {}",
+        coalitions_at_t4
+    );
 
     // --- Phase 5: merge coalitions ---
     println!("\n=== Phase 5: Merging alpha + beta ===");
     manager.merge_coalitions(vec![alpha, beta]).await?;
-    println!("  coalitions after merge: {}", manager.count_coalitions().await);
+    println!(
+        "  coalitions after merge: {}",
+        manager.count_coalitions().await
+    );
 
     // --- Phase 6: analytics ---
     println!("\n=== Phase 6: Analytics ===");
     let range = TimeRange::all();
-    let event_count =
-        TemporalAnalytics::event_count_in_range(events_ref, &range).await;
+    let event_count = TemporalAnalytics::event_count_in_range(events_ref, &range).await;
     println!("  total events recorded: {}", event_count);
 
     let stats = manager.graph().event_stats().await;

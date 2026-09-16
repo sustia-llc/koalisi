@@ -36,7 +36,9 @@ const N_TASKS: usize = 20;
 fn per_bit_success(task: usize) -> [bool; 8] {
     let dependable = task % 10 != 9;
     let flaky = task.is_multiple_of(5);
-    [dependable, dependable, flaky, dependable, false, false, false, false]
+    [
+        dependable, dependable, flaky, dependable, false, false, false, false,
+    ]
 }
 
 #[tokio::main]
@@ -65,7 +67,9 @@ async fn main() -> Result<()> {
     // consumes is the ordering across bits.
     println!("Per-bit reliability posterior after {N_TASKS} task outcomes:");
     for (bit, &r) in calc.reliability().iter().take(4).enumerate() {
-        let recent: Vec<bool> = ((N_TASKS - 3)..N_TASKS).map(|t| per_bit_success(t)[bit]).collect();
+        let recent: Vec<bool> = ((N_TASKS - 3)..N_TASKS)
+            .map(|t| per_bit_success(t)[bit])
+            .collect();
         println!("  bit {bit}: reliability {r:.4}   (last 3 tasks: {recent:?})");
     }
     println!("  (bit 2 ranks lowest, as its outcome stream implies)");
@@ -82,10 +86,15 @@ async fn main() -> Result<()> {
     let cfg = PopulationConfig::default().with_seed(27);
     let outcome = search(&agents, &calc, &cfg);
 
-    println!("\nBest coalition structure (fitness = {:.2}):", outcome.best.fitness);
+    println!(
+        "\nBest coalition structure (fitness = {:.2}):",
+        outcome.best.fitness
+    );
     for (id, block) in outcome.best.blocks().iter().enumerate() {
         let ids: Vec<usize> = block.iter().map(|&i| agents[i].agent_id()).collect();
-        let union = block.iter().fold(0u32, |acc, &i| acc | agents[i].capabilities());
+        let union = block
+            .iter()
+            .fold(0u32, |acc, &i| acc | agents[i].capabilities());
         let members: Vec<&dyn AgentCapabilities> = block
             .iter()
             .map(|&i| &agents[i] as &dyn AgentCapabilities)

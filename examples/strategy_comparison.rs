@@ -105,20 +105,20 @@ use catgraph_applied::prop::presentation::content::{
 use catgraph_applied::prop::presentation::rewrite::RewriteRule;
 use catgraph_applied::prop::{Free, PropExpr};
 use catgraph_syntax::frobenius::FrobeniusOr;
-use koalisi::process::{
-    DeclineCounter, Demand, LabelledRule, Residual, ResidualBasis, ResidualPolicy, Role, Schema,
-    StaffingTable, Step, Workflow, WorkflowGen, chain, content_matches, demand, fusion_pairs,
-    optimize_workflow, rule_labels, rule_theory, spider_expr, staffing_price, step_expr,
-    uniform_cost, verify_optimization, workflow_cost,
-};
 use koalisi::algorithms::{
     AgentCapabilities, CoalitionStructure, FeedbackCalculator, FeedbackStore, PopulationConfig,
     SynergisticCalculator, ValueCalculator, search,
 };
 use koalisi::decision::{
     AifDecisionPolicy, AifMmDecisionPolicy, CoalitionDecisionPolicy, CouplingModel, Decision,
-    DecisionContext, MagnitudePolicy, PersistentAifArm, PersistentAifConfig, RoleId, RoleModulation,
-    ThresholdPolicy, TrialBoundary,
+    DecisionContext, MagnitudePolicy, PersistentAifArm, PersistentAifConfig, RoleId,
+    RoleModulation, ThresholdPolicy, TrialBoundary,
+};
+use koalisi::process::{
+    DeclineCounter, Demand, LabelledRule, Residual, ResidualBasis, ResidualPolicy, Role, Schema,
+    StaffingTable, Step, Workflow, WorkflowGen, chain, content_matches, demand, fusion_pairs,
+    optimize_workflow, rule_labels, rule_theory, spider_expr, staffing_price, step_expr,
+    uniform_cost, verify_optimization, workflow_cost,
 };
 // Part 11 (koalisi #78) EQ5b: the role-slotted group arm and its instrumentation.
 use koalisi::decision::{
@@ -1281,7 +1281,10 @@ fn print_report(
         "- Path B.3 (bounded latency overhead): mag median {mag_l_med:.3} µs ≤ 10 × aif median {aif_l_med:.3} µs → {}",
         pass(b3)
     );
-    println!("- Path A (v1 speed route): equals the v1 result → {}", pass(path_a));
+    println!(
+        "- Path A (v1 speed route): equals the v1 result → {}",
+        pass(path_a)
+    );
     println!();
     println!("**VERDICT (v2): {v2_verdict}**");
     println!();
@@ -1293,7 +1296,11 @@ fn print_report(
     println!();
 
     // K4-v3 confirmatory verdict (multi-modality AIF arm; koalisi #43 Part 2).
-    let lat_ratio = if aif_l_med > 0.0 { mm_l_med / aif_l_med } else { f64::NAN };
+    let lat_ratio = if aif_l_med > 0.0 {
+        mm_l_med / aif_l_med
+    } else {
+        f64::NAN
+    };
     println!("### K4-v3 confirmatory criteria (multi-modality AIF arm, #43 Part 2)");
     println!();
     println!(
@@ -1405,7 +1412,8 @@ fn make_fb(
     let store = FeedbackStore::new(1.0);
     let calc = FeedbackCalculator::new(SynergisticCalculator, hw, fw, store.clone());
     (
-        Box::new(ThresholdPolicy::new(calc, join_threshold, 0.0)) as Box<dyn CoalitionDecisionPolicy>,
+        Box::new(ThresholdPolicy::new(calc, join_threshold, 0.0))
+            as Box<dyn CoalitionDecisionPolicy>,
         Some(store),
     )
 }
@@ -1446,8 +1454,11 @@ fn run_feedback_scope(scope: Scope, join_threshold: f64, hw: f64, fw: f64) -> Sc
     });
     let thr_run = run_fb_arm(scope, |_| {
         (
-            Box::new(ThresholdPolicy::new(SynergisticCalculator, join_threshold, 0.0))
-                as Box<dyn CoalitionDecisionPolicy>,
+            Box::new(ThresholdPolicy::new(
+                SynergisticCalculator,
+                join_threshold,
+                0.0,
+            )) as Box<dyn CoalitionDecisionPolicy>,
             None,
         )
     });
@@ -1583,9 +1594,7 @@ fn print_feedback_report(scope_a: &ScopeRun, scope_b: &ScopeRun) {
     println!();
     print_scope_table(scope_b);
     println!();
-    println!(
-        "**Scope B medians:** mag {b_mag_med:.4} · thr {b_thr_med:.4} · fb {b_fb_med:.4}."
-    );
+    println!("**Scope B medians:** mag {b_mag_med:.4} · thr {b_thr_med:.4} · fb {b_fb_med:.4}.");
     println!();
 
     // Record-only secondaries.
@@ -1688,8 +1697,18 @@ fn print_weight_sweep() {
 // ===========================================================================
 
 fn part4_selective_feedback() {
-    let scope_a = run_feedback_scope(Scope::A, JOIN_THRESHOLD_SELECTIVE, HW_SELECTIVE, FW_SELECTIVE);
-    let scope_b = run_feedback_scope(Scope::B, JOIN_THRESHOLD_SELECTIVE, HW_SELECTIVE, FW_SELECTIVE);
+    let scope_a = run_feedback_scope(
+        Scope::A,
+        JOIN_THRESHOLD_SELECTIVE,
+        HW_SELECTIVE,
+        FW_SELECTIVE,
+    );
+    let scope_b = run_feedback_scope(
+        Scope::B,
+        JOIN_THRESHOLD_SELECTIVE,
+        HW_SELECTIVE,
+        FW_SELECTIVE,
+    );
     print_selective_report(&scope_a, &scope_b);
     print_selective_threshold_sweep();
 }
@@ -1795,7 +1814,9 @@ fn print_selective_report(scope_a: &ScopeRun, scope_b: &ScopeRun) {
     println!();
     print_scope_table(scope_b);
     println!();
-    println!("**Scope B medians:** mag {b_mag_med:.4} · thr-selective {b_thr_med:.4} · fb-selective {b_fb_med:.4}.");
+    println!(
+        "**Scope B medians:** mag {b_mag_med:.4} · thr-selective {b_thr_med:.4} · fb-selective {b_fb_med:.4}."
+    );
     println!();
 
     // Record-only secondaries.
@@ -2107,13 +2128,19 @@ fn persistent_battery_mode(
     {
         let arm = PersistentAifArm::new(start, config).expect("persistent arm construction");
         let mut warm = Vec::new();
-        let _ = run_seed_b_regime(&arm, start, mode.regime, &mut warm, |req, bits, success, _| {
-            if degraded {
-                arm.observe_outcome(req, &vec![success; width]);
-            } else {
-                arm.observe_outcome(req, bits);
-            }
-        });
+        let _ = run_seed_b_regime(
+            &arm,
+            start,
+            mode.regime,
+            &mut warm,
+            |req, bits, success, _| {
+                if degraded {
+                    arm.observe_outcome(req, &vec![success; width]);
+                } else {
+                    arm.observe_outcome(req, bits);
+                }
+            },
+        );
     }
     let mut lat = Vec::new();
     let results = (start..end)
@@ -2201,7 +2228,9 @@ fn churns_b(rs: &[SeedResultB]) -> Vec<f64> {
 }
 /// Seeds on which `a` strictly beats `b` on PRIMARY_B.
 fn superior_count_b(a: &[SeedResultB], b: &[SeedResultB]) -> usize {
-    (0..a.len()).filter(|&i| a[i].primary > b[i].primary).count()
+    (0..a.len())
+        .filter(|&i| a[i].primary > b[i].primary)
+        .count()
 }
 /// Seeds on which the act streams differ (S1 divergence vs the scalar theorem).
 fn act_divergence(a: &[SeedResultB], b: &[SeedResultB]) -> usize {
@@ -2266,13 +2295,27 @@ fn part4c_persistent_aif() {
     println!();
     println!("## Per-seed PRIMARY_B + churn");
     println!();
-    println!("| seed | pers_primary | scalar_primary | mag_primary | pers_churn | scalar_churn | acts_differ |");
-    println!("|-----:|-------------:|---------------:|------------:|-----------:|-------------:|:-----------:|");
+    println!(
+        "| seed | pers_primary | scalar_primary | mag_primary | pers_churn | scalar_churn | acts_differ |"
+    );
+    println!(
+        "|-----:|-------------:|---------------:|------------:|-----------:|-------------:|:-----------:|"
+    );
     for i in 0..pers.len() {
-        let differ = if pers[i].acts != scalar[i].acts { "yes" } else { "no" };
+        let differ = if pers[i].acts != scalar[i].acts {
+            "yes"
+        } else {
+            "no"
+        };
         println!(
             "| {} | {:.4} | {:.4} | {:.4} | {} | {} | {} |",
-            i, pers[i].primary, scalar[i].primary, mag[i].primary, pers[i].churn, scalar[i].churn, differ
+            i,
+            pers[i].primary,
+            scalar[i].primary,
+            mag[i].primary,
+            pers[i].churn,
+            scalar[i].churn,
+            differ
         );
     }
     println!();
@@ -2327,31 +2370,46 @@ fn print_persistent_exploratory() {
     let rows: Vec<(String, PersistentAifConfig)> = vec![
         (
             "E4 PerTask (reset each task)".to_owned(),
-            PersistentAifConfig { trial_boundary: TrialBoundary::PerTask, ..base },
+            PersistentAifConfig {
+                trial_boundary: TrialBoundary::PerTask,
+                ..base
+            },
         ),
         (
             "E5 learning off".to_owned(),
-            PersistentAifConfig { persistent_learning: false, ..base },
+            PersistentAifConfig {
+                persistent_learning: false,
+                ..base
+            },
         ),
         (
             "E6 dynamics off (MeanField query)".to_owned(),
-            PersistentAifConfig { query_dynamics: false, ..base },
+            PersistentAifConfig {
+                query_dynamics: false,
+                ..base
+            },
         ),
         (
             "E7 novelty off".to_owned(),
-            PersistentAifConfig { query_novelty: false, ..base },
+            PersistentAifConfig {
+                query_novelty: false,
+                ..base
+            },
         ),
         (
             "E8 initial_precision_b = 1.0".to_owned(),
-            PersistentAifConfig { initial_precision_b: 1.0, ..base },
+            PersistentAifConfig {
+                initial_precision_b: 1.0,
+                ..base
+            },
         ),
-        (
-            "E8 initial_precision_b = 4.0 (registered)".to_owned(),
-            base,
-        ),
+        ("E8 initial_precision_b = 4.0 (registered)".to_owned(), base),
         (
             "E8 initial_precision_b = 16.0".to_owned(),
-            PersistentAifConfig { initial_precision_b: 16.0, ..base },
+            PersistentAifConfig {
+                initial_precision_b: 16.0,
+                ..base
+            },
         ),
     ];
 
@@ -2366,7 +2424,9 @@ fn print_persistent_exploratory() {
         println!("| {label} | {med:.4} | {churn:.2} |");
     }
     println!();
-    println!("_Single-toggle ablations off the registered arm; no verdicts (prereg §Exploratory conditions)._");
+    println!(
+        "_Single-toggle ablations off the registered arm; no verdicts (prereg §Exploratory conditions)._"
+    );
     println!();
 }
 
@@ -2441,14 +2501,28 @@ fn part4d_e1_persistent_aif() {
     println!();
     println!("## Per-seed PRIMARY_B + churn (seeds 30..60)");
     println!();
-    println!("| seed | e1_primary | scalar_primary | mag_primary | e1_churn | scalar_churn | acts_differ |");
-    println!("|-----:|-----------:|---------------:|------------:|---------:|-------------:|:-----------:|");
+    println!(
+        "| seed | e1_primary | scalar_primary | mag_primary | e1_churn | scalar_churn | acts_differ |"
+    );
+    println!(
+        "|-----:|-----------:|---------------:|------------:|---------:|-------------:|:-----------:|"
+    );
     for i in 0..e1.len() {
         let seed = 30 + i as u64;
-        let differ = if e1[i].acts != scalar[i].acts { "yes" } else { "no" };
+        let differ = if e1[i].acts != scalar[i].acts {
+            "yes"
+        } else {
+            "no"
+        };
         println!(
             "| {} | {:.4} | {:.4} | {:.4} | {} | {} | {} |",
-            seed, e1[i].primary, scalar[i].primary, mag[i].primary, e1[i].churn, scalar[i].churn, differ
+            seed,
+            e1[i].primary,
+            scalar[i].primary,
+            mag[i].primary,
+            e1[i].churn,
+            scalar[i].churn,
+            differ
         );
     }
     println!();
@@ -2659,7 +2733,10 @@ impl CoalitionDecisionPolicy for MarginE1<'_> {
     ) -> Decision {
         let d = self.arm.should_join(agent, coalition, ctx);
         if let Some(tap) = self.tap {
-            tap.lock().expect("score tap poisoned").join_scores.push(d.score);
+            tap.lock()
+                .expect("score tap poisoned")
+                .join_scores
+                .push(d.score);
         }
         Decision {
             act: d.act && d.score > self.join_delta,
@@ -2675,7 +2752,10 @@ impl CoalitionDecisionPolicy for MarginE1<'_> {
     ) -> Decision {
         let d = self.arm.should_leave(agent, coalition, ctx);
         if let Some(tap) = self.tap {
-            tap.lock().expect("score tap poisoned").leave_scores.push(d.score);
+            tap.lock()
+                .expect("score tap poisoned")
+                .leave_scores
+                .push(d.score);
         }
         Decision {
             act: d.act && d.score >= self.leave_delta,
@@ -2755,13 +2835,19 @@ fn margin_battery_mode(
                 leave_delta: ld,
                 tap,
             };
-            run_seed_b_regime(&wrapper, s, mode.regime, &mut lat, |req, bits, success, _| {
-                if degraded {
-                    arm.observe_outcome(req, &vec![success; width]);
-                } else {
-                    arm.observe_outcome(req, bits);
-                }
-            })
+            run_seed_b_regime(
+                &wrapper,
+                s,
+                mode.regime,
+                &mut lat,
+                |req, bits, success, _| {
+                    if degraded {
+                        arm.observe_outcome(req, &vec![success; width]);
+                    } else {
+                        arm.observe_outcome(req, bits);
+                    }
+                },
+            )
         })
         .collect();
     (results, lat)
@@ -3041,9 +3127,14 @@ fn rel_mag_battery_range(
             filter_leave,
         };
         let mut warm = Vec::new();
-        let _ = run_seed_b(&policy, start, &mut warm, |_req, _bits, success, members| {
-            store.record_outcome(members, if success { 1.0 } else { 0.0 });
-        });
+        let _ = run_seed_b(
+            &policy,
+            start,
+            &mut warm,
+            |_req, _bits, success, members| {
+                store.record_outcome(members, if success { 1.0 } else { 0.0 });
+            },
+        );
     }
     let mut lat = Vec::new();
     let results = (start..end)
@@ -3066,9 +3157,7 @@ fn rel_mag_battery_range(
 
 #[allow(clippy::too_many_lines)]
 fn part4g_reliability_filtered_mag() {
-    println!(
-        "# koalisi #54 — Part 4g: reliability-filtered magnitude (unregistered, exploratory)"
-    );
+    println!("# koalisi #54 — Part 4g: reliability-filtered magnitude (unregistered, exploratory)");
     println!();
     println!(
         "_the option-C probe: magnitude stays purely STRUCTURAL, reliability gates SEPARATELY via the #41 `FeedbackStore` (a veto), fed ONLY the whole-task success signal (the runtime-feasible L2 task-completion event, #54 Step 2). Folding reliability into the couplings backfires — down-scaling `A(i→j)` for an unreliable agent makes it LESS substitutable, RAISING its Möbius weight — so the two mechanisms are composed, not merged. Unregistered and exploratory; the grid was fixed before the run._"
@@ -3144,7 +3233,10 @@ fn part4g_reliability_filtered_mag() {
         println!("_cell = median PRIMARY_B / median churn over seeds 30..60._");
         println!();
     };
-    print_grid("## grid — filter_leave = false (join veto only)", &cells_noleave);
+    print_grid(
+        "## grid — filter_leave = false (join veto only)",
+        &cells_noleave,
+    );
     print_grid(
         "## grid — filter_leave = true (join veto + reliability eviction)",
         &cells_leave,
@@ -3196,9 +3288,7 @@ fn part4h_v6_never_evict() {
         ..e1_config()
     };
 
-    println!(
-        "# koalisi #56 — K4-v6: never-evict E1 arm, dual-signal, out-of-sample (REGISTERED)"
-    );
+    println!("# koalisi #56 — K4-v6: never-evict E1 arm, dual-signal, out-of-sample (REGISTERED)");
     println!();
     println!(
         "_governed by `docs/prereg-K4-v6-never-evict.md` (committed + posted pre-implementation); registered lever = `eviction_cap: Some(0)` (churn 0 by construction) atop the #53 E6 `aif-e1` config; Scope B · seeds **60..90** (out-of-sample, never used by v1–v5 or #54 Parts 4d–4g); BOTH signals gating; all thresholds are THIS run's own 60..90 medians._"
@@ -3471,7 +3561,9 @@ fn assert_battery_identical(a: &[SeedResultB], b: &[SeedResultB], what: &str) {
 
 #[allow(clippy::too_many_lines)]
 fn part5a_battery_v2() {
-    println!("# koalisi #61 — Part 5a: battery v2 core, γ × regime × margin factorial (REGISTERED)");
+    println!(
+        "# koalisi #61 — Part 5a: battery v2 core, γ × regime × margin factorial (REGISTERED)"
+    );
     println!();
     println!(
         "_governed by `docs/prereg-K4-battery-v2.md` (committed + posted to #61 pre-implementation); lever 2 = de-saturation, CONFIRMATORY. Factorial γ ∈ {{1, 4, 16}} × regime ∈ {{v1-draw, v2-draw}} × join margin δ ∈ {{0, 0.15, 0.30}} (hysteresis h = 0 everywhere) over the registered `aif-e1` arm, Scope B · seeds **120..150** (out-of-sample; 150..180 held out for replication) · **degraded/L2 signal** confirmatory. The v2 draw is `|required| ∈ 2..=8` (v1: 1..=5) over the same 8-bit universe and the same pool draw. All bars are THIS run's own 120..150 medians._"
@@ -3518,8 +3610,7 @@ fn part5a_battery_v2() {
                     tap.as_ref(),
                 );
                 if let Some(t) = tap {
-                    let (bare, _) =
-                        persistent_battery_mode(cfg, mode, V2_SEED_START, V2_SEED_END);
+                    let (bare, _) = persistent_battery_mode(cfg, mode, V2_SEED_START, V2_SEED_END);
                     assert_battery_identical(
                         &rs,
                         &bare,
@@ -3891,7 +3982,9 @@ fn draw_routing_instance(seed: u64) -> RoutingInstance {
     let m = 7 + rng.next_u64() % 2;
     let required = draw_distinct_bits(&mut rng, m);
 
-    let req_bits: Vec<usize> = (0..UNIVERSE).filter(|b| required & (1u32 << b) != 0).collect();
+    let req_bits: Vec<usize> = (0..UNIVERSE)
+        .filter(|b| required & (1u32 << b) != 0)
+        .collect();
     let b_star = req_bits[(rng.next_u64() % req_bits.len() as u64) as usize];
 
     let mut reliability = [V2B_STRONG_R; UNIVERSE];
@@ -3961,13 +4054,9 @@ fn structure_required_coverage(
     agents: &[Worker],
     required: u32,
 ) -> u32 {
-    structure
-        .blocks()
-        .iter()
-        .fold(0u32, |acc, blk| {
-            acc | blk.iter().fold(0u32, |b, &i| b | agents[i].caps)
-        })
-        & required
+    structure.blocks().iter().fold(0u32, |acc, blk| {
+        acc | blk.iter().fold(0u32, |b, &i| b | agents[i].caps)
+    }) & required
 }
 
 /// Capability mask of `structure`'s **top block** — the block maximizing `calc`'s
@@ -4311,15 +4400,8 @@ fn part5c_item1_w12_slice() {
         degraded: true,
     };
     let tap = std::sync::Mutex::new(ScoreTap::default());
-    let (e1, e1_lat) = margin_battery_mode(
-        cfg,
-        0.0,
-        0.0,
-        mode,
-        V2_SEED_START,
-        V2_SEED_END,
-        Some(&tap),
-    );
+    let (e1, e1_lat) =
+        margin_battery_mode(cfg, 0.0, 0.0, mode, V2_SEED_START, V2_SEED_END, Some(&tap));
 
     let (scalar, _) = stateless_battery_mode(
         || Box::new(AifDecisionPolicy::default()) as Box<dyn CoalitionDecisionPolicy>,
@@ -4581,8 +4663,12 @@ fn part5c_item3_expected_outcome() {
         deg_rows.push((seed, n, best.blocks().len(), f_singletons, f_one, f_best));
     }
 
-    println!("| seed | n | argmax blocks | fitness(all-singletons) | fitness(one block) | fitness(argmax) |");
-    println!("|-----:|--:|--------------:|------------------------:|-------------------:|----------------:|");
+    println!(
+        "| seed | n | argmax blocks | fitness(all-singletons) | fitness(one block) | fitness(argmax) |"
+    );
+    println!(
+        "|-----:|--:|--------------:|------------------------:|-------------------:|----------------:|"
+    );
     for (seed, n, blocks, f_s, f_1, f_b) in &deg_rows {
         println!("| {seed} | {n} | {blocks} | {f_s:.4} | {f_1:.4} | {f_b:.4} |");
     }
@@ -4816,8 +4902,12 @@ fn part5c_item4_learned_twins() {
         });
     }
 
-    println!("| seed | b* | strong bit | r̂[b*] | r̂[strong] | ordered | learned skips b* | REAL_l | REAL_u |");
-    println!("|-----:|---:|-----------:|------:|----------:|:-------:|:----------------:|-------:|-------:|");
+    println!(
+        "| seed | b* | strong bit | r̂[b*] | r̂[strong] | ordered | learned skips b* | REAL_l | REAL_u |"
+    );
+    println!(
+        "|-----:|---:|-----------:|------:|----------:|:-------:|:----------------:|-------:|-------:|"
+    );
     for r in &rows {
         println!(
             "| {} | {} | {} | {:.4} | {:.4} | {} | {} | {:.4} | {:.4} |",
@@ -4826,7 +4916,11 @@ fn part5c_item4_learned_twins() {
             r.strong,
             r.r_hat_weak,
             r.r_hat_strong,
-            if r.r_hat_weak < r.r_hat_strong { "yes" } else { "no" },
+            if r.r_hat_weak < r.r_hat_strong {
+                "yes"
+            } else {
+                "no"
+            },
             if r.skips_b_star { "yes" } else { "no" },
             r.real_learned,
             r.real_unweighted
@@ -4941,7 +5035,9 @@ fn draw_routing_instance_corrected(seed: u64) -> (RoutingInstance, usize) {
         let m = 7 + rng.next_u64() % 2;
         let required = draw_distinct_bits(&mut rng, m);
 
-        let req_bits: Vec<usize> = (0..UNIVERSE).filter(|b| required & (1u32 << b) != 0).collect();
+        let req_bits: Vec<usize> = (0..UNIVERSE)
+            .filter(|b| required & (1u32 << b) != 0)
+            .collect();
         let b_star = req_bits[(rng.next_u64() % req_bits.len() as u64) as usize];
 
         let pool_union = agents.iter().fold(0u32, |acc, a| acc | a.caps);
@@ -5096,7 +5192,9 @@ fn assert_p6_coefficient_gates() {
 /// bound `1.25·m`, so a reader can see whether a seed's geometry admits the
 /// leg-A flip at all before reading its conjunct columns.
 fn min_cover_multiplicity(agents: &[Worker], required: u32) -> Option<u32> {
-    let req_bits: Vec<usize> = (0..UNIVERSE).filter(|b| required & (1u32 << b) != 0).collect();
+    let req_bits: Vec<usize> = (0..UNIVERSE)
+        .filter(|b| required & (1u32 << b) != 0)
+        .collect();
     let m = req_bits.len();
     let compact = |caps: u32| -> u32 {
         req_bits
@@ -5507,7 +5605,11 @@ fn part6_corrected_routing() {
             r.rejections,
             if r.c1_weighted_omits { "yes" } else { "no" },
             if r.c2_unweighted_covers { "yes" } else { "no" },
-            if r.c3_counterfactual_covers { "yes" } else { "no" },
+            if r.c3_counterfactual_covers {
+                "yes"
+            } else {
+                "no"
+            },
             if r.fired { "yes" } else { "no" },
             r.real_w,
             r.real_u,
@@ -5525,12 +5627,8 @@ fn part6_corrected_routing() {
     // --- Leg A mechanism diagnostics (context only) ------------------------
     println!("## Leg A mechanism diagnostics (context)");
     println!();
-    println!(
-        "| seed | m | s | win_lo | win_hi | v_left | j | min_mult | 1.25·m | W full? |"
-    );
-    println!(
-        "|-----:|--:|--:|-------:|-------:|-------:|--:|---------:|-------:|:-------:|"
-    );
+    println!("| seed | m | s | win_lo | win_hi | v_left | j | min_mult | 1.25·m | W full? |");
+    println!("|-----:|--:|--:|-------:|-------:|-------:|--:|---------:|-------:|:-------:|");
     for r in &diag_rows {
         let (v_left, j) = match r.left {
             Some((v, j)) => (format!("{v:.4}"), j.to_string()),
@@ -7088,7 +7186,8 @@ where
 /// task. Warm-up on the first instance discarded.
 fn p8_e1_battery(insts: &[TypedInstance], config: PersistentAifConfig) -> (Vec<P8Seed>, Vec<f64>) {
     if let Some(first) = insts.first() {
-        let arm = PersistentAifArm::new(P8_SEED_START, config).expect("persistent arm construction");
+        let arm =
+            PersistentAifArm::new(P8_SEED_START, config).expect("persistent arm construction");
         let mut warm = Vec::new();
         let _ = p8_run_seed(
             &P8Arm::Fixed(&arm),
@@ -7624,8 +7723,12 @@ fn p8_sfib_gate() -> bool {
         let agents: Vec<usize> = (0..grid.n_agents()).collect();
         // The example's own fresh route — the same public entry point
         // `magnitude_at_t` calls, on the grid's product couplings.
-        let actual =
-            catgraph_magnitude::coalition_magnitude_from_couplings(&agents, grid.couplings(), &agents, 1.0);
+        let actual = catgraph_magnitude::coalition_magnitude_from_couplings(
+            &agents,
+            grid.couplings(),
+            &agents,
+            1.0,
+        );
         let proof = grid.proof(1.0);
         match (actual, proof) {
             (Ok(a), Ok(p)) => {
@@ -7732,12 +7835,14 @@ fn part8_eq4_typed_roles() {
     );
     for (i, (a, b)) in mag.iter().zip(mag_again.iter()).enumerate() {
         assert_eq!(
-            a.acts, b.acts,
+            a.acts,
+            b.acts,
             "X-identity cell 1: identity-configuration acts must match `mag` on seed {}",
             P8_SEED_START + i as u64
         );
         assert_eq!(
-            a.scores, b.scores,
+            a.scores,
+            b.scores,
             "X-identity cell 1: identity-configuration score bits must match `mag` on seed {}",
             P8_SEED_START + i as u64
         );
@@ -7857,8 +7962,16 @@ fn part8_eq4_typed_roles() {
         "- **Tag conditioning (disclosure):** the re-draw conditions TAGS on the pool as well. A required bit held by workers of exactly ONE role has its tag forced — every feasible tag for it is that role — so on such a bit role-matched coverage coincides with untyped coverage and the bit is contest-dead. Measured here: **{:.1}%** of required bits across all {} tasks (per-seed mean {:.1}% … {:.1}%). The direction is CONSERVATIVE for H-T — the typed arm can only earn its margin on the remaining bits — and re-draw intensity anti-correlates with pool size, so the small-pool seeds carry the most conditioning.",
         100.0 * mean(&single_all),
         single_all.len(),
-        100.0 * per_seed_single.iter().copied().fold(f64::INFINITY, f64::min),
-        100.0 * per_seed_single.iter().copied().fold(f64::NEG_INFINITY, f64::max)
+        100.0
+            * per_seed_single
+                .iter()
+                .copied()
+                .fold(f64::INFINITY, f64::min),
+        100.0
+            * per_seed_single
+                .iter()
+                .copied()
+                .fold(f64::NEG_INFINITY, f64::max)
     );
     println!();
 
@@ -7892,12 +8005,8 @@ fn part8_eq4_typed_roles() {
 
     println!("## H-T (confirmatory) — typed valuation beats untyped");
     println!();
-    println!(
-        "| seed | n | redraws | mag | mag-typed | Δ | churn mag | churn typed |"
-    );
-    println!(
-        "|-----:|--:|--------:|----:|----------:|--:|----------:|------------:|"
-    );
+    println!("| seed | n | redraws | mag | mag-typed | Δ | churn mag | churn typed |");
+    println!("|-----:|--:|--------:|----:|----------:|--:|----------:|------------:|");
     for (i, ((m, t), inst)) in mag.iter().zip(typed.iter()).zip(insts.iter()).enumerate() {
         println!(
             "| {} | {} | {} | {:.4} | {:.4} | {:+.4} | {} | {} |",
@@ -7970,7 +8079,12 @@ fn part8_eq4_typed_roles() {
             |inst| Box::new(p8_typed_policy(inst, &rho)) as Box<dyn CoalitionDecisionPolicy>,
             P8Metric::Typed,
         );
-        p8_row(&format!("mag-typed (ρ_off = {off})"), &cell, &mag, &cell_lat);
+        p8_row(
+            &format!("mag-typed (ρ_off = {off})"),
+            &cell,
+            &mag,
+            &cell_lat,
+        );
     }
     p8_row("mag (control)", &mag, &mag, &mag_lat);
     println!();
@@ -9052,7 +9166,8 @@ fn p9_e1_battery(
     config: PersistentAifConfig,
 ) -> (Vec<P9Seed>, Vec<f64>) {
     if let (Some(first), Some(first_decl)) = (insts.first(), declared.first()) {
-        let arm = PersistentAifArm::new(P9_SEED_START, config).expect("persistent arm construction");
+        let arm =
+            PersistentAifArm::new(P9_SEED_START, config).expect("persistent arm construction");
         let mut warm = Vec::new();
         let _ = p9_run_seed_hooked(
             &P9Arm::Fixed(&arm),
@@ -9070,9 +9185,15 @@ fn p9_e1_battery(
         .map(|(i, (inst, decl))| {
             let seed = P9_SEED_START + i as u64;
             let arm = PersistentAifArm::new(seed, config).expect("persistent arm construction");
-            p9_run_seed_hooked(&P9Arm::Fixed(&arm), inst, decl, &mut lat, &mut |req, bits| {
-                arm.observe_outcome(req, bits);
-            })
+            p9_run_seed_hooked(
+                &P9Arm::Fixed(&arm),
+                inst,
+                decl,
+                &mut lat,
+                &mut |req, bits| {
+                    arm.observe_outcome(req, bits);
+                },
+            )
         })
         .collect();
     (results, lat)
@@ -9350,12 +9471,15 @@ fn p9_eceil_min_distinct(
         staffing_price(&inst.table),
     ));
     for target in as_written.distinct() {
-        consider(optimize_workflow(written, rules, P9_ECEIL_FUEL, |g| {
-            match g {
+        consider(optimize_workflow(
+            written,
+            rules,
+            P9_ECEIL_FUEL,
+            |g| match g {
                 FrobeniusOr::User(s) if *s == target => P9_ECEIL_HEAVY,
                 _ => 1,
-            }
-        }));
+            },
+        ));
     }
     best
 }
@@ -9384,7 +9508,8 @@ fn part9_eq5a_process_structured() {
     // --- The pinned theory ---------------------------------------------------
     let bits = u8::try_from(UNIVERSE).expect("invariant: the universe is 8 bits");
     let roles = u8::try_from(P8_ROLES).expect("invariant: R = 3");
-    let rules = rule_theory(bits, roles).expect("invariant: the registered (8, 3) theory constructs");
+    let rules =
+        rule_theory(bits, roles).expect("invariant: the registered (8, 3) theory constructs");
     let labels = rule_labels(bits, roles).expect("invariant: labels mirror the theory");
     assert_eq!(rules.len(), labels.len());
     let pairs = fusion_pairs(bits);
@@ -9618,7 +9743,10 @@ fn part9_eq5a_process_structured() {
     };
     for (i, (a, b)) in deg_asis.iter().zip(eq4_ref.iter()).enumerate() {
         let seed = P9_SEED_START + i as u64;
-        assert_eq!(a.acts, b.acts, "X-reduce: acts vs the EQ4 typed arm, seed {seed}");
+        assert_eq!(
+            a.acts, b.acts,
+            "X-reduce: acts vs the EQ4 typed arm, seed {seed}"
+        );
         assert_eq!(
             a.primary.to_bits(),
             b.primary.to_bits(),
@@ -9778,12 +9906,8 @@ fn part9_eq5a_process_structured() {
     );
     println!();
     println!("```");
-    println!(
-        "value(S) = Mag(S) − λ · Σ per_gen(g)   over step occurrences g of the declared"
-    );
-    println!(
-        "                         writing whose (bit, role) is NOT covered by S"
-    );
+    println!("value(S) = Mag(S) − λ · Σ per_gen(g)   over step occurrences g of the declared");
+    println!("                         writing whose (bit, role) is NOT covered by S");
     println!("```");
     println!();
     println!(
@@ -9914,7 +10038,9 @@ fn part9_eq5a_process_structured() {
     println!();
 
     // --- E-fuel --------------------------------------------------------------
-    println!("## E-fuel (registered exploratory, non-gating) — how much of any margin is fuel-bought");
+    println!(
+        "## E-fuel (registered exploratory, non-gating) — how much of any margin is fuel-bought"
+    );
     println!();
     println!(
         "_The registered sweep `{P9_FUEL_GRID:?}` on the rewriting cells (confirmatory fuel is F = {P9_FUEL}), a direct probe of catgraph's registered no-termination posture. `fuel_exhausted()` counts are a MANDATORY disclosure (A1.2), never a RUN-INVALID condition._"
@@ -9933,10 +10059,18 @@ fn part9_eq5a_process_structured() {
         let med = median(p9_primaries(&rs));
         println!(
             "| `wf-rw-{}` ({}) | {} | {med:.4} | {:.2}× | {}/{n_seeds} | {} | {:.1} | {:.1} | {:.1} |",
-            if cell.cost == P9Cost::Uniform { "u" } else { "p" },
+            if cell.cost == P9Cost::Uniform {
+                "u"
+            } else {
+                "p"
+            },
             cell.cost.label(),
             cell.fuel,
-            if asis_med > 0.0 { med / asis_med } else { f64::NAN },
+            if asis_med > 0.0 {
+                med / asis_med
+            } else {
+                f64::NAN
+            },
             p9_superior_count(&rs, &asis),
             cell.stats.fuel_exhausted,
             median(cell.stats.explored.clone()),
@@ -9955,7 +10089,9 @@ fn part9_eq5a_process_structured() {
     println!();
 
     // --- E-conc --------------------------------------------------------------
-    println!("## E-conc (registered disclosure, non-gating) — demand concentration onto absent `(bit, role)`");
+    println!(
+        "## E-conc (registered disclosure, non-gating) — demand concentration onto absent `(bit, role)`"
+    );
     println!();
     println!(
         "_The registered failure mode, MEASURED: a cheaper writing may concentrate demand on a `(bit, role)` no pool worker holds. Such a task is COUNTED, never re-drawn (prereg §2). `PRIMARY = success_rate × mean cov_eff` is not additive over tasks, so the contribution below decomposes the **mean-quality** factor: `Δ_infeasible` is the part of the per-seed `mean cov_eff` gap that comes from POOL-INFEASIBLE tasks, and `Δ_feasible` the rest._"
@@ -10013,7 +10149,9 @@ fn part9_eq5a_process_structured() {
     println!();
 
     // --- E-dedup -------------------------------------------------------------
-    println!("## E-dedup (registered exploratory, non-gating) — content vs writing over the corpus");
+    println!(
+        "## E-dedup (registered exploratory, non-gating) — content vs writing over the corpus"
+    );
     println!();
     println!(
         "_Reported as a corpus fact and a latency fact; it cannot carry the verdict (EQ3 spent this lineage's appetite for latency legs)._"
@@ -10027,12 +10165,21 @@ fn part9_eq5a_process_structured() {
     println!(
         "- Bucket-size distribution: largest **{}**, median **{:.1}**, **{singletons}** singleton buckets of {} (sorted by SIZE — `ContentKey` is not `Ord`, so nothing here depends on key order).",
         dedup.buckets.first().copied().unwrap_or(0),
-        median(dedup.buckets.iter().map(|&b| b as f64).collect::<Vec<f64>>()),
+        median(
+            dedup
+                .buckets
+                .iter()
+                .map(|&b| b as f64)
+                .collect::<Vec<f64>>()
+        ),
         dedup.buckets.len()
     );
     // The same question over a DECLARED corpus: rewriting is a normalizing pass,
     // so the writing-vs-content gap should close after it.
-    let rw_corpus: Vec<&Workflow> = d_rw_u.iter().flat_map(|s| s.iter().map(|d| &d.writing)).collect();
+    let rw_corpus: Vec<&Workflow> = d_rw_u
+        .iter()
+        .flat_map(|s| s.iter().map(|d| &d.writing))
+        .collect();
     let rw_dedup = p9_dedup_pass(&rw_corpus);
     assert_eq!(
         rw_dedup.biconditional_violations, 0,
@@ -10050,7 +10197,9 @@ fn part9_eq5a_process_structured() {
     println!();
 
     // --- E-ceil --------------------------------------------------------------
-    println!("## E-ceil (registered exploratory, non-gating) — a reference arm WITHIN the rewriting family");
+    println!(
+        "## E-ceil (registered exploratory, non-gating) — a reference arm WITHIN the rewriting family"
+    );
     println!();
     println!(
         "_NOT a supremum (the #72 A2.5 correction). `cost_of` sums per-generator weights over OCCURRENCES, so \"minimise DISTINCT `(bit, role)` demand\" — the staffing question — is not expressible as a `per_gen` at all; E-ceil therefore runs as (i) a large-fuel scarcity-priced cell and (ii) a harness-side minimum-distinct-demand search on a pinned subsample._"
@@ -10273,7 +10422,9 @@ fn p10_flat_instance(seed: u64) -> WorkflowInstance {
 }
 
 fn p10_flat_instances() -> Vec<WorkflowInstance> {
-    (P10_SEED_START..P10_SEED_END).map(p10_flat_instance).collect()
+    (P10_SEED_START..P10_SEED_END)
+        .map(p10_flat_instance)
+        .collect()
 }
 
 /// What X-pair measured (prereg §5).
@@ -10464,9 +10615,7 @@ fn p10_verdict(gates_ok: bool, srepl_ok: bool, hps_ok: bool) -> &'static str {
 
 #[allow(clippy::too_many_lines)]
 fn part10_residual_process_specificity() {
-    println!(
-        "# koalisi #80 — Part 10: is the unstaffable residual process-specific? (REGISTERED)"
-    );
+    println!("# koalisi #80 — Part 10: is the unstaffable residual process-specific? (REGISTERED)");
     println!();
     println!(
         "_governed by `docs/prereg-K4-residual-process-specificity.md` (committed BEFORE this code; design-lock of record [koalisi #80](https://github.com/sustia-llc/koalisi/issues/80)). Report date {P10_REPORT_DATE}. Seeds **{P10_SEED_START}..{P10_SEED_END}** (fresh; 90..120 and 150..180 stay reserved). EQ5a measured the unstaffable-residual lever at median PRIMARY 0.2484 vs control 0.1989 (**1.25×, strictly superior on 30/30 seeds**) — the strongest paired consistency in this lineage since v5 — under a family-wise bar raised to 1.4× for four looks, so it carried **no verdict**. EQ5a measured the margin and cannot explain it. **H-PS (confirmatory):** the advantage is process-specific — materially larger on the workflow world than on a structurally flat world carrying the same coverage demand. **The null is (B), and it is the favourite:** the residual is a monotone penalty on uncovered demand, i.e. a coverage proxy in process clothing, which would work identically on flat tasks._"
@@ -11269,9 +11418,7 @@ fn p11_identical_seeds(a: &[P9Seed], b: &[P9Seed]) -> usize {
 fn p11_s_learn(run: &P11GroupRun) -> (bool, usize, usize) {
     let exact = run.counters.iter().filter(|c| c.s_learn_exact()).count();
     let moved = run.moved.iter().filter(|&&m| m).count();
-    let ok = exact == run.counters.len()
-        && moved == run.moved.len()
-        && run.begin_failures == 0;
+    let ok = exact == run.counters.len() && moved == run.moved.len() && run.begin_failures == 0;
     (ok, exact, moved)
 }
 
@@ -11390,7 +11537,10 @@ fn p11_agreement(run: &P11GroupRun) -> P11Agree {
     }
     let n = count_as_f64(samples.len());
     let unanimous = samples.iter().filter(|s| s.unanimous()).count();
-    let zero_sensitive = samples.iter().filter(|s| s.candidate_sensitive == 0).count();
+    let zero_sensitive = samples
+        .iter()
+        .filter(|s| s.candidate_sensitive == 0)
+        .count();
     let mut margins: Vec<f64> = samples.iter().map(|s| s.margin).collect();
     margins.sort_by(f64::total_cmp);
 
@@ -11426,9 +11576,10 @@ fn p11_identical_leave_rate(run: &P11GroupRun) -> (u64, u64) {
 
 /// How many decisions of a cell were acts — the A5.8 measured-sign disclosure.
 fn p11_act_count(rs: &[P9Seed]) -> usize {
-    rs.iter().map(|s| s.acts.iter().filter(|a| **a).count()).sum()
+    rs.iter()
+        .map(|s| s.acts.iter().filter(|a| **a).count())
+        .sum()
 }
-
 
 fn p11_table_head() {
     println!(
@@ -11505,10 +11656,20 @@ fn p11_scale_alignment_is_bit_ordered() -> bool {
         };
         p.begin_task(d).ok()?;
         // Partial coverage on purpose — see the doc comment.
-        let cand = Worker { id: 0, caps: 0b001, trust: 50 };
-        let other = Worker { id: 1, caps: 0b010, trust: 50 };
+        let cand = Worker {
+            id: 0,
+            caps: 0b001,
+            trust: 50,
+        };
+        let other = Worker {
+            id: 1,
+            caps: 0b010,
+            trust: 50,
+        };
         let coalition: [&dyn AgentCapabilities; 1] = [&other];
-        let ctx = DecisionContext { required_capabilities: 0b111 };
+        let ctx = DecisionContext {
+            required_capabilities: 0b111,
+        };
         Some(p.should_join(&cand, &coalition, &ctx).score.to_bits())
     };
     match (read(&a), read(&b)) {
@@ -11774,7 +11935,10 @@ fn part11_eq5b_typed_two_engine() {
         .map(|(label, _, cfg)| {
             let redo = p11_group_battery(&insts, &declared, *cfg, P11_SEED_START)
                 .unwrap_or_else(|e| panic!("determinism re-run of `{label}` failed: {e}"));
-            (*label, p11_identical_seeds(&named(label).seeds, &redo.seeds))
+            (
+                *label,
+                p11_identical_seeds(&named(label).seeds, &redo.seeds),
+            )
         })
         .collect();
     // A5.10 L2-4: the printed rationale used to claim "a slip to `act` would show
@@ -11790,8 +11954,7 @@ fn part11_eq5b_typed_two_engine() {
     )
     .unwrap_or_else(|e| panic!("seed-invariance run failed: {e}"));
     let invariant = p11_identical_seeds(&grp_role.seeds, &invariance.seeds);
-    let determinism_ok =
-        determinism.iter().all(|&(_, n)| n == n_seeds) && invariant == n_seeds;
+    let determinism_ok = determinism.iter().all(|&(_, n)| n == n_seeds) && invariant == n_seeds;
     println!(
         "- **S-determinism — {}.** Every **model** cell re-run from scratch and compared per seed on acts, raw score bits, PRIMARY bits and churn: {}. Extended from the confirmatory pair to all five (A5.10 L2-3), since A4.2 gates model-variations.",
         pass(determinism_ok),
@@ -11815,10 +11978,8 @@ fn part11_eq5b_typed_two_engine() {
         .zip(learn.iter())
         .filter(|((_, kind, _), _)| *kind != P11_READ_PROBE)
         .all(|(_, &(ok, _, _))| ok);
-    let exempt_rows: Vec<(usize, usize, Vec<String>)> = runs
-        .iter()
-        .map(|r| p11_exempt(r, P11_SEED_START))
-        .collect();
+    let exempt_rows: Vec<(usize, usize, Vec<String>)> =
+        runs.iter().map(|r| p11_exempt(r, P11_SEED_START)).collect();
     println!(
         "- **S-learn (i) — {}.** Per seed, each world model must record **exactly one** update per task in which its role had demand — **counted, not inferred from state movement**, because under MMP a missing commit makes an update apply TWICE rather than not at all, so \"did the state move?\" passes a double-updating arm. Deficit and surplus are both `RUN-INVALID`. Seeds with an exact ledger, and seeds whose every **in-scope** world model moved off initialization by more than {tol:e} (the prereg-pinned non-vacuity tolerance — necessary, explicitly NOT sufficient): {}. **Amendment A6.1 scopes non-vacuity to models with `expected > 0`.** The first official run (`7e265fe`) returned `RUN-INVALID` here with the counted ledger 30/30 exact on every cell: seeds **354** and **355** each carried a role model at `expected == 0, updates == 0, max |pA delta| == 0e0` — never asked to learn, because `p8_task_feasible` requires a pool worker **of the tagged role** holding each required bit, so a role absent from the pool can never be legally tagged (354 is `n = 5` with worker-role counts `[3, 0, 2]`; 355 is `n = 4` with `[2, 0, 2]`). At `P(role absent) = 3·(2/3)^n − 3·(1/3)^n` — 0.553 at `n = 4`, 12.5 % of seeds, ≈ 3.76 expected failures per 30-seed block — **no seed block passes the uncorrected guard**, so the guard is what changed and not the block. **Exempt models, disclosed per cell and per seed:** {}. A5.4's `all` stands **within** that scope, so a model that WAS asked and stayed frozen still fails, and \"everything exempt\" is not a pass.",
         pass(learn_ok),
@@ -11827,7 +11988,11 @@ fn part11_eq5b_typed_two_engine() {
             .zip(learn.iter())
             .map(|((label, kind, _), &(_, exact, moved))| format!(
                 "`{label}`{} {exact}/{n_seeds} exact, {moved}/{n_seeds} moved",
-                if *kind == P11_READ_PROBE { " (reported, not gated)" } else { "" }
+                if *kind == P11_READ_PROBE {
+                    " (reported, not gated)"
+                } else {
+                    ""
+                }
             ))
             .collect::<Vec<_>>()
             .join(" · "),
@@ -11837,7 +12002,10 @@ fn part11_eq5b_typed_two_engine() {
             .map(|((label, _, _), (seeds, total, pairs))| if *total == 0 {
                 format!("`{label}` none")
             } else {
-                format!("`{label}` {total} model(s) on {seeds}/{n_seeds} seeds — {}", pairs.join(", "))
+                format!(
+                    "`{label}` {total} model(s) on {seeds}/{n_seeds} seeds — {}",
+                    pairs.join(", ")
+                )
             })
             .collect::<Vec<_>>()
             .join(" · "),
@@ -11875,7 +12043,13 @@ fn part11_eq5b_typed_two_engine() {
     for ((label, kind, _), run) in cells.iter().zip(runs.iter()) {
         p11_row(label, kind, &run.seeds, &ctl, &run.latencies);
     }
-    p11_row("wf-val-p", "reference", &val_p.seeds, &ctl, &val_p.latencies);
+    p11_row(
+        "wf-val-p",
+        "reference",
+        &val_p.seeds,
+        &ctl,
+        &val_p.latencies,
+    );
     println!();
     println!(
         "_`wf-asis` is the EQ4-validated typed magnitude arm (`with_role_modulation`, oracle `ρ = δ`) staffing the as-written workflow — EQ5a's own control. `wf-val-p` is EQ5a's strongest cell, the library `ResidualPolicy` at EQ5a's pinned λ = {P9_LAMBDA} and the staffing-priced cost model; it is a **mandatory non-gating disclosure**, and the pre-committed interpretation binds: a PASS that does not also exceed its median is reported as **\"beats the typed control, not the strongest process cell\"**. `grp-seed` is the exploratory seeded-sampling cell (E-seed) and reports **no margin** — its score encodes the draw, so read its `act` column only._"
@@ -11885,7 +12059,9 @@ fn part11_eq5b_typed_two_engine() {
     // --- H-G (confirmatory) --------------------------------------------------
     println!("## H-G (confirmatory — BOTH conjuncts in the SAME cell, prereg §5)");
     println!();
-    println!("| cell | median PRIMARY | ratio vs `wf-asis` | conjunct 1 (≥ {P11_HG_FACTOR:.2}×) | superior seeds | conjunct 2 (≥ {P11_HG_SUPERIOR_MIN}) | H-G |");
+    println!(
+        "| cell | median PRIMARY | ratio vs `wf-asis` | conjunct 1 (≥ {P11_HG_FACTOR:.2}×) | superior seeds | conjunct 2 (≥ {P11_HG_SUPERIOR_MIN}) | H-G |"
+    );
     println!("|---|---:|---:|---|---:|---|---|");
     let hgs: Vec<P11Hg> = cells
         .iter()
@@ -12025,7 +12201,9 @@ fn part11_eq5b_typed_two_engine() {
             ag.act_rate_blind
                 .map_or_else(|| "n/a".to_owned(), |b| format!("{:.1} %", 100.0 * b))
         );
-        println!("| `{label}` | {zero_sens} | {blind} | {weight} | {li} of {lq} ({leave_rate}) | {acts} |");
+        println!(
+            "| `{label}` | {zero_sens} | {blind} | {weight} | {li} of {lq} ({leave_rate}) | {acts} |"
+        );
     }
     println!();
     println!(
@@ -12039,7 +12217,9 @@ fn part11_eq5b_typed_two_engine() {
     // --- E-agree + A1.3 roster disclosure ------------------------------------
     println!("## E-agree and the realised roster (registered disclosures — prereg §5, A1.3)");
     println!();
-    println!("| cell | roster 1 / 2 / 3 | empty role-slots | unanimous reads | margin p25 / median / p75 |");
+    println!(
+        "| cell | roster 1 / 2 / 3 | empty role-slots | unanimous reads | margin p25 / median / p75 |"
+    );
     println!("|---|---|---:|---:|---|");
     for ((label, _, _), run) in cells.iter().zip(runs.iter()) {
         let (hist, empty, tasks) = p11_roster_histogram(run);
@@ -12065,7 +12245,10 @@ fn part11_eq5b_typed_two_engine() {
                     ag.margin[0], ag.margin[1], ag.margin[2]
                 )
             } else {
-                format!("{:.4} / {:.4} / {:.4}", ag.margin[0], ag.margin[1], ag.margin[2])
+                format!(
+                    "{:.4} / {:.4} / {:.4}",
+                    ag.margin[0], ag.margin[1], ag.margin[2]
+                )
             }
         );
     }
@@ -12093,7 +12276,8 @@ fn part11_eq5b_typed_two_engine() {
     // --- S-live, now a DISCLOSURE (Amendment A5.5) ---------------------------
     println!("## S-live (DISCLOSURE, not a gate — Amendment A5.5)");
     println!();
-    let live: Vec<(usize, usize, usize)> = runs.iter().map(|r| p9_divergence(&r.seeds, &ctl)).collect();
+    let live: Vec<(usize, usize, usize)> =
+        runs.iter().map(|r| p9_divergence(&r.seeds, &ctl)).collect();
     println!(
         "- Divergence from `wf-asis`, reported as **acts AND raw score bits separately**: {}. This is the #80 lesson (gotcha 31): a term can be live in the score and dead at the decision, and a leg reading only PRIMARY sees a flat null where the truth is \"it reached the margin and never crossed a threshold\". Read the two columns against each other before reading any median.",
         cells
@@ -12172,7 +12356,9 @@ fn part11_eq5b_typed_two_engine() {
     println!(
         "- `VALIDATED (two-engine)` — H-G passes both conjuncts in at least one confirmatory cell, all §5 gates hold."
     );
-    println!("- `FALSIFIED (two-engine)` — gates hold, no confirmatory cell passes both conjuncts.");
+    println!(
+        "- `FALSIFIED (two-engine)` — gates hold, no confirmatory cell passes both conjuncts."
+    );
     println!("- `RUN-INVALID` — any gate fails.");
     println!();
     let carried: Vec<f64> = hgs
@@ -12199,14 +12385,20 @@ fn part11_eq5b_typed_two_engine() {
         } else if beats_val_p {
             "A confirmatory cell carried AND exceeded `wf-val-p`'s median.".to_owned()
         } else {
-            format!("A confirmatory cell carried but did NOT exceed `wf-val-p`'s median ({val_p_med:.4}) — reported, as pre-committed, as **\"beats the typed control, not the strongest process cell\"**.")
+            format!(
+                "A confirmatory cell carried but did NOT exceed `wf-val-p`'s median ({val_p_med:.4}) — reported, as pre-committed, as **\"beats the typed control, not the strongest process cell\"**."
+            )
         },
         if !hg_ok {
             String::new()
         } else if beats_e1 {
-            format!("It also exceeded **`arm-E1`'s** median ({e1_med:.4}), so the group shape is doing measurable work beyond the single-agent engine (A5.2).")
+            format!(
+                "It also exceeded **`arm-E1`'s** median ({e1_med:.4}), so the group shape is doing measurable work beyond the single-agent engine (A5.2)."
+            )
         } else {
-            format!("**A5.2's symmetric clause fires:** the carrying cell did NOT exceed `arm-E1`'s median ({e1_med:.4}), so this reads as **\"the persistent AIF engine beats the typed control; the group shape adds nothing measurable here\"**. `arm-E1` remains non-gating — a reading constraint, not a second conjunct.")
+            format!(
+                "**A5.2's symmetric clause fires:** the carrying cell did NOT exceed `arm-E1`'s median ({e1_med:.4}), so this reads as **\"the persistent AIF engine beats the typed control; the group shape adds nothing measurable here\"**. `arm-E1` remains non-gating — a reading constraint, not a second conjunct."
+            )
         }
     );
 
@@ -12290,7 +12482,8 @@ mod part11_tests {
                  A5.1 zero-sens {:.0}%, blind {:.2} @ w {:.2}, leave-id {li}/{lq}, \
                  act s/b {}  agree {}",
                 median(p9_primaries(&run.seeds)),
-                hg.ratio.map_or_else(|| "n/a".to_owned(), |r| format!("{r:.3}×")),
+                hg.ratio
+                    .map_or_else(|| "n/a".to_owned(), |r| format!("{r:.3}×")),
                 hg.superior,
                 median(p9_churns(&run.seeds)),
                 median(run.latencies.clone()),
@@ -12347,7 +12540,10 @@ mod part11_tests {
                     ag.zero_sensitive_rate > 0.0,
                     "{label}: A5.1 predicts decisions with no candidate-sensitive internal"
                 );
-                assert!(li > 0, "{label}: A5.1 predicts candidate-blind leave queries");
+                assert!(
+                    li > 0,
+                    "{label}: A5.1 predicts candidate-blind leave queries"
+                );
             }
             runs.push((label, run));
         }
@@ -12462,7 +12658,10 @@ mod part4c_tests {
         assert_eq!(pers.len(), 2);
         for r in &pers {
             assert!(r.primary.is_finite() && (0.0..=1.0).contains(&r.primary));
-            assert!(!r.acts.is_empty(), "some join/leave decisions must have run");
+            assert!(
+                !r.acts.is_empty(),
+                "some join/leave decisions must have run"
+            );
         }
         assert!(!lat.is_empty(), "latencies recorded");
 
@@ -12474,7 +12673,10 @@ mod part4c_tests {
 
         // An exploratory toggle also runs end-to-end on 2 seeds.
         let (e5, _) = persistent_battery(
-            PersistentAifConfig { persistent_learning: false, ..PersistentAifConfig::default() },
+            PersistentAifConfig {
+                persistent_learning: false,
+                ..PersistentAifConfig::default()
+            },
             2,
         );
         assert_eq!(e5.len(), 2);
@@ -12489,7 +12691,10 @@ mod part4c_tests {
         assert_eq!(e1.len(), 2);
         for r in &e1 {
             assert!(r.primary.is_finite() && (0.0..=1.0).contains(&r.primary));
-            assert!(!r.acts.is_empty(), "some join/leave decisions must have run");
+            assert!(
+                !r.acts.is_empty(),
+                "some join/leave decisions must have run"
+            );
         }
         assert!(!lat.is_empty(), "latencies recorded");
 
@@ -12517,7 +12722,10 @@ mod part4c_tests {
         assert_eq!(deg.len(), 2);
         for r in &deg {
             assert!(r.primary.is_finite() && (0.0..=1.0).contains(&r.primary));
-            assert!(!r.acts.is_empty(), "some join/leave decisions must have run");
+            assert!(
+                !r.acts.is_empty(),
+                "some join/leave decisions must have run"
+            );
         }
         assert!(!lat.is_empty(), "latencies recorded");
     }
@@ -12579,7 +12787,10 @@ mod part4c_tests {
     /// churn (the never-evict structural guarantee); one lockout config also runs.
     #[test]
     fn part4h_two_seed_smoke() {
-        let ne_cfg = PersistentAifConfig { eviction_cap: Some(0), ..e1_config() };
+        let ne_cfg = PersistentAifConfig {
+            eviction_cap: Some(0),
+            ..e1_config()
+        };
         let (ne, lat) = persistent_battery_range(ne_cfg, 60, 62);
         assert_eq!(ne.len(), 2);
         for r in &ne {
@@ -12588,7 +12799,10 @@ mod part4c_tests {
         }
         assert!(!lat.is_empty(), "latencies recorded");
 
-        let lk_cfg = PersistentAifConfig { rejoin_lockout_tasks: 1, ..e1_config() };
+        let lk_cfg = PersistentAifConfig {
+            rejoin_lockout_tasks: 1,
+            ..e1_config()
+        };
         let (lk, _) = persistent_battery_range_degraded(lk_cfg, 60, 62);
         assert_eq!(lk.len(), 2);
         for r in &lk {
@@ -12610,7 +12824,10 @@ mod part4c_tests {
             assert_eq!(tasks.len(), TASKS);
             for t in &tasks {
                 let r = t.required.count_ones();
-                assert!((2..=8).contains(&r), "v2 draw is |required| in 2..=8, got {r}");
+                assert!(
+                    (2..=8).contains(&r),
+                    "v2 draw is |required| in 2..=8, got {r}"
+                );
                 assert_eq!(t.order.len(), agents.len());
             }
         }
@@ -12623,7 +12840,10 @@ mod part4c_tests {
     #[test]
     fn part5a_two_seed_smoke() {
         let cfg = e1_gamma_config(1.0);
-        let mode = RunMode { regime: Regime::V2, degraded: true };
+        let mode = RunMode {
+            regime: Regime::V2,
+            degraded: true,
+        };
         let (wrapped, _) = margin_battery_mode(cfg, 0.0, 0.0, mode, 120, 122, None);
         let (bare, _) = persistent_battery_mode(cfg, mode, 120, 122);
         assert_battery_identical(&wrapped, &bare, "MarginE1(0,0) must reproduce the bare arm");
@@ -12704,7 +12924,10 @@ mod part4c_tests {
             let (agents, tasks) = draw_prefix_w12(&mut rng);
             assert!((4..=16).contains(&agents.len()), "pool draw unchanged");
             for a in &agents {
-                assert!((1..=6).contains(&a.caps.count_ones()), "w12 caps are 1..=6 bits");
+                assert!(
+                    (1..=6).contains(&a.caps.count_ones()),
+                    "w12 caps are 1..=6 bits"
+                );
                 assert_eq!(
                     a.caps >> W12_UNIVERSE_BITS,
                     0,
@@ -12714,8 +12937,15 @@ mod part4c_tests {
             assert_eq!(tasks.len(), TASKS);
             for t in &tasks {
                 let r = t.required.count_ones();
-                assert!((2..=12).contains(&r), "w12 draw is |required| in 2..=12, got {r}");
-                assert_eq!(t.required >> W12_UNIVERSE_BITS, 0, "required stays in 12 bits");
+                assert!(
+                    (2..=12).contains(&r),
+                    "w12 draw is |required| in 2..=12, got {r}"
+                );
+                assert_eq!(
+                    t.required >> W12_UNIVERSE_BITS,
+                    0,
+                    "required stays in 12 bits"
+                );
                 assert_eq!(t.order.len(), agents.len());
             }
         }
@@ -12740,7 +12970,10 @@ mod part4c_tests {
             |_req, bits, _success, _members| widths.push(bits.len()),
         );
         assert!(r.primary.is_finite() && (0.0..=1.0).contains(&r.primary));
-        assert!(!r.acts.is_empty(), "some join/leave decisions must have run");
+        assert!(
+            !r.acts.is_empty(),
+            "some join/leave decisions must have run"
+        );
         assert_eq!(widths.len(), TASKS, "one outcome per task");
         assert!(
             widths.iter().all(|&w| w == W12_UNIVERSE_BITS as usize),
@@ -12772,7 +13005,9 @@ mod part4c_tests {
         let task = &tasks[0];
         let arm = PersistentAifArm::new(120, e1_w12_config(P5C_W12_GAMMA))
             .expect("12-bit persistent arm construction");
-        let ctx = DecisionContext { required_capabilities: task.required };
+        let ctx = DecisionContext {
+            required_capabilities: task.required,
+        };
 
         let mut members: Vec<usize> = vec![task.order[0]];
         for &idx in task.order[1..].iter().take(3) {
@@ -12806,7 +13041,10 @@ mod part4c_tests {
     #[ignore = "12-bit battery is debug-prohibitive; run --release with --ignored"]
     fn part5c_item1_w12_battery_smoke() {
         let cfg = e1_w12_config(P5C_W12_GAMMA);
-        let mode = RunMode { regime: Regime::W12, degraded: true };
+        let mode = RunMode {
+            regime: Regime::W12,
+            degraded: true,
+        };
         let (wrapped, lat) = margin_battery_mode(cfg, 0.0, 0.0, mode, 120, 122, None);
         let (bare, _) = persistent_battery_mode(cfg, mode, 120, 122);
         assert_battery_identical(
@@ -12831,13 +13069,19 @@ mod part4c_tests {
     #[test]
     fn part5c_item2_smoke() {
         let cfg = e1_gamma_config(P5C_HYSTERESIS_GAMMA);
-        let mode = RunMode { regime: Regime::V2, degraded: true };
+        let mode = RunMode {
+            regime: Regime::V2,
+            degraded: true,
+        };
         for &h in &P5C_H_GRID {
             let (rs, lat) = margin_battery_mode(cfg, 0.0, h, mode, 120, 121, None);
             assert_eq!(rs.len(), 1);
             for r in &rs {
                 assert!(r.primary.is_finite() && (0.0..=1.0).contains(&r.primary));
-                assert!(!r.acts.is_empty(), "some join/leave decisions must have run");
+                assert!(
+                    !r.acts.is_empty(),
+                    "some join/leave decisions must have run"
+                );
             }
             assert!(!lat.is_empty(), "latencies recorded");
         }
@@ -12868,7 +13112,10 @@ mod part4c_tests {
             let n = inst.agents.len();
             let singletons: Vec<Vec<usize>> = (0..n).map(|i| vec![i]).collect();
             let member_cost_of = |blocks: &[Vec<usize>]| -> f64 {
-                blocks.iter().map(|b| b.len() as f64 * V2B_MEMBER_COST).sum()
+                blocks
+                    .iter()
+                    .map(|b| b.len() as f64 * V2B_MEMBER_COST)
+                    .sum()
             };
             assert!(
                 (member_cost_of(&singletons) - member_cost_of(&best.blocks())).abs() < 1e-9,
@@ -12896,8 +13143,12 @@ mod part4c_tests {
             }
             // The twin is a plain calculator swap — the search runs end-to-end.
             let cfg = PopulationConfig::default().with_seed(seed);
-            let learned =
-                search(&inst.agents, &TaskCoverageV2::weighted(inst.required, r_hat), &cfg).best;
+            let learned = search(
+                &inst.agents,
+                &TaskCoverageV2::weighted(inst.required, r_hat),
+                &cfg,
+            )
+            .best;
             assert_eq!(learned.assignment.len(), inst.agents.len());
         }
     }
@@ -13076,7 +13327,9 @@ mod part4c_tests {
             assert_eq!(via_wrapper, via_inner, "seed {seed}");
             let salted = learned_reliability(&inst, seed, P6_TWIN_SEED_SALT, P5C_TWIN_TASKS);
             assert!(
-                salted.iter().all(|r| r.is_finite() && (0.0..=1.0).contains(r)),
+                salted
+                    .iter()
+                    .all(|r| r.is_finite() && (0.0..=1.0).contains(r)),
                 "the Part 6 salt must still yield probabilities"
             );
         }
@@ -13188,10 +13441,7 @@ mod part4c_tests {
         assert_eq!(inc.decades[15], 1);
         assert_eq!(inc.decades[16], 2, "≥ 1e0 saturates the overflow bucket");
         assert_eq!(
-            inc.decades.iter().sum::<usize>()
-                + inc.exact_zero
-                + inc.underflow
-                + inc.non_finite,
+            inc.decades.iter().sum::<usize>() + inc.exact_zero + inc.underflow + inc.non_finite,
             inc.probed,
             "the classes are disjoint and exhaustive"
         );
@@ -13495,7 +13745,11 @@ mod part4c_tests {
             order: vec![0, 1],
         };
 
-        assert_eq!(p8_typed_covered(&inst, &[0], &task), 1, "only bit 0 matches");
+        assert_eq!(
+            p8_typed_covered(&inst, &[0], &task),
+            1,
+            "only bit 0 matches"
+        );
         assert_eq!(
             p8_untyped_covered(&inst, &[0], task.required),
             2,
@@ -13555,12 +13809,13 @@ mod part4c_tests {
         // The policy's own magnitude must be finite and match a hand-built
         // evaluation of the very same collapsed table.
         let counters = P8ChannelCounters::default();
-        let got =
-            p8_channel_magnitude(&masks, required, &tags, Some(&counters)).expect("channel magnitude");
+        let got = p8_channel_magnitude(&masks, required, &tags, Some(&counters))
+            .expect("channel magnitude");
         let agents = [0usize, 1];
-        let want =
-            catgraph_magnitude::coalition_magnitude_from_couplings(&agents, &expected, &agents, 1.0)
-                .expect("hand-built magnitude");
+        let want = catgraph_magnitude::coalition_magnitude_from_couplings(
+            &agents, &expected, &agents, 1.0,
+        )
+        .expect("hand-built magnitude");
         assert!(
             (got - want).abs() <= 1e-12 * want.abs().max(1.0),
             "channel magnitude {got} vs hand-built {want}"
@@ -13863,7 +14118,10 @@ mod part4c_tests {
         assert!(!lat.is_empty(), "latencies recorded");
         for r in asis.iter().chain(&rw) {
             assert!(r.primary.is_finite() && (0.0..=1.0).contains(&r.primary));
-            assert!(!r.acts.is_empty(), "some join/leave decisions must have run");
+            assert!(
+                !r.acts.is_empty(),
+                "some join/leave decisions must have run"
+            );
         }
 
         // Empty rule set ⇒ the rewriting cell IS the control (X-reduce's second
@@ -14006,7 +14264,10 @@ mod part4c_tests {
         assert!(zero_run.terms.iter().all(|&t| t == 0.0));
         for (a, b) in zero_run.seeds.iter().zip(asis.iter()) {
             assert_eq!(a.acts, b.acts, "λ = 0 must reproduce the control's acts");
-            assert_eq!(a.scores, b.scores, "λ = 0 must reproduce the control's scores");
+            assert_eq!(
+                a.scores, b.scores,
+                "λ = 0 must reproduce the control's scores"
+            );
         }
     }
 
@@ -14130,14 +14391,8 @@ mod part4c_tests {
             (&flat, &d_flat, ResidualBasis::Occurrences),
             (&wf, &d_wf, ResidualBasis::Distinct),
         ] {
-            let run = p9_valuation_battery(
-                insts,
-                decl,
-                &oracle,
-                P10_LAMBDA,
-                P9Cost::Uniform,
-                basis,
-            );
+            let run =
+                p9_valuation_battery(insts, decl, &oracle, P10_LAMBDA, P9Cost::Uniform, basis);
             assert_eq!(run.seeds.len(), 2);
             assert_eq!(run.terms.len(), 2 * TASKS);
             assert!(run.terms.iter().all(|t| t.is_finite() && *t >= 0.0));
@@ -14147,7 +14402,10 @@ mod part4c_tests {
             );
             for r in &run.seeds {
                 assert!(r.primary.is_finite() && (0.0..=1.0).contains(&r.primary));
-                assert!(!r.acts.is_empty(), "some join/leave decisions must have run");
+                assert!(
+                    !r.acts.is_empty(),
+                    "some join/leave decisions must have run"
+                );
             }
         }
 
@@ -14155,7 +14413,10 @@ mod part4c_tests {
         // dominates H-PS.
         assert_eq!(p10_verdict(false, true, true), "RUN-INVALID");
         assert_eq!(p10_verdict(true, false, true), "NOT REPLICATED");
-        assert_eq!(p10_verdict(true, true, true), "VALIDATED (process-specific)");
+        assert_eq!(
+            p10_verdict(true, true, true),
+            "VALIDATED (process-specific)"
+        );
         assert_eq!(p10_verdict(true, true, false), "FALSIFIED (coverage proxy)");
     }
 
@@ -14263,7 +14524,13 @@ mod part4c_tests {
         let (ctl_wf, _) = p9_battery(&wf, &d_wf, typed);
         let (ctl_flat, _) = p9_battery(&flat, &d_flat, typed);
 
-        let cells: [(&str, &Vec<WorkflowInstance>, &Vec<Vec<P9Declared>>, ResidualBasis, &Vec<P9Seed>); 3] = [
+        let cells: [(
+            &str,
+            &Vec<WorkflowInstance>,
+            &Vec<Vec<P9Declared>>,
+            ResidualBasis,
+            &Vec<P9Seed>,
+        ); 3] = [
             ("res-wf", &wf, &d_wf, ResidualBasis::Occurrences, &ctl_wf),
             (
                 "res-flat",
@@ -14272,19 +14539,12 @@ mod part4c_tests {
                 ResidualBasis::Occurrences,
                 &ctl_flat,
             ),
-            (
-                "res-distinct",
-                &wf,
-                &d_wf,
-                ResidualBasis::Distinct,
-                &ctl_wf,
-            ),
+            ("res-distinct", &wf, &d_wf, ResidualBasis::Distinct, &ctl_wf),
         ];
 
         let mut live_anywhere = false;
         for (label, insts, decl, basis, ctl) in cells {
-            let zero =
-                p9_valuation_battery(insts, decl, &oracle, 0.0, P9Cost::Uniform, basis);
+            let zero = p9_valuation_battery(insts, decl, &oracle, 0.0, P9Cost::Uniform, basis);
             assert!(zero.terms.iter().all(|&t| t == 0.0), "{label}: λ = 0 term");
             assert!(
                 p9_bit_identical(&zero.seeds, ctl),
@@ -14297,14 +14557,8 @@ mod part4c_tests {
             // measurement rather than an argument.
             assert_eq!(zero.probe_declines, 0, "{label}: λ = 0 probe declines");
 
-            let run = p9_valuation_battery(
-                insts,
-                decl,
-                &oracle,
-                P10_LAMBDA,
-                P9Cost::Uniform,
-                basis,
-            );
+            let run =
+                p9_valuation_battery(insts, decl, &oracle, P10_LAMBDA, P9Cost::Uniform, basis);
             let (_, acts, scores) = p9_divergence(&run.seeds, ctl);
             live_anywhere |= acts > 0 || scores > 0;
             assert_eq!(

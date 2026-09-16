@@ -238,7 +238,10 @@ impl AifDecisionPolicy {
         // `g_at` returns +∞ on engine error, so `∞ - ∞` can be NaN. Never join on
         // an untrustworthy margin, and never propagate NaN/±∞ as a score.
         if !margin.is_finite() {
-            return Decision { act: false, score: 0.0 };
+            return Decision {
+                act: false,
+                score: 0.0,
+            };
         }
         Decision {
             act: margin > join_margin,
@@ -265,7 +268,10 @@ impl AifDecisionPolicy {
         // `g_at` returns +∞ on engine error, so `∞ - ∞` can be NaN. Don't eject on
         // an untrustworthy value and don't propagate NaN/±∞ as a score.
         if !delta.is_finite() {
-            return Decision { act: false, score: 0.0 };
+            return Decision {
+                act: false,
+                score: 0.0,
+            };
         }
         Decision {
             act: delta <= 0.0,
@@ -413,7 +419,12 @@ impl CoalitionDecisionPolicy for AifDecisionPolicy {
 
         Box::pin(async move {
             tokio_rayon::spawn(move || {
-                Self::join_decision_from_competences(comp_alone, comp_coalition, params, join_margin)
+                Self::join_decision_from_competences(
+                    comp_alone,
+                    comp_coalition,
+                    params,
+                    join_margin,
+                )
             })
             .await
         })
@@ -623,7 +634,11 @@ mod tests {
         };
         let with_clone: [&dyn AgentCapabilities; 4] = [&a0, &a1, &a2, &redundant];
         let leave = policy.should_leave(&redundant, &with_clone, &ctx);
-        assert!(leave.act, "redundant agent should leave (score={})", leave.score);
+        assert!(
+            leave.act,
+            "redundant agent should leave (score={})",
+            leave.score
+        );
     }
 
     #[test]
@@ -739,8 +754,13 @@ mod tests {
         };
         let with_clone: [&dyn AgentCapabilities; 4] = [&a0, &a1, &a2, &redundant];
         let sync_leave = policy.should_leave(&redundant, &with_clone, &ctx);
-        let async_leave = policy.should_leave_async(&redundant, &with_clone, &ctx).await;
-        assert_eq!(sync_leave.act, async_leave.act, "leave: act must match sync");
+        let async_leave = policy
+            .should_leave_async(&redundant, &with_clone, &ctx)
+            .await;
+        assert_eq!(
+            sync_leave.act, async_leave.act,
+            "leave: act must match sync"
+        );
         assert!(
             (sync_leave.score - async_leave.score).abs() < 1e-12,
             "leave: score must match sync: sync={} async={}",
@@ -779,13 +799,20 @@ mod tests {
         // The dynamic-dispatch async call must produce the non-degenerate join
         // decision (coverage 1/3 → 3/3), proving the override is reached.
         let d = p.should_join_async(&a0, &coalition, &ctx).await;
-        assert!(d.act, "trait-object async join should fire (score={})", d.score);
+        assert!(
+            d.act,
+            "trait-object async join should fire (score={})",
+            d.score
+        );
         assert!(d.score > 0.0, "join margin must be positive");
 
         // And the leave override is reachable too: a0 provides unique coverage.
         let full: [&dyn AgentCapabilities; 3] = [&a0, &a1, &a2];
         let stay = p.should_leave_async(&a0, &full, &ctx).await;
-        assert!(!stay.act, "trait-object async leave: unique-coverage agent stays");
+        assert!(
+            !stay.act,
+            "trait-object async leave: unique-coverage agent stays"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -825,10 +852,20 @@ mod tests {
             compat,
             CoalitionHistory::new(),
         );
-        let ctx = DecisionContext { required_capabilities: 0b111 };
+        let ctx = DecisionContext {
+            required_capabilities: 0b111,
+        };
 
-        let a0 = TestAgent { id: 0, caps: 0b010, trust: 50 };
-        let a1 = TestAgent { id: 1, caps: 0b010, trust: 50 };
+        let a0 = TestAgent {
+            id: 0,
+            caps: 0b010,
+            trust: 50,
+        };
+        let a1 = TestAgent {
+            id: 1,
+            caps: 0b010,
+            trust: 50,
+        };
         let coalition: [&dyn AgentCapabilities; 1] = [&a1];
 
         // Even with strong beliefs present, weight 0 ignores them ⇒ redundant
@@ -856,14 +893,26 @@ mod tests {
             },
             CoalitionHistory::new(),
         );
-        let ctx = DecisionContext { required_capabilities: 0b111 };
+        let ctx = DecisionContext {
+            required_capabilities: 0b111,
+        };
 
-        let a0 = TestAgent { id: 0, caps: 0b010, trust: 50 };
-        let a1 = TestAgent { id: 1, caps: 0b010, trust: 50 };
+        let a0 = TestAgent {
+            id: 0,
+            caps: 0b010,
+            trust: 50,
+        };
+        let a1 = TestAgent {
+            id: 1,
+            caps: 0b010,
+            trust: 50,
+        };
         let coalition: [&dyn AgentCapabilities; 1] = [&a1];
 
         assert!(
-            !AifDecisionPolicy::default().should_join(&a0, &coalition, &ctx).act,
+            !AifDecisionPolicy::default()
+                .should_join(&a0, &coalition, &ctx)
+                .act,
             "pure coverage: redundant clone declines",
         );
         assert!(
@@ -888,14 +937,26 @@ mod tests {
             },
             CoalitionHistory::new(),
         );
-        let ctx = DecisionContext { required_capabilities: 0b111 };
+        let ctx = DecisionContext {
+            required_capabilities: 0b111,
+        };
 
-        let a0 = TestAgent { id: 0, caps: 0b001, trust: 50 };
-        let a1 = TestAgent { id: 1, caps: 0b010, trust: 50 };
+        let a0 = TestAgent {
+            id: 0,
+            caps: 0b001,
+            trust: 50,
+        };
+        let a1 = TestAgent {
+            id: 1,
+            caps: 0b010,
+            trust: 50,
+        };
         let coalition: [&dyn AgentCapabilities; 1] = [&a1];
 
         assert!(
-            AifDecisionPolicy::default().should_join(&a0, &coalition, &ctx).act,
+            AifDecisionPolicy::default()
+                .should_join(&a0, &coalition, &ctx)
+                .act,
             "pure coverage: new bit ⇒ join",
         );
         assert!(
@@ -909,9 +970,19 @@ mod tests {
         // Neutral trust/compat (base alignment 0.5), redundant coverage ⇒ no
         // join. Recording strong past performance for {0,1} lifts alignment and
         // flips the decision to join.
-        let ctx = DecisionContext { required_capabilities: 0b111 };
-        let a0 = TestAgent { id: 0, caps: 0b010, trust: 50 };
-        let a1 = TestAgent { id: 1, caps: 0b010, trust: 50 };
+        let ctx = DecisionContext {
+            required_capabilities: 0b111,
+        };
+        let a0 = TestAgent {
+            id: 0,
+            caps: 0b010,
+            trust: 50,
+        };
+        let a1 = TestAgent {
+            id: 1,
+            caps: 0b010,
+            trust: 50,
+        };
         let coalition: [&dyn AgentCapabilities; 1] = [&a1];
 
         let no_history = AifDecisionPolicy::with_beliefs(
@@ -945,13 +1016,25 @@ mod tests {
     fn trust_controls_whether_a_redundant_member_leaves() {
         // a0 is capability-redundant within {a0, a1} (both 0b010): pure coverage
         // says leave. High trust keeps it; low trust ejects it.
-        let ctx = DecisionContext { required_capabilities: 0b111 };
-        let a0 = TestAgent { id: 0, caps: 0b010, trust: 50 };
-        let a1 = TestAgent { id: 1, caps: 0b010, trust: 50 };
+        let ctx = DecisionContext {
+            required_capabilities: 0b111,
+        };
+        let a0 = TestAgent {
+            id: 0,
+            caps: 0b010,
+            trust: 50,
+        };
+        let a1 = TestAgent {
+            id: 1,
+            caps: 0b010,
+            trust: 50,
+        };
         let full: [&dyn AgentCapabilities; 2] = [&a0, &a1];
 
         assert!(
-            AifDecisionPolicy::default().should_leave(&a0, &full, &ctx).act,
+            AifDecisionPolicy::default()
+                .should_leave(&a0, &full, &ctx)
+                .act,
             "pure coverage: redundant member leaves",
         );
 
@@ -997,15 +1080,31 @@ mod tests {
         // from being EJECTED. Here all three members share caps 0b010 (coverage
         // pinned at 1/3 regardless of size), so a pure-coverage policy would shed
         // any of them; high mutual trust keeps a0.
-        let ctx = DecisionContext { required_capabilities: 0b111 };
-        let a0 = TestAgent { id: 0, caps: 0b010, trust: 50 };
-        let a1 = TestAgent { id: 1, caps: 0b010, trust: 50 };
-        let a2 = TestAgent { id: 2, caps: 0b010, trust: 50 };
+        let ctx = DecisionContext {
+            required_capabilities: 0b111,
+        };
+        let a0 = TestAgent {
+            id: 0,
+            caps: 0b010,
+            trust: 50,
+        };
+        let a1 = TestAgent {
+            id: 1,
+            caps: 0b010,
+            trust: 50,
+        };
+        let a2 = TestAgent {
+            id: 2,
+            caps: 0b010,
+            trust: 50,
+        };
         let full: [&dyn AgentCapabilities; 3] = [&a0, &a1, &a2];
 
         // Pure coverage: a redundant member in a 3-clone coalition leaves.
         assert!(
-            AifDecisionPolicy::default().should_leave(&a0, &full, &ctx).act,
+            AifDecisionPolicy::default()
+                .should_leave(&a0, &full, &ctx)
+                .act,
             "pure coverage: redundant member of a 3-clone coalition leaves",
         );
 
@@ -1067,9 +1166,19 @@ mod tests {
             },
             CoalitionHistory::new(),
         );
-        let ctx = DecisionContext { required_capabilities: 0b111 };
-        let a0 = TestAgent { id: 0, caps: 0b010, trust: 50 };
-        let a1 = TestAgent { id: 1, caps: 0b010, trust: 50 };
+        let ctx = DecisionContext {
+            required_capabilities: 0b111,
+        };
+        let a0 = TestAgent {
+            id: 0,
+            caps: 0b010,
+            trust: 50,
+        };
+        let a1 = TestAgent {
+            id: 1,
+            caps: 0b010,
+            trust: 50,
+        };
         let coalition: [&dyn AgentCapabilities; 1] = [&a1];
 
         let sync = policy.should_join(&a0, &coalition, &ctx);

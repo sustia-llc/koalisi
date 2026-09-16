@@ -112,10 +112,7 @@ where
     },
 
     /// All hyperedges were cleared from the graph.
-    HyperedgesCleared {
-        timestamp: Timestamp,
-        count: usize,
-    },
+    HyperedgesCleared { timestamp: Timestamp, count: usize },
 
     /// The entire graph was cleared.
     GraphCleared {

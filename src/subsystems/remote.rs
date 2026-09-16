@@ -132,7 +132,7 @@ const IDLE_TIMEOUT: Duration = Duration::from_secs(300);
 // ---------------------------------------------------------------------------
 
 /// Versioned wire projection of a
-/// [`DecisionRecord`](crate::subsystems::coalition_actor::DecisionRecord).
+/// [`crate::subsystems::coalition_actor::DecisionRecord`].
 ///
 /// Fields are raw scalars/strings only — the
 /// [`WireTopologyEvent`](crate::persistence::WireTopologyEvent) precedent: the
@@ -409,7 +409,7 @@ pub struct RemoteHandle {
 /// and [`spawn_outcome_forwarder`](crate::subsystems::outcome::spawn_outcome_forwarder);
 /// pass `your_token.child_token()` if the gateway should be cancellable in
 /// isolation. `rx` is the receiving end of a
-/// [`DecisionRecord`](crate::subsystems::coalition_actor::DecisionRecord) tap
+/// [`crate::subsystems::coalition_actor::DecisionRecord`] tap
 /// (directly the [`CoalitionService`](crate::subsystems::coalition_actor::CoalitionService)'s,
 /// or one leg of a
 /// [`spawn_decision_tee`](crate::subsystems::coalition_actor::spawn_decision_tee)).
@@ -845,7 +845,10 @@ mod tests {
         let all = buf.respond(&EventRequest::PollSince { last_seq: 0 });
         let evs = events(&all);
         assert_eq!(evs.iter().map(|e| e.seq).collect::<Vec<_>>(), vec![1, 2, 3]);
-        assert!(evs.iter().all(|e| e.schema_version == REMOTE_WIRE_SCHEMA_VERSION));
+        assert!(
+            evs.iter()
+                .all(|e| e.schema_version == REMOTE_WIRE_SCHEMA_VERSION)
+        );
         assert_eq!(evs[0].coalition, "coalition-7");
         assert_eq!(evs[0].agent_id, 1);
         assert_eq!(evs[0].kind, "join");
@@ -879,7 +882,10 @@ mod tests {
         assert!(events(&empty).is_empty());
 
         // Non-draining: the full poll still returns everything.
-        assert_eq!(events(&buf.respond(&EventRequest::PollSince { last_seq: 0 })).len(), 4);
+        assert_eq!(
+            events(&buf.respond(&EventRequest::PollSince { last_seq: 0 })).len(),
+            4
+        );
         assert_eq!(buf.len(), 4);
 
         assert_eq!(

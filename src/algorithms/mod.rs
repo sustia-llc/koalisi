@@ -19,11 +19,11 @@ pub use aipa::{
     compute_partition_min_bound, compute_partition_upper_bound, find_best_partition,
     generate_integer_partitions, partition_count, verify_partition,
 };
+pub use dcvc::{DCVCDistributor, DistributionStats, WorkloadShare};
+pub use feedback::{FAILURE_UNIT, FeedbackCalculator, FeedbackStore, HISTORY_UNIT};
 pub use population::{
     CoalitionStructure, PopulationConfig, SearchOutcome, record_trajectory, search,
 };
-pub use dcvc::{DCVCDistributor, DistributionStats, WorkloadShare};
-pub use feedback::{FAILURE_UNIT, FeedbackCalculator, FeedbackStore, HISTORY_UNIT};
 pub use value_calculation::{
     AdditiveCalculator, MultiplicativeCalculator, SynergisticCalculator, ValueCalculator,
     WeightedCalculator,

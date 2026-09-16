@@ -3,10 +3,10 @@
 
 use std::collections::BTreeSet;
 
+use koalisi::algorithms::population::record_trajectory;
 use koalisi::algorithms::{
     CapabilityAgent, PopulationConfig, SynergisticCalculator, ValueCalculator, search,
 };
-use koalisi::algorithms::population::record_trajectory;
 use koalisi::topology::{CoalitionManager, Timestamp};
 
 /// A modest, capability-diverse agent pool.
@@ -67,8 +67,10 @@ fn gbest_is_monotone_and_beats_baselines() {
     // count), so the initial gbest already dominates both — and search never
     // regresses the gbest.
     let calc = SynergisticCalculator;
-    let all: Vec<&dyn koalisi::algorithms::AgentCapabilities> =
-        agents.iter().map(|a| a as &dyn koalisi::algorithms::AgentCapabilities).collect();
+    let all: Vec<&dyn koalisi::algorithms::AgentCapabilities> = agents
+        .iter()
+        .map(|a| a as &dyn koalisi::algorithms::AgentCapabilities)
+        .collect();
     let single_block = calc.calculate_value(&all);
     let all_singletons: f64 = agents
         .iter()

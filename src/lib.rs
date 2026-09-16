@@ -3,7 +3,7 @@
 //! ## Architecture
 //!
 //! - [`core`] — domain-agnostic coalition infrastructure:
-//!   [`CoalitionRuntime`](core::CoalitionRuntime) (`TaskTracker` +
+//!   [`core::CoalitionRuntime`] (`TaskTracker` +
 //!   `CancellationToken` + three-step shutdown), settings, logging.
 //! - [`topology`] — temporal hypergraph, event sourcing,
 //!   `CoalitionManager`, time-travel queries, analytics.
@@ -15,7 +15,7 @@
 //!   available), behind feature `decision` an Active Inference
 //!   expected-free-energy policy, and behind feature `magnitude` its categorical
 //!   A/B mirror scoring coalitions by enriched-category magnitude.
-//! - [`process`] *(feature `process`)* — process-structured coalition tasks:
+//! - `process` *(feature `process`)* — process-structured coalition tasks:
 //!   workflows as colored string diagrams, `(bit, role)` demand extraction, the
 //!   pinned rewrite theory, and the bounded convex-DPO optimize hook (EQ5a).
 //! - `harness` *(feature `harness`)* — the K7 round's shared plumbing: seeded
@@ -53,6 +53,6 @@ pub mod subsystems {
     pub mod remote;
 }
 
+pub use core::CoalitionRuntime;
 pub use decision::{CoalitionDecisionPolicy, Decision, DecisionContext, ThresholdPolicy};
 pub use ingest::{DataSource, Sample, SampleMonitor, SampleUpdate};
-pub use core::CoalitionRuntime;

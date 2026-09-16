@@ -65,27 +65,18 @@ where
     exists
 }
 
-fn vertex_created_at_impl<V, HE>(
-    events: &EventLog<V, HE>,
-    vertex: VertexIndex,
-) -> Option<Timestamp>
+fn vertex_created_at_impl<V, HE>(events: &EventLog<V, HE>, vertex: VertexIndex) -> Option<Timestamp>
 where
     V: Clone + std::fmt::Debug,
     HE: Clone + std::fmt::Debug,
 {
-    events
-        .vertex_events(vertex)
-        .iter()
-        .find_map(|e| match e {
-            TemporalEvent::VertexAdded { timestamp, .. } => Some(*timestamp),
-            _ => None,
-        })
+    events.vertex_events(vertex).iter().find_map(|e| match e {
+        TemporalEvent::VertexAdded { timestamp, .. } => Some(*timestamp),
+        _ => None,
+    })
 }
 
-fn vertex_removed_at_impl<V, HE>(
-    events: &EventLog<V, HE>,
-    vertex: VertexIndex,
-) -> Option<Timestamp>
+fn vertex_removed_at_impl<V, HE>(events: &EventLog<V, HE>, vertex: VertexIndex) -> Option<Timestamp>
 where
     V: Clone + std::fmt::Debug,
     HE: Clone + std::fmt::Debug,

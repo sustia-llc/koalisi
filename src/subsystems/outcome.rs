@@ -251,16 +251,14 @@ mod tests {
 
         let store_sink: Box<dyn OutcomeSink> = Box::new(store.clone());
         let counter = Arc::clone(&count);
-        let closure_sink: Box<dyn OutcomeSink> =
-            Box::new(move |_o: &TaskOutcome| {
-                counter.fetch_add(1, Ordering::SeqCst);
-            });
+        let closure_sink: Box<dyn OutcomeSink> = Box::new(move |_o: &TaskOutcome| {
+            counter.fetch_add(1, Ordering::SeqCst);
+        });
 
         let tracker = TaskTracker::new();
         let token = CancellationToken::new();
         let (tx, rx) = mpsc::channel(16);
-        let handle =
-            spawn_outcome_forwarder(rx, vec![store_sink, closure_sink], &tracker, token);
+        let handle = spawn_outcome_forwarder(rx, vec![store_sink, closure_sink], &tracker, token);
 
         emit_outcome(Some(&tx), outcome(vec![1], true));
         emit_outcome(Some(&tx), outcome(vec![1, 2], false));
