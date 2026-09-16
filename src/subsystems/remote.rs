@@ -22,8 +22,7 @@
 //! [`DecisionRecord`] itself stays serde-free (it is core, feature-independent);
 //! conversion to the versioned wire type [`RemoteCoalitionEventV1`] happens only
 //! here, at the boundary — the same "wire projection, not serde on domain types"
-//! discipline as P7.2's
-//! [`WireTopologyEvent`](crate::persistence::WireTopologyEvent).
+//! discipline as P7.2's `WireTopologyEvent` (feature `persistence`).
 //!
 //! ## Wire protocol
 //!
@@ -135,7 +134,7 @@ const IDLE_TIMEOUT: Duration = Duration::from_secs(300);
 /// [`crate::subsystems::coalition_actor::DecisionRecord`].
 ///
 /// Fields are raw scalars/strings only — the
-/// [`WireTopologyEvent`](crate::persistence::WireTopologyEvent) precedent: the
+/// `WireTopologyEvent` (feature `persistence`) precedent: the
 /// in-memory record keeps its koalisi types and stays serde-free, and this
 /// mirror is what crosses the network. `kind` is the stable lowercase label
 /// from [`DecisionKind::as_str`](crate::subsystems::coalition_actor::DecisionKind::as_str)
