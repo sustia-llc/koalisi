@@ -12,34 +12,27 @@ When you bump the project's behaviour, also:
   for PR releases) — per-release tagging resumed 2026-07-27, owner call;
   v0.7.0–v0.15.0 were backfilled onto their merges the same day
 
-**Review protocol (standing, owner 2026-08-05): EVERY PR gets the
-reviewer pass before tag/merge — re-pin and deps+docs slices included.**
-Every finding is applied or owner-adjudicated, including ones below the
-review skill's confidence bar. The former carve-out for re-pins ("the
-re-pin protocol's own gates are the review", PR #62 precedent) is
-REVOKED: the first re-pin reviewed under it (PR #77) produced three real
-findings, one of them a miss of the checklist directly above — and
-suites, clippy and a byte-identical battery structurally cannot detect
-stale docs, which is the failure mode a deps-only PR carries most often.
-Reviewer output is evidence, not verdict: check each claim against the
-diff (a PR #77 panel called the lockfile delta clean when it was not).
+**Review protocol (standing, owner 2026-08-05): EVERY PR gets `/code-review
+low` before tag/merge — re-pin and deps+docs slices included** (suites,
+clippy and a byte-identical battery cannot detect stale docs, the failure
+mode a deps-only PR carries most often). Every finding is applied or
+owner-adjudicated, whatever its severity. Reviewer output is evidence, not
+verdict: check each claim against the diff. Full protocol:
+`docs/PROTOCOL.md` §4.
 
-**Maintenance rule (2026-08-09)**: new release entries go in FULL to the
-`project-history.md` archive (§1); this file keeps only the latest three plus a
-verdict-trail row. New gotchas: an engineering contract goes here in full, an
-A/B-lineage one goes to the `ab-lineage-gotchas.md` archive with a one-line
-index entry here. **Keep this file under 150k chars** — past that the harness
-truncates it and the tail silently stops reaching the session.
+**Maintenance rule**: new release entries go in FULL to the
+`project-history.md` archive (§1); this file keeps only the latest three. New
+gotchas: an engineering contract goes here in full, an A/B-lineage one goes to
+the `ab-lineage-gotchas.md` archive with a one-line index entry here. **Keep
+this file under 150k chars** — past that the harness truncates it and the tail
+silently stops reaching the session.
 
 ## Where the rest of the record lives
 
-This file is the working state. Everything historical or registration-specific
-was moved out on 2026-08-09, when CLAUDE.md had crossed the 150k-char harness
-limit (163.2k) and its tail was being silently truncated. Nothing was deleted.
-The two archives are held **outside this repository** (owner call, 2026-08-09);
-their location is recorded in `CLAUDE.local.md`:
+This file is the working state. Two archives are held **outside this
+repository** (owner call, 2026-08-09); their location is in `CLAUDE.local.md`:
 
-- **`project-history.md`** — the full release ledger v0.4.0 → v0.31.0 verbatim,
+- **`project-history.md`** — the full release ledger v0.4.0 → present verbatim,
   the Phase 5/6/7 narratives, the K1–K6 sections, the downstream/removed-work
   notes, and the obsolete gotchas 1–6 / 8–10.
 - **`ab-lineage-gotchas.md`** — gotchas 20–28 and 30–33 verbatim (the
@@ -66,55 +59,51 @@ them. The retained gotchas (7, 11–19, 29) are unaffected and self-contained.
 ## Mission (one paragraph)
 
 **koalisi** — a reference implementation of agentic coalitions in Rust.
-Four-layer architecture: Core (CoalitionRuntime, lifecycle), Topology
-(temporal hypergraph via `catgraph_applied::Hypergraph` since K1 — was
-yamafaktory hypergraph v4.2.0 — event sourcing, CoalitionManager,
-time-travel queries, analytics), Algorithms (DCVC workload distribution,
-AIPA partition search, pluggable value calculators), and Runtime (since K3:
-tokio tasks with mpsc/oneshot command handles — kameo is gone — the
-`CoalitionService` policy-gated membership seam, a thin task-restart layer,
-an optional SurrealDB-backed durable decision log, and — since v0.25.0,
-#38 — an optional libp2p remote coalition-event gateway). koalisi began as a
-forex triangular-arbitrage tool; that domain was removed in v0.11.0 (#37) —
-the architecture is domain-agnostic and the demonstrated runtime is now a
-synthetic coalition-formation pipeline. Market/trading work lives in the
-sibling `biome` project.
-Evolved from four prior projects: dynamo (topology), coalesce (algorithms),
-coalition_aif (decision — planned), and forex-arbitrage-swarm (runtime — the
-forex domain since removed).
+Four layers: Core (`CoalitionRuntime`, lifecycle), Topology (temporal
+hypergraph over `catgraph_applied::Hypergraph`, event sourcing,
+`CoalitionManager`, time-travel queries, analytics), Algorithms (DCVC workload
+distribution, AIPA partition search, pluggable value calculators, population
+structure search), and Runtime (tokio tasks with mpsc/oneshot command handles,
+the `CoalitionService` policy-gated membership seam, a task-restart layer, an
+optional SurrealDB-backed durable decision log, an optional libp2p remote
+coalition-event gateway). The architecture is domain-agnostic; the
+demonstrated runtime is a synthetic coalition-formation pipeline, and the
+showcase is the pre-registered A/B trail in `docs/`. Market/trading work lives
+in the sibling `biome` project.
 
 ## Available tooling for this project
 
-- **`causality` (DeepCausality) plugin** — **NO DeepCausality crate is in
-  koalisi's lock since the v0.23.0 re-pin (v0.32.0); read this before
-  routing.** koalisi's topology backend is `catgraph_applied::Hypergraph`
-  (plain `Vec`/`HashMap` container — read its module docs at the pinned
-  catgraph tag for the contract). catgraph sits on none of the DeepCausality
-  substrate: cg#219/#221 gave it its own `Zero`/`One` + `Dual` (retiring
-  `deep_causality_num`), cg#220 its own toposort + connected components
-  (retiring `ultragraph`), and cg#222 made `catgraph-syntax`'s Arrow seam
-  crate-owned (retiring `deep_causality_haft`, which was the last edge, under
-  feature `process` only). `rg -n 'deep_causality|ultragraph' Cargo.lock` →
-  nothing. `causality:causal-graphs` and the substrate-specific skills
-  describe crates that are not in the dependency graph — do NOT route there;
-  the implementations are catgraph's own. `causality:causality-theory` is
-  still apt for the algebraic layer (`Rig`, HKT/witnesses) catgraph's
-  enrichment sits on, as theory reference only.
-- ~~`graph` plugin v2.0.1~~ (yamafaktory hypergraph skills) — **OBSOLETE for
-  `src/topology/` since K1**; historical reference only (pre-K1 semantics, the
-  dropped `PersistentHypergraph` idea — see the Phase 7 narrative in the
-  `project-history.md` archive §2).
+- **No DeepCausality crate is in koalisi's lock under any feature**
+  (`rg -n 'deep_causality|ultragraph' Cargo.lock` → nothing); the `causality`
+  plugin's substrate skills describe crates that are not in the graph — do
+  not route there. The topology backend contract is the module docs of
+  `catgraph-applied/src/hypergraph.rs` at the pinned tag.
+  `causality:causality-theory` stays apt as theory reference for the
+  algebraic layer catgraph's enrichment sits on.
 - Rust implementation is dispatched to the built-in `general-purpose` agent
   per `.claude/stack/agent-dispatch.md`; review is `/code-review low`.
 
-## Current state — 2026-09-16 (v0.33.0)
+## Current state — 2026-09-16 (v0.34.0)
 
-Full release ledger v0.4.0 → v0.33.0 is the `project-history.md` archive (§1).
+Full release ledger v0.4.0 → v0.34.0 is the `project-history.md` archive (§1).
 The three most recent entries are kept here in brief — read the ledger before
 touching anything with a frozen battery, a pinned decision, or a registered doc.
 
 ### Latest three
 
+- **Housekeeping re-pin + trim — v0.34.0 (2026-09-16, PR #90)**: `sha2`
+  0.10 → 0.11, `libp2p` 0.56 → 0.57, `surrealdb-types` 3.2.1 → 3.2.4, lock
+  refreshed (+22/−7 stanzas; `sha2`/`digest` 0.10 and 0.11 now coexist —
+  koalisi on 0.11, the surrealdb stack on 0.10). Whole tree rustfmt-clean
+  under rustfmt 1.9.0 (38 files, whitespace only, the frozen archive binary
+  included); 18 intra-doc links fixed so `cargo doc -D warnings` is green
+  at every feature set; `Cargo.toml`, this file and README trimmed to what
+  they state. **All twelve suites at baseline + `harness` 125; X-battery
+  PASS with zero non-latency diffs** (one serial run vs
+  `docs/runs/K4-archive.log`: 61 raw differing lines, 11 latency/timing
+  survivors after the column strip, all 33 verdict lines identical); MSRV
+  tiers unchanged on the new lock (1.88 / 1.89 / 1.92), `rust-version`
+  1.93 kept.
 - **K7 scaffold — v0.33.0 (2026-09-16, PR #89)**: Phase A of the stack's
   2026-09-16 K7 round plan. `docs/README.md` (index: K4 verdict trail, seed
   ledger, immutability rule), `docs/PROTOCOL.md` (the run protocol, moved out
@@ -133,68 +122,18 @@ touching anything with a frozen battery, a pinned decision, or a registered doc.
   clippy `--all-targets -D warnings` clean at default, the six-feature set,
   `harness` and `durable`; **MSRV tiers reproduced, `harness` joins the 1.88
   tier** (1.87 fails on the same catgraph let-chains). Two base-tree reds
-  recorded, NOT gates of record here: `cargo fmt --check` under rustfmt
-  1.9.0 flags 38 untouched files on `main`, and `RUSTDOCFLAGS=-D warnings
-  cargo doc` fails on 8 pre-existing intra-doc links at any feature set
-  without `process`. `rg -n strategy_comparison src/` is NOT a zero-hit: two
-  rustdoc lines in `src/algorithms/population.rs` name it (left as is).
-- **catgraph re-pin `v0.9.0` ×3 → `v0.23.0` — v0.32.0 (2026-09-14, #87)**:
-  Phase C of the stack's 2026-09-13 downstream re-pin plan; all three catgraph
-  deps in lockstep (K6 rule), the pin its own commit. Fifteen upstream tags
-  absorbed (`v0.10.0` … `v0.23.0`); **compile-breaking set NONE** (every seams-listed breaking name is a
-  zero-hit; `Presentation { message }` and the five-variant `FrobeniusOr`
-  re-verified at the tag). **Drift check CLEAN**: all eleven suites at
-  baseline counts on both sides (106/162/135/191/143/126/156/112/159/239,
-  `durable` 107 — pre-pin measured on a worktree of `main`), clippy
-  `--all-targets -D warnings` clean from a fresh target dir at default and
-  at six features, and **X-battery PASS with zero non-latency diffs** (both
-  runs serial, 2129 lines; 70 differing line-pairs, 59 latency-column-only
-  table rows + 11 latency/timing prose lines; every verdict byte-identical).
-  The three predicted `mag`-arm exposures (applied #451, magnitude #450/#436)
-  moved no decision. **MSRV: the 1.93 `process` tier is GONE** — no `deep_causality_*`
-  package is in the lock (cg#222 owns the syntax Arrow seam). Measured
-  2026-09-14: **three tiers**, 1.88 default/`magnitude`/`persistence`/
-  `remote`/`process` · 1.89 + `decision`/`magnitude-fast` (and the showcase
-  set) · 1.92 + `durable`. The cross-feature max is 1.92; **`rust-version`
-  stays 1.93.0 — owner decision C-D1, 2026-09-14** (the 2026-08-09 showcase
-  ground no longer holds, the resolver-3 ground still does). Lockfile: four catgraph
-  packages move, three `deep_causality_*` stanzas leave (net −3),
-  `catgraph-applied` swaps `rand` for `rand_core`, and two unrelated edges
-  (`data-encoding-macro-internal` → `syn 2`, `tempfile` → `getrandom 0.3.4`)
-  moved — fourth time the dependency arrays carried the story. See
-  **gotcha 34** (tier bullets rewritten).
-- **catgraph re-pin `v0.8.0` ×3 → `v0.9.0` — v0.31.0 (2026-08-09)**: all three
-  catgraph deps in lockstep (K6 rule). Upstream v0.9.0 is dependency
-  streamlining — cg#219/#221 give catgraph its own `Zero`/`One` + `Dual`,
-  cg#220 its own toposort + components. **Drift check CLEAN**: all ten suites
-  at baseline counts (106/162/135/191/143/126/156/112/159/239, measured BEFORE
-  the bump too — all ten matched the table, so no documentation drift hides in
-  the comparison; plus `durable` 107), default clippy `--all-targets` clean
-  from a fresh target dir, and **X-battery PASS with zero non-latency diffs**
-  (both runs 2129 lines; of 122 differing lines, 102 are table rows whose only
-  changed field is the final latency column and 20 are prose lines reporting
-  latency — strip that column and the diff is empty).
-  ⚠ **MSRV: re-tested; declared floor stays 1.93, and the note carried since
-  v0.17.0 was wrong.** The claim recorded in this entry on the day
-  (*"feature-conditional; only `process` needs more than the default floor"*)
-  was **itself wrong twice more** and was corrected same-day — see the
-  four-tier table in `Cargo.toml` and **gotcha 34**. Short version: the floor
-  is feature-conditional across **four** tiers (1.88 default/`magnitude`/
-  `persistence`/`remote` · 1.89 + `decision`/`magnitude-fast` · 1.92 +
-  `durable` · 1.93 + `process`); `num` is not removed by v0.9.0 and was never
-  the sole cause; and `rust-version = "1.93.0"` **stays** as the cross-feature
-  maximum — lowering it was tried and reverted, because the A/B showcase needs
-  1.93 regardless and resolver 3 turns a lower declared MSRV into a silent
-  brake on dependency updates. Obligation CLOSED as corrected.
-  **Lockfile**: FOUR catgraph packages move (core `catgraph` rides along as a
-  transitive), `ultragraph 0.9.2` leaves entirely, `union-find 0.4.4` is newly
-  referenced but was already present (no package added), `deep_causality_num`
-  vanishes from two dependency arrays while its stanza stays; net −1. **Third
-  time a `name`/`version` grep would have missed the real story** (v0.26.0,
-  v0.29.0). Breaking rider (cg#219/#221: `Rig` via `deep_causality_num`'s
-  `Zero`/`One` → `catgraph_applied::rig`) verified NOT applicable — koalisi
-  names no `Rig` impl, no `rig::`, no `deep_causality`/`ultragraph` path.
-  See **gotcha 34** for the battery-concurrency trap this run walked into.
+  recorded (`cargo fmt --check` on 38 files; `cargo doc -D warnings` on 8
+  links) — both fixed in v0.34.0. `rg -n strategy_comparison src/` is NOT a
+  zero-hit: two rustdoc lines in `src/algorithms/population.rs` name it.
+- **catgraph re-pin `v0.9.0` ×3 → `v0.23.0` — v0.32.0 (2026-09-14, #87, PR
+  #88)**: three catgraph deps in lockstep, the pin its own commit; fifteen
+  upstream tags absorbed with a compile-breaking set of NONE. Drift check
+  CLEAN: eleven suites at baseline both sides, clippy clean at default + six
+  features, X-battery zero non-latency diffs (2129 lines each, 33 verdict
+  lines byte-identical). Lock 681 → 678: no `deep_causality_*` package under
+  any feature. MSRV tiers 1.88 / 1.89 / 1.92, the former 1.93 `process` tier
+  gone; **owner decision C-D1: KEEP `rust-version = 1.93.0`** (resolver-3
+  ground). Review: 7 findings, all applied.
 
 ### Lineages, verdict trail, seed ledger, run protocol — `docs/`
 
@@ -226,15 +165,13 @@ flagging. Rust implementation is dispatched per
 | `--features durable` | 107 (+1 container-backed restart test; needs Docker) | `cargo test --features durable` |
 | `--features harness` | 125 (+19 K7 harness unit tests, v0.33.0) | `cargo test --features harness` |
 | All examples | exit 0 | see Reproducers below |
-
-(All non-remote suites are the pre-v0.25.0 baselines +3 — the always-compiled
-`spawn_decision_tee` unit tests.)
+| Lint + docs | clean | `cargo fmt --check`; `cargo clippy --all-targets -- -D warnings` per feature set; `RUSTDOCFLAGS='-D warnings' cargo doc --no-deps` at every feature (green since v0.34.0) |
 
 ### File inventory
 
 ```
 koalisi/
-├── Cargo.toml                              git tag deps: catgraph-applied + catgraph-magnitude + catgraph-syntax v0.23.0 in lockstep (one checkout — K6); aif-v0.13.0, surrealdb-live-message, libp2p 0.56 (optional); no path deps since K3; declared MSRV 1.93 sits ABOVE the measured cross-feature max 1.92 over three tiers (1.88/1.89/1.92) — owner decision C-D1 2026-09-14: KEEP 1.93, gotcha 34
+├── Cargo.toml                              git tag deps: catgraph-applied + catgraph-magnitude + catgraph-syntax v0.23.0 in lockstep (one checkout); aif-v0.13.0, surrealdb-live-message v0.2.1, libp2p 0.57, sha2 0.11 (optional); no path deps; declared MSRV 1.93 above the measured tiers 1.88/1.89/1.92 — owner decision C-D1: KEEP, gotcha 34
 ├── README.md                               user-facing
 ├── CLAUDE.md                               THIS FILE
 ├── config/{default,development,test}.toml  coalition threshold, history capacity; [sdb]+[docker] for the durable feature's upstream SETTINGS (cwd-resolved)
@@ -390,7 +327,7 @@ Numbering is preserved across all three files.
       `restart_limit`; exceeding gives up + cancels the child token.
       Demonstrated by `examples/supervised_monitor.rs`.
 
-14. **`durable` feature gotchas (surrealdb-live-message v0.2.0).**
+14. **`durable` feature gotchas (surrealdb-live-message v0.2.1).**
     - **Upstream `SETTINGS` resolves from the CONSUMER's cwd**: `config/default`
       (required) + `config/{RUN_MODE}` + env. koalisi's `config/default.toml`
       carries `[sdb]` + `[docker]` for it (inert feature-off). Running durable
@@ -570,62 +507,25 @@ Numbering is preserved across all three files.
       final column, so a keyword filter leaves ~100 rows looking like real
       diffs. Strip the trailing `| <float> |` from both sides and diff again;
       an empty result is the actual X-battery PASS.
-    - **The obvious way to re-measure MSRV DOES NOT WORK, and the obvious
-      workaround is the trap.** Because the package declares the
-      cross-feature maximum, cargo refuses any toolchain below 1.93 before
-      evaluating a single dependency —
-      `cargo +1.89 check --no-default-features --features decision` dies
-      with `koalisi@0.32.0 requires rustc 1.93.0`, so every sub-1.93 tier
-      is unmeasurable from the committed manifest. **Procedure**:
-      temporarily set `rust-version` low (1.85.0), run
-      `cargo +<v> check --all-targets --features <set>`, restore 1.93.0,
-      and diff the manifest to prove the probe left no trace.
-      **Do NOT substitute `--ignore-rust-version`** — it suppresses the
-      dependency rust-version checks too, so it cannot see a dependency
-      floor at all. That flag produced retired claim (d).
-    - **The floor is feature-conditional, with THREE tiers** (measured
-      2026-09-14 at catgraph `v0.23.0`, `cargo +<v> check --all-targets
-      --locked --features <set>`): **1.88** default / `magnitude` /
-      `persistence` / `remote` / `process` (1.87 fails on five let-chains
-      inside the `catgraph 0.23.0` lib, which declares no `rust-version`,
-      not koalisi's own source) · **1.89** + `decision`, `magnitude-fast`,
-      and the showcase set `decision,magnitude,process` (1.88 refused
-      declaratively: nalgebra 0.35.0 / safe_arch 1.0.0 / wide 1.5.0) ·
-      **1.92** + `durable` (1.91 fails to compile `diskann`; at v0.31.0
-      1.90 was measured failing too). **The 1.93 `process` tier is GONE**:
-      cg#222 made `catgraph-syntax`'s Arrow seam crate-owned, and
-      `rg -n deep_causality Cargo.lock` finds nothing at `v0.23.0`.
-    - **`rust-version = "1.93.0"` is DECLARED, and since v0.32.0 sits ABOVE
-      the measured cross-feature maximum (1.92). Owner decision C-D1
-      (2026-09-14): KEEP 1.93.** Do not change it in passing. The
-      2026-08-09 decision to keep 1.93 rested on two measured
-      grounds: (i) `strategy_comparison` requires all three features, so
-      the A/B showcase needed 1.93 regardless — **this no longer holds**,
-      the showcase set checks on 1.89; (ii) **edition 2024 means resolver
-      3, so the declared value CONSTRAINS RESOLUTION**: with 1.88 declared,
-      `cargo update --dry-run` reported `Locking 107 packages to latest
-      Rust 1.88.0 compatible versions` and held back nalgebra, roaring,
-      safe_arch, wide and the deep_causality crates — this applies to any
-      lower declaration as before. Calibration so it is not overstated:
-      cargo **announces** that line, and MSRV-aware selection has an
-      opt-out (`cargo update --ignore-rust-version`, or `[resolver]
-      incompatible-rust-versions = "allow"`), so the cost is one config
-      line plus the standing need to notice held-back deps.
-      Cost of the current value: 1.88–1.92 downstreams are refused a
-      default-only build that would compile.
-    - **FOUR wrong claims have been retired here. Do not write a fifth.**
-      (a) "the floor is `num` alone, liftable at the next catgraph re-pin"
-      — `num` survived beneath `haft` until v0.23.0. (b) "no catgraph
-      re-pin can lift it, the substrate must move" — the `process` tier
-      was koalisi's own optional feature, and the v0.23.0 re-pin lifted it.
-      (c) "only `process` needs more than the default floor" — `durable`
-      needs 1.92. (d) "the default floor is 1.88 **for everything but
-      `durable`/`process`**" — the 1.88 tier itself is right; its *extent*
-      was wrong, since `decision` and `magnitude-fast` need 1.89. Every one
-      came from measuring a chosen subset and generalising; (d)
-      additionally from the masking flag. **"I checked the widest feature
-      set" is NOT "I checked every feature"** — `durable` sits in no other
-      tier's superset.
+    - **MSRV re-measurement procedure.** The declared 1.93 makes cargo
+      refuse any lower toolchain before it evaluates a dependency, so:
+      temporarily set `rust-version` to 1.85.0, run `cargo +<v> check
+      --all-targets --locked --features <set>` **per feature set** (every
+      feature, not the widest set — `durable` sits in no other tier's
+      superset), restore 1.93.0, diff the manifest. **Never
+      `--ignore-rust-version`**: it suppresses the dependency checks too,
+      so it cannot see a dependency floor.
+    - **The tiers are in `Cargo.toml`** (1.88 / 1.89 / 1.92, re-measured at
+      every re-pin). **`rust-version = "1.93.0"` is DECLARED above them —
+      owner decision C-D1 (2026-09-14): KEEP.** Do not change it in
+      passing. Ground: edition 2024 means resolver 3, so the declared value
+      bounds dependency resolution (`cargo update` holds packages to
+      declared-MSRV-compatible versions; the opt-out is `[resolver]
+      incompatible-rust-versions = "allow"`). Cost: a 1.88–1.92 downstream
+      is refused a default-only build that would compile.
+    - **Four wrong MSRV claims were retired between v0.17.0 and v0.31.0**,
+      every one from measuring a chosen subset and generalising (the
+      ledger has them). Measure every feature; cite the command.
     - **`cargo test … | rg '^test result' | tail` truncates.** Bare `tail` is
       `tail -10`; suites with 11+ result lines (`persistence,magnitude`) lose
       the lib-test line and undercount by ~95. Always `tail -20`.
