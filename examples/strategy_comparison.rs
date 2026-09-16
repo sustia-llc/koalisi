@@ -1,8 +1,15 @@
+//! **THE K4 ARCHIVE BINARY — FROZEN.** Parts 1–11 are the K4 lineage
+//! (`docs/README.md`, verdict trail); this file changes only through `src/`,
+//! and its one remaining job is the X-battery gate at dependency re-pins: one
+//! serial release run diffed against `docs/runs/K4-archive.log` with the
+//! latency column stripped (`docs/runs/README.md`). New registrations run on
+//! `examples/gauntlet.rs` and `examples/k7/`, never here.
+//!
 //! A/B comparison of coalition-decision strategies.
 //!
-//! Run with:
+//! Run with (all three features are required since Part 9):
 //! ```sh
-//! cargo run --release --features decision,magnitude --example strategy_comparison
+//! cargo run --release --features decision,magnitude,process --example strategy_comparison
 //! ```
 //!
 //! **Why `--release`:** the latency criterion (Part 2) is only meaningful on

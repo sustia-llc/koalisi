@@ -46,9 +46,10 @@ their location is recorded in `CLAUDE.local.md`:
   A/B-registration lineage). Indexed one line each at the end of §Worth
   flagging below; **read the full text there before designing or running any
   K4-lineage registration.**
-- **`docs/`** (in-repo, public) — the A/B showcase trail: one prereg + one
-  report per registration. Registered docs are IMMUTABLE, and they carry the
-  public record of every verdict summarised in the trail table below.
+- **`docs/`** (in-repo, public) — the A/B showcase trail, indexed by
+  `docs/README.md` (verdict trail + seed ledger) with the run protocol in
+  `docs/PROTOCOL.md` and raw run outputs under `docs/runs/`. Registered docs
+  are IMMUTABLE; they carry the public record of every verdict.
 - **`.claude/docs/`** (in-repo, tracked) — the public internal design docs that
   stayed: the Phase 7 persistence design, the K3 hot-path bench, the
   SwarmAgentic digest + paper.
@@ -106,14 +107,37 @@ forex domain since removed).
 - Rust implementation is dispatched to the built-in `general-purpose` agent
   per `.claude/stack/agent-dispatch.md`; review is `/code-review low`.
 
-## Current state — 2026-09-14 (v0.32.0)
+## Current state — 2026-09-16 (v0.33.0)
 
-Full release ledger v0.4.0 → v0.32.0 is the `project-history.md` archive (§1).
+Full release ledger v0.4.0 → v0.33.0 is the `project-history.md` archive (§1).
 The three most recent entries are kept here in brief — read the ledger before
 touching anything with a frozen battery, a pinned decision, or a registered doc.
 
 ### Latest three
 
+- **K7 scaffold — v0.33.0 (2026-09-16, PR #89)**: Phase A of the stack's
+  2026-09-16 K7 round plan. `docs/README.md` (index: K4 verdict trail, seed
+  ledger, immutability rule), `docs/PROTOCOL.md` (the run protocol, moved out
+  of this file), `docs/runs/K4-archive.log` (ONE fresh serial run of the frozen
+  battery at `v0.32.0` pins: 2129 lines, 33 verdict lines, every headline
+  verdict equal to the trail; `docs/runs/README.md` carries the recipe),
+  `strategy_comparison.rs` header-frozen (one comment hunk), and the K7
+  harness: `src/harness/` behind the new default-off feature `harness`
+  (`SplitMix64` + `permutation` + `distinct_bits`; `InstanceSpec` →
+  `Instance`; `SeedRange` / `Arm` / `run_instance` / `run_battery`;
+  `percentile` / `median_iqr` / `superior_count` / tables / `Verdict`) and
+  `examples/gauntlet.rs` (zero registrations; names no K4 helper — `rg -F` of
+  the K4 helper list on it is empty). 19 harness unit tests, 15 falsified
+  red-then-green in a copy. **All twelve suites at baseline**
+  (106/162/135/191/143/126/156/112/159/239 + `durable` 107; `harness` 125),
+  clippy `--all-targets -D warnings` clean at default, the six-feature set,
+  `harness` and `durable`; **MSRV tiers reproduced, `harness` joins the 1.88
+  tier** (1.87 fails on the same catgraph let-chains). Two base-tree reds
+  recorded, NOT gates of record here: `cargo fmt --check` under rustfmt
+  1.9.0 flags 38 untouched files on `main`, and `RUSTDOCFLAGS=-D warnings
+  cargo doc` fails on 8 pre-existing intra-doc links at any feature set
+  without `process`. `rg -n strategy_comparison src/` is NOT a zero-hit: two
+  rustdoc lines in `src/algorithms/population.rs` name it (left as is).
 - **catgraph re-pin `v0.9.0` ×3 → `v0.23.0` — v0.32.0 (2026-09-14, #87)**:
   Phase C of the stack's 2026-09-13 downstream re-pin plan; all three catgraph
   deps in lockstep (K6 rule), the pin its own commit. Fifteen upstream tags
@@ -171,63 +195,19 @@ touching anything with a frozen battery, a pinned decision, or a registered doc.
   `Zero`/`One` → `catgraph_applied::rig`) verified NOT applicable — koalisi
   names no `Rig` impl, no `rig::`, no `deep_causality`/`ultragraph` path.
   See **gotcha 34** for the battery-concurrency trap this run walked into.
-- **EQ5b typed two-engine RUN — v0.30.0 (2026-08-08, #78): `VALIDATED
-  (two-engine)`** — the second validated registration in the K4 lineage, after
-  EQ4. **Read the mechanism before quoting the verdict**: role specialisation
-  measured NEGATIVE (shared-model reference cells 0.2409 vs specialised 0.2270,
-  specialised superior on only 15/30), and the arm depends on the structural
-  defect the review found — 23.0 % of decisions have ZERO candidate-sensitive
-  internals, and removing those blind voters (`grp-role-blind`) collapses the
-  arm 0.2270 → **0.0268**. Official re-run seeds 330..360: `grp-role` 0.2270 =
-  1.2567× / 22-of-30, `grp-mult` 0.2266 = 1.2544× / 22-of-30, control `wf-asis`
-  0.1806; both cells clear conjunct 1 by 0.7 % / 0.4 % and **the margin is
-  reported in full, not renegotiated**. Did NOT exceed `wf-val-p` (0.2435) ⇒
-  pre-committed scoped claim "beats the typed control, not the strongest process
-  cell"; DID exceed `arm-E1` (0.0403). Gates X-battery / X-identity /
-  S-determinism / S-learn all PASS. **koa#54 stays FINAL** — no EQ5b outcome
-  reopens it. Library `src/decision/group_policy.rs` (`GroupAifPolicy`, features
-  `decision` + `process`). Report
-  `docs/ab-report-K4-eq5b-typed-two-engine.md` (13-item ledger). See
-  **gotcha 33**.
 
-### K4 A/B lineage — verdict trail
+### Lineages, verdict trail, seed ledger, run protocol — `docs/`
 
-Most rows are pre-registered runs whose prereg + report pair lives in `docs/`
-and is IMMUTABLE. Four are not, and `docs/` will not yield a prereg for them:
-**v1/v2** registered on issue #7 (report only), **K1** and **K6** are a
-backend-parity and an optimization re-run rather than registrations (report
-only), and **#54** is a decision memo + design note. Full entries in the
-history ledger.
-
-| # | Arm / question | Seeds | Verdict | Gotcha |
-|---|---|---|---|---|
-| v1 / v2 | magnitude vs scalar AIF (#7) | 0..30 | `FALSIFIED (latency)` / `VALIDATED (B)` | — |
-| K1 | catgraph backend parity (#4) | 0..30 | byte-identical re-run | 12 |
-| K6 | evaluator hot path (#14) | 0..30 | Path A missed; dual verdict unchanged | 15 |
-| v3 | multimodal AIF (#43) | 0..30 | `FALSIFIED (multimodality)` — decision-equivalent to scalar | — |
-| v4 | persistent AIF (#44) | 0..30 | `FALSIFIED (persistence)` — escapes v3's theorem, loses on performance | — |
-| v5 | E1-only persistent (#53) | 30..60 | **`VALIDATED (gap closed)`** 1.62× | — |
-| #46 | feedback arm | 0..30 | `FALSIFIED (feedback)` | 20 |
-| #48 | selective-base feedback | 0..30 | `PARTIAL (mechanism only)` | 22 |
-| #54 | arm-choice memo, Steps 1–4 | 30..60 | **DECIDED B+D — CLOSED, FINAL** | 23 |
-| v6 | never-evict (#56) | 60..90 | `FALSIFIED (never-evict)` — churn IS the e1 mechanism | — |
-| EQ1 | battery v2 de-saturation (#61) | 120..150 | `FALSIFIED (de-saturation)`; lever 1 `RUN-INVALID` → #63 | 25 |
-| #63 | corrected block-level routing | 180..210 | `FALSIFIED (block-routing)` | 26 |
-| EQ3 | latency re-match (#69) | 210..240 | `FALSIFIED (latency re-match)` | 27 |
-| EQ4 | typed roles (#72) | 240..270 | **`VALIDATED (typed roles)`** 3.61×, 30/30 | 28 |
-| EQ5a | process-structured (#76) | 270..300 | `FALSIFIED (process structure)` | 30 |
-| #80 | residual process-specificity | 300..330 | `FALSIFIED (coverage proxy)` | 31 |
-| EQ5b | typed two-engine (#78) | 330..360 | **`VALIDATED (two-engine)`** 1.2567×, 22/30 | 33 |
-
-**Seed ledger** — consumed: 0..90, 120..150, 180..360. **Reserved-unconsumed:
-90..120 and 150..180.**
-
-**Standing run protocol** (every registration): owner design-lock posted on the
-issue BEFORE prereg → prereg doc committed BEFORE implementation → 3-lens review
-BEFORE the official run → amendments are pre-verdict only → registered docs are
-immutable (results append, sections are never edited). Pin-first: dependency
-re-pins land in their own PR so the registration is born on the final pins.
-Rust implementation is dispatched per `.claude/stack/agent-dispatch.md`.
+Since v0.33.0 these live in the public repo: **`docs/README.md`** carries the
+K4 verdict trail (17 rows, every prereg + report by path), the K7 lineage
+rows as they land, and the **seed ledger** (90..120 reserved for K7-1,
+150..180 reserved-unconsumed); **`docs/PROTOCOL.md`** is the standing run
+protocol (design-lock → prereg → 3-lens review → serial run → immutable
+report; pin-first; latency-column-stripped diff; review on every PR);
+**`docs/runs/`** holds the committed raw outputs and the re-pin drift recipe.
+The per-registration gotcha numbers are the index at the end of §Worth
+flagging. Rust implementation is dispatched per
+`.claude/stack/agent-dispatch.md`.
 
 ### Tests passing
 
@@ -243,7 +223,8 @@ Rust implementation is dispatched per `.claude/stack/agent-dispatch.md`.
 | `--features remote` | 112 (gateway buffer + loopback round-trip) | `cargo test --features remote` |
 | `--features process` | 159 (EQ5a surface + #80 ResidualPolicy) | `cargo test --features process` |
 | `--features decision,magnitude,process` | 239 (the Part 9 + Part 10 + Part 11 batteries) | `cargo test --features decision,magnitude,process` |
-| `--features durable` | +1 container-backed restart test; needs Docker | `cargo test --features durable` |
+| `--features durable` | 107 (+1 container-backed restart test; needs Docker) | `cargo test --features durable` |
+| `--features harness` | 125 (+19 K7 harness unit tests, v0.33.0) | `cargo test --features harness` |
 | All examples | exit 0 | see Reproducers below |
 
 (All non-remote suites are the pre-v0.25.0 baselines +3 — the always-compiled
@@ -283,6 +264,7 @@ koalisi/
 │   │   ├── dcvc.rs                         DCVCDistributor, WorkloadShare
 │   │   ├── aipa.rs                         Integer partitions, bounds, best-partition + 10 unit tests
 │   │   └── population.rs                   P5.2 (#42): population coalition-structure search atop AIPA (SplitMix64 PSO, gbest lineage) + record_trajectory (always compiled, no deps)
+│   ├── harness/                            v0.33.0: the K7 harness (feature `harness`, no deps) — rng.rs (SplitMix64, permutation, distinct_bits), instance.rs (InstanceSpec → Instance over CapabilityAgent), battery.rs (SeedRange, Arm, run_instance, run_battery), report.rs (percentile, median_iqr, superior_count, tables, Verdict); registrations are examples, never here
 │   ├── decision/
 │   │   ├── mod.rs                          CoalitionDecisionPolicy + ThresholdPolicy (always compiled)
 │   │   ├── aif_policy.rs                   AifDecisionPolicy + EfeValueCalculator (feature `decision`)
@@ -328,7 +310,8 @@ koalisi/
 │   ├── supervised_monitor.rs               spawn_supervised restart demo over SampleMonitor<SensorEvent> (v0.11.0; was supervised_swarm)
 │   ├── population_search.rs                #42: TaskCoverage-driven structure search + record/replay (default features; was missing from this inventory — added v0.16.0)
 │   ├── population_reliability.rs           #57 (v0.16.0): outcome stream → world-model snapshot → ReliabilityCoverage → search + replay (feature decision)
-│   ├── strategy_comparison.rs              divergence demo + K4 A/B battery (requires ALL THREE: decision,magnitude,process — since EQ5a Part 9)
+│   ├── strategy_comparison.rs              FROZEN K4 archive binary (Parts 1–11; requires ALL THREE: decision,magnitude,process); changes only through src/; its job is the X-battery gate at re-pins against docs/runs/K4-archive.log
+│   ├── gauntlet.rs                         v0.33.0: K7 harness skeleton over src/harness/ (feature `harness`), zero registrations; K7 registrations are one [[example]] each under examples/k7/k7_<n>.rs (K-D3)
 │   ├── remote_coalition_consumer.rs        #38 (v0.25.0): gateway + client in one process over a live CoalitionService (feature `remote`)
 │   └── durable_decisions.rs                durable decision log end-to-end (feature `durable`)
 ├── .claude/docs/                           TRACKED internal design docs + references (docs/ reorg 2026-07-27; rest of .claude/ stays gitignored)
@@ -336,32 +319,12 @@ koalisi/
 │   ├── k3-hot-path-bench.md                K3 kameo-vs-tokio bench evidence
 │   ├── SwarmAgentic-summary.md             Phase 5 paper digest (Zhang et al. 2025)
 │   └── 2506.15672v1.{md,pdf} + _images/    the SwarmAgentic paper itself (CC0 per its PDF metadata)
-├── docs/                                   PUBLIC A/B showcase trail — pre-registrations, reports, evidence (registered docs are immutable)
-│   ├── ab-report-K4-{yamafaktory,catgraph}.md   K4 A/B + backend-parity reports
-│   ├── ab-report-K4-catgraph-evaluator.md  K6 post-optimization re-run + parity + latency profile (#33 evidence)
-│   ├── baseline-aif-scalar-scope-b.md      frozen scalar Scope-B baseline (v4/v5 prereg anchor)
-│   ├── prereg-feedback-arm-k4.md           #46 pre-registration (feedback-arm K4 rematch; result appended)
-│   ├── ab-report-feedback-arm-k4.md        #46 run — FALSIFIED (feedback); Scope A null + Scope B reliability contest + E1 sweep
-│   ├── prereg-feedback-arm-k4-v2.md        #48 pre-registration (selective-base rematch, join=100, hw=0/fw=1; result appended)
-│   ├── ab-report-feedback-arm-k4-v2.md     #48 run — PARTIAL (mechanism only); selectivity vs reliability-gating decomposition + E1 threshold sweep
-│   ├── per-bit-outcome-plumbing-design.md  #54 Step 2 design note — outcome-signal fidelity ladder; degraded ≈ oracle result (gotcha 23)
-│   ├── k4-arm-choice-memo.md               #54 Step 4 decision memo — DECIDED B+D 2026-07-18; postscript: #56 FALSIFIED ⇒ B's park final
-│   ├── prereg-K4-v6-never-evict.md         #56 pre-registration (never-evict, dual-signal, 60..90; result appended)
-│   ├── ab-report-K4-v6-never-evict.md      #56 run — FALSIFIED (never-evict); cap-series monotonicity = churn is the mechanism
-│   ├── prereg-K4-battery-v2.md             #61 EQ1 pre-registration (de-saturated regime; Part 5c scope DONE v0.19.0)
-│   ├── ab-report-K4-battery-v2.md          #61 run — lever 2 FALSIFIED (de-saturation), lever 1 RUN-INVALID (sanity leg → #63); v2-regime context inversion; + Part 5c addendum (v0.19.0)
-│   ├── prereg-K4-routing-corrected.md      #63 pre-registration (block-level routing; legs A/C/L; + pre-impl tie-break amendment)
-│   ├── ab-report-K4-routing-corrected.md   #63 run — FALSIFIED (block-routing), mechanism-scoped (window vs lattice); leg C DEGENERATE (4th gotcha-21 mechanism); leg L ordering 30/30 (gotcha 26)
-│   ├── prereg-K4-eq3-latency-rematch.md    #69 EQ3 pre-registration (+ pre-run Amendment 1: L2 behind toggle, H-par′, skeletal route; result appended)
-│   ├── ab-report-K4-eq3-latency-rematch.md #69 run — FALSIFIED (latency re-match); empty-band CONFIRMED; L3 ζ-asymmetry ceiling; 10-item ledger (gotcha 27)
-│   ├── prereg-K4-eq4-typed-roles.md        #72 EQ4 pre-registration (+ pre-run Amendments 1–2: typed Scope-A, E-ρq-inv cell, E-T3 counters; result appended)
-│   ├── ab-report-K4-eq4-typed-roles.md     #72 run — VALIDATED (typed roles), first since v5; 43.5% conversion; E-ρq anti-alignment + inverse cell; 15-item ledger (gotcha 28)
-│   ├── prereg-K4-eq5a-process-structured.md #76 EQ5a pre-registration (+ FIVE pre-run amendments: pinned constants, erratum, two inert-leg fixes, the 3-lens review)
-│   ├── ab-report-K4-eq5a-process-structured.md #76 run — FALSIFIED (process structure); valuation converts where rewriting does not; 100% of a low ceiling; 15-item ledger (gotcha 30)
-│   ├── prereg-K4-residual-process-specificity.md #80 pre-registration (+ pre-run Amendment 1: probe declines gated, floor-condition disclosure)
-│   ├── ab-report-K4-residual-process-specificity.md #80 run — FALSIFIED (coverage proxy); the lever replicates 1.34x but lift_wf == lift_flat; 355 score bits, 0 acts; 8-item ledger (gotcha 31)
-│   ├── prereg-K4-eq5b-typed-two-engine.md  #78 EQ5b pre-registration (+ SIX pre-verdict amendments: unbuildable arm, coverage masks, CW rationale false, the A3.1 erratum, the 3-lens review, the unsatisfiable non-vacuity guard)
-│   └── ab-report-K4-eq5b-typed-two-engine.md #78 run — VALIDATED (two-engine) 1.2567x / 22-of-30; role specialisation NEGATIVE and the candidate-blind voters load-bearing; 13-item ledger (gotcha 33)
+├── docs/                                   PUBLIC A/B showcase trail (registered docs are immutable)
+│   ├── README.md                           v0.33.0: the index — K4 verdict trail (17 rows, every prereg/report by path), K7 rows, seed ledger, immutability rule, layout
+│   ├── PROTOCOL.md                         v0.33.0: the run protocol (design-lock → prereg → 3-lens review → serial run → immutable report; gates; review; seeds; naming)
+│   ├── runs/                               v0.33.0: committed raw outputs — README.md (archive + drift-check recipe), K4-archive.log (one serial run at v0.32.0 pins), K7-<n>.log per registration
+│   ├── prereg-*.md + ab-report-*.md        the K4 lineage: 13 prereg + 16 report pairs/singles (v1/v2, K1, K6 report-only), each row of docs/README.md names both files; per-registration gotchas indexed at the end of §Worth flagging
+│   └── baseline-aif-scalar-scope-b.md, per-bit-outcome-plumbing-design.md, k4-arm-choice-memo.md   the three memos (v4/v5 baseline anchor; #54 Step 2 design note, gotcha 23; #54 Step 4 decision memo — DECIDED B+D, FINAL)
 └── tests/
     ├── topology_test.rs                    12 tests
     ├── algorithms_test.rs                  18 tests (incl. 3 feedback-loop/seeding tests, #41)
@@ -764,9 +727,14 @@ timeout 60s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-tar
 # === with process feature (EQ5a #76 + #80 ResidualPolicy, 159 tests) ===
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features process
 timeout 300s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision,magnitude,process   # 239
-# NOTE: strategy_comparison now requires all THREE features (Part 9), and the
-# battery run takes ~21 min — NO timeout wrapper on battery runs (run protocol).
+# NOTE: strategy_comparison is the FROZEN K4 archive; the ~21 min battery runs
+# SERIAL on a quiet machine with NO timeout wrapper — the archive + drift-check
+# recipe is docs/runs/README.md.
 cargo run --release --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision,magnitude,process --example strategy_comparison
+
+# === with harness feature (K7 skeleton, v0.33.0) ===
+timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features harness
+timeout 60s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features harness --example gauntlet
 
 # === with durable feature (needs Docker; container-backed restart test) ===
 timeout 300s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features durable
@@ -794,8 +762,12 @@ What is still open:
   transferability). Both LLM-free slices shipped (#41 v0.12.0, #42 v0.13.0). The
   only still-NEST-dependent piece is the NEST-H4 calibration-copilot deployment
   framing, which activates whenever ownership lands.
-- **K4 lineage** — the next registration follows the standing run protocol under
-  §Current state. Seeds 90..120 and 150..180 stay reserved-unconsumed.
+- **K7 lineage** — plan `.claude/stack/2026-09-16-koalisi-tira-k7-round.md`
+  (ratified 2026-09-16). Phase A (this scaffold, v0.33.0) DONE; next is the
+  `K7-1` design-lock on its koalisi issue (ext-6, tira #46, read against EQ5b
+  candidate (a), seeds 90..120), then the tira `aif-v0.14.0` tag, then the
+  koalisi re-pin PR (`v0.34.0`) and the `K7-1` registration (`v0.35.0`) per
+  `docs/PROTOCOL.md`. Seeds 150..180 stay reserved-unconsumed.
 - **[#25] Metrics example** — still valid but needs reframing: instrument the
   `CoalitionService` decision path / topology events, not the deleted
   `tick_bus`/`alert_bus`.
