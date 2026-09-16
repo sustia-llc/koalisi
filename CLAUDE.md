@@ -103,11 +103,8 @@ forex domain since removed).
   `src/topology/` since K1**; historical reference only (pre-K1 semantics, the
   dropped `PersistentHypergraph` idea — see the Phase 7 narrative in the
   `project-history.md` archive §2).
-- `rust-v2:rust-dev-v2` / `rust-v2:rust-practical` — primary Rust agents per
-  the user CLAUDE.md routing rules.
-- `surrealdb:surrealdb-rust-v3` / `surrealdb:surrealdb-search` /
-  `surrealdb:surrealql-language` — for K3 (#6) surrealdb-live-message work,
-  per the user CLAUDE.md routing rules.
+- Rust implementation is dispatched to the built-in `general-purpose` agent
+  per `.claude/stack/agent-dispatch.md`; review is `/code-review low`.
 
 ## Current state — 2026-09-14 (v0.32.0)
 
@@ -230,7 +227,7 @@ issue BEFORE prereg → prereg doc committed BEFORE implementation → 3-lens re
 BEFORE the official run → amendments are pre-verdict only → registered docs are
 immutable (results append, sections are never edited). Pin-first: dependency
 re-pins land in their own PR so the registration is born on the final pins.
-Rust implementation is dispatched to `rust-v2:rust-dev-v2`.
+Rust implementation is dispatched per `.claude/stack/agent-dispatch.md`.
 
 ### Tests passing
 
