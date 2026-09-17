@@ -102,7 +102,8 @@ cargo run --example population_search
 
 # Feature-gated
 cargo run --release --features decision,magnitude,process --example strategy_comparison   # the frozen K4 archive battery (Parts 1–11, ~20 min, serial)
-cargo run --features harness --example gauntlet                                   # K7 harness skeleton — zero registrations yet
+cargo run --features harness --example gauntlet                                   # K7 harness skeleton
+K7_1_SEEDS=5000..5003 cargo run --release --features harness,decision,process --example k7_1   # K7-1 off-block smoke (no verdict; the run of record is docs/runs/K7-1.log)
 cargo run --features decision --example population_reliability                    # learned-reliability fitness for the structure search (#57)
 cargo run --features durable --example durable_decisions                          # durable decision log (needs Docker)
 cargo run --features remote --example remote_coalition_consumer                   # remote coalition-event gateway + client, one process (#38)
@@ -140,8 +141,8 @@ Two binaries carry it. `examples/strategy_comparison.rs` is the **K4 lineage**
 `src/`, and a fresh serial run diffed against `docs/runs/K4-archive.log` is the
 drift gate at every dependency re-pin. The **K7 lineage** runs on
 `examples/gauntlet.rs` and one example per registration under `examples/k7/`,
-sharing its plumbing through `src/harness/` (feature `harness`); it has no
-registration yet.
+sharing its plumbing through `src/harness/` (feature `harness`); its
+pre-registrations and reports are under `docs/k7/`.
 
 The run history is deliberately adversarial:
 
@@ -159,6 +160,7 @@ The run history is deliberately adversarial:
 | EQ5a ([#76](https://github.com/sustia-llc/koalisi/issues/76)) | process-structured tasks (string-diagram rewriting) | `FALSIFIED (process structure)` — rewriting converted 100 % of a low ceiling; the signal was *valuation*, not rewriting |
 | EQ5a follow-up ([#80](https://github.com/sustia-llc/koalisi/issues/80)) | is the residual lever process-specific? | `FALSIFIED (coverage proxy)` — it replicates at 1.34× and then behaves identically without the process structure |
 | EQ5b ([#78](https://github.com/sustia-llc/koalisi/issues/78)) | `GroupAgent` of role-slotted AIF internals over the v5 world model | `VALIDATED (two-engine)` — 1.2567× on 22/30, **by 0.7 %**; but role specialisation measured *negative* and the win rides members structurally blind to the candidate |
+| K7-1 ([#90](https://github.com/sustia-llc/koalisi/issues/90)) | EQ5b's group with the candidate's own role internal routed to every voter (`aif` ext-6 topology, λ = ½) vs the EQ5b group | `VALIDATED (topology-routed group)` — 2.41× on 30/30; but the routed arm's outcome is that of an **engine-free redundancy prune** (598 of 600 tasks), one voter decides every read it can see, and the control loses by evicting needed members on every three-role task. The effect was seen off-block before the run |
 
 Two feedback-calculator arms ran the same gauntlet
 ([#46](https://github.com/sustia-llc/koalisi/issues/46) `FALSIFIED`,
@@ -183,10 +185,11 @@ cargo test --features persistence          # 126 tests (+ chained event store + 
 cargo test --features persistence,magnitude # 156 tests (incl. the live-vs-replayed parity gate)
 cargo test --features remote               # 112 tests (+ gateway event buffer + loopback round-trip)
 cargo test --features process              # 161 tests (+ process-structured workflows + the unstaffable-residual policy)
-cargo test --features decision,magnitude,process # 241 tests (the full A/B battery surface)
+cargo test --features decision,magnitude,process # 249 tests (the full A/B battery surface)
 cargo test --features durable              # 107 tests (+ container-backed restart-durability test; needs Docker)
-cargo test --features harness              # 126 tests (+ the K7 harness: rng, instance generation, battery loop, lifecycle hook, report helpers)
-cargo test --features harness,process      # 198 tests (+ the K7 workflow world and its identity gate against docs/runs/K4-archive.log)
+cargo test --features harness              # 129 tests (+ the K7 harness: rng, instance generation, battery loop, lifecycle hook, decision trace, report helpers)
+cargo test --features harness,process      # 201 tests (+ the K7 workflow world and its identity gate against docs/runs/K4-archive.log)
+cargo test --features harness,decision,process # 291 tests (+ the group arm hosted on the harness and its identity gate against the same log)
 cargo test --features metrics              # 106 tests (the default suite; the feature gates two optional deps and the metrics_scrape example)
 ```
 

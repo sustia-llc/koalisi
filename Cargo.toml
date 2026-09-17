@@ -1,6 +1,6 @@
 [package]
 name = "koalisi"
-version = "0.37.0"
+version = "0.38.0"
 edition = "2024"
 # Declared floor 1.93.0 — owner decision C-D1 (2026-09-14): KEEP; do not lower
 # in passing. Edition 2024 means resolver 3, so this value also bounds
@@ -167,6 +167,11 @@ required-features = ["harness"]
 name = "metrics_scrape"
 required-features = ["metrics"]
 
+[[example]]
+name = "k7_1"
+path = "examples/k7/k7_1.rs"
+required-features = ["harness", "decision", "process"]
+
 [[test]]
 name = "magnitude_trajectory"
 required-features = ["magnitude"]
@@ -194,3 +199,7 @@ required-features = ["remote"]
 [[test]]
 name = "harness_workflow"
 required-features = ["harness", "process"]
+
+[[test]]
+name = "k7_group_host"
+required-features = ["harness", "decision", "process"]

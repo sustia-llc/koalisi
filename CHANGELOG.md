@@ -17,6 +17,82 @@ Planned work — issue-tracked (details in [`CLAUDE.md`](./CLAUDE.md)
   decision/belief streams (the `TaskOutcome` durable home), [#33] federation
   manifests + FAIR provenance.
 
+## [0.38.0] — 2026-09-17
+
+`K7-1`, the first registration of the K7 lineage
+([#90](https://github.com/sustia-llc/koalisi/issues/90)): topology-routed
+group voting (tira ext-6) against the candidate-blind group —
+**`VALIDATED (topology-routed group)`**, 2.4144×, 30/30 on seeds 90..120.
+Registration, amendments, run and report:
+[`docs/k7/`](docs/k7/prereg-K7-1-topology-routed-group.md),
+[`docs/runs/K7-1.log`](docs/runs/K7-1.log).
+
+### Added
+- **`VoteRouting`** on `GroupAifConfig` (features `decision` + `process`):
+  `Off` (the default — the bare `VotingAgent` active slot) and
+  `CandidateStar { lambda }`, which wraps the active slot in
+  `aif::RoutedAggregator` over an `aif::Topology` built per decision on the
+  realised roster: the candidate's role internal is the centre, every other
+  row places `lambda` on it and `1 − lambda` on itself, identity rows when the
+  centre is off the roster. A `lambda` outside `[0, 1]` and a routing combined
+  with `SeededSampling` or a non-`CertaintyWeighted` vote are construction
+  errors (`GroupAifError::InvalidRoutingWeight`, `UnsupportedRouting`).
+- **`GroupAifPolicy` implements the lifecycle hooks** of
+  `CoalitionDecisionPolicy`: `begin_task(&TaskStart)` rebuilds the `Demand`
+  with `Demand::from_steps`; `observe_outcome` forwards the per-bit signal.
+  `TaskStart::steps` carries distinct steps, so every multiplicity is 1
+  through the hook.
+- `AgreementSample` gains `leave`, `group_act`, `sensitive_rows`,
+  `blind_origin_share`, `centre_vote`; `GroupAifCounters` gains
+  `routed_reads`, `begin_task_rejections`, `outcome_updates_unapplied`. The
+  last was added by review after the run of record (tree `1688b75`); an
+  off-block smoke (`K7_1_SEEDS=5000..5003`) on the binaries before and after
+  it is byte-identical once the latency column is stripped.
+- **`harness::TracedPolicy`** (feature `harness`): wraps a policy, forwards
+  all four trait methods, records `(leave, act, score bits)` per decision.
+- **`examples/k7/k7_1.rs`** (`harness,decision,process`): eight cells over
+  seeds 90..120, six in-binary gates computed before any table, the H-T bar,
+  the `ref-prune` identity, the outcome decomposition by roster, one
+  `VERDICT:` line. `K7_1_SEEDS=a..b` runs an off-block smoke with no verdict
+  and refuses `0..480`.
+- **`tests/k7_group_host.rs`**: the harness-hosted `grp-role` /
+  `grp-role-blind` on 330..360 reproduce `docs/runs/K4-archive.log:2032`,
+  `:2036` and the reach row `:2071`.
+
+### Changed
+- `docs/README.md`: the K7-1 row; seed block 90..120 consumed.
+- With routing on, an error routing the H-S disclosure after a successful
+  read is a decline counted in `declines_upstream`
+  (`rg -n 'agreement sample routing failed' src/` names the site). `Off`
+  calls no fallible routing code.
+
+### Gates
+- Suites on the branch: the seven lanes the diff cannot touch are identical
+  per test binary to a `7f6cf10` worktree (`magnitude` 135, `magnitude-fast`
+  143, `persistence` 126, `persistence,magnitude` 156, `remote` 112,
+  `metrics` 106, `durable` 107); default 106, `decision` 162,
+  `decision,magnitude` 191, `process` 161 unchanged;
+  `decision,magnitude,process` 241 → 249, `harness` 126 → 129,
+  `harness,process` 198 → 201; new lane `harness,decision,process` 291.
+- `cargo fmt --all -- --check` clean; clippy `--all-targets -- -D warnings`
+  clean at `--no-default-features`, default and fourteen feature lanes; `cargo
+  doc` with `-D warnings` clean at default and fourteen feature sets.
+- **X-battery PASS on the second of two serial runs** on `1688b75`. The
+  first flipped the v1 latency criterion (mag 3.306 µs < aif 3.871 µs) and
+  three verdict-text lines with it; all 13 hunks surviving the column strip
+  were latency or wall-clock lines. The re-run: 11 surviving hunks, all
+  latency or wall-clock, all 33 verdict lines byte-identical (`cmp`). Not
+  re-baselined.
+- MSRV, the sets whose code changed, `rust-version` temporarily at 1.85.0:
+  1.88 passes default, `magnitude`, `persistence`, `remote`, `process`,
+  `harness`, `harness,process`, `metrics`; 1.89 passes
+  `harness,decision,process` and `decision,magnitude,process`; 1.88 refuses
+  `harness,decision,process` (aif 0.14.0 / nalgebra 0.35.0 / safe_arch
+  1.2.0). Not re-measured in this release: `decision`, `decision,magnitude`,
+  `magnitude-fast`, `persistence,magnitude` at 1.89 and `durable` at 1.92 —
+  no dependency moved and no code under them changed.
+  `rust-version = "1.93.0"` kept (C-D1).
+
 ## [0.37.0] — 2026-09-17
 
 Dependency re-pin: `aif-v0.13.0` → `aif-v0.14.0`, on its own ahead of the

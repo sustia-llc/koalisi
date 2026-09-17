@@ -54,8 +54,17 @@ EQ4's lever is retained role-diverse redundancy, not coverage routing.
 
 ## K7 lineage
 
-No registration yet. The first, `K7-1`, is locked on its koalisi issue before
-its pre-registration is written; rows land here as each report is recorded.
+Each registration is locked on its koalisi issue before its pre-registration
+is written; rows land here as each report is recorded.
+
+| # | Arm / question | Issue | Seeds | Verdict | Pre-registration | Report | Raw output |
+|---|---|---|---|---|---|---|---|
+| K7-1 | topology-routed group voting (tira ext-6) vs the candidate-blind group | #90 | 90..120 | **`VALIDATED (topology-routed group)`** 2.41×, 30/30 | [`k7/prereg-K7-1-topology-routed-group.md`](k7/prereg-K7-1-topology-routed-group.md) | [`k7/ab-report-K7-1-topology-routed-group.md`](k7/ab-report-K7-1-topology-routed-group.md) | [`runs/K7-1.log`](runs/K7-1.log) |
+
+Read K7-1's mechanism section before quoting its verdict: the routed arm's
+PRIMARY is that of an engine-free redundancy prune, the candidate's own role
+query alone decides every centre-present read, and the effect was seen
+off-block before the run.
 
 ## Seed ledger
 
@@ -67,7 +76,7 @@ reused across registrations.
 | 0..30 | consumed | v1/v2, K1, K6, v3, v4, #46, #48 |
 | 30..60 | consumed | v5, #54 |
 | 60..90 | consumed | v6 |
-| 90..120 | **reserved — K7-1** | released by the owner 2026-09-16 |
+| 90..120 | consumed | K7-1 |
 | 120..150 | consumed | EQ1 |
 | 150..180 | **reserved — unconsumed** | released only by an owner decision on the registration's issue |
 | 180..210 | consumed | #63 |
