@@ -19,6 +19,86 @@ Planned work — issue-tracked (details in [`CLAUDE.md`](./CLAUDE.md)
 - **[#25]** metrics example, reframed onto the `CoalitionService` decision
   path / topology events.
 
+## [0.35.0] — 2026-09-16
+
+The K7 harness scaffold (phase H of the K7 round, [#92]): the Part 9/11
+workflow world copied out of the frozen archive binary, and a per-task
+lifecycle hook on `CoalitionDecisionPolicy`. No registration; no behaviour
+change for any existing policy.
+
+### Added
+- **`koalisi::harness::workflow`** (features `harness` + `process`): the
+  v2w world of `examples/strategy_comparison.rs` Parts 9/11 as library
+  code — `WorkflowSpec` (the v2 prefix draw, per-agent roles, per-required-bit
+  role tags with the feasibility re-draw, the shape draw, an optional
+  `PerformanceSpec` draw appended last), `WorkflowInstance` / `WorkflowTask`
+  (declared `Demand` per task, `StaffingTable`), `OutcomeSignal`
+  (`RoleCoverage`, `Performance`, `Both`), `WorkflowArm` (a per-instance
+  policy factory), `run_workflow_instance` / `run_workflow_battery` with
+  Part 11's role-matched distinct-step scorer, `WorkflowError`. The frozen
+  binary is untouched (`git diff --stat examples/strategy_comparison.rs`
+  → nothing).
+- **Identity gate** `tests/harness_workflow.rs` (features `harness,process`):
+  the copy, driving the `wf-asis` control (`MagnitudePolicy` with the
+  identity role modulation) reproduces Part 9's thirty per-seed `wf-asis`
+  rows on seeds 270..300 (`docs/runs/K4-archive.log:1787–1816`) and Part
+  11's medians 0.1806 / 7.50 on 330..360 (`:2031`);
+  `tests/fixtures/k7-workflow-v2w.txt` pins every generated instance on
+  both blocks; `InstanceSpec { required_bits: 2..=8, .. }` is pinned equal
+  to the frozen `draw_prefix_v2` at seed 270.
+- **Lifecycle hook**: `CoalitionDecisionPolicy::begin_task(&TaskStart)` and
+  `observe_outcome(required, &[bool])`, default no-ops; `TaskStart {
+  required, steps: &[(bit, role)] }` (re-exported at the crate root).
+  `run_instance` calls them once per task before the arrivals (empty
+  `steps`, the flat per-bit union over 32 bits, `FLAT_SIGNAL_WIDTH`) and
+  after the leave sweep; `run_workflow_instance` passes the declared
+  distinct steps and the selected `OutcomeSignal` bits.
+- `Demand::from_steps` (feature `process`): a `Demand` from an iterator of
+  steps, one occurrence per yielded step.
+- `InstanceSpec::draw(&mut SplitMix64)`: the draw body of `generate`,
+  callable on a caller-owned stream.
+
+### Fixed
+- Two intra-doc links in `src/subsystems/remote.rs` pointed at a
+  `persistence`-gated item; `RUSTDOCFLAGS='-D warnings' cargo doc
+  --features remote` was red on `main` since v0.34.0 (measured on
+  `1c08d6b`). Now code spans.
+
+### Gates
+- Thirteen suites: 106 / 162 / 135 / 191 / 143 / 126 / 156 / 112, `process`
+  161 (+2), `decision,magnitude,process` 241 (+2), `durable` 107, `harness`
+  126 (+1), and the new `harness,process` lane 198.
+- `cargo fmt --check` clean; clippy `--all-targets -- -D warnings` clean at
+  `--no-default-features`, default and every feature lane including
+  `harness,process` and the frozen-binary lane
+  `decision,magnitude,process`; `cargo doc` with `-D warnings` clean at
+  default and all nine feature sets.
+- Every new pin falsified in a copy (fixture pin, identity rows, medians,
+  hand-derived role-mismatch case, hook order, hook placement,
+  `from_steps` multiplicity); the Part 9 fan-out denominator was found
+  unable to move the identity rows (it changes occurrence multiplicity
+  only) and is caught by the fixture pin instead.
+- `examples/gauntlet.rs` output identical to the pre-scaffold tree except
+  the summary's latency column (H1 X-identity).
+- **X-battery PASS on the second of two serial runs**: the first run
+  (2129 lines, 130 raw differing lines, 28 after the latency-column strip)
+  flipped the v1 latency criterion to PASS (aif median 4.118 µs vs the
+  archive's 3.312 µs) and with it the v1/v2 verdict lines — gotcha 34's
+  timing-noise flip on Path A, every quality, churn, ratio and superiority
+  line identical; the re-run on the same quiet machine (124 raw differing
+  lines, 22 after the strip, all latency or wall-clock figures) reproduced
+  all 33 verdict lines byte-identically. Recorded, not re-baselined.
+- MSRV tiers reproduced with `rust-version` temporarily at 1.85.0: 1.88 for
+  default, `magnitude`, `persistence`, `persistence,magnitude`, `remote`,
+  `process`, `harness`, `harness,process` (1.87 fails on catgraph's
+  let-chains); 1.89 for `decision`, `magnitude-fast`,
+  `decision,magnitude`, `decision,magnitude,process` (1.88 refused by
+  nalgebra 0.35 / safe_arch 1.0 / wide 1.5); 1.92 for `durable` (1.91 fails
+  to compile). `rust-version = "1.93.0"` kept (C-D1).
+- `/code-review low`: no findings.
+
+[#92]: https://github.com/sustia-llc/koalisi/issues/92
+
 ## [0.34.0] — 2026-09-16
 
 Housekeeping re-pin: three direct dependencies move, the whole tree is
