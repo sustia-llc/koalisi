@@ -32,7 +32,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use metrics::{counter, histogram};
-use metrics_exporter_prometheus::{Matcher, PrometheusBuilder};
+use metrics_exporter_prometheus::{BuildError, Matcher, PrometheusBuilder};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
@@ -55,6 +55,10 @@ const TOPOLOGY_EVENTS_TOTAL: &str = "koalisi_topology_events_total";
 
 const CHANNEL_CAPACITY: usize = 64;
 const ENV_ADDR: &str = "KOALISI_METRICS_ADDR";
+/// Connect attempts of the self-scrape, 20 ms apart.
+const CONNECT_ATTEMPTS: usize = 100;
+/// Probe-and-bind attempts for the default loopback listener.
+const LISTENER_ATTEMPTS: usize = 8;
 
 /// Join and leave threshold of the scripted `ThresholdPolicy`. The additive
 /// marginal of one agent is `50 + 10 * popcount(caps) + trust`.
@@ -130,33 +134,65 @@ fn record_outcome_metrics(outcome: &TaskOutcome) {
     histogram!(OUTCOME_MEMBERS).record(as_f64(outcome.members.len() as u64));
 }
 
-/// The address the Prometheus listener will use: the env override, or a free
-/// loopback port found by binding port 0 and releasing it.
-async fn listener_addr() -> Result<SocketAddr> {
+/// Install the Prometheus recorder with its HTTP listener on `addr`.
+fn install_recorder(addr: SocketAddr) -> Result<(), BuildError> {
+    PrometheusBuilder::new()
+        .with_http_listener(addr)
+        .set_buckets_for_metric(
+            Matcher::Full(DECISION_SCORE.to_string()),
+            &[75.0, 100.0, 150.0],
+        )?
+        .set_buckets_for_metric(Matcher::Full(OUTCOME_MEMBERS.to_string()), &[1.0, 2.0, 4.0])?
+        .install()
+}
+
+/// Install the recorder and return the listener address: the env override,
+/// or a free loopback port found by binding port 0 and releasing it. The
+/// exporter binds before it sets the global recorder, so a probed port taken
+/// by another process between the release and the exporter's bind is retried
+/// on a fresh port.
+async fn install_on_listener() -> Result<SocketAddr> {
     if let Ok(raw) = std::env::var(ENV_ADDR) {
-        return raw
+        let addr: SocketAddr = raw
             .parse()
-            .with_context(|| format!("{ENV_ADDR}={raw} is not a socket address"));
+            .with_context(|| format!("{ENV_ADDR}={raw} is not a socket address"))?;
+        install_recorder(addr).with_context(|| format!("install the recorder on {addr}"))?;
+        return Ok(addr);
     }
-    let probe = TcpListener::bind("127.0.0.1:0")
-        .await
-        .context("probe a free loopback port")?;
-    probe.local_addr().context("probe local_addr")
+    let mut last = None;
+    for _ in 0..LISTENER_ATTEMPTS {
+        let addr = {
+            let probe = TcpListener::bind("127.0.0.1:0")
+                .await
+                .context("probe a free loopback port")?;
+            probe.local_addr().context("probe local_addr")?
+        };
+        match install_recorder(addr) {
+            Ok(()) => return Ok(addr),
+            Err(BuildError::FailedToCreateHTTPListener(cause)) => last = Some((addr, cause)),
+            Err(other) => return Err(other).context("install the Prometheus recorder"),
+        }
+    }
+    match last {
+        Some((addr, cause)) => {
+            bail!("no loopback listener after {LISTENER_ATTEMPTS} attempts; last {addr}: {cause}")
+        }
+        None => bail!("LISTENER_ATTEMPTS is 0"),
+    }
 }
 
 /// One `GET /metrics` over a raw HTTP/1.1 connection; returns the body.
 async fn scrape(addr: SocketAddr) -> Result<String> {
-    let mut stream = None;
-    for _ in 0..100 {
-        match TcpStream::connect(addr).await {
-            Ok(s) => {
-                stream = Some(s);
-                break;
-            }
-            Err(_) => tokio::time::sleep(Duration::from_millis(20)).await,
+    let mut attempt = TcpStream::connect(addr).await;
+    for _ in 1..CONNECT_ATTEMPTS {
+        if attempt.is_ok() {
+            break;
         }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        attempt = TcpStream::connect(addr).await;
     }
-    let mut stream = stream.with_context(|| format!("connect to {addr}"))?;
+    let mut stream =
+        attempt.with_context(|| format!("connect to {addr} ({CONNECT_ATTEMPTS} attempts)"))?;
     let request = format!("GET /metrics HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n");
     stream
         .write_all(request.as_bytes())
@@ -194,26 +230,69 @@ fn parse_samples(body: &str) -> Result<BTreeMap<String, f64>> {
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        let (series, value) = line
-            .rsplit_once(' ')
-            .with_context(|| format!("sample line without a value: {line}"))?;
-        let value: f64 = value
+        let (name, labels, rest) = split_series(line)?;
+        // `value [timestamp]`: the value is the first token after the series.
+        let value: f64 = rest
+            .split_whitespace()
+            .next()
+            .with_context(|| format!("sample line without a value: {line}"))?
             .parse()
             .with_context(|| format!("sample value is not a number: {line}"))?;
-        let key = match series.split_once('{') {
-            Some((name, rest)) => {
-                let labels = rest
-                    .strip_suffix('}')
-                    .with_context(|| format!("unterminated label set: {line}"))?;
-                let mut labels: Vec<&str> = labels.split(',').collect();
-                labels.sort_unstable();
-                format!("{name}{{{}}}", labels.join(","))
-            }
-            None => series.to_string(),
+        let key = if labels.is_empty() {
+            name.to_string()
+        } else {
+            let mut labels = labels;
+            labels.sort_unstable();
+            format!("{name}{{{}}}", labels.join(","))
         };
         samples.insert(key, value);
     }
     Ok(samples)
+}
+
+/// Split one sample line into its metric name, its `key="value"` label pairs
+/// and the text after the series. Commas, braces and spaces inside a quoted
+/// label value, and `\"` / `\\` escapes, stay inside that pair.
+fn split_series(line: &str) -> Result<(&str, Vec<&str>, &str)> {
+    let name_end = line
+        .find(|c: char| c == '{' || c.is_whitespace())
+        .with_context(|| format!("sample line without a value: {line}"))?;
+    let name = &line[..name_end];
+    if !line[name_end..].starts_with('{') {
+        return Ok((name, Vec::new(), &line[name_end..]));
+    }
+
+    let mut labels = Vec::new();
+    let first = name_end + 1;
+    let mut start = first;
+    let mut quoted = false;
+    let mut escaped = false;
+    for (i, c) in line.char_indices().skip_while(|(i, _)| *i < first) {
+        if escaped {
+            escaped = false;
+        } else if quoted {
+            match c {
+                '\\' => escaped = true,
+                '"' => quoted = false,
+                _ => {}
+            }
+        } else {
+            match c {
+                '"' => quoted = true,
+                ',' | '}' => {
+                    if start < i {
+                        labels.push(&line[start..i]);
+                    }
+                    if c == '}' {
+                        return Ok((name, labels, &line[i + 1..]));
+                    }
+                    start = i + 1;
+                }
+                _ => {}
+            }
+        }
+    }
+    bail!("unterminated label set: {line}")
 }
 
 /// Assert one scraped sample against the recorder-free value and the value
@@ -259,24 +338,27 @@ fn check_family(
         );
     }
     let prefix = format!("{name}{{");
-    let scraped: Vec<&String> = samples.keys().filter(|k| k.starts_with(&prefix)).collect();
-    let expected: Vec<String> = {
-        let mut keys: Vec<String> = scripted
-            .iter()
-            .map(|(labels, _)| format!("{name}{{{labels}}}"))
-            .collect();
-        keys.sort_unstable();
-        keys
-    };
+    // `samples` and `independent` are `BTreeMap`s, so their keys arrive sorted.
+    let scraped: Vec<&str> = samples
+        .keys()
+        .filter(|k| k.starts_with(&prefix))
+        .map(String::as_str)
+        .collect();
+    let mut expected: Vec<String> = scripted
+        .iter()
+        .map(|(labels, _)| format!("{name}{{{labels}}}"))
+        .collect();
+    expected.sort_unstable();
     assert_eq!(
-        scraped.len(),
-        expected.len(),
-        "{name}: scraped series {scraped:?} != scripted series {expected:?}"
+        scraped, expected,
+        "{name}: scraped series != scripted series"
     );
+    let counted: Vec<&str> = independent.keys().map(String::as_str).collect();
+    let mut scripted_labels: Vec<&str> = scripted.iter().map(|(l, _)| l.as_str()).collect();
+    scripted_labels.sort_unstable();
     assert_eq!(
-        independent.len(),
-        scripted.len(),
-        "{name}: independent series {independent:?} != scripted series {expected:?}"
+        counted, scripted_labels,
+        "{name}: independent series != scripted series"
     );
 }
 
@@ -289,16 +371,7 @@ async fn main() -> Result<()> {
     // =====================================================================
     // 1. Prometheus recorder + HTTP listener on loopback.
     // =====================================================================
-    let addr = listener_addr().await?;
-    PrometheusBuilder::new()
-        .with_http_listener(addr)
-        .set_buckets_for_metric(
-            Matcher::Full(DECISION_SCORE.to_string()),
-            &[75.0, 100.0, 150.0],
-        )?
-        .set_buckets_for_metric(Matcher::Full(OUTCOME_MEMBERS.to_string()), &[1.0, 2.0, 4.0])?
-        .install()
-        .context("install the Prometheus recorder")?;
+    let addr = install_on_listener().await?;
     println!("prometheus listener on http://{addr}/metrics");
 
     // =====================================================================
