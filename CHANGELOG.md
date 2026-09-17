@@ -17,6 +17,42 @@ Planned work — issue-tracked (details in [`CLAUDE.md`](./CLAUDE.md)
   decision/belief streams (the `TaskOutcome` durable home), [#33] federation
   manifests + FAIR provenance.
 
+## [0.39.0] — 2026-09-17
+
+Dependency re-pin: `surrealdb-live-message` `v0.2.1` → `v0.2.2`, on its own
+ahead of `K7-2` ([#97](https://github.com/sustia-llc/koalisi/issues/97)). No
+`src/` change.
+
+### Changed
+- **`surrealdb-live-message` re-pinned `v0.2.1` → `v0.2.2`**, the pin its own
+  commit. Upstream's tag moves `surrealdb` / `surrealdb-types` 3.2.1 → 3.2.4
+  and rewrites one rustdoc block. `Cargo.lock` moves one stanza
+  (`surrealdb_live_message` 0.2.1 → 0.2.2); `cargo update -p
+  surrealdb_live_message` reported "Locking 0 packages".
+- **`config/default.toml`: SurrealDB container image tag `v3.1.5` → `v3.2.4`**,
+  its own commit — upstream's own test-harness tag. The container is
+  upstream's; koalisi supplies the `[sdb]` keys it reads.
+- **The MSRV gate verifies the declaration** (owner, 2026-09-17): `cargo
+  +1.93.0 check --all-targets --locked --features <set>` on the feature sets
+  a change reaches. The tier re-measurement is retired; the tiers in
+  `Cargo.toml` are a historical record, last measured at `v0.37.0`.
+
+### Gates
+- Scope (owner, 2026-09-17): `durable` only. With every other feature
+  enabled, `cargo tree --locked --features
+  decision,magnitude,magnitude-fast,persistence,remote,process,harness,metrics
+  -i surrealdb_live_message` reports that the package matches nothing, so the
+  frozen archive binary and the other lanes build from inputs identical to
+  `v0.38.0`. **X-battery and the all-lane comparison were not run.**
+- `cargo test --features durable`: 107, identical per test binary to a
+  `7f6cf10` worktree; the container-backed restart test ran on
+  `surrealdb/surrealdb:v3.2.4` (`docker events`: the run's
+  `koalisi_sdb_container` was created from that image). `examples/durable_decisions`
+  ends `stopped cleanly`.
+- clippy `--all-targets --features durable -- -D warnings` and `cargo doc`
+  `-D warnings` clean; `cargo +1.93.0 check --all-targets --locked --features
+  durable` passes.
+
 ## [0.38.0] — 2026-09-17
 
 `K7-1`, the first registration of the K7 lineage

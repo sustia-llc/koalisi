@@ -83,14 +83,27 @@ in the sibling `biome` project.
 - Rust implementation is dispatched to the built-in `general-purpose` agent
   per `.claude/stack/agent-dispatch.md`; review is `/code-review low`.
 
-## Current state — 2026-09-17 (v0.38.0)
+## Current state — 2026-09-17 (v0.39.0)
 
-Full release ledger v0.4.0 → v0.38.0 is the `project-history.md` archive (§1).
+Full release ledger v0.4.0 → v0.39.0 is the `project-history.md` archive (§1).
 The three most recent entries are kept here in brief — read the ledger before
 touching anything with a frozen battery, a pinned decision, or a registered doc.
 
 ### Latest three
 
+- **`surrealdb-live-message` `v0.2.2` re-pin — v0.39.0 (2026-09-17, PR #98)**:
+  `v0.2.1` → `v0.2.2` (upstream: `surrealdb` 3.2.1 → 3.2.4 and a rustdoc
+  rewrite), the pin its own commit — the lock moves that one stanza,
+  "Locking 0 packages"; then `config/default.toml`'s container image tag
+  `v3.1.5` → `v3.2.4` as its own commit. No `src/` change. **Gate scope
+  `durable` only (owner)**: no other feature set reaches the crate (`cargo
+  tree -i` with every other feature on matches nothing), so X-battery and
+  the all-lane comparison were NOT run. `durable` 107 identical per test
+  binary; the restart test ran on `surrealdb/surrealdb:v3.2.4` (`docker
+  events`); clippy / doc clean; `cargo +1.93.0 check --features durable`
+  passes. **The MSRV gate changed here (owner)**: verify the declared
+  1.93.0 on the sets a change reaches; the tier re-measurement is retired
+  (gotcha 34).
 - **`K7-1` — v0.38.0 (2026-09-17, #90, PR #96)**: topology-routed group
   voting (tira ext-6) vs the candidate-blind group —
   **`VALIDATED (topology-routed group)`**, `grp-topo` 0.4258 vs in-battery
@@ -130,27 +143,7 @@ touching anything with a frozen battery, a pinned decision, or a registered doc.
   the pin; MSRV tiers reproduced (1.88 / 1.89 / 1.92). `aif` 0.14 declares
   `rust-version` 1.89, so the `decision` sets are now refused on 1.88 by
   `aif` itself as well as by nalgebra / safe_arch / wide.
-- **Metrics example + lock refresh — v0.36.0 (2026-09-17, #25, PR #94)**: #25
-  re-scoped by comment from the deleted `tick_bus`/`alert_bus` to the three
-  tap surfaces, then feature `metrics` (off by default: optional `metrics`
-  0.24 + `metrics-exporter-prometheus` 0.18 `http-listener` only, tokio
-  `net` + `io-util`) and `examples/metrics_scrape.rs` — counters and
-  histograms from a `spawn_decision_tee` sink, an `OutcomeSink` under
-  `spawn_outcome_forwarder` and the `with_event_tap` receiver; one
-  self-scrape of `/metrics`, every series asserted against a recorder-free
-  count and the scripted value; eight perturbations falsified in a copy.
-  No `src/` change. **`cargo update` rides as the PR's first commit** (owner
-  call mid-session; 154 updated / 15 added / 21 removed, `wide` 1.7.1 and
-  `safe_arch` 1.2.0 among them); the feature commit adds 14 lock stanzas
-  and moves none. Fourteen suites identical per test binary on a `3ff92f6`
-  worktree and on the branch (`metrics` lane 106); fmt, clippy (fifteen
-  lanes) and doc (twelve sets) clean; **X-battery PASS on one serial run**
-  (124 raw differing lines, 11 hunks after the column strip, all latency or
-  wall-clock; 33 verdict lines byte-identical); MSRV tiers reproduced
-  (1.88 / 1.89 / 1.92), `metrics` in the 1.88 tier. The service task runs
-  on a bare `tokio::spawn` and owns the manager, so the topology tap closes
-  only after `drop(service)` lets that task end — the example awaits the
-  topology consumer's handle for that reason.
+
 ### Lineages, verdict trail, seed ledger, run protocol — `docs/`
 
 Since v0.33.0 these live in the public repo: **`docs/README.md`** carries the
@@ -190,7 +183,7 @@ flagging. Rust implementation is dispatched per
 
 ```
 koalisi/
-├── Cargo.toml                              git tag deps: catgraph-applied + catgraph-magnitude + catgraph-syntax v0.23.0 in lockstep (one checkout); aif-v0.14.0, surrealdb-live-message v0.2.1, libp2p 0.57, sha2 0.11, metrics 0.24 + metrics-exporter-prometheus 0.18 (optional); no path deps; declared MSRV 1.93 above the measured tiers 1.88/1.89/1.92 — owner decision C-D1: KEEP, gotcha 34
+├── Cargo.toml                              git tag deps: catgraph-applied + catgraph-magnitude + catgraph-syntax v0.23.0 in lockstep (one checkout); aif-v0.14.0, surrealdb-live-message v0.2.2, libp2p 0.57, sha2 0.11, metrics 0.24 + metrics-exporter-prometheus 0.18 (optional); no path deps; declared MSRV 1.93 above the measured tiers 1.88/1.89/1.92 — owner decision C-D1: KEEP, gotcha 34
 ├── README.md                               user-facing
 ├── CLAUDE.md                               THIS FILE
 ├── config/{default,development,test}.toml  coalition threshold, history capacity; [sdb]+[docker] for the durable feature's upstream SETTINGS (cwd-resolved)
@@ -352,7 +345,7 @@ Numbering is preserved across all three files.
       `restart_limit`; exceeding gives up + cancels the child token.
       Demonstrated by `examples/supervised_monitor.rs`.
 
-14. **`durable` feature gotchas (surrealdb-live-message v0.2.1).**
+14. **`durable` feature gotchas (surrealdb-live-message v0.2.2).**
     - **Upstream `SETTINGS` resolves from the CONSUMER's cwd**: `config/default`
       (required) + `config/{RUN_MODE}` + env. koalisi's `config/default.toml`
       carries `[sdb]` + `[docker]` for it (inert feature-off). Running durable
@@ -368,7 +361,14 @@ Numbering is preserved across all three files.
       full/closed. Durability is at-least-once from the tap ONWARD; a dropped
       tap record is a koalisi-side loss (size the channel accordingly).
     - Docker required for the container-backed test; upstream's
-      `SurrealDBContainer` (bollard) manages the instance.
+      `SurrealDBContainer` (bollard) manages the instance. **koalisi has no
+      container code** (`rg -n 'bollard|SurrealDBContainer' src tests
+      examples` prints nothing): the test and the example boot the
+      DB through upstream's `sdb::sdb_task`, and what koalisi owns is the
+      `[sdb]` keys upstream reads from `config/default.toml` — `image`,
+      `tag` (`v3.2.4` since v0.39.0, upstream's own test tag) and
+      `container_name = "koalisi_sdb_container"`. `docker events --since
+      <t> --until 0s --filter event=create` shows which image a run used.
 
 15. **K6 evaluator-cache contracts (magnitude arm, #14) — rely on these.**
     - **Rank-order identity does NOT freeze decisions.** The catgraph#31
@@ -532,25 +532,29 @@ Numbering is preserved across all three files.
       final column, so a keyword filter leaves ~100 rows looking like real
       diffs. Strip the trailing `| <float> |` from both sides and diff again;
       an empty result is the actual X-battery PASS.
-    - **MSRV re-measurement procedure.** The declared 1.93 makes cargo
-      refuse any lower toolchain before it evaluates a dependency, so:
-      temporarily set `rust-version` to 1.85.0, run `cargo +<v> check
-      --all-targets --locked --features <set>` **per feature set** (every
-      feature, not the widest set — `durable` sits in no other tier's
-      superset), restore 1.93.0, diff the manifest. **Never
-      `--ignore-rust-version`**: it suppresses the dependency checks too,
-      so it cannot see a dependency floor.
-    - **The tiers are in `Cargo.toml`** (1.88 / 1.89 / 1.92, re-measured at
-      every re-pin). **`rust-version = "1.93.0"` is DECLARED above them —
-      owner decision C-D1 (2026-09-14): KEEP.** Do not change it in
-      passing. Ground: edition 2024 means resolver 3, so the declared value
+    - **The MSRV gate verifies the DECLARATION (owner, 2026-09-17).**
+      `cargo +1.93.0 check --all-targets --locked --features <set>` on the
+      feature sets a PR's dependency or source change reaches (find them
+      with `cargo tree --locked --features <sets> -i <crate>`; `durable`
+      sits in no other set's superset). The host toolchain is newer than
+      1.93, so this is the one gate that sees a std API or a dependency
+      newer than the declaration. **Never `--ignore-rust-version`**: it
+      suppresses the dependency checks too. The tier re-measurement
+      (temporary `rust-version = 1.85.0`, per-tier probes, below-tier
+      failures) is RETIRED — with 1.93 declared, cargo refuses every lower
+      toolchain before it evaluates a dependency, and no decision reads the
+      tiers.
+    - **The tiers in `Cargo.toml`** (1.88 / 1.89 / 1.92) are a historical
+      record, last measured at v0.37.0. **`rust-version = "1.93.0"` is
+      DECLARED above them — owner decision C-D1 (2026-09-14): KEEP.** Do
+      not change it in passing. Ground: edition 2024 means resolver 3, so the declared value
       bounds dependency resolution (`cargo update` holds packages to
       declared-MSRV-compatible versions; the opt-out is `[resolver]
       incompatible-rust-versions = "allow"`). Cost: a 1.88–1.92 downstream
       is refused a default-only build that would compile.
     - **Four wrong MSRV claims were retired between v0.17.0 and v0.31.0**,
       every one from measuring a chosen subset and generalising (the
-      ledger has them). Measure every feature; cite the command.
+      ledger has them). State which sets a check covered; cite the command.
     - **`cargo test … | rg '^test result' | tail` truncates.** Bare `tail` is
       `tail -10`; suites with 11+ result lines (`persistence,magnitude`) lose
       the lib-test line and undercount by ~95. Always `tail -20`.
@@ -702,16 +706,20 @@ What is still open:
   harness (v0.33.0), the K0 board corrections, tira's `aif-v0.14.0`, the H
   scaffold (v0.35.0, #92), M — the #25 metrics example + a lock refresh
   (v0.36.0), C1 — the `aif-v0.14.0` re-pin (v0.37.0), C2 — `K7-1`
-  (v0.38.0, `VALIDATED (topology-routed group)`). Next in koalisi: a
-  `surrealdb-live-message` `v0.2.1` → `v0.2.2` re-pin as its own PR
-  (v0.39.0: the pin its own commit, then the `config/default.toml` image tag
-  to `v3.2.4`; owner call 2026-09-17), then `K7-2` (seeds 150..180,
-  released) and `K7-3` (360..390). **K7-1's report changes what `K7-2` /
-  `K7-3` can mean**: on this world with `OutcomeSignal::RoleCoverage` an
-  engine-free prune reproduces the routed arm's outcome, so a learning axis
-  (novelty, world-model topology) read on PRIMARY may be dead at the outcome
-  — read `docs/k7/ab-report-K7-1-topology-routed-group.md` §3.2 and §5
-  before locking either.
+  (v0.38.0, `VALIDATED (topology-routed group)`), the
+  `surrealdb-live-message` `v0.2.2` re-pin (v0.39.0). Next in koalisi:
+  G-1 — `K7-2` (v0.40.0), **locked on
+  [#97](https://github.com/sustia-llc/koalisi/issues/97)**: novelty on/off
+  on the ROUTED arm `grp-topo` (where the blind voters decide no
+  centre-present read, so the contrast prices the v5 mechanism alone),
+  `grp-role` / `grp-role-nonov` and `ref-prune` as references, seeds
+  150..180, with the registered expectation *live in score and acts, dead
+  at the outcome*. **If the run confirms dead-at-the-outcome, the next
+  registration moves the WORLD** (`OutcomeSignal::Performance` / `Both` with
+  the performance draw), on its own issue, next free K7 number, fresh seed
+  block (owner, 2026-09-17). `K7-3` (360..390) keeps its place and reads
+  K7-2's report before its lock — the same risk applies to its axis; see
+  `docs/k7/ab-report-K7-1-topology-routed-group.md` §3.2 and §5.
 - **MSRV — C-D1 DECIDED (owner, 2026-09-14): KEEP `rust-version = 1.93.0`.**
   The v0.23.0 re-pin removed the last DeepCausality edge and the `process`
   tier with it; the measured cross-feature maximum is 1.92 and the

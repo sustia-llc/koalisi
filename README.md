@@ -198,7 +198,7 @@ cargo test --features metrics              # 106 tests (the default suite; the f
 - [catgraph-applied](https://github.com/sustia-llc/catgraph) (tag `v0.23.0`, kept in lockstep with catgraph-magnitude and catgraph-syntax — one repo, one checkout, all three move together) — CRUD hypergraph container backing the topology layer
 - tokio + tokio-util — async runtime + lifecycle primitives
 - rayon + tokio-rayon — CPU-bound graph operations bridge
-- [surrealdb-live-message](https://github.com/sustia-llc/surrealdb-live-message) (tag `v0.2.1`, **optional**, feature `durable`) — two-tier restart-durable message bus for the coalition decision log
+- [surrealdb-live-message](https://github.com/sustia-llc/surrealdb-live-message) (tag `v0.2.2`, **optional**, feature `durable`) — two-tier restart-durable message bus for the coalition decision log
 - [aif](https://github.com/sustia-llc/tira) (tag `aif-v0.14.0`, **optional**, feature `decision`) — active-inference engine for the AIF decision strategies (scalar, multimodal, persistent); `nalgebra` is only compiled when the feature is enabled
 - [catgraph-magnitude](https://github.com/sustia-llc/catgraph) (tag `v0.23.0`, **optional**, feature `magnitude`) — enriched-category coalition magnitude for the categorical decision strategy
 - [catgraph-syntax](https://github.com/sustia-llc/catgraph) (tag `v0.23.0`, **optional**, feature `process`) — colored-syntax layer over the free-prop term surface for process-structured tasks; depends on catgraph + catgraph-applied + thiserror only, so no DeepCausality crate is in the dependency graph under any feature
