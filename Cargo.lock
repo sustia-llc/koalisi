@@ -2983,7 +2983,7 @@ dependencies = [
 
 [[package]]
 name = "koalisi"
-version = "0.38.0"
+version = "0.39.0"
 dependencies = [
  "aif",
  "anyhow",
@@ -6000,8 +6000,8 @@ dependencies = [
 
 [[package]]
 name = "surrealdb_live_message"
-version = "0.2.1"
-source = "git+https://github.com/sustia-llc/surrealdb-live-message?tag=v0.2.1#73724254c4ba28670fe5cbd0d15a3ac767aac934"
+version = "0.2.2"
+source = "git+https://github.com/sustia-llc/surrealdb-live-message?tag=v0.2.2#4e12e9cbb6745968909e202d7f97528639c94dc8"
 dependencies = [
  "anyhow",
  "bollard",
