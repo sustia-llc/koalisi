@@ -20,7 +20,8 @@ Planned work — issue-tracked (details in [`CLAUDE.md`](./CLAUDE.md)
 ## [0.36.0] — 2026-09-17
 
 A Prometheus metrics example over the three runtime tap surfaces ([#25], as
-re-scoped on the issue 2026-09-17), and a lock refresh. No `src/` change.
+re-scoped on the issue 2026-09-17), and a lock refresh (PR #94). No `src/`
+change.
 
 ### Added
 - **Feature `metrics`** (off by default): optional `metrics` 0.24 and

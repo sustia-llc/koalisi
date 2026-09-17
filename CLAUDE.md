@@ -91,7 +91,7 @@ touching anything with a frozen battery, a pinned decision, or a registered doc.
 
 ### Latest three
 
-- **Metrics example + lock refresh — v0.36.0 (2026-09-17, #25)**: #25
+- **Metrics example + lock refresh — v0.36.0 (2026-09-17, #25, PR #94)**: #25
   re-scoped by comment from the deleted `tick_bus`/`alert_bus` to the three
   tap surfaces, then feature `metrics` (off by default: optional `metrics`
   0.24 + `metrics-exporter-prometheus` 0.18 `http-listener` only, tokio
