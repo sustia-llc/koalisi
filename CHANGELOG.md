@@ -74,6 +74,15 @@ re-scoped on the issue 2026-09-17), and a lock refresh. No `src/` change.
   `decision,magnitude,process` (1.88 refused by nalgebra 0.35.0 /
   safe_arch 1.2.0 / wide 1.7.1); 1.92 for `durable` (1.91 fails to compile
   `diskann`). `rust-version = "1.93.0"` kept (C-D1).
+- `/code-review low`, two passes, both on the example: the first four
+  findings (a probed loopback port could be taken before the exporter bound
+  it — now retried on a fresh port; the last connect error was discarded;
+  the sample parser split label sets on bare commas and took the last token
+  as the value — now quote-aware, value first; the series-set check compared
+  lengths — now the sets), the second one (label pairs kept surrounding
+  whitespace — now trimmed; that fix shipped without a further pass). The
+  set assertion falsified in a copy with an extra series labelled
+  `Bo,gus} x`.
 
 ## [0.35.0] — 2026-09-16
 

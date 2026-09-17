@@ -280,8 +280,9 @@ fn split_series(line: &str) -> Result<(&str, Vec<&str>, &str)> {
             match c {
                 '"' => quoted = true,
                 ',' | '}' => {
-                    if start < i {
-                        labels.push(&line[start..i]);
+                    let pair = line[start..i].trim();
+                    if !pair.is_empty() {
+                        labels.push(pair);
                     }
                     if c == '}' {
                         return Ok((name, labels, &line[i + 1..]));
