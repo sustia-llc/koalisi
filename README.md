@@ -40,7 +40,7 @@ from temporal hypergraph topology to coalition formation algorithms to
 | `ingest` | Domain-neutral ingestion (K5): `Sample`/`DataSource` traits, generic `SampleMonitor<S>`, `Pacing` + `pump_source`, synthetic NEST-shaped multi-resolution and tauhokohoko-shaped sensor-event fixture sources (seeded, no credentials) |
 | `decision` | `CoalitionDecisionPolicy` trait + always-available `ThresholdPolicy`; optional Active Inference strategy (`EfeValueCalculator`, `AifDecisionPolicy`) behind the `decision` feature; optional categorical-magnitude strategy (`MagnitudeValueCalculator`, `MagnitudePolicy`) behind the `magnitude` feature |
 | `persistence` | Append-only event store (feature `persistence`): hash-chained streams, CBOR frame log (`FileEventStore`), crash-tail recovery, writer task; topology events tap in and replay back into a fresh `EventLog` all queries run on unchanged (P7.1 + P7.2) — see `.claude/docs/phase7-persistence-design.md` |
-| `harness` | The K7 A/B harness (feature `harness`): seeded instance generation, the battery loop (bootstrap join, policy-gated arrivals, one leave sweep), per-seed metrics, report helpers — the plumbing every K7 registration shares |
+| `harness` | The K7 A/B harness (feature `harness`): seeded instance generation, the battery loop (bootstrap join, policy-gated arrivals, one leave sweep), per-seed metrics, report helpers — the plumbing every K7 registration shares; with `process`, the workflow world (`WorkflowSpec`: per-agent roles, per-task declared `Demand`, role-matched step coverage, an optional performance draw) and the per-task lifecycle hook every policy can observe (`begin_task` / `observe_outcome`) |
 | `subsystems` | `CoalitionService` — the policy-gated coalition-membership seam (join/leave consult a `CoalitionDecisionPolicy` before mutating the hypergraph) — plus a decision-tap tee (`spawn_decision_tee`), an optional durable decision log (`durable`), and an optional libp2p remote coalition-event gateway (`remote`: bounded buffer, cursor polling, stable `RemoteCoalitionEventV1` wire schema) |
 
 ## Quick start
@@ -181,10 +181,11 @@ cargo test --features magnitude-fast       # 143 tests (+ EQ3 opt-in levers + re
 cargo test --features persistence          # 126 tests (+ chained event store + topology replay)
 cargo test --features persistence,magnitude # 156 tests (incl. the live-vs-replayed parity gate)
 cargo test --features remote               # 112 tests (+ gateway event buffer + loopback round-trip)
-cargo test --features process              # 159 tests (+ process-structured workflows + the unstaffable-residual policy)
-cargo test --features decision,magnitude,process # 239 tests (the full A/B battery surface)
+cargo test --features process              # 161 tests (+ process-structured workflows + the unstaffable-residual policy)
+cargo test --features decision,magnitude,process # 241 tests (the full A/B battery surface)
 cargo test --features durable              # 107 tests (+ container-backed restart-durability test; needs Docker)
-cargo test --features harness              # 125 tests (+ the K7 harness: rng, instance generation, battery loop, report helpers)
+cargo test --features harness              # 126 tests (+ the K7 harness: rng, instance generation, battery loop, lifecycle hook, report helpers)
+cargo test --features harness,process      # 198 tests (+ the K7 workflow world and its identity gate against docs/runs/K4-archive.log)
 ```
 
 ## Dependencies

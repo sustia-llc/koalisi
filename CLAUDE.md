@@ -83,14 +83,39 @@ in the sibling `biome` project.
 - Rust implementation is dispatched to the built-in `general-purpose` agent
   per `.claude/stack/agent-dispatch.md`; review is `/code-review low`.
 
-## Current state — 2026-09-16 (v0.34.0)
+## Current state — 2026-09-16 (v0.35.0)
 
-Full release ledger v0.4.0 → v0.34.0 is the `project-history.md` archive (§1).
+Full release ledger v0.4.0 → v0.35.0 is the `project-history.md` archive (§1).
 The three most recent entries are kept here in brief — read the ledger before
 touching anything with a frozen battery, a pinned decision, or a registered doc.
 
 ### Latest three
 
+- **K7 harness scaffold H0 + H1 — v0.35.0 (2026-09-16, #92, PR #93)**: memo →
+  owner lock on #92 (six items, all as recommended) → code.
+  `src/harness/workflow.rs` (needs `process`) is the Part 9/11 v2w world
+  copied out of the frozen binary — `WorkflowSpec` (v2 prefix + roles +
+  tags with feasibility re-draw + shape draw + optional `PerformanceSpec`
+  appended last), `WorkflowInstance`/`WorkflowTask`, `OutcomeSignal`
+  {RoleCoverage, Performance, Both}, `WorkflowArm` (per-instance factory),
+  `run_workflow_instance`/`run_workflow_battery` with Part 11's
+  role-matched distinct-step scorer; `InstanceSpec::draw(&mut rng)` split
+  out of `generate`. `CoalitionDecisionPolicy` gains default no-op
+  `begin_task(&TaskStart)` / `observe_outcome(required, &[bool])`, called
+  once per task by both runners; `Demand::from_steps`. **Identity gate**
+  `tests/harness_workflow.rs`: the copy driving `wf-asis` reproduces Part
+  9's thirty per-seed rows on 270..300 (`docs/runs/K4-archive.log:1787–1816`)
+  and Part 11's medians 0.1806 / 7.50 on 330..360 (`:2031`) — the log
+  prints NO per-seed `wf-asis` on 330..360, a correction to the plan's
+  gate text; `tests/fixtures/k7-workflow-v2w.txt` pins every instance on
+  both blocks. Frozen binary diff empty; gauntlet byte-identical bar the
+  latency column. Thirteen suites (`process` 161, dmp 241, `harness` 126,
+  new `harness,process` 198, rest unchanged); clippy/doc/fmt clean at
+  every lane; MSRV tiers reproduced (1.88 / 1.89 / 1.92); **X-battery PASS
+  on the second of two serial runs** — the first flipped the v1 latency
+  criterion (gotcha 34's Path A noise; every non-latency line identical),
+  the re-run reproduced all 33 verdict lines. Base-tree red fixed: two
+  `persistence`-gated doc links in `remote.rs`. Review: no findings.
 - **Housekeeping re-pin + trim — v0.34.0 (2026-09-16, PR #91)**: `sha2`
   0.10 → 0.11, `libp2p` 0.56 → 0.57, `surrealdb-types` 3.2.1 → 3.2.4, lock
   refreshed (+22/−7 stanzas; `sha2`/`digest` 0.10 and 0.11 now coexist —
@@ -125,15 +150,6 @@ touching anything with a frozen battery, a pinned decision, or a registered doc.
   recorded (`cargo fmt --check` on 38 files; `cargo doc -D warnings` on 8
   links) — both fixed in v0.34.0. `rg -n strategy_comparison src/` is NOT a
   zero-hit: two rustdoc lines in `src/algorithms/population.rs` name it.
-- **catgraph re-pin `v0.9.0` ×3 → `v0.23.0` — v0.32.0 (2026-09-14, #87, PR
-  #88)**: three catgraph deps in lockstep, the pin its own commit; fifteen
-  upstream tags absorbed with a compile-breaking set of NONE. Drift check
-  CLEAN: eleven suites at baseline both sides, clippy clean at default + six
-  features, X-battery zero non-latency diffs (2129 lines each, 33 verdict
-  lines byte-identical). Lock 681 → 678: no `deep_causality_*` package under
-  any feature. MSRV tiers 1.88 / 1.89 / 1.92, the former 1.93 `process` tier
-  gone; **owner decision C-D1: KEEP `rust-version = 1.93.0`** (resolver-3
-  ground). Review: 7 findings, all applied.
 
 ### Lineages, verdict trail, seed ledger, run protocol — `docs/`
 
@@ -160,10 +176,11 @@ flagging. Rust implementation is dispatched per
 | `--features persistence` | 126 | `cargo test --features persistence` |
 | `--features persistence,magnitude` | 156 (incl. the #18/#30 replay parity gate) | `cargo test --features persistence,magnitude` |
 | `--features remote` | 112 (gateway buffer + loopback round-trip) | `cargo test --features remote` |
-| `--features process` | 159 (EQ5a surface + #80 ResidualPolicy) | `cargo test --features process` |
-| `--features decision,magnitude,process` | 239 (the Part 9 + Part 10 + Part 11 batteries) | `cargo test --features decision,magnitude,process` |
+| `--features process` | 161 (EQ5a surface + #80 ResidualPolicy + `Demand::from_steps`) | `cargo test --features process` |
+| `--features decision,magnitude,process` | 241 (the Part 9 + Part 10 + Part 11 batteries) | `cargo test --features decision,magnitude,process` |
 | `--features durable` | 107 (+1 container-backed restart test; needs Docker) | `cargo test --features durable` |
-| `--features harness` | 125 (+19 K7 harness unit tests, v0.33.0) | `cargo test --features harness` |
+| `--features harness` | 126 (+20 K7 harness unit tests incl. the H1 hook order pin) | `cargo test --features harness` |
+| `--features harness,process` | 198 (+ the H0 workflow world: 13 unit tests, the 5-test identity gate `tests/harness_workflow.rs` against `docs/runs/K4-archive.log`) | `cargo test --features harness,process` |
 | All examples | exit 0 | see Reproducers below |
 | Lint + docs | clean | `cargo fmt --check`; `cargo clippy --all-targets -- -D warnings` per feature set; `RUSTDOCFLAGS='-D warnings' cargo doc --no-deps` at every feature (green since v0.34.0) |
 
@@ -201,9 +218,9 @@ koalisi/
 │   │   ├── dcvc.rs                         DCVCDistributor, WorkloadShare
 │   │   ├── aipa.rs                         Integer partitions, bounds, best-partition + 10 unit tests
 │   │   └── population.rs                   P5.2 (#42): population coalition-structure search atop AIPA (SplitMix64 PSO, gbest lineage) + record_trajectory (always compiled, no deps)
-│   ├── harness/                            v0.33.0: the K7 harness (feature `harness`, no deps) — rng.rs (SplitMix64, permutation, distinct_bits), instance.rs (InstanceSpec → Instance over CapabilityAgent), battery.rs (SeedRange, Arm, run_instance, run_battery), report.rs (percentile, median_iqr, superior_count, tables, Verdict); registrations are examples, never here
+│   ├── harness/                            v0.33.0: the K7 harness (feature `harness`, no deps) — rng.rs (SplitMix64, permutation, distinct_bits), instance.rs (InstanceSpec → Instance over CapabilityAgent; `draw(&mut rng)` since v0.35.0), battery.rs (SeedRange, Arm, run_instance — calls the H1 hooks once per task — run_battery, FLAT_SIGNAL_WIDTH), report.rs (percentile, median_iqr, superior_count, tables, Verdict), workflow.rs (v0.35.0, needs `process`: WorkflowSpec/PerformanceSpec → WorkflowInstance/WorkflowTask, OutcomeSignal, WorkflowArm, run_workflow_instance, run_workflow_battery — the Part 9/11 v2w world copied out of the frozen binary); registrations are examples, never here
 │   ├── decision/
-│   │   ├── mod.rs                          CoalitionDecisionPolicy + ThresholdPolicy (always compiled)
+│   │   ├── mod.rs                          CoalitionDecisionPolicy (+ the v0.35.0 default no-op lifecycle hooks begin_task(&TaskStart) / observe_outcome(required, &[bool])) + ThresholdPolicy (always compiled)
 │   │   ├── aif_policy.rs                   AifDecisionPolicy + EfeValueCalculator (feature `decision`)
 │   │   ├── reliability_value.rs            ReliabilityCoverage (#57, v0.16.0): reliability-weighted coverage ValueCalculator from the persistent world-model snapshot (feature `decision`; gotcha 24)
 │   │   ├── group_policy.rs                 GroupAifPolicy (#78, v0.30.0): aif::GroupAgent, R=3 role internals over arm-E1 world models, CertaintyWeighted, deterministic group_distribution read (features `decision`+`process`; gotcha 33)
@@ -274,7 +291,9 @@ koalisi/
     ├── persistence_integration.rs          7 tests (#29: roundtrip, rotation+reopen, tamper, torn tail, sealed opaque, writer drain, bounds; feature `persistence`)
     ├── topology_replay.rs                  3 tests (#30: 13-variant round-trip, reconstruction equality, schema/Sealed rejection; feature `persistence`)
     ├── remote_integration.rs               1 test (#38: loopback round-trip service → tee → gateway → client, cursor deltas + seq ordering; feature `remote`)
-    └── replay_parity.rs                    1 test (#30: magnitude_history live == replayed — THE parity gate; features `persistence,magnitude`)
+    ├── replay_parity.rs                    1 test (#30: magnitude_history live == replayed — THE parity gate; features `persistence,magnitude`)
+    ├── harness_workflow.rs                 5 tests (v0.35.0, #92: the H0 identity gate — Part 9 `wf-asis` rows on 270..300 + Part 11 medians on 330..360 from docs/runs/K4-archive.log, the instance fixture, the v2-prefix pin, a hand-derived role-mismatch case; features `harness,process`)
+    └── fixtures/k7-workflow-v2w.txt        the committed print of every generated v2w instance on 270..300 and 330..360 (regenerate with K7_WRITE_FIXTURE=1 — only when the world changes by design)
 ```
 
 Two further files belong to this project but are **not in this tree** — the
@@ -632,8 +651,9 @@ timeout 300s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-tar
 # recipe is docs/runs/README.md.
 cargo run --release --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision,magnitude,process --example strategy_comparison
 
-# === with harness feature (K7 skeleton, v0.33.0) ===
+# === with harness feature (K7 skeleton v0.33.0; workflow world + lifecycle hook v0.35.0) ===
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features harness
+timeout 300s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features harness,process   # 198, incl. the H0 identity gate
 timeout 60s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features harness --example gauntlet
 
 # === with durable feature (needs Docker; container-backed restart test) ===
@@ -662,12 +682,17 @@ What is still open:
   transferability). Both LLM-free slices shipped (#41 v0.12.0, #42 v0.13.0). The
   only still-NEST-dependent piece is the NEST-H4 calibration-copilot deployment
   framing, which activates whenever ownership lands.
-- **K7 lineage** — plan `.claude/stack/2026-09-16-koalisi-tira-k7-round.md`
-  (ratified 2026-09-16). Phase A (this scaffold, v0.33.0) DONE; next is the
-  `K7-1` design-lock on its koalisi issue (ext-6, tira #46, read against EQ5b
-  candidate (a), seeds 90..120), then the tira `aif-v0.14.0` tag, then the
-  koalisi re-pin PR (`v0.34.0`) and the `K7-1` registration (`v0.35.0`) per
-  `docs/PROTOCOL.md`. Seeds 150..180 stay reserved-unconsumed.
+- **K7 lineage** — plan `.claude/stack/2026-09-16-koalisi-tira-programme-sweep.md`
+  (ratified 2026-09-16; supersedes §3–§5 of the K7 round plan). Landed: the
+  harness (v0.33.0), the K0 board corrections, tira's `aif-v0.14.0`, the H
+  scaffold (v0.35.0, #92). Next in koalisi: M — the #25 metrics example
+  (v0.36.0); then C1 — the `aif-v0.14.0` re-pin PR (v0.37.0, pin-first,
+  one serial archive run diffed against `docs/runs/K4-archive.log`); then
+  C2 — the `K7-1` registration (v0.38.0: prereg `docs/k7/prereg-K7-1-<slug>.md`
+  before code, `examples/k7/k7_1.rs`, seeds 90..120, in-battery controls
+  `grp-role` / `grp-role-blind` on the H0 workflow world with Part 11 outcome
+  semantics) per `docs/PROTOCOL.md`; then `K7-2` (seeds 150..180, released)
+  and `K7-3` (360..390) on the same pin.
 - **[#25] Metrics example** — still valid but needs reframing: instrument the
   `CoalitionService` decision path / topology events, not the deleted
   `tick_bus`/`alert_bus`.

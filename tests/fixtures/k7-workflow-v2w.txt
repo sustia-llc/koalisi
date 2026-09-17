@@ -1,0 +1,2122 @@
+seed 270
+n 13 redraws 81 max_attempts 14
+prefix_required 126,136,88,129,187,228,255,17,239,114,107,255,93,59,255,53,253,110,55,127
+agent 0 caps 66 trust 51 role 2
+agent 1 caps 196 trust 76 role 2
+agent 2 caps 9 trust 50 role 1
+agent 3 caps 12 trust 22 role 1
+agent 4 caps 128 trust 29 role 0
+agent 5 caps 32 trust 75 role 0
+agent 6 caps 169 trust 55 role 0
+agent 7 caps 192 trust 64 role 1
+agent 8 caps 202 trust 68 role 0
+agent 9 caps 4 trust 81 role 1
+agent 10 caps 33 trust 88 role 1
+agent 11 caps 129 trust 83 role 1
+agent 12 caps 9 trust 22 role 2
+task 0 required 237 tags 0:2,2:2,3:1,5:0,6:1,7:0 arrival 6,4,0,3,2,7,5,12,9,8,11,1,10 written [r0,r1,r2] (s5_r0 ; delta@r0 ; s7_r0 * s7_r0 ; mu@r0) * (s3_r1 ; s6_r1) * (s0_r2 ; s2_r2)
+task 1 required 136 tags 3:1,7:0 arrival 4,9,10,7,11,8,6,3,2,12,5,1,0 written [r0,r1] s7_r0 * s3_r1
+task 2 required 96 tags 5:1,6:2 arrival 10,7,11,0,1,8,6,4,12,9,2,5,3 written [r1,r2] s5_r1 * s6_r2
+task 3 required 129 tags 0:2,7:2 arrival 9,0,12,10,8,11,4,6,3,7,1,2,5 written [r2] s0_r2 ; s7_r2
+task 4 required 238 tags 1:0,2:1,3:0,5:1,6:0,7:0 arrival 12,10,2,6,8,1,11,3,7,5,9,4,0 written [r0,r1] (s1_r0 ; delta@r0 ; s3_r0 * s3_r0 ; mu@r0 ; s6_r0 ; s7_r0) * (s2_r1 ; s5_r1)
+task 5 required 228 tags 2:2,5:0,6:2,7:0 arrival 5,12,6,0,10,1,11,8,7,3,2,9,4 written [r0,r2] (s5_r0 ; s7_r0) * (s2_r2 ; s6_r2)
+task 6 required 137 tags 0:1,3:1,7:1 arrival 11,5,1,0,6,12,4,3,8,2,10,9,7 written [r1] s0_r1 ; s3_r1 ; s7_r1
+task 7 required 141 tags 0:1,2:1,3:2,7:1 arrival 6,11,10,7,9,2,1,4,3,12,0,8,5 written [r1,r2] (s0_r1 ; s2_r1 ; delta@r1 ; s7_r1 * s7_r1 ; mu@r1) * s3_r2
+task 8 required 239 tags 0:1,1:0,2:1,3:2,5:1,6:0,7:1 arrival 11,8,10,3,6,1,0,2,12,9,4,5,7 written [r0,r1,r2] (s1_r0 ; s6_r0) * (s0_r1 ; delta@r1 ; s2_r1 * s2_r1 ; mu@r1 ; s5_r1 ; s7_r1) * s3_r2
+task 9 required 65 tags 0:0,6:2 arrival 4,10,7,2,9,12,1,6,3,5,11,8,0 written [r0,r2] s0_r0 * s6_r2
+task 10 required 73 tags 0:2,3:2,6:1 arrival 9,12,4,3,6,5,8,0,11,1,2,7,10 written [r1,r2] s6_r1 * (s0_r2 ; delta@r2 ; s3_r2 * s3_r2 ; mu@r2)
+task 11 required 192 tags 6:0,7:2 arrival 7,11,3,1,8,9,5,6,4,12,2,0,10 written [r0,r2] s6_r0 * s7_r2
+task 12 required 228 tags 2:2,5:0,6:2,7:2 arrival 5,1,12,0,4,2,7,6,3,9,11,8,10 written [r0,r2] s5_r0 * (s2_r2 ; s6_r2 ; delta@r2 ; s7_r2 * s7_r2 ; mu@r2)
+task 13 required 44 tags 2:1,3:1,5:0 arrival 0,11,1,4,6,8,10,12,2,9,7,3,5 written [r0,r1] s5_r0 * (s2_r1 ; s3_r1)
+task 14 required 34 tags 1:0,5:0 arrival 3,7,11,6,5,0,12,8,10,1,4,2,9 written [r0] s1_r0 ; s5_r0
+task 15 required 140 tags 2:1,3:0,7:2 arrival 10,5,0,11,1,7,8,12,9,6,3,4,2 written [r0,r1,r2] s3_r0 * s2_r1 * s7_r2
+task 16 required 129 tags 0:0,7:2 arrival 7,1,0,6,11,4,3,10,5,12,9,8,2 written [r0,r2] s0_r0 * s7_r2
+task 17 required 6 tags 1:2,2:2 arrival 7,11,12,1,8,0,3,2,5,6,9,10,4 written [r2] s1_r2 ; s2_r2
+task 18 required 66 tags 1:2,6:2 arrival 0,1,8,6,9,5,12,7,3,2,11,4,10 written [r2] s1_r2 ; s6_r2
+task 19 required 12 tags 2:2,3:0 arrival 1,9,6,12,5,0,3,4,8,7,2,10,11 written [r0,r2] s3_r0 * s2_r2
+performance none
+
+seed 271
+n 7 redraws 504 max_attempts 166
+prefix_required 9,17,154,159,245,187,236,255,59,255,126,89,251,255,19,110,247,221,238,233
+agent 0 caps 149 trust 75 role 1
+agent 1 caps 64 trust 63 role 0
+agent 2 caps 164 trust 39 role 1
+agent 3 caps 22 trust 74 role 1
+agent 4 caps 50 trust 41 role 0
+agent 5 caps 85 trust 60 role 1
+agent 6 caps 146 trust 55 role 1
+task 0 required 96 tags 5:0,6:0 arrival 1,6,2,3,4,5,0 written [r0] s5_r0 ; delta@r0 ; s6_r0 * s6_r0 ; mu@r0
+task 1 required 17 tags 0:1,4:1 arrival 1,5,6,0,2,4,3 written [r1] s0_r1 ; delta@r1 ; s4_r1 * s4_r1 ; mu@r1
+task 2 required 144 tags 4:0,7:1 arrival 5,6,0,2,3,4,1 written [r0,r1] s4_r0 * s7_r1
+task 3 required 84 tags 2:1,4:0,6:0 arrival 2,3,4,5,6,1,0 written [r0,r1] (s4_r0 ; s6_r0) * s2_r1
+task 4 required 48 tags 4:0,5:1 arrival 4,0,1,3,5,2,6 written [r0,r1] s4_r0 * s5_r1
+task 5 required 82 tags 1:0,4:0,6:0 arrival 6,4,1,3,0,5,2 written [r0] s1_r0 ; s4_r0 ; s6_r0
+task 6 required 36 tags 2:1,5:1 arrival 0,6,4,5,3,1,2 written [r1] s2_r1 ; s5_r1
+task 7 required 98 tags 1:1,5:0,6:0 arrival 1,4,2,3,0,6,5 written [r0,r1] (s5_r0 ; s6_r0) * s1_r1
+task 8 required 114 tags 1:0,4:0,5:1,6:1 arrival 1,6,4,5,3,2,0 written [r0,r1] (s1_r0 ; s4_r0) * (s5_r1 ; delta@r1 ; s6_r1 * s6_r1 ; mu@r1)
+task 9 required 65 tags 0:1,6:0 arrival 4,3,5,6,2,1,0 written [r0,r1] s6_r0 * s0_r1
+task 10 required 49 tags 0:1,4:1,5:1 arrival 5,6,3,4,0,2,1 written [r1] s0_r1 ; s4_r1 ; delta@r1 ; s5_r1 * s5_r1 ; mu@r1
+task 11 required 208 tags 4:1,6:1,7:1 arrival 2,5,3,0,6,1,4 written [r1] s4_r1 ; delta@r1 ; s6_r1 * s6_r1 ; mu@r1 ; delta@r1 ; s7_r1 * s7_r1 ; mu@r1
+task 12 required 112 tags 4:0,5:0,6:0 arrival 2,3,0,4,1,5,6 written [r0] s4_r0 ; s5_r0 ; s6_r0
+task 13 required 130 tags 1:0,7:1 arrival 6,5,0,3,2,4,1 written [r0,r1] s1_r0 * s7_r1
+task 14 required 65 tags 0:1,6:1 arrival 3,5,6,0,4,2,1 written [r1] s0_r1 ; s6_r1
+task 15 required 65 tags 0:1,6:1 arrival 6,2,0,5,1,3,4 written [r1] s0_r1 ; delta@r1 ; s6_r1 * s6_r1 ; mu@r1
+task 16 required 81 tags 0:1,4:1,6:1 arrival 3,4,5,0,1,2,6 written [r1] s0_r1 ; s4_r1 ; s6_r1
+task 17 required 68 tags 2:1,6:1 arrival 6,3,1,5,0,4,2 written [r1] s2_r1 ; s6_r1
+task 18 required 100 tags 2:1,5:0,6:1 arrival 5,4,0,3,6,2,1 written [r0,r1] s5_r0 * (s2_r1 ; delta@r1 ; s6_r1 * s6_r1 ; mu@r1)
+task 19 required 114 tags 1:0,4:1,5:1,6:0 arrival 0,4,2,6,5,1,3 written [r0,r1] (s1_r0 ; delta@r0 ; s6_r0 * s6_r0 ; mu@r0) * (s4_r1 ; delta@r1 ; s5_r1 * s5_r1 ; mu@r1)
+performance none
+
+seed 272
+n 7 redraws 142 max_attempts 23
+prefix_required 122,5,12,108,255,67,223,48,127,174,7,239,234,255,253,212,223,144,98,255
+agent 0 caps 178 trust 44 role 2
+agent 1 caps 133 trust 57 role 0
+agent 2 caps 153 trust 64 role 1
+agent 3 caps 38 trust 27 role 1
+agent 4 caps 16 trust 56 role 1
+agent 5 caps 148 trust 72 role 0
+agent 6 caps 85 trust 41 role 1
+task 0 required 34 tags 1:2,5:2 arrival 5,3,1,2,6,0,4 written [r2] s1_r2 ; s5_r2
+task 1 required 21 tags 0:0,2:0,4:2 arrival 2,1,3,6,5,0,4 written [r0,r2] (s0_r0 ; s2_r0) * s4_r2
+task 2 required 162 tags 1:1,5:2,7:0 arrival 2,5,1,3,0,4,6 written [r0,r1,r2] s7_r0 * s1_r1 * s5_r2
+task 3 required 143 tags 0:1,1:1,2:0,3:1,7:0 arrival 2,6,0,5,4,1,3 written [r0,r1] (s2_r0 ; delta@r0 ; s7_r0 * s7_r0 ; mu@r0) * (s0_r1 ; s1_r1 ; delta@r1 ; s3_r1 * s3_r1 ; mu@r1)
+task 4 required 112 tags 4:2,5:2,6:1 arrival 4,5,1,2,6,3,0 written [r1,r2] s6_r1 * (s4_r2 ; s5_r2)
+task 5 required 26 tags 1:1,3:1,4:2 arrival 5,3,1,0,6,2,4 written [r1,r2] (s1_r1 ; s3_r1) * s4_r2
+task 6 required 36 tags 2:0,5:1 arrival 1,3,6,0,5,4,2 written [r0,r1] s2_r0 * s5_r1
+task 7 required 132 tags 2:1,7:0 arrival 4,0,2,3,5,1,6 written [r0,r1] s7_r0 * s2_r1
+task 8 required 145 tags 0:1,4:1,7:0 arrival 3,2,0,1,4,6,5 written [r0,r1] s7_r0 * (s0_r1 ; s4_r1)
+task 9 required 68 tags 2:0,6:1 arrival 6,1,4,5,2,0,3 written [r0,r1] s2_r0 * s6_r1
+task 10 required 7 tags 0:1,1:2,2:0 arrival 6,0,4,2,5,1,3 written [r0,r1,r2] s2_r0 * s0_r1 * s1_r2
+task 11 required 177 tags 0:1,4:2,5:2,7:1 arrival 0,3,6,1,2,4,5 written [r1,r2] (s0_r1 ; s7_r1) * (s4_r2 ; delta@r2 ; s5_r2 * s5_r2 ; mu@r2)
+task 12 required 194 tags 1:1,6:1,7:2 arrival 6,0,4,1,2,5,3 written [r1,r2] (s1_r1 ; s6_r1) * s7_r2
+task 13 required 36 tags 2:1,5:1 arrival 2,0,5,3,1,4,6 written [r1] s2_r1 ; s5_r1
+task 14 required 17 tags 0:0,4:2 arrival 3,4,6,0,5,1,2 written [r0,r2] s0_r0 * s4_r2
+task 15 required 148 tags 2:0,4:1,7:0 arrival 2,0,1,4,6,5,3 written [r0,r1] (s2_r0 ; s7_r0) * s4_r1
+task 16 required 150 tags 1:1,2:1,4:0,7:1 arrival 4,3,0,5,1,6,2 written [r0,r1] s4_r0 * (s1_r1 ; s2_r1 ; s7_r1)
+task 17 required 144 tags 4:1,7:2 arrival 1,3,0,5,2,6,4 written [r1,r2] s4_r1 * s7_r2
+task 18 required 223 tags 0:1,1:2,2:0,3:1,4:2,6:1,7:1 arrival 2,5,1,3,6,4,0 written [r0,r1,r2] s2_r0 * (s0_r1 ; delta@r1 ; s3_r1 * s3_r1 ; mu@r1 ; s6_r1 ; delta@r1 ; s7_r1 * s7_r1 ; mu@r1) * (s1_r2 ; s4_r2)
+task 19 required 33 tags 0:0,5:1 arrival 6,3,1,4,5,2,0 written [r0,r1] s0_r0 * s5_r1
+performance none
+
+seed 273
+n 6 redraws 384 max_attempts 60
+prefix_required 80,84,127,251,161,191,255,177,201,83,242,204,85,3,254,253,92,23,255,116
+agent 0 caps 32 trust 23 role 2
+agent 1 caps 18 trust 87 role 1
+agent 2 caps 92 trust 41 role 0
+agent 3 caps 194 trust 53 role 0
+agent 4 caps 1 trust 49 role 0
+agent 5 caps 128 trust 49 role 2
+task 0 required 20 tags 2:0,4:0 arrival 5,1,2,0,4,3 written [r0] s2_r0 ; s4_r0
+task 1 required 75 tags 0:0,1:0,3:0,6:0 arrival 1,4,0,2,3,5 written [r0] s0_r0 ; s1_r0 ; s3_r0 ; s6_r0
+task 2 required 144 tags 4:1,7:2 arrival 1,4,0,2,5,3 written [r1,r2] s4_r1 * s7_r2
+task 3 required 130 tags 1:1,7:0 arrival 3,0,5,2,4,1 written [r0,r1] s7_r0 * s1_r1
+task 4 required 3 tags 0:0,1:0 arrival 3,5,0,4,1,2 written [r0] s0_r0 ; s1_r0
+task 5 required 49 tags 0:0,4:0,5:2 arrival 3,1,2,5,0,4 written [r0,r2] (s0_r0 ; s4_r0) * s5_r2
+task 6 required 82 tags 1:0,4:0,6:0 arrival 2,0,3,5,1,4 written [r0] s1_r0 ; s4_r0 ; s6_r0
+task 7 required 6 tags 1:0,2:0 arrival 1,0,4,2,5,3 written [r0] s1_r0 ; s2_r0
+task 8 required 131 tags 0:0,1:0,7:2 arrival 2,1,0,3,4,5 written [r0,r2] (s0_r0 ; delta@r0 ; s1_r0 * s1_r0 ; mu@r0) * s7_r2
+task 9 required 34 tags 1:1,5:2 arrival 2,1,5,4,3,0 written [r1,r2] s1_r1 * s5_r2
+task 10 required 134 tags 1:0,2:0,7:0 arrival 2,3,4,5,0,1 written [r0] s1_r0 ; s2_r0 ; s7_r0
+task 11 required 82 tags 1:1,4:1,6:0 arrival 4,2,0,5,1,3 written [r0,r1] s6_r0 * (s1_r1 ; s4_r1)
+task 12 required 144 tags 4:0,7:2 arrival 4,3,5,2,1,0 written [r0,r2] s4_r0 * s7_r2
+task 13 required 3 tags 0:0,1:0 arrival 3,2,1,5,4,0 written [r0] s0_r0 ; s1_r0
+task 14 required 132 tags 2:0,7:2 arrival 5,4,0,1,3,2 written [r0,r2] s2_r0 * s7_r2
+task 15 required 160 tags 5:2,7:0 arrival 0,1,5,4,2,3 written [r0,r2] s7_r0 * s5_r2
+task 16 required 129 tags 0:0,7:2 arrival 1,4,0,2,5,3 written [r0,r2] s0_r0 * s7_r2
+task 17 required 24 tags 3:0,4:0 arrival 3,2,5,0,1,4 written [r0] s3_r0 ; delta@r0 ; s4_r0 * s4_r0 ; mu@r0
+task 18 required 226 tags 1:0,5:2,6:0,7:2 arrival 0,2,5,1,4,3 written [r0,r2] (s1_r0 ; delta@r0 ; s6_r0 * s6_r0 ; mu@r0) * (s5_r2 ; s7_r2)
+task 19 required 130 tags 1:1,7:2 arrival 3,4,5,1,0,2 written [r1,r2] s1_r1 * s7_r2
+performance none
+
+seed 274
+n 4 redraws 307 max_attempts 50
+prefix_required 173,127,95,50,239,254,194,18,207,255,251,255,78,183,183,255,255,193,181,179
+agent 0 caps 11 trust 84 role 0
+agent 1 caps 28 trust 67 role 1
+agent 2 caps 180 trust 45 role 2
+agent 3 caps 108 trust 89 role 2
+task 0 required 149 tags 0:0,2:2,4:2,7:2 arrival 3,2,0,1 written [r0,r2] s0_r0 * (s2_r2 ; s4_r2 ; s7_r2)
+task 1 required 5 tags 0:0,2:1 arrival 3,0,1,2 written [r0,r1] s0_r0 * s2_r1
+task 2 required 176 tags 4:2,5:2,7:2 arrival 2,0,1,3 written [r2] s4_r2 ; delta@r2 ; s5_r2 * s5_r2 ; mu@r2 ; s7_r2
+task 3 required 17 tags 0:0,4:2 arrival 2,1,3,0 written [r0,r2] s0_r0 * s4_r2
+task 4 required 44 tags 2:1,3:2,5:2 arrival 0,2,1,3 written [r1,r2] s2_r1 * (s3_r2 ; s5_r2)
+task 5 required 159 tags 0:0,1:0,2:2,3:0,4:1,7:2 arrival 3,1,0,2 written [r0,r1,r2] (s0_r0 ; s1_r0 ; s3_r0) * s4_r1 * (s2_r2 ; s7_r2)
+task 6 required 110 tags 1:0,2:1,3:2,5:2,6:2 arrival 0,2,1,3 written [r0,r1,r2] s1_r0 * s2_r1 * (s3_r2 ; s5_r2 ; s6_r2)
+task 7 required 96 tags 5:2,6:2 arrival 0,3,1,2 written [r2] s5_r2 ; s6_r2
+task 8 required 24 tags 3:2,4:2 arrival 3,0,2,1 written [r2] s3_r2 ; s4_r2
+task 9 required 3 tags 0:0,1:0 arrival 3,2,0,1 written [r0] s0_r0 ; s1_r0
+task 10 required 96 tags 5:2,6:2 arrival 2,1,0,3 written [r2] s5_r2 ; s6_r2
+task 11 required 24 tags 3:2,4:1 arrival 0,3,1,2 written [r1,r2] s4_r1 * s3_r2
+task 12 required 120 tags 3:0,4:1,5:2,6:2 arrival 2,1,3,0 written [r0,r1,r2] s3_r0 * s4_r1 * (s5_r2 ; s6_r2)
+task 13 required 30 tags 1:0,2:2,3:0,4:1 arrival 1,3,2,0 written [r0,r1,r2] (s1_r0 ; s3_r0) * s4_r1 * s2_r2
+task 14 required 88 tags 3:2,4:2,6:2 arrival 2,3,0,1 written [r2] s3_r2 ; delta@r2 ; s4_r2 * s4_r2 ; mu@r2 ; delta@r2 ; s6_r2 * s6_r2 ; mu@r2
+task 15 required 40 tags 3:2,5:2 arrival 1,0,3,2 written [r2] s3_r2 ; delta@r2 ; s5_r2 * s5_r2 ; mu@r2
+task 16 required 6 tags 1:0,2:2 arrival 2,3,0,1 written [r0,r2] s1_r0 * s2_r2
+task 17 required 193 tags 0:0,6:2,7:2 arrival 3,1,0,2 written [r0,r2] s0_r0 * (s6_r2 ; s7_r2)
+task 18 required 181 tags 0:0,2:2,4:1,5:2,7:2 arrival 1,0,3,2 written [r0,r1,r2] s0_r0 * s4_r1 * (s2_r2 ; s5_r2 ; s7_r2)
+task 19 required 112 tags 4:2,5:2,6:2 arrival 3,2,0,1 written [r2] s4_r2 ; s5_r2 ; s6_r2
+performance none
+
+seed 275
+n 15 redraws 107 max_attempts 18
+prefix_required 48,255,37,255,163,83,132,192,28,65,175,239,239,82,255,191,255,116,207,225
+agent 0 caps 22 trust 66 role 2
+agent 1 caps 20 trust 75 role 2
+agent 2 caps 11 trust 60 role 1
+agent 3 caps 16 trust 29 role 0
+agent 4 caps 10 trust 41 role 2
+agent 5 caps 82 trust 93 role 0
+agent 6 caps 128 trust 28 role 0
+agent 7 caps 4 trust 54 role 2
+agent 8 caps 5 trust 42 role 2
+agent 9 caps 34 trust 38 role 1
+agent 10 caps 2 trust 54 role 1
+agent 11 caps 67 trust 37 role 0
+agent 12 caps 28 trust 29 role 2
+agent 13 caps 150 trust 63 role 0
+agent 14 caps 16 trust 30 role 1
+task 0 required 3 tags 0:2,1:2 arrival 3,11,1,12,0,4,14,5,13,7,9,6,2,8,10 written [r2] s0_r2 ; delta@r2 ; s1_r2 * s1_r2 ; mu@r2
+task 1 required 146 tags 1:2,4:2,7:0 arrival 13,12,7,3,11,0,8,5,1,6,4,14,9,2,10 written [r0,r2] s7_r0 * (s1_r2 ; s4_r2)
+task 2 required 129 tags 0:0,7:0 arrival 8,9,11,13,6,12,7,14,2,3,1,0,10,4,5 written [r0] s0_r0 ; s7_r0
+task 3 required 130 tags 1:1,7:0 arrival 8,0,1,14,6,3,12,7,5,11,2,4,13,10,9 written [r0,r1] s7_r0 * s1_r1
+task 4 required 223 tags 0:2,1:2,2:0,3:2,4:2,6:0,7:0 arrival 2,10,12,6,11,8,3,5,14,4,0,7,13,1,9 written [r0,r2] (s2_r0 ; delta@r0 ; s6_r0 * s6_r0 ; mu@r0 ; s7_r0) * (s0_r2 ; s1_r2 ; delta@r2 ; s3_r2 * s3_r2 ; mu@r2 ; s4_r2)
+task 5 required 83 tags 0:0,1:0,4:1,6:0 arrival 2,0,10,7,6,3,1,12,5,13,9,11,4,8,14 written [r0,r1] (s0_r0 ; delta@r0 ; s1_r0 * s1_r0 ; mu@r0 ; s6_r0) * s4_r1
+task 6 required 18 tags 1:2,4:2 arrival 7,13,6,2,10,12,5,0,8,3,11,9,4,14,1 written [r2] s1_r2 ; s4_r2
+task 7 required 241 tags 0:1,4:0,5:1,6:0,7:0 arrival 6,8,9,14,3,4,11,13,7,1,12,2,10,5,0 written [r0,r1] (s4_r0 ; s6_r0 ; delta@r0 ; s7_r0 * s7_r0 ; mu@r0) * (s0_r1 ; s5_r1)
+task 8 required 24 tags 3:1,4:2 arrival 12,0,10,4,2,11,1,14,9,5,6,8,3,13,7 written [r1,r2] s3_r1 * s4_r2
+task 9 required 98 tags 1:1,5:1,6:0 arrival 11,10,1,12,8,9,6,0,7,4,2,3,13,5,14 written [r0,r1] s6_r0 * (s1_r1 ; delta@r1 ; s5_r1 * s5_r1 ; mu@r1)
+task 10 required 243 tags 0:2,1:0,4:2,5:1,6:0,7:0 arrival 9,2,8,1,14,12,10,0,5,3,6,11,7,13,4 written [r0,r1,r2] (s1_r0 ; s6_r0 ; s7_r0) * s5_r1 * (s0_r2 ; s4_r2)
+task 11 required 21 tags 0:1,2:0,4:1 arrival 7,2,12,9,6,8,14,11,13,1,4,10,0,5,3 written [r0,r1] s2_r0 * (s0_r1 ; s4_r1)
+task 12 required 239 tags 0:0,1:2,2:0,3:1,5:1,6:0,7:0 arrival 8,0,10,7,14,9,1,3,2,13,4,12,5,6,11 written [r0,r1,r2] (s0_r0 ; delta@r0 ; s2_r0 * s2_r0 ; mu@r0 ; s6_r0 ; delta@r0 ; s7_r0 * s7_r0 ; mu@r0) * (s3_r1 ; delta@r1 ; s5_r1 * s5_r1 ; mu@r1) * s1_r2
+task 13 required 23 tags 0:2,1:0,2:2,4:2 arrival 14,8,1,5,7,11,9,0,6,12,10,4,13,2,3 written [r0,r2] s1_r0 * (s0_r2 ; s2_r2 ; s4_r2)
+task 14 required 63 tags 0:2,1:1,2:0,3:1,4:0,5:1 arrival 11,6,10,8,0,2,13,1,12,3,5,4,9,7,14 written [r0,r1,r2] (s2_r0 ; s4_r0) * (s1_r1 ; s3_r1 ; s5_r1) * s0_r2
+task 15 required 207 tags 0:0,1:1,2:0,3:2,6:0,7:0 arrival 1,2,4,5,7,0,9,8,6,12,10,11,13,14,3 written [r0,r1,r2] (s0_r0 ; s2_r0 ; s6_r0 ; s7_r0) * s1_r1 * s3_r2
+task 16 required 65 tags 0:1,6:0 arrival 13,7,4,1,2,3,0,8,5,14,10,12,9,11,6 written [r0,r1] s6_r0 * s0_r1
+task 17 required 6 tags 1:1,2:0 arrival 2,10,12,11,0,6,9,8,5,13,3,14,7,1,4 written [r0,r1] s2_r0 * s1_r1
+task 18 required 69 tags 0:2,2:2,6:0 arrival 4,0,1,6,12,11,5,14,13,10,3,7,8,2,9 written [r0,r2] s6_r0 * (s0_r2 ; s2_r2)
+task 19 required 36 tags 2:0,5:1 arrival 14,6,12,0,8,5,3,1,9,7,13,4,10,11,2 written [r0,r1] s2_r0 * s5_r1
+performance none
+
+seed 276
+n 16 redraws 15 max_attempts 7
+prefix_required 226,117,250,3,85,165,172,233,94,246,239,6,132,81,239,192,42,239,59,83
+agent 0 caps 146 trust 86 role 0
+agent 1 caps 225 trust 24 role 1
+agent 2 caps 116 trust 23 role 2
+agent 3 caps 72 trust 76 role 2
+agent 4 caps 129 trust 60 role 1
+agent 5 caps 89 trust 45 role 1
+agent 6 caps 18 trust 56 role 0
+agent 7 caps 96 trust 97 role 2
+agent 8 caps 8 trust 22 role 1
+agent 9 caps 142 trust 92 role 0
+agent 10 caps 15 trust 33 role 0
+agent 11 caps 116 trust 56 role 0
+agent 12 caps 30 trust 78 role 1
+agent 13 caps 49 trust 21 role 2
+agent 14 caps 40 trust 87 role 0
+agent 15 caps 56 trust 88 role 0
+task 0 required 226 tags 1:1,5:0,6:2,7:1 arrival 3,13,5,10,1,7,9,15,8,2,11,12,0,4,14,6 written [r0,r1,r2] s5_r0 * (s1_r1 ; delta@r1 ; s7_r1 * s7_r1 ; mu@r1) * s6_r2
+task 1 required 117 tags 0:1,2:1,4:1,5:1,6:1 arrival 7,9,12,1,3,5,4,0,15,2,11,8,13,6,14,10 written [r1] s0_r1 ; s2_r1 ; s4_r1 ; delta@r1 ; s5_r1 * s5_r1 ; mu@r1 ; s6_r1
+task 2 required 119 tags 0:0,1:1,2:1,4:0,5:1,6:0 arrival 10,8,6,11,14,4,13,1,0,7,9,15,3,2,5,12 written [r0,r1] (s0_r0 ; s4_r0 ; s6_r0) * (s1_r1 ; s2_r1 ; s5_r1)
+task 3 required 3 tags 0:0,1:0 arrival 6,9,4,7,2,0,11,14,10,1,3,12,13,8,15,5 written [r0] s0_r0 ; s1_r0
+task 4 required 85 tags 0:0,2:0,4:1,6:2 arrival 0,15,12,6,1,11,9,10,2,5,7,3,13,14,8,4 written [r0,r1,r2] (s0_r0 ; s2_r0) * s4_r1 * s6_r2
+task 5 required 165 tags 0:2,2:2,5:2,7:0 arrival 9,14,2,11,3,12,7,13,6,5,15,8,0,10,4,1 written [r0,r2] s7_r0 * (s0_r2 ; delta@r2 ; s2_r2 * s2_r2 ; mu@r2 ; s5_r2)
+task 6 required 66 tags 1:1,6:0 arrival 0,11,6,10,1,8,13,15,12,14,9,4,7,2,3,5 written [r0,r1] s6_r0 * s1_r1
+task 7 required 61 tags 0:2,2:1,3:0,4:1,5:0 arrival 10,11,13,3,0,12,14,2,9,5,7,15,4,1,6,8 written [r0,r1,r2] (s3_r0 ; s5_r0) * (s2_r1 ; s4_r1) * s0_r2
+task 8 required 94 tags 1:1,2:2,3:1,4:1,6:2 arrival 11,15,8,14,12,9,6,0,13,3,4,5,10,2,1,7 written [r1,r2] (s1_r1 ; s3_r1 ; s4_r1) * (s2_r2 ; s6_r2)
+task 9 required 254 tags 1:0,2:2,3:0,4:0,5:1,6:1,7:0 arrival 0,8,1,3,5,6,2,11,7,10,9,4,12,15,14,13 written [r0,r1,r2] (s1_r0 ; s3_r0 ; delta@r0 ; s4_r0 * s4_r0 ; mu@r0 ; delta@r0 ; s7_r0 * s7_r0 ; mu@r0) * (s5_r1 ; s6_r1) * s2_r2
+task 10 required 133 tags 0:1,2:2,7:0 arrival 15,5,9,4,11,12,13,7,10,6,1,2,0,8,14,3 written [r0,r1,r2] s7_r0 * s0_r1 * s2_r2
+task 11 required 6 tags 1:0,2:0 arrival 1,13,11,7,14,3,10,0,12,6,2,4,5,15,9,8 written [r0] s1_r0 ; s2_r0
+task 12 required 132 tags 2:2,7:1 arrival 14,12,10,0,1,8,6,2,4,13,5,7,9,3,11,15 written [r1,r2] s7_r1 * s2_r2
+task 13 required 81 tags 0:2,4:2,6:2 arrival 1,12,0,13,7,4,9,2,3,11,5,8,14,15,10,6 written [r2] s0_r2 ; s4_r2 ; delta@r2 ; s6_r2 * s6_r2 ; mu@r2
+task 14 required 239 tags 0:1,1:1,2:0,3:1,5:1,6:0,7:0 arrival 1,9,3,8,14,0,11,2,15,12,7,4,13,5,10,6 written [r0,r1] (s2_r0 ; s6_r0 ; s7_r0) * (s0_r1 ; s1_r1 ; s3_r1 ; s5_r1)
+task 15 required 224 tags 5:0,6:0,7:1 arrival 2,3,15,4,8,14,5,11,12,0,1,10,6,9,13,7 written [r0,r1] (s5_r0 ; s6_r0) * s7_r1
+task 16 required 192 tags 6:1,7:0 arrival 7,9,15,5,3,10,14,8,4,1,13,2,6,12,0,11 written [r0,r1] s7_r0 * s6_r1
+task 17 required 159 tags 0:0,1:0,2:0,3:0,4:0,7:0 arrival 0,10,11,9,1,12,5,4,6,15,8,7,2,14,3,13 written [r0] s0_r0 ; delta@r0 ; s1_r0 * s1_r0 ; mu@r0 ; s2_r0 ; s3_r0 ; s4_r0 ; s7_r0
+task 18 required 59 tags 0:0,1:1,3:0,4:0,5:0 arrival 5,10,3,8,14,7,12,9,1,4,6,0,11,2,15,13 written [r0,r1] (s0_r0 ; s3_r0 ; delta@r0 ; s4_r0 * s4_r0 ; mu@r0 ; delta@r0 ; s5_r0 * s5_r0 ; mu@r0) * s1_r1
+task 19 required 83 tags 0:0,1:0,4:1,6:1 arrival 4,6,7,13,12,15,5,1,14,3,10,11,0,9,8,2 written [r0,r1] (s0_r0 ; s1_r0) * (s4_r1 ; s6_r1)
+performance none
+
+seed 277
+n 13 redraws 37 max_attempts 8
+prefix_required 159,255,127,100,255,35,164,255,110,224,255,192,155,255,161,127,255,201,17,95
+agent 0 caps 138 trust 30 role 0
+agent 1 caps 130 trust 23 role 2
+agent 2 caps 16 trust 34 role 0
+agent 3 caps 64 trust 99 role 2
+agent 4 caps 9 trust 44 role 0
+agent 5 caps 102 trust 91 role 1
+agent 6 caps 16 trust 27 role 1
+agent 7 caps 128 trust 61 role 2
+agent 8 caps 16 trust 77 role 0
+agent 9 caps 132 trust 33 role 2
+agent 10 caps 65 trust 58 role 2
+agent 11 caps 32 trust 20 role 0
+agent 12 caps 54 trust 30 role 2
+task 0 required 183 tags 0:2,1:2,2:1,4:1,5:1,7:2 arrival 0,2,4,11,6,3,10,9,8,5,12,1,7 written [r1,r2] (s2_r1 ; s4_r1 ; s5_r1) * (s0_r2 ; s1_r2 ; s7_r2)
+task 1 required 179 tags 0:0,1:2,4:2,5:0,7:2 arrival 0,4,3,9,5,8,2,1,12,7,6,10,11 written [r0,r2] (s0_r0 ; s5_r0) * (s1_r2 ; delta@r2 ; s4_r2 * s4_r2 ; mu@r2 ; s7_r2)
+task 2 required 31 tags 0:2,1:2,2:2,3:0,4:0 arrival 4,1,5,0,9,12,2,7,6,10,11,8,3 written [r0,r2] (s3_r0 ; s4_r0) * (s0_r2 ; s1_r2 ; s2_r2)
+task 3 required 3 tags 0:2,1:2 arrival 2,1,11,3,10,4,8,6,0,7,9,12,5 written [r2] s0_r2 ; s1_r2
+task 4 required 132 tags 2:1,7:0 arrival 5,9,0,4,10,2,1,11,12,7,3,8,6 written [r0,r1] s7_r0 * s2_r1
+task 5 required 35 tags 0:0,1:1,5:1 arrival 5,8,3,0,6,10,4,12,7,9,2,11,1 written [r0,r1] s0_r0 * (s1_r1 ; s5_r1)
+task 6 required 164 tags 2:2,5:2,7:0 arrival 8,9,0,1,4,12,6,10,5,2,7,3,11 written [r0,r2] s7_r0 * (s2_r2 ; delta@r2 ; s5_r2 * s5_r2 ; mu@r2)
+task 7 required 211 tags 0:2,1:2,4:1,6:2,7:0 arrival 9,7,3,10,5,4,12,0,1,8,2,6,11 written [r0,r1,r2] s7_r0 * s4_r1 * (s0_r2 ; s1_r2 ; s6_r2)
+task 8 required 255 tags 0:0,1:1,2:2,3:0,4:2,5:0,6:2,7:2 arrival 12,1,10,6,9,2,5,8,4,7,11,0,3 written [r0,r1,r2] (s0_r0 ; s3_r0 ; s5_r0) * s1_r1 * (s2_r2 ; delta@r2 ; s4_r2 * s4_r2 ; mu@r2 ; delta@r2 ; s6_r2 * s6_r2 ; mu@r2 ; s7_r2)
+task 9 required 224 tags 5:2,6:2,7:2 arrival 4,10,7,6,3,5,12,0,8,1,2,9,11 written [r2] s5_r2 ; s6_r2 ; s7_r2
+task 10 required 48 tags 4:0,5:0 arrival 7,8,3,10,5,0,1,4,9,6,11,2,12 written [r0] s4_r0 ; s5_r0
+task 11 required 9 tags 0:2,3:0 arrival 0,2,7,3,8,12,10,6,1,4,5,9,11 written [r0,r2] s3_r0 * s0_r2
+task 12 required 177 tags 0:0,4:2,5:0,7:0 arrival 2,6,11,10,5,8,9,7,0,12,4,1,3 written [r0,r2] (s0_r0 ; delta@r0 ; s5_r0 * s5_r0 ; mu@r0 ; s7_r0) * s4_r2
+task 13 required 144 tags 4:0,7:2 arrival 11,4,5,9,12,0,6,1,2,3,8,10,7 written [r0,r2] s4_r0 * s7_r2
+task 14 required 161 tags 0:0,5:0,7:2 arrival 7,12,1,0,5,4,6,8,2,10,11,3,9 written [r0,r2] (s0_r0 ; s5_r0) * s7_r2
+task 15 required 96 tags 5:0,6:2 arrival 4,5,9,1,2,10,8,0,3,12,7,6,11 written [r0,r2] s5_r0 * s6_r2
+task 16 required 97 tags 0:0,5:0,6:1 arrival 8,4,12,5,2,6,9,7,10,0,1,3,11 written [r0,r1] (s0_r0 ; s5_r0) * s6_r1
+task 17 required 18 tags 1:0,4:2 arrival 8,3,12,1,6,4,5,0,2,7,9,11,10 written [r0,r2] s1_r0 * s4_r2
+task 18 required 17 tags 0:0,4:0 arrival 2,11,3,6,0,10,12,4,1,8,5,9,7 written [r0] s0_r0 ; s4_r0
+task 19 required 118 tags 1:0,2:1,4:2,5:1,6:1 arrival 0,1,4,3,12,2,8,10,5,7,9,11,6 written [r0,r1,r2] s1_r0 * (s2_r1 ; delta@r1 ; s5_r1 * s5_r1 ; mu@r1 ; s6_r1) * s4_r2
+performance none
+
+seed 278
+n 6 redraws 113 max_attempts 21
+prefix_required 52,46,240,254,3,182,251,127,40,251,255,250,68,109,189,192,87,203,154,245
+agent 0 caps 22 trust 90 role 2
+agent 1 caps 12 trust 50 role 2
+agent 2 caps 216 trust 29 role 0
+agent 3 caps 11 trust 61 role 0
+agent 4 caps 54 trust 93 role 2
+agent 5 caps 77 trust 31 role 1
+task 0 required 56 tags 3:1,4:2,5:2 arrival 4,5,1,0,3,2 written [r1,r2] s3_r1 * (s4_r2 ; s5_r2)
+task 1 required 46 tags 1:0,2:2,3:2,5:2 arrival 3,4,0,2,1,5 written [r0,r2] s1_r0 * (s2_r2 ; delta@r2 ; s3_r2 * s3_r2 ; mu@r2 ; s5_r2)
+task 2 required 69 tags 0:1,2:1,6:0 arrival 1,4,3,0,2,5 written [r0,r1] s6_r0 * (s0_r1 ; s2_r1)
+task 3 required 65 tags 0:1,6:0 arrival 3,0,4,2,5,1 written [r0,r1] s6_r0 * s0_r1
+task 4 required 3 tags 0:0,1:0 arrival 3,0,2,4,1,5 written [r0] s0_r0 ; s1_r0
+task 5 required 23 tags 0:1,1:0,2:1,4:2 arrival 0,5,2,1,3,4 written [r0,r1,r2] s1_r0 * (s0_r1 ; s2_r1) * s4_r2
+task 6 required 168 tags 3:2,5:2,7:0 arrival 4,3,5,0,1,2 written [r0,r2] s7_r0 * (s3_r2 ; s5_r2)
+task 7 required 127 tags 0:1,1:0,2:1,3:0,4:2,5:2,6:1 arrival 0,1,3,2,5,4 written [r0,r1,r2] (s1_r0 ; delta@r0 ; s3_r0 * s3_r0 ; mu@r0) * (s0_r1 ; s2_r1 ; delta@r1 ; s6_r1 * s6_r1 ; mu@r1) * (s4_r2 ; s5_r2)
+task 8 required 188 tags 2:1,3:0,4:0,5:2,7:0 arrival 4,3,1,2,0,5 written [r0,r1,r2] (s3_r0 ; delta@r0 ; s4_r0 * s4_r0 ; mu@r0 ; s7_r0) * s2_r1 * s5_r2
+task 9 required 72 tags 3:1,6:0 arrival 2,5,1,0,3,4 written [r0,r1] s6_r0 * s3_r1
+task 10 required 10 tags 1:0,3:1 arrival 3,5,4,2,0,1 written [r0,r1] s1_r0 * s3_r1
+task 11 required 68 tags 2:1,6:0 arrival 0,4,1,3,2,5 written [r0,r1] s6_r0 * s2_r1
+task 12 required 215 tags 0:1,1:2,2:2,4:0,6:0,7:0 arrival 4,0,3,1,2,5 written [r0,r1,r2] (s4_r0 ; delta@r0 ; s6_r0 * s6_r0 ; mu@r0 ; s7_r0) * s0_r1 * (s1_r2 ; s2_r2)
+task 13 required 136 tags 3:2,7:0 arrival 1,0,3,2,5,4 written [r0,r2] s7_r0 * s3_r2
+task 14 required 10 tags 1:2,3:2 arrival 1,5,0,2,3,4 written [r2] s1_r2 ; s3_r2
+task 15 required 192 tags 6:1,7:0 arrival 5,4,1,3,2,0 written [r0,r1] s7_r0 * s6_r1
+task 16 required 57 tags 0:1,3:0,4:0,5:2 arrival 5,0,3,2,1,4 written [r0,r1,r2] (s3_r0 ; s4_r0) * s0_r1 * s5_r2
+task 17 required 219 tags 0:0,1:2,3:2,4:0,6:0,7:0 arrival 0,5,3,2,4,1 written [r0,r2] (s0_r0 ; s4_r0 ; delta@r0 ; s6_r0 * s6_r0 ; mu@r0 ; s7_r0) * (s1_r2 ; s3_r2)
+task 18 required 148 tags 2:2,4:2,7:0 arrival 5,0,3,4,2,1 written [r0,r2] s7_r0 * (s2_r2 ; s4_r2)
+task 19 required 144 tags 4:0,7:0 arrival 2,4,3,5,1,0 written [r0] s4_r0 ; s7_r0
+performance none
+
+seed 279
+n 15 redraws 33 max_attempts 11
+prefix_required 68,231,159,71,11,99,116,144,253,254,131,34,83,251,255,75,127,143,132,220
+agent 0 caps 180 trust 91 role 2
+agent 1 caps 6 trust 43 role 1
+agent 2 caps 100 trust 23 role 2
+agent 3 caps 81 trust 70 role 1
+agent 4 caps 240 trust 44 role 1
+agent 5 caps 2 trust 89 role 2
+agent 6 caps 16 trust 76 role 1
+agent 7 caps 152 trust 36 role 2
+agent 8 caps 7 trust 99 role 2
+agent 9 caps 132 trust 96 role 2
+agent 10 caps 16 trust 29 role 0
+agent 11 caps 16 trust 22 role 0
+agent 12 caps 88 trust 95 role 1
+agent 13 caps 73 trust 56 role 2
+agent 14 caps 72 trust 93 role 0
+task 0 required 68 tags 2:1,6:2 arrival 0,3,2,11,5,1,10,13,14,6,8,12,4,9,7 written [r1,r2] s2_r1 * s6_r2
+task 1 required 231 tags 0:1,1:2,2:2,5:2,6:1,7:1 arrival 6,2,4,1,0,3,14,9,8,10,12,13,11,5,7 written [r1,r2] (s0_r1 ; s6_r1 ; delta@r1 ; s7_r1 * s7_r1 ; mu@r1) * (s1_r2 ; delta@r2 ; s2_r2 * s2_r2 ; mu@r2 ; delta@r2 ; s5_r2 * s5_r2 ; mu@r2)
+task 2 required 223 tags 0:2,1:2,2:2,3:1,4:0,6:1,7:2 arrival 2,1,8,11,4,10,14,5,13,7,0,3,6,9,12 written [r0,r1,r2] s4_r0 * (s3_r1 ; s6_r1) * (s0_r2 ; s1_r2 ; delta@r2 ; s2_r2 * s2_r2 ; mu@r2 ; s7_r2)
+task 3 required 255 tags 0:1,1:1,2:1,3:2,4:2,5:1,6:0,7:2 arrival 14,11,13,6,12,0,8,2,7,9,3,10,4,5,1 written [r0,r1,r2] s6_r0 * (s0_r1 ; delta@r1 ; s1_r1 * s1_r1 ; mu@r1 ; s2_r1 ; s5_r1) * (s3_r2 ; s4_r2 ; s7_r2)
+task 4 required 54 tags 1:2,2:1,4:1,5:1 arrival 7,5,13,14,8,3,0,2,6,9,12,4,10,11,1 written [r1,r2] (s2_r1 ; s4_r1 ; delta@r1 ; s5_r1 * s5_r1 ; mu@r1) * s1_r2
+task 5 required 205 tags 0:2,2:2,3:0,6:0,7:2 arrival 4,6,9,10,12,11,1,3,2,0,14,5,8,7,13 written [r0,r2] (s3_r0 ; s6_r0) * (s0_r2 ; s2_r2 ; delta@r2 ; s7_r2 * s7_r2 ; mu@r2)
+task 6 required 116 tags 2:1,4:1,5:2,6:1 arrival 5,9,0,12,6,4,11,14,1,7,8,3,2,10,13 written [r1,r2] (s2_r1 ; s4_r1 ; s6_r1) * s5_r2
+task 7 required 218 tags 1:2,3:0,4:2,6:2,7:1 arrival 1,4,7,13,3,14,9,10,11,12,0,2,5,6,8 written [r0,r1,r2] s3_r0 * s7_r1 * (s1_r2 ; s4_r2 ; s6_r2)
+task 8 required 253 tags 0:1,2:2,3:1,4:2,5:1,6:2,7:1 arrival 10,1,3,5,7,2,8,13,9,0,4,6,14,12,11 written [r1,r2] (s0_r1 ; delta@r1 ; s3_r1 * s3_r1 ; mu@r1 ; s5_r1 ; delta@r1 ; s7_r1 * s7_r1 ; mu@r1) * (s2_r2 ; s4_r2 ; s6_r2)
+task 9 required 254 tags 1:1,2:2,3:2,4:1,5:1,6:1,7:2 arrival 13,8,4,7,5,0,2,14,11,12,3,10,9,6,1 written [r1,r2] (s1_r1 ; s4_r1 ; s5_r1 ; s6_r1) * (s2_r2 ; s3_r2 ; delta@r2 ; s7_r2 * s7_r2 ; mu@r2)
+task 10 required 131 tags 0:1,1:1,7:2 arrival 14,0,3,6,4,11,2,7,1,5,8,10,9,13,12 written [r1,r2] (s0_r1 ; s1_r1) * s7_r2
+task 11 required 68 tags 2:2,6:2 arrival 8,6,12,0,2,4,13,7,9,14,11,5,3,10,1 written [r2] s2_r2 ; s6_r2
+task 12 required 106 tags 1:1,3:1,5:1,6:0 arrival 0,2,1,8,7,5,10,9,14,11,6,12,13,3,4 written [r0,r1] s6_r0 * (s1_r1 ; s3_r1 ; s5_r1)
+task 13 required 251 tags 0:1,1:2,3:0,4:1,5:2,6:0,7:1 arrival 6,8,7,0,3,11,14,4,9,10,5,13,12,2,1 written [r0,r1,r2] (s3_r0 ; s6_r0) * (s0_r1 ; delta@r1 ; s4_r1 * s4_r1 ; mu@r1 ; s7_r1) * (s1_r2 ; s5_r2)
+task 14 required 49 tags 0:1,4:2,5:2 arrival 13,3,6,11,8,5,10,4,14,9,7,12,0,1,2 written [r1,r2] s0_r1 * (s4_r2 ; s5_r2)
+task 15 required 196 tags 2:2,6:1,7:1 arrival 6,1,3,4,7,9,13,2,8,11,14,10,0,5,12 written [r1,r2] (s6_r1 ; s7_r1) * s2_r2
+task 16 required 65 tags 0:1,6:0 arrival 1,9,8,6,4,7,13,10,12,14,3,2,11,0,5 written [r0,r1] s6_r0 * s0_r1
+task 17 required 230 tags 1:2,2:2,5:2,6:2,7:1 arrival 2,8,14,9,6,5,10,3,13,12,7,1,4,0,11 written [r1,r2] s7_r1 * (s1_r2 ; s2_r2 ; delta@r2 ; s5_r2 * s5_r2 ; mu@r2 ; s6_r2)
+task 18 required 43 tags 0:1,1:2,3:2,5:1 arrival 0,10,11,2,4,3,5,9,6,7,1,12,13,14,8 written [r1,r2] (s0_r1 ; s5_r1) * (s1_r2 ; s3_r2)
+task 19 required 70 tags 1:1,2:1,6:0 arrival 9,14,6,7,3,8,11,2,13,5,0,12,10,1,4 written [r0,r1] s6_r0 * (s1_r1 ; delta@r1 ; s2_r1 * s2_r1 ; mu@r1)
+performance none
+
+seed 280
+n 13 redraws 112 max_attempts 20
+prefix_required 191,168,122,255,237,237,247,220,72,77,144,154,87,255,255,223,180,118,50,88
+agent 0 caps 64 trust 79 role 2
+agent 1 caps 3 trust 41 role 0
+agent 2 caps 33 trust 27 role 1
+agent 3 caps 226 trust 21 role 2
+agent 4 caps 16 trust 43 role 1
+agent 5 caps 5 trust 50 role 1
+agent 6 caps 72 trust 73 role 0
+agent 7 caps 10 trust 50 role 2
+agent 8 caps 64 trust 45 role 2
+agent 9 caps 69 trust 42 role 2
+agent 10 caps 71 trust 33 role 2
+agent 11 caps 97 trust 90 role 2
+agent 12 caps 8 trust 33 role 1
+task 0 required 195 tags 0:0,1:0,6:0,7:2 arrival 7,5,8,3,1,9,4,6,12,10,0,11,2 written [r0,r2] (s0_r0 ; s1_r0 ; s6_r0) * s7_r2
+task 1 required 244 tags 2:2,4:1,5:1,6:2,7:2 arrival 8,11,10,7,1,4,2,5,3,12,9,6,0 written [r1,r2] (s4_r1 ; s5_r1) * (s2_r2 ; s6_r2 ; s7_r2)
+task 2 required 163 tags 0:1,1:0,5:2,7:2 arrival 11,6,2,10,4,3,5,0,1,9,12,7,8 written [r0,r1,r2] s1_r0 * s0_r1 * (s5_r2 ; s7_r2)
+task 3 required 104 tags 3:1,5:2,6:0 arrival 0,11,8,10,9,2,3,4,7,1,6,12,5 written [r0,r1,r2] s6_r0 * s3_r1 * s5_r2
+task 4 required 199 tags 0:2,1:0,2:2,6:2,7:2 arrival 12,9,0,4,10,6,11,3,8,1,2,7,5 written [r0,r2] s1_r0 * (s0_r2 ; s2_r2 ; delta@r2 ; s6_r2 * s6_r2 ; mu@r2 ; s7_r2)
+task 5 required 40 tags 3:1,5:2 arrival 6,0,1,5,7,3,4,2,9,11,12,10,8 written [r1,r2] s3_r1 * s5_r2
+task 6 required 5 tags 0:1,2:1 arrival 2,8,12,6,9,10,5,3,4,0,11,1,7 written [r1] s0_r1 ; s2_r1
+task 7 required 40 tags 3:2,5:1 arrival 0,9,12,11,8,2,1,6,3,7,4,5,10 written [r1,r2] s5_r1 * s3_r2
+task 8 required 72 tags 3:1,6:0 arrival 3,7,0,5,8,2,11,10,12,9,4,1,6 written [r0,r1] s6_r0 * s3_r1
+task 9 required 42 tags 1:2,3:2,5:1 arrival 10,5,0,6,3,4,11,1,7,12,2,9,8 written [r1,r2] s5_r1 * (s1_r2 ; s3_r2)
+task 10 required 5 tags 0:1,2:2 arrival 6,0,2,8,5,3,11,9,10,12,7,1,4 written [r1,r2] s0_r1 * s2_r2
+task 11 required 81 tags 0:2,4:1,6:0 arrival 1,0,9,11,4,10,8,12,6,7,3,2,5 written [r0,r1,r2] s6_r0 * s4_r1 * s0_r2
+task 12 required 166 tags 1:2,2:2,5:1,7:2 arrival 1,8,6,2,11,12,0,5,10,7,3,9,4 written [r1,r2] s5_r1 * (s1_r2 ; s2_r2 ; s7_r2)
+task 13 required 159 tags 0:2,1:2,2:2,3:2,4:1,7:2 arrival 4,11,10,7,2,3,12,5,6,1,8,9,0 written [r1,r2] s4_r1 * (s0_r2 ; s1_r2 ; s2_r2 ; s3_r2 ; s7_r2)
+task 14 required 105 tags 0:2,3:0,5:1,6:2 arrival 11,4,5,10,1,8,6,12,7,2,9,0,3 written [r0,r1,r2] s3_r0 * s5_r1 * (s0_r2 ; s6_r2)
+task 15 required 74 tags 1:2,3:1,6:2 arrival 0,1,6,3,10,5,11,9,7,12,8,2,4 written [r1,r2] s3_r1 * (s1_r2 ; s6_r2)
+task 16 required 180 tags 2:1,4:1,5:2,7:2 arrival 4,6,0,1,11,3,12,8,7,10,9,5,2 written [r1,r2] (s2_r1 ; s4_r1) * (s5_r2 ; s7_r2)
+task 17 required 225 tags 0:2,5:1,6:2,7:2 arrival 3,4,5,0,2,1,10,7,6,8,11,12,9 written [r1,r2] s5_r1 * (s0_r2 ; s6_r2 ; delta@r2 ; s7_r2 * s7_r2 ; mu@r2)
+task 18 required 170 tags 1:0,3:1,5:2,7:2 arrival 10,6,4,1,3,5,8,12,9,7,11,2,0 written [r0,r1,r2] s1_r0 * s3_r1 * (s5_r2 ; s7_r2)
+task 19 required 88 tags 3:2,4:1,6:2 arrival 8,3,4,1,6,7,10,9,12,2,5,11,0 written [r1,r2] s4_r1 * (s3_r2 ; s6_r2)
+performance none
+
+seed 281
+n 8 redraws 799 max_attempts 134
+prefix_required 140,254,130,255,6,251,5,147,176,83,30,253,200,75,36,223,14,17,70,53
+agent 0 caps 140 trust 35 role 0
+agent 1 caps 8 trust 27 role 0
+agent 2 caps 24 trust 56 role 2
+agent 3 caps 80 trust 50 role 2
+agent 4 caps 16 trust 87 role 2
+agent 5 caps 8 trust 30 role 1
+agent 6 caps 132 trust 53 role 2
+agent 7 caps 132 trust 73 role 2
+task 0 required 140 tags 2:0,3:0,7:2 arrival 1,4,2,5,3,6,0,7 written [r0,r2] (s2_r0 ; s3_r0) * s7_r2
+task 1 required 192 tags 6:2,7:0 arrival 6,5,1,2,3,4,0,7 written [r0,r2] s7_r0 * s6_r2
+task 2 required 132 tags 2:2,7:2 arrival 0,1,3,2,4,6,7,5 written [r2] s2_r2 ; delta@r2 ; s7_r2 * s7_r2 ; mu@r2
+task 3 required 136 tags 3:1,7:2 arrival 4,6,3,5,0,1,7,2 written [r1,r2] s3_r1 * s7_r2
+task 4 required 192 tags 6:2,7:2 arrival 4,0,6,5,2,1,7,3 written [r2] s6_r2 ; delta@r2 ; s7_r2 * s7_r2 ; mu@r2
+task 5 required 132 tags 2:2,7:0 arrival 4,6,0,1,5,7,3,2 written [r0,r2] s7_r0 * s2_r2
+task 6 required 208 tags 4:2,6:2,7:2 arrival 2,6,0,4,3,1,5,7 written [r2] s4_r2 ; s6_r2 ; s7_r2
+task 7 required 200 tags 3:0,6:2,7:2 arrival 5,1,6,0,4,7,3,2 written [r0,r2] s3_r0 * (s6_r2 ; delta@r2 ; s7_r2 * s7_r2 ; mu@r2)
+task 8 required 24 tags 3:0,4:2 arrival 7,5,1,2,3,6,4,0 written [r0,r2] s3_r0 * s4_r2
+task 9 required 148 tags 2:0,4:2,7:0 arrival 6,4,0,2,5,7,1,3 written [r0,r2] (s2_r0 ; s7_r0) * s4_r2
+task 10 required 20 tags 2:0,4:2 arrival 0,7,5,1,3,4,2,6 written [r0,r2] s2_r0 * s4_r2
+task 11 required 204 tags 2:0,3:2,6:2,7:2 arrival 2,1,0,6,5,7,4,3 written [r0,r2] s2_r0 * (s3_r2 ; delta@r2 ; s6_r2 * s6_r2 ; mu@r2 ; delta@r2 ; s7_r2 * s7_r2 ; mu@r2)
+task 12 required 144 tags 4:2,7:0 arrival 0,6,2,7,3,5,4,1 written [r0,r2] s7_r0 * s4_r2
+task 13 required 12 tags 2:0,3:0 arrival 7,2,0,5,3,6,4,1 written [r0] s2_r0 ; s3_r0
+task 14 required 72 tags 3:0,6:2 arrival 3,5,4,0,6,2,7,1 written [r0,r2] s3_r0 * s6_r2
+task 15 required 132 tags 2:2,7:0 arrival 6,2,4,7,1,5,0,3 written [r0,r2] s7_r0 * s2_r2
+task 16 required 80 tags 4:2,6:2 arrival 7,0,3,4,1,2,6,5 written [r2] s4_r2 ; s6_r2
+task 17 required 136 tags 3:0,7:2 arrival 2,6,0,4,1,3,7,5 written [r0,r2] s3_r0 * s7_r2
+task 18 required 68 tags 2:2,6:2 arrival 5,7,3,0,1,4,2,6 written [r2] s2_r2 ; s6_r2
+task 19 required 12 tags 2:2,3:0 arrival 6,2,3,4,7,0,1,5 written [r0,r2] s3_r0 * s2_r2
+performance none
+
+seed 282
+n 16 redraws 28 max_attempts 6
+prefix_required 24,155,192,21,20,130,127,26,23,31,127,192,239,199,236,255,20,241,105,255
+agent 0 caps 29 trust 82 role 2
+agent 1 caps 1 trust 37 role 1
+agent 2 caps 208 trust 59 role 2
+agent 3 caps 160 trust 59 role 0
+agent 4 caps 200 trust 28 role 2
+agent 5 caps 65 trust 28 role 0
+agent 6 caps 172 trust 51 role 0
+agent 7 caps 86 trust 96 role 0
+agent 8 caps 116 trust 68 role 2
+agent 9 caps 9 trust 46 role 0
+agent 10 caps 64 trust 85 role 2
+agent 11 caps 232 trust 70 role 0
+agent 12 caps 72 trust 98 role 2
+agent 13 caps 184 trust 82 role 0
+agent 14 caps 226 trust 82 role 1
+agent 15 caps 141 trust 93 role 0
+task 0 required 24 tags 3:0,4:2 arrival 15,10,14,13,7,9,5,8,0,6,11,1,2,4,3,12 written [r0,r2] s3_r0 * s4_r2
+task 1 required 88 tags 3:2,4:2,6:0 arrival 7,4,8,9,2,11,5,3,0,6,12,1,15,14,10,13 written [r0,r2] s6_r0 * (s3_r2 ; delta@r2 ; s4_r2 * s4_r2 ; mu@r2)
+task 2 required 192 tags 6:1,7:1 arrival 14,8,5,4,15,12,13,6,2,1,0,11,10,7,3,9 written [r1] s6_r1 ; s7_r1
+task 3 required 21 tags 0:0,2:2,4:0 arrival 10,8,0,7,14,12,6,5,4,3,2,13,9,11,1,15 written [r0,r2] (s0_r0 ; delta@r0 ; s4_r0 * s4_r0 ; mu@r0) * s2_r2
+task 4 required 20 tags 2:0,4:0 arrival 12,11,2,1,6,15,5,3,9,13,8,7,14,4,10,0 written [r0] s2_r0 ; s4_r0
+task 5 required 130 tags 1:1,7:2 arrival 6,0,8,13,7,4,3,1,12,2,14,15,10,5,11,9 written [r1,r2] s1_r1 * s7_r2
+task 6 required 18 tags 1:1,4:2 arrival 14,1,5,10,3,4,13,9,8,12,15,0,11,6,2,7 written [r1,r2] s1_r1 * s4_r2
+task 7 required 42 tags 1:0,3:2,5:2 arrival 10,8,11,1,6,2,9,3,7,0,13,15,12,4,14,5 written [r0,r2] s1_r0 * (s3_r2 ; delta@r2 ; s5_r2 * s5_r2 ; mu@r2)
+task 8 required 34 tags 1:0,5:2 arrival 6,1,2,4,9,0,8,10,7,14,12,5,13,11,3,15 written [r0,r2] s1_r0 * s5_r2
+task 9 required 192 tags 6:1,7:0 arrival 6,7,3,0,9,5,1,8,10,15,14,12,2,13,11,4 written [r0,r1] s7_r0 * s6_r1
+task 10 required 127 tags 0:1,1:1,2:2,3:0,4:2,5:0,6:0 arrival 5,15,13,3,8,9,7,14,2,11,10,12,4,0,6,1 written [r0,r1,r2] (s3_r0 ; delta@r0 ; s5_r0 * s5_r0 ; mu@r0 ; delta@r0 ; s6_r0 * s6_r0 ; mu@r0) * (s0_r1 ; delta@r1 ; s1_r1 * s1_r1 ; mu@r1) * (s2_r2 ; s4_r2)
+task 11 required 192 tags 6:2,7:1 arrival 14,6,3,7,13,8,15,11,1,10,0,9,5,12,2,4 written [r1,r2] s7_r1 * s6_r2
+task 12 required 157 tags 0:1,2:2,3:0,4:0,7:1 arrival 0,3,15,1,10,14,7,11,4,13,9,8,12,2,6,5 written [r0,r1,r2] (s3_r0 ; s4_r0) * (s0_r1 ; s7_r1) * s2_r2
+task 13 required 207 tags 0:1,1:1,2:0,3:0,6:1,7:1 arrival 10,0,14,2,7,5,15,11,9,13,6,3,4,8,12,1 written [r0,r1] (s2_r0 ; delta@r0 ; s3_r0 * s3_r0 ; mu@r0) * (s0_r1 ; s1_r1 ; delta@r1 ; s6_r1 * s6_r1 ; mu@r1 ; s7_r1)
+task 14 required 130 tags 1:1,7:2 arrival 15,4,12,2,13,5,11,1,6,3,7,9,14,10,0,8 written [r1,r2] s1_r1 * s7_r2
+task 15 required 251 tags 0:1,1:1,3:0,4:2,5:1,6:0,7:0 arrival 7,15,14,8,6,0,13,12,4,5,9,3,1,2,11,10 written [r0,r1,r2] (s3_r0 ; s6_r0 ; delta@r0 ; s7_r0 * s7_r0 ; mu@r0) * (s0_r1 ; s1_r1 ; s5_r1) * s4_r2
+task 16 required 152 tags 3:0,4:0,7:2 arrival 4,3,6,14,15,12,1,5,2,10,0,9,8,7,13,11 written [r0,r2] (s3_r0 ; s4_r0) * s7_r2
+task 17 required 241 tags 0:0,4:0,5:0,6:0,7:2 arrival 5,6,8,11,1,14,15,9,4,7,13,3,10,12,2,0 written [r0,r2] (s0_r0 ; s4_r0 ; s5_r0 ; delta@r0 ; s6_r0 * s6_r0 ; mu@r0) * s7_r2
+task 18 required 246 tags 1:1,2:2,4:0,5:0,6:0,7:2 arrival 9,8,6,13,11,12,3,15,10,2,7,14,4,5,1,0 written [r0,r1,r2] (s4_r0 ; s5_r0 ; delta@r0 ; s6_r0 * s6_r0 ; mu@r0) * s1_r1 * (s2_r2 ; s7_r2)
+task 19 required 145 tags 0:1,4:2,7:2 arrival 14,15,12,11,0,10,8,4,1,2,9,5,7,3,13,6 written [r1,r2] s0_r1 * (s4_r2 ; delta@r2 ; s7_r2 * s7_r2 ; mu@r2)
+performance none
+
+seed 283
+n 5 redraws 754 max_attempts 87
+prefix_required 127,24,207,30,255,123,182,66,178,33,121,171,213,138,45,153,233,68,66,172
+agent 0 caps 135 trust 22 role 0
+agent 1 caps 136 trust 43 role 2
+agent 2 caps 146 trust 58 role 0
+agent 3 caps 84 trust 34 role 0
+agent 4 caps 21 trust 20 role 0
+task 0 required 129 tags 0:0,7:0 arrival 3,2,4,1,0 written [r0] s0_r0 ; delta@r0 ; s7_r0 * s7_r0 ; mu@r0
+task 1 required 130 tags 1:0,7:0 arrival 4,3,0,1,2 written [r0] s1_r0 ; s7_r0
+task 2 required 18 tags 1:0,4:0 arrival 2,3,1,0,4 written [r0] s1_r0 ; s4_r0
+task 3 required 144 tags 4:0,7:2 arrival 0,2,4,3,1 written [r0,r2] s4_r0 * s7_r2
+task 4 required 20 tags 2:0,4:0 arrival 4,1,3,0,2 written [r0] s2_r0 ; s4_r0
+task 5 required 18 tags 1:0,4:0 arrival 1,3,0,2,4 written [r0] s1_r0 ; delta@r0 ; s4_r0 * s4_r0 ; mu@r0
+task 6 required 144 tags 4:0,7:2 arrival 2,1,0,4,3 written [r0,r2] s4_r0 * s7_r2
+task 7 required 144 tags 4:0,7:0 arrival 1,3,4,2,0 written [r0] s4_r0 ; delta@r0 ; s7_r0 * s7_r0 ; mu@r0
+task 8 required 146 tags 1:0,4:0,7:2 arrival 1,3,4,0,2 written [r0,r2] (s1_r0 ; s4_r0) * s7_r2
+task 9 required 24 tags 3:2,4:0 arrival 4,3,2,1,0 written [r0,r2] s4_r0 * s3_r2
+task 10 required 192 tags 6:0,7:2 arrival 4,0,1,2,3 written [r0,r2] s6_r0 * s7_r2
+task 11 required 130 tags 1:0,7:2 arrival 2,0,1,3,4 written [r0,r2] s1_r0 * s7_r2
+task 12 required 82 tags 1:0,4:0,6:0 arrival 4,3,1,2,0 written [r0] s1_r0 ; s4_r0 ; delta@r0 ; s6_r0 * s6_r0 ; mu@r0
+task 13 required 10 tags 1:0,3:2 arrival 3,4,0,1,2 written [r0,r2] s1_r0 * s3_r2
+task 14 required 136 tags 3:2,7:0 arrival 4,3,2,1,0 written [r0,r2] s7_r0 * s3_r2
+task 15 required 141 tags 0:0,2:0,3:2,7:2 arrival 1,0,3,4,2 written [r0,r2] (s0_r0 ; s2_r0) * (s3_r2 ; delta@r2 ; s7_r2 * s7_r2 ; mu@r2)
+task 16 required 17 tags 0:0,4:0 arrival 2,0,3,1,4 written [r0] s0_r0 ; s4_r0
+task 17 required 10 tags 1:0,3:2 arrival 3,4,0,2,1 written [r0,r2] s1_r0 * s3_r2
+task 18 required 15 tags 0:0,1:0,2:0,3:2 arrival 4,2,1,3,0 written [r0,r2] (s0_r0 ; s1_r0 ; s2_r0) * s3_r2
+task 19 required 144 tags 4:0,7:2 arrival 1,4,0,3,2 written [r0,r2] s4_r0 * s7_r2
+performance none
+
+seed 284
+n 12 redraws 92 max_attempts 14
+prefix_required 232,255,127,247,253,40,255,169,127,197,63,223,255,255,175,135,249,65,5,90
+agent 0 caps 128 trust 35 role 2
+agent 1 caps 128 trust 46 role 2
+agent 2 caps 64 trust 78 role 2
+agent 3 caps 64 trust 49 role 0
+agent 4 caps 2 trust 37 role 2
+agent 5 caps 16 trust 44 role 2
+agent 6 caps 48 trust 91 role 0
+agent 7 caps 27 trust 88 role 0
+agent 8 caps 85 trust 58 role 1
+agent 9 caps 1 trust 91 role 2
+agent 10 caps 194 trust 28 role 1
+agent 11 caps 17 trust 41 role 2
+task 0 required 232 tags 3:0,5:0,6:1,7:2 arrival 8,5,2,4,1,9,7,11,10,0,6,3 written [r0,r1,r2] (s3_r0 ; s5_r0) * s6_r1 * s7_r2
+task 1 required 232 tags 3:0,5:0,6:2,7:2 arrival 0,4,9,1,8,11,10,2,5,7,3,6 written [r0,r2] (s3_r0 ; s5_r0) * (s6_r2 ; delta@r2 ; s7_r2 * s7_r2 ; mu@r2)
+task 2 required 17 tags 0:2,4:1 arrival 0,10,8,1,4,3,11,9,5,6,7,2 written [r1,r2] s4_r1 * s0_r2
+task 3 required 6 tags 1:0,2:1 arrival 5,8,11,3,0,6,7,9,2,10,4,1 written [r0,r1] s1_r0 * s2_r1
+task 4 required 144 tags 4:1,7:2 arrival 1,2,0,10,6,5,11,7,9,4,8,3 written [r1,r2] s4_r1 * s7_r2
+task 5 required 251 tags 0:2,1:0,3:0,4:2,5:0,6:1,7:1 arrival 0,1,11,8,6,9,4,10,5,2,3,7 written [r0,r1,r2] (s1_r0 ; s3_r0 ; s5_r0) * (s6_r1 ; s7_r1) * (s0_r2 ; s4_r2)
+task 6 required 91 tags 0:0,1:2,3:0,4:2,6:2 arrival 5,8,10,11,4,1,7,6,9,2,0,3 written [r0,r2] (s0_r0 ; delta@r0 ; s3_r0 * s3_r0 ; mu@r0) * (s1_r2 ; s4_r2 ; s6_r2)
+task 7 required 79 tags 0:0,1:0,2:1,3:0,6:2 arrival 3,7,4,2,0,1,6,11,8,9,5,10 written [r0,r1,r2] (s0_r0 ; s1_r0 ; delta@r0 ; s3_r0 * s3_r0 ; mu@r0) * s2_r1 * s6_r2
+task 8 required 130 tags 1:0,7:2 arrival 9,3,7,10,4,1,0,5,8,6,11,2 written [r0,r2] s1_r0 * s7_r2
+task 9 required 139 tags 0:2,1:1,3:0,7:2 arrival 7,3,5,9,6,8,0,2,11,10,1,4 written [r0,r1,r2] s3_r0 * s1_r1 * (s0_r2 ; delta@r2 ; s7_r2 * s7_r2 ; mu@r2)
+task 10 required 81 tags 0:2,4:2,6:1 arrival 9,3,4,2,6,1,7,10,11,0,5,8 written [r1,r2] s6_r1 * (s0_r2 ; delta@r2 ; s4_r2 * s4_r2 ; mu@r2)
+task 11 required 98 tags 1:0,5:0,6:0 arrival 3,9,7,0,11,2,1,10,8,6,5,4 written [r0] s1_r0 ; delta@r0 ; s5_r0 * s5_r0 ; mu@r0 ; s6_r0
+task 12 required 251 tags 0:1,1:1,3:0,4:1,5:0,6:2,7:2 arrival 5,1,10,9,7,2,4,8,6,11,3,0 written [r0,r1,r2] (s3_r0 ; delta@r0 ; s5_r0 * s5_r0 ; mu@r0) * (s0_r1 ; s1_r1 ; s4_r1) * (s6_r2 ; s7_r2)
+task 13 required 130 tags 1:1,7:2 arrival 0,3,9,1,5,8,4,10,2,7,11,6 written [r1,r2] s1_r1 * s7_r2
+task 14 required 24 tags 3:0,4:2 arrival 11,5,6,10,3,1,7,0,2,8,4,9 written [r0,r2] s3_r0 * s4_r2
+task 15 required 69 tags 0:0,2:1,6:1 arrival 10,8,4,7,3,2,11,6,9,1,5,0 written [r0,r1] s0_r0 * (s2_r1 ; delta@r1 ; s6_r1 * s6_r1 ; mu@r1)
+task 16 required 48 tags 4:1,5:0 arrival 11,1,9,8,2,10,6,4,5,7,0,3 written [r0,r1] s5_r0 * s4_r1
+task 17 required 65 tags 0:1,6:0 arrival 1,5,4,6,9,11,2,7,10,3,0,8 written [r0,r1] s6_r0 * s0_r1
+task 18 required 245 tags 0:0,2:1,4:2,5:0,6:2,7:2 arrival 10,8,7,9,6,0,2,4,5,3,11,1 written [r0,r1,r2] (s0_r0 ; delta@r0 ; s5_r0 * s5_r0 ; mu@r0) * s2_r1 * (s4_r2 ; s6_r2 ; s7_r2)
+task 19 required 66 tags 1:0,6:0 arrival 6,3,11,7,8,4,1,10,0,9,5,2 written [r0] s1_r0 ; s6_r0
+performance none
+
+seed 285
+n 15 redraws 85 max_attempts 16
+prefix_required 247,55,79,255,13,255,213,89,223,215,245,150,62,141,255,15,247,63,253,254
+agent 0 caps 1 trust 38 role 2
+agent 1 caps 24 trust 73 role 2
+agent 2 caps 140 trust 38 role 1
+agent 3 caps 34 trust 81 role 2
+agent 4 caps 38 trust 39 role 2
+agent 5 caps 64 trust 27 role 2
+agent 6 caps 132 trust 77 role 0
+agent 7 caps 16 trust 96 role 0
+agent 8 caps 96 trust 47 role 2
+agent 9 caps 90 trust 29 role 2
+agent 10 caps 82 trust 60 role 0
+agent 11 caps 28 trust 65 role 2
+agent 12 caps 65 trust 28 role 2
+agent 13 caps 28 trust 84 role 0
+agent 14 caps 98 trust 45 role 0
+task 0 required 33 tags 0:2,5:0 arrival 5,12,1,2,7,0,4,9,11,6,13,8,3,10,14 written [r0,r2] s5_r0 * s0_r2
+task 1 required 238 tags 1:2,2:2,3:2,5:2,6:0,7:0 arrival 9,7,8,6,0,14,12,3,11,5,10,1,2,13,4 written [r0,r2] (s6_r0 ; delta@r0 ; s7_r0 * s7_r0 ; mu@r0) * (s1_r2 ; s2_r2 ; s3_r2 ; delta@r2 ; s5_r2 * s5_r2 ; mu@r2)
+task 2 required 68 tags 2:1,6:0 arrival 3,10,12,14,13,2,0,5,6,9,4,1,7,8,11 written [r0,r1] s6_r0 * s2_r1
+task 3 required 48 tags 4:0,5:2 arrival 14,7,9,8,11,3,6,2,5,4,13,1,0,10,12 written [r0,r2] s4_r0 * s5_r2
+task 4 required 30 tags 1:0,2:2,3:0,4:2 arrival 10,13,9,1,5,14,12,6,0,4,3,8,7,11,2 written [r0,r2] (s1_r0 ; s3_r0) * (s2_r2 ; delta@r2 ; s4_r2 * s4_r2 ; mu@r2)
+task 5 required 159 tags 0:2,1:0,2:1,3:2,4:2,7:1 arrival 13,5,12,11,14,2,4,7,3,8,9,1,10,6,0 written [r0,r1,r2] s1_r0 * (s2_r1 ; s7_r1) * (s0_r2 ; s3_r2 ; s4_r2)
+task 6 required 132 tags 2:1,7:1 arrival 12,6,7,11,10,5,2,4,9,1,13,3,0,14,8 written [r1] s2_r1 ; delta@r1 ; s7_r1 * s7_r1 ; mu@r1
+task 7 required 89 tags 0:2,3:2,4:0,6:2 arrival 9,0,8,2,6,4,10,11,3,12,14,5,13,7,1 written [r0,r2] s4_r0 * (s0_r2 ; s3_r2 ; s6_r2)
+task 8 required 223 tags 0:2,1:2,2:0,3:0,4:2,6:0,7:0 arrival 5,13,4,14,10,12,2,6,9,3,8,0,11,7,1 written [r0,r2] (s2_r0 ; delta@r0 ; s3_r0 * s3_r0 ; mu@r0 ; s6_r0 ; s7_r0) * (s0_r2 ; s1_r2 ; s4_r2)
+task 9 required 52 tags 2:0,4:0,5:0 arrival 0,14,9,8,4,5,7,10,1,3,11,6,13,12,2 written [r0] s2_r0 ; s4_r0 ; s5_r0
+task 10 required 20 tags 2:1,4:2 arrival 11,3,10,7,5,4,6,13,1,8,9,14,12,2,0 written [r1,r2] s2_r1 * s4_r2
+task 11 required 12 tags 2:2,3:1 arrival 4,7,13,3,2,8,9,11,0,12,1,5,10,6,14 written [r1,r2] s3_r1 * s2_r2
+task 12 required 156 tags 2:2,3:1,4:0,7:0 arrival 14,8,9,7,12,13,6,0,3,11,5,10,1,4,2 written [r0,r1,r2] (s4_r0 ; s7_r0) * s3_r1 * s2_r2
+task 13 required 227 tags 0:2,1:0,5:2,6:0,7:0 arrival 14,0,13,11,10,2,3,1,9,5,12,6,4,7,8 written [r0,r2] (s1_r0 ; s6_r0 ; s7_r0) * (s0_r2 ; delta@r2 ; s5_r2 * s5_r2 ; mu@r2)
+task 14 required 236 tags 2:0,3:0,5:2,6:0,7:0 arrival 1,14,13,0,8,5,6,11,2,3,12,7,9,10,4 written [r0,r2] (s2_r0 ; s3_r0 ; s6_r0 ; delta@r0 ; s7_r0 * s7_r0 ; mu@r0) * s5_r2
+task 15 required 36 tags 2:1,5:2 arrival 12,7,6,3,0,4,9,13,14,8,5,1,2,10,11 written [r1,r2] s2_r1 * s5_r2
+task 16 required 78 tags 1:2,2:1,3:0,6:2 arrival 0,9,12,8,14,4,5,7,2,10,1,13,3,11,6 written [r0,r1,r2] s3_r0 * s2_r1 * (s1_r2 ; s6_r2)
+task 17 required 40 tags 3:0,5:0 arrival 8,7,1,5,11,10,4,9,6,12,2,14,3,0,13 written [r0] s3_r0 ; s5_r0
+task 18 required 34 tags 1:2,5:2 arrival 12,10,1,3,7,4,8,0,11,9,13,2,14,5,6 written [r2] s1_r2 ; s5_r2
+task 19 required 60 tags 2:1,3:2,4:2,5:2 arrival 5,2,1,9,13,10,4,3,12,7,0,14,11,8,6 written [r1,r2] s2_r1 * (s3_r2 ; delta@r2 ; s4_r2 * s4_r2 ; mu@r2 ; s5_r2)
+performance none
+
+seed 286
+n 14 redraws 205 max_attempts 32
+prefix_required 41,239,28,198,255,66,151,143,255,67,56,255,29,255,40,53,254,151,249,146
+agent 0 caps 72 trust 42 role 1
+agent 1 caps 1 trust 57 role 0
+agent 2 caps 64 trust 39 role 2
+agent 3 caps 30 trust 28 role 2
+agent 4 caps 192 trust 31 role 2
+agent 5 caps 192 trust 64 role 2
+agent 6 caps 68 trust 44 role 1
+agent 7 caps 64 trust 46 role 0
+agent 8 caps 16 trust 81 role 1
+agent 9 caps 1 trust 68 role 2
+agent 10 caps 64 trust 75 role 1
+agent 11 caps 33 trust 35 role 0
+agent 12 caps 128 trust 47 role 2
+agent 13 caps 1 trust 78 role 0
+task 0 required 5 tags 0:2,2:2 arrival 6,10,9,5,13,11,7,1,8,2,4,0,3,12 written [r2] s0_r2 ; s2_r2
+task 1 required 12 tags 2:2,3:2 arrival 13,8,2,7,9,12,3,6,1,10,4,11,0,5 written [r2] s2_r2 ; s3_r2
+task 2 required 100 tags 2:1,5:0,6:0 arrival 10,8,3,13,7,12,4,1,11,2,0,6,9,5 written [r0,r1] (s5_r0 ; s6_r0) * s2_r1
+task 3 required 72 tags 3:1,6:1 arrival 7,9,10,2,5,8,0,1,6,12,11,13,4,3 written [r1] s3_r1 ; s6_r1
+task 4 required 104 tags 3:1,5:0,6:2 arrival 5,8,6,9,0,3,13,1,10,12,4,2,7,11 written [r0,r1,r2] s5_r0 * s3_r1 * s6_r2
+task 5 required 66 tags 1:2,6:1 arrival 3,2,10,6,0,13,5,9,12,1,8,11,4,7 written [r1,r2] s6_r1 * s1_r2
+task 6 required 66 tags 1:2,6:1 arrival 2,7,9,5,11,0,13,8,6,12,10,1,4,3 written [r1,r2] s6_r1 * s1_r2
+task 7 required 192 tags 6:2,7:2 arrival 6,13,7,9,0,5,8,2,10,11,1,3,12,4 written [r2] s6_r2 ; s7_r2
+task 8 required 25 tags 0:2,3:1,4:1 arrival 4,9,12,0,8,13,7,6,5,2,10,1,3,11 written [r1,r2] (s3_r1 ; delta@r1 ; s4_r1 * s4_r1 ; mu@r1) * s0_r2
+task 9 required 80 tags 4:2,6:2 arrival 3,2,0,10,8,11,6,12,5,13,7,1,4,9 written [r2] s4_r2 ; s6_r2
+task 10 required 149 tags 0:2,2:1,4:2,7:2 arrival 2,10,6,3,11,13,8,4,0,9,1,5,7,12 written [r1,r2] s2_r1 * (s0_r2 ; s4_r2 ; s7_r2)
+task 11 required 98 tags 1:2,5:0,6:1 arrival 13,7,8,11,0,3,12,2,6,4,10,1,9,5 written [r0,r1,r2] s5_r0 * s6_r1 * s1_r2
+task 12 required 29 tags 0:2,2:2,3:1,4:2 arrival 3,1,6,11,2,4,12,8,0,9,7,13,10,5 written [r1,r2] s3_r1 * (s0_r2 ; s2_r2 ; s4_r2)
+task 13 required 72 tags 3:2,6:0 arrival 1,8,7,9,6,5,4,11,2,3,0,12,13,10 written [r0,r2] s6_r0 * s3_r2
+task 14 required 18 tags 1:2,4:2 arrival 3,2,0,10,12,6,4,1,11,7,13,8,9,5 written [r2] s1_r2 ; s4_r2
+task 15 required 5 tags 0:2,2:1 arrival 10,6,2,1,9,0,3,13,5,11,4,7,12,8 written [r1,r2] s2_r1 * s0_r2
+task 16 required 96 tags 5:0,6:2 arrival 13,11,10,9,8,12,7,6,5,3,2,1,4,0 written [r0,r2] s5_r0 * s6_r2
+task 17 required 54 tags 1:2,2:1,4:1,5:0 arrival 9,3,6,5,8,2,13,1,0,10,12,4,11,7 written [r0,r1,r2] s5_r0 * (s2_r1 ; s4_r1) * s1_r2
+task 18 required 221 tags 0:2,2:1,3:2,4:1,6:0,7:2 arrival 9,0,1,12,10,5,3,7,8,4,13,11,2,6 written [r0,r1,r2] s6_r0 * (s2_r1 ; delta@r1 ; s4_r1 * s4_r1 ; mu@r1) * (s0_r2 ; delta@r2 ; s3_r2 * s3_r2 ; mu@r2 ; s7_r2)
+task 19 required 24 tags 3:1,4:2 arrival 11,3,6,4,10,0,9,1,12,8,7,13,5,2 written [r1,r2] s3_r1 * s4_r2
+performance none
+
+seed 287
+n 6 redraws 258 max_attempts 43
+prefix_required 192,255,239,159,247,98,18,124,207,181,131,121,255,255,160,255,213,118,9,127
+agent 0 caps 3 trust 29 role 2
+agent 1 caps 2 trust 20 role 0
+agent 2 caps 150 trust 31 role 2
+agent 3 caps 24 trust 76 role 0
+agent 4 caps 16 trust 27 role 2
+agent 5 caps 195 trust 89 role 1
+task 0 required 11 tags 0:1,1:0,3:0 arrival 2,4,3,0,5,1 written [r0,r1] (s1_r0 ; s3_r0) * s0_r1
+task 1 required 139 tags 0:1,1:1,3:0,7:1 arrival 2,0,1,4,3,5 written [r0,r1] s3_r0 * (s0_r1 ; s1_r1 ; s7_r1)
+task 2 required 211 tags 0:1,1:0,4:0,6:1,7:1 arrival 0,4,5,3,2,1 written [r0,r1] (s1_r0 ; s4_r0) * (s0_r1 ; s6_r1 ; s7_r1)
+task 3 required 130 tags 1:0,7:2 arrival 1,3,0,2,4,5 written [r0,r2] s1_r0 * s7_r2
+task 4 required 17 tags 0:2,4:2 arrival 5,4,2,0,3,1 written [r2] s0_r2 ; s4_r2
+task 5 required 147 tags 0:1,1:2,4:2,7:2 arrival 5,4,3,2,0,1 written [r1,r2] s0_r1 * (s1_r2 ; s4_r2 ; s7_r2)
+task 6 required 18 tags 1:0,4:0 arrival 5,4,3,1,0,2 written [r0] s1_r0 ; s4_r0
+task 7 required 146 tags 1:0,4:2,7:2 arrival 2,0,1,4,5,3 written [r0,r2] s1_r0 * (s4_r2 ; s7_r2)
+task 8 required 6 tags 1:0,2:2 arrival 3,2,4,0,1,5 written [r0,r2] s1_r0 * s2_r2
+task 9 required 130 tags 1:1,7:2 arrival 1,3,0,4,5,2 written [r1,r2] s1_r1 * s7_r2
+task 10 required 131 tags 0:1,1:0,7:1 arrival 1,5,4,0,3,2 written [r0,r1] s1_r0 * (s0_r1 ; s7_r1)
+task 11 required 90 tags 1:0,3:0,4:0,6:1 arrival 3,4,2,1,0,5 written [r0,r1] (s1_r0 ; s3_r0 ; delta@r0 ; s4_r0 * s4_r0 ; mu@r0) * s6_r1
+task 12 required 218 tags 1:0,3:0,4:0,6:1,7:2 arrival 4,0,1,3,2,5 written [r0,r1,r2] (s1_r0 ; s3_r0 ; s4_r0) * s6_r1 * s7_r2
+task 13 required 7 tags 0:2,1:2,2:2 arrival 5,1,4,0,3,2 written [r2] s0_r2 ; s1_r2 ; s2_r2
+task 14 required 82 tags 1:1,4:2,6:1 arrival 5,4,3,1,2,0 written [r1,r2] (s1_r1 ; delta@r1 ; s6_r1 * s6_r1 ; mu@r1) * s4_r2
+task 15 required 20 tags 2:2,4:0 arrival 5,0,3,2,4,1 written [r0,r2] s4_r0 * s2_r2
+task 16 required 132 tags 2:2,7:1 arrival 4,2,0,5,1,3 written [r1,r2] s7_r1 * s2_r2
+task 17 required 17 tags 0:2,4:2 arrival 2,3,1,4,0,5 written [r2] s0_r2 ; delta@r2 ; s4_r2 * s4_r2 ; mu@r2
+task 18 required 9 tags 0:1,3:0 arrival 2,4,0,1,3,5 written [r0,r1] s3_r0 * s0_r1
+task 19 required 19 tags 0:2,1:0,4:0 arrival 2,0,1,5,3,4 written [r0,r2] (s1_r0 ; delta@r0 ; s4_r0 * s4_r0 ; mu@r0) * s0_r2
+performance none
+
+seed 288
+n 5 redraws 329 max_attempts 63
+prefix_required 40,38,254,239,200,49,145,28,223,6,175,254,123,255,255,93,173,255,94,85
+agent 0 caps 21 trust 34 role 2
+agent 1 caps 83 trust 98 role 0
+agent 2 caps 3 trust 98 role 0
+agent 3 caps 184 trust 73 role 2
+agent 4 caps 96 trust 90 role 1
+task 0 required 242 tags 1:0,4:2,5:2,6:1,7:2 arrival 1,3,4,2,0 written [r0,r1,r2] s1_r0 * s6_r1 * (s4_r2 ; s5_r2 ; s7_r2)
+task 1 required 36 tags 2:2,5:1 arrival 1,2,3,0,4 written [r1,r2] s5_r1 * s2_r2
+task 2 required 33 tags 0:0,5:2 arrival 0,4,2,1,3 written [r0,r2] s0_r0 * s5_r2
+task 3 required 3 tags 0:2,1:0 arrival 2,0,1,3,4 written [r0,r2] s1_r0 * s0_r2
+task 4 required 66 tags 1:0,6:1 arrival 4,1,2,0,3 written [r0,r1] s1_r0 * s6_r1
+task 5 required 96 tags 5:1,6:0 arrival 2,4,0,1,3 written [r0,r1] s6_r0 * s5_r1
+task 6 required 48 tags 4:0,5:1 arrival 1,0,3,2,4 written [r0,r1] s4_r0 * s5_r1
+task 7 required 39 tags 0:2,1:0,2:2,5:1 arrival 4,1,0,2,3 written [r0,r1,r2] s1_r0 * s5_r1 * (s0_r2 ; s2_r2)
+task 8 required 5 tags 0:0,2:2 arrival 1,4,3,0,2 written [r0,r2] s0_r0 * s2_r2
+task 9 required 160 tags 5:1,7:2 arrival 0,2,1,4,3 written [r1,r2] s5_r1 * s7_r2
+task 10 required 154 tags 1:0,3:2,4:2,7:2 arrival 0,3,1,4,2 written [r0,r2] s1_r0 * (s3_r2 ; s4_r2 ; s7_r2)
+task 11 required 234 tags 1:0,3:2,5:1,6:1,7:2 arrival 2,0,1,3,4 written [r0,r1,r2] s1_r0 * (s5_r1 ; s6_r1) * (s3_r2 ; s7_r2)
+task 12 required 3 tags 0:2,1:0 arrival 1,4,2,0,3 written [r0,r2] s1_r0 * s0_r2
+task 13 required 100 tags 2:2,5:1,6:1 arrival 1,3,4,2,0 written [r1,r2] (s5_r1 ; s6_r1) * s2_r2
+task 14 required 9 tags 0:0,3:2 arrival 1,0,2,4,3 written [r0,r2] s0_r0 * s3_r2
+task 15 required 33 tags 0:0,5:2 arrival 3,0,2,4,1 written [r0,r2] s0_r0 * s5_r2
+task 16 required 17 tags 0:2,4:2 arrival 1,0,4,3,2 written [r2] s0_r2 ; s4_r2
+task 17 required 49 tags 0:0,4:2,5:1 arrival 0,4,1,3,2 written [r0,r1,r2] s0_r0 * s5_r1 * s4_r2
+task 18 required 152 tags 3:2,4:2,7:2 arrival 1,3,2,4,0 written [r2] s3_r2 ; delta@r2 ; s4_r2 * s4_r2 ; mu@r2 ; s7_r2
+task 19 required 76 tags 2:2,3:2,6:0 arrival 2,3,0,4,1 written [r0,r2] s6_r0 * (s2_r2 ; delta@r2 ; s3_r2 * s3_r2 ; mu@r2)
+performance none
+
+seed 289
+n 15 redraws 89 max_attempts 21
+prefix_required 40,180,20,10,154,247,255,20,191,123,255,65,241,72,126,158,252,255,189,191
+agent 0 caps 232 trust 22 role 0
+agent 1 caps 102 trust 82 role 1
+agent 2 caps 48 trust 44 role 1
+agent 3 caps 216 trust 90 role 0
+agent 4 caps 232 trust 72 role 1
+agent 5 caps 129 trust 91 role 0
+agent 6 caps 88 trust 55 role 1
+agent 7 caps 56 trust 75 role 1
+agent 8 caps 153 trust 80 role 0
+agent 9 caps 169 trust 57 role 2
+agent 10 caps 184 trust 62 role 1
+agent 11 caps 72 trust 74 role 0
+agent 12 caps 80 trust 35 role 0
+agent 13 caps 162 trust 35 role 1
+agent 14 caps 128 trust 23 role 2
+task 0 required 40 tags 3:1,5:1 arrival 7,12,2,6,14,9,11,1,3,8,4,10,13,5,0 written [r1] s3_r1 ; s5_r1
+task 1 required 177 tags 0:2,4:0,5:1,7:1 arrival 7,1,10,2,13,0,8,12,3,4,5,9,6,14,11 written [r0,r1,r2] s4_r0 * (s5_r1 ; s7_r1) * s0_r2
+task 2 required 20 tags 2:1,4:0 arrival 5,1,6,14,10,4,0,13,9,11,8,3,2,12,7 written [r0,r1] s4_r0 * s2_r1
+task 3 required 10 tags 1:1,3:0 arrival 14,10,8,2,6,9,0,11,1,13,7,3,12,5,4 written [r0,r1] s3_r0 * s1_r1
+task 4 required 182 tags 1:1,2:1,4:1,5:0,7:0 arrival 4,1,7,5,11,8,3,10,2,6,0,13,14,9,12 written [r0,r1] (s5_r0 ; delta@r0 ; s7_r0 * s7_r0 ; mu@r0) * (s1_r1 ; delta@r1 ; s2_r1 * s2_r1 ; mu@r1 ; s4_r1)
+task 5 required 191 tags 0:2,1:1,2:1,3:1,4:0,5:1,7:1 arrival 1,8,3,4,11,13,2,5,0,6,9,10,14,12,7 written [r0,r1,r2] s4_r0 * (s1_r1 ; s2_r1 ; delta@r1 ; s3_r1 * s3_r1 ; mu@r1 ; delta@r1 ; s5_r1 * s5_r1 ; mu@r1 ; s7_r1) * s0_r2
+task 6 required 201 tags 0:0,3:1,6:0,7:0 arrival 4,5,12,8,3,1,9,7,0,14,13,6,10,2,11 written [r0,r1] (s0_r0 ; delta@r0 ; s6_r0 * s6_r0 ; mu@r0 ; delta@r0 ; s7_r0 * s7_r0 ; mu@r0) * s3_r1
+task 7 required 20 tags 2:1,4:0 arrival 12,5,10,8,3,4,6,13,0,2,14,7,9,11,1 written [r0,r1] s4_r0 * s2_r1
+task 8 required 172 tags 2:1,3:2,5:2,7:0 arrival 5,14,13,6,4,9,12,2,11,7,0,1,8,10,3 written [r0,r1,r2] s7_r0 * s2_r1 * (s3_r2 ; delta@r2 ; s5_r2 * s5_r2 ; mu@r2)
+task 9 required 216 tags 3:0,4:0,6:0,7:0 arrival 8,13,10,4,1,9,5,7,11,12,3,14,2,0,6 written [r0] s3_r0 ; s4_r0 ; delta@r0 ; s6_r0 * s6_r0 ; mu@r0 ; s7_r0
+task 10 required 18 tags 1:1,4:0 arrival 7,13,10,5,1,2,0,4,8,9,3,12,11,6,14 written [r0,r1] s4_r0 * s1_r1
+task 11 required 9 tags 0:0,3:2 arrival 1,14,7,8,11,2,12,10,0,13,5,9,4,6,3 written [r0,r2] s0_r0 * s3_r2
+task 12 required 19 tags 0:0,1:1,4:0 arrival 6,13,7,1,4,10,3,5,12,2,14,8,0,9,11 written [r0,r1] (s0_r0 ; s4_r0) * s1_r1
+task 13 required 72 tags 3:2,6:0 arrival 2,10,11,12,6,0,4,1,13,14,8,3,5,9,7 written [r0,r2] s6_r0 * s3_r2
+task 14 required 159 tags 0:2,1:1,2:1,3:0,4:1,7:1 arrival 1,6,14,10,5,9,13,7,11,12,4,2,8,3,0 written [r0,r1,r2] s3_r0 * (s1_r1 ; s2_r1 ; s4_r1 ; s7_r1) * s0_r2
+task 15 required 80 tags 4:1,6:1 arrival 0,6,13,2,11,14,5,8,1,3,4,10,9,7,12 written [r1] s4_r1 ; s6_r1
+task 16 required 67 tags 0:0,1:1,6:0 arrival 7,9,5,13,0,12,10,6,11,2,4,3,8,14,1 written [r0,r1] (s0_r0 ; delta@r0 ; s6_r0 * s6_r0 ; mu@r0) * s1_r1
+task 17 required 9 tags 0:2,3:2 arrival 9,2,8,4,12,0,13,14,7,6,5,11,3,10,1 written [r2] s0_r2 ; s3_r2
+task 18 required 98 tags 1:1,5:0,6:0 arrival 7,10,11,12,3,14,5,0,13,2,8,1,9,6,4 written [r0,r1] (s5_r0 ; s6_r0) * s1_r1
+task 19 required 115 tags 0:0,1:1,4:1,5:1,6:1 arrival 3,14,12,11,5,4,8,13,7,9,0,2,1,10,6 written [r0,r1] s0_r0 * (s1_r1 ; s4_r1 ; s5_r1 ; s6_r1)
+performance none
+
+seed 290
+n 11 redraws 300 max_attempts 69
+prefix_required 84,197,144,123,89,9,153,136,186,132,3,68,191,255,111,39,73,191,15,153
+agent 0 caps 114 trust 96 role 0
+agent 1 caps 114 trust 49 role 0
+agent 2 caps 7 trust 62 role 1
+agent 3 caps 4 trust 24 role 0
+agent 4 caps 216 trust 62 role 0
+agent 5 caps 196 trust 36 role 0
+agent 6 caps 116 trust 60 role 0
+agent 7 caps 240 trust 69 role 0
+agent 8 caps 136 trust 26 role 2
+agent 9 caps 8 trust 66 role 2
+agent 10 caps 82 trust 43 role 0
+task 0 required 7 tags 0:1,1:0,2:0 arrival 6,4,2,10,8,0,9,3,1,7,5 written [r0,r1] (s1_r0 ; s2_r0) * s0_r1
+task 1 required 207 tags 0:1,1:1,2:0,3:2,6:0,7:0 arrival 0,2,10,8,5,4,7,6,9,3,1 written [r0,r1,r2] (s2_r0 ; s6_r0 ; delta@r0 ; s7_r0 * s7_r0 ; mu@r0) * (s0_r1 ; s1_r1) * s3_r2
+task 2 required 10 tags 1:1,3:0 arrival 3,8,1,9,2,7,5,4,10,6,0 written [r0,r1] s3_r0 * s1_r1
+task 3 required 6 tags 1:0,2:0 arrival 8,6,3,0,5,1,7,4,9,10,2 written [r0] s1_r0 ; s2_r0
+task 4 required 24 tags 3:0,4:0 arrival 0,4,7,5,9,2,3,10,8,1,6 written [r0] s3_r0 ; s4_r0
+task 5 required 132 tags 2:0,7:0 arrival 3,1,9,10,5,0,2,8,7,6,4 written [r0] s2_r0 ; delta@r0 ; s7_r0 * s7_r0 ; mu@r0
+task 6 required 236 tags 2:1,3:2,5:0,6:0,7:0 arrival 2,4,6,5,9,0,1,10,8,7,3 written [r0,r1,r2] (s5_r0 ; s6_r0 ; delta@r0 ; s7_r0 * s7_r0 ; mu@r0) * s2_r1 * s3_r2
+task 7 required 136 tags 3:2,7:0 arrival 4,5,9,6,2,8,3,0,10,1,7 written [r0,r2] s7_r0 * s3_r2
+task 8 required 19 tags 0:1,1:0,4:0 arrival 4,1,6,7,10,9,0,5,2,3,8 written [r0,r1] (s1_r0 ; delta@r0 ; s4_r0 * s4_r0 ; mu@r0) * s0_r1
+task 9 required 26 tags 1:0,3:2,4:0 arrival 8,3,5,0,4,10,7,1,2,6,9 written [r0,r2] (s1_r0 ; s4_r0) * s3_r2
+task 10 required 193 tags 0:1,6:0,7:0 arrival 4,1,7,3,2,0,8,10,6,5,9 written [r0,r1] (s6_r0 ; s7_r0) * s0_r1
+task 11 required 130 tags 1:0,7:2 arrival 10,4,9,6,8,2,3,1,7,5,0 written [r0,r2] s1_r0 * s7_r2
+task 12 required 224 tags 5:0,6:0,7:2 arrival 5,2,1,6,9,10,0,4,7,3,8 written [r0,r2] (s5_r0 ; s6_r0) * s7_r2
+task 13 required 10 tags 1:1,3:2 arrival 0,4,3,7,10,8,6,2,9,5,1 written [r1,r2] s1_r1 * s3_r2
+task 14 required 168 tags 3:0,5:0,7:0 arrival 8,6,7,9,3,4,0,5,1,10,2 written [r0] s3_r0 ; s5_r0 ; s7_r0
+task 15 required 216 tags 3:2,4:0,6:0,7:2 arrival 10,8,0,1,6,7,5,2,9,4,3 written [r0,r2] (s4_r0 ; s6_r0) * (s3_r2 ; s7_r2)
+task 16 required 14 tags 1:1,2:1,3:0 arrival 6,8,4,7,1,3,10,2,5,0,9 written [r0,r1] s3_r0 * (s1_r1 ; s2_r1)
+task 17 required 70 tags 1:1,2:0,6:0 arrival 6,7,5,0,4,1,9,8,10,2,3 written [r0,r1] (s2_r0 ; s6_r0) * s1_r1
+task 18 required 11 tags 0:1,1:0,3:2 arrival 1,0,3,9,2,5,6,7,10,8,4 written [r0,r1,r2] s1_r0 * s0_r1 * s3_r2
+task 19 required 96 tags 5:0,6:0 arrival 1,0,6,3,2,7,5,8,4,9,10 written [r0] s5_r0 ; s6_r0
+performance none
+
+seed 291
+n 8 redraws 127 max_attempts 25
+prefix_required 246,191,171,36,3,255,162,255,255,93,131,20,203,255,255,223,255,247,72,255
+agent 0 caps 10 trust 46 role 0
+agent 1 caps 17 trust 63 role 1
+agent 2 caps 67 trust 84 role 1
+agent 3 caps 25 trust 62 role 1
+agent 4 caps 140 trust 61 role 0
+agent 5 caps 144 trust 91 role 2
+agent 6 caps 176 trust 94 role 2
+agent 7 caps 54 trust 59 role 1
+task 0 required 66 tags 1:1,6:1 arrival 0,6,7,1,5,2,3,4 written [r1] s1_r1 ; delta@r1 ; s6_r1 * s6_r1 ; mu@r1
+task 1 required 28 tags 2:0,3:0,4:2 arrival 1,5,6,3,2,7,4,0 written [r0,r2] (s2_r0 ; delta@r0 ; s3_r0 * s3_r0 ; mu@r0) * s4_r2
+task 2 required 152 tags 3:1,4:2,7:0 arrival 7,3,0,1,4,5,6,2 written [r0,r1,r2] s7_r0 * s3_r1 * s4_r2
+task 3 required 36 tags 2:0,5:1 arrival 7,5,3,2,1,6,0,4 written [r0,r1] s2_r0 * s5_r1
+task 4 required 52 tags 2:0,4:1,5:1 arrival 7,4,2,0,6,1,5,3 written [r0,r1] s2_r0 * (s4_r1 ; s5_r1)
+task 5 required 173 tags 0:1,2:1,3:0,5:2,7:2 arrival 1,7,0,6,5,4,3,2 written [r0,r1,r2] s3_r0 * (s0_r1 ; delta@r1 ; s2_r1 * s2_r1 ; mu@r1) * (s5_r2 ; s7_r2)
+task 6 required 59 tags 0:1,1:1,3:1,4:1,5:2 arrival 4,0,2,1,3,5,7,6 written [r1,r2] (s0_r1 ; s1_r1 ; s3_r1 ; s4_r1) * s5_r2
+task 7 required 130 tags 1:0,7:2 arrival 3,1,2,7,4,5,6,0 written [r0,r2] s1_r0 * s7_r2
+task 8 required 255 tags 0:1,1:0,2:1,3:1,4:1,5:1,6:1,7:2 arrival 0,4,6,5,3,7,2,1 written [r0,r1,r2] s1_r0 * (s0_r1 ; delta@r1 ; s2_r1 * s2_r1 ; mu@r1 ; delta@r1 ; s3_r1 * s3_r1 ; mu@r1 ; s4_r1 ; delta@r1 ; s5_r1 * s5_r1 ; mu@r1 ; delta@r1 ; s6_r1 * s6_r1 ; mu@r1) * s7_r2
+task 9 required 74 tags 1:0,3:0,6:1 arrival 5,4,0,6,7,2,3,1 written [r0,r1] (s1_r0 ; delta@r0 ; s3_r0 * s3_r0 ; mu@r0) * s6_r1
+task 10 required 27 tags 0:1,1:0,3:1,4:1 arrival 4,5,6,3,7,0,1,2 written [r0,r1] s1_r0 * (s0_r1 ; s3_r1 ; s4_r1)
+task 11 required 12 tags 2:1,3:1 arrival 2,5,4,6,0,7,1,3 written [r1] s2_r1 ; s3_r1
+task 12 required 59 tags 0:1,1:0,3:1,4:1,5:1 arrival 1,6,7,2,3,5,0,4 written [r0,r1] s1_r0 * (s0_r1 ; s3_r1 ; delta@r1 ; s4_r1 * s4_r1 ; mu@r1 ; s5_r1)
+task 13 required 18 tags 1:0,4:1 arrival 2,3,6,7,5,4,1,0 written [r0,r1] s1_r0 * s4_r1
+task 14 required 251 tags 0:1,1:1,3:0,4:2,5:1,6:1,7:2 arrival 0,6,2,4,1,7,5,3 written [r0,r1,r2] s3_r0 * (s0_r1 ; delta@r1 ; s1_r1 * s1_r1 ; mu@r1 ; s5_r1 ; s6_r1) * (s4_r2 ; s7_r2)
+task 15 required 38 tags 1:0,2:1,5:2 arrival 5,3,7,4,1,0,6,2 written [r0,r1,r2] s1_r0 * s2_r1 * s5_r2
+task 16 required 40 tags 3:0,5:2 arrival 3,2,5,6,4,1,0,7 written [r0,r2] s3_r0 * s5_r2
+task 17 required 96 tags 5:1,6:1 arrival 4,0,2,5,1,3,6,7 written [r1] s5_r1 ; s6_r1
+task 18 required 96 tags 5:1,6:1 arrival 7,3,4,6,5,1,0,2 written [r1] s5_r1 ; s6_r1
+task 19 required 136 tags 3:0,7:2 arrival 7,5,3,2,6,1,4,0 written [r0,r2] s3_r0 * s7_r2
+performance none
+
+seed 292
+n 10 redraws 68 max_attempts 14
+prefix_required 62,255,9,134,76,35,65,232,255,95,255,137,94,169,9,20,253,49,72,108
+agent 0 caps 177 trust 71 role 1
+agent 1 caps 2 trust 70 role 1
+agent 2 caps 19 trust 82 role 2
+agent 3 caps 210 trust 20 role 2
+agent 4 caps 170 trust 20 role 0
+agent 5 caps 1 trust 58 role 1
+agent 6 caps 154 trust 99 role 1
+agent 7 caps 21 trust 58 role 1
+agent 8 caps 36 trust 87 role 1
+agent 9 caps 50 trust 38 role 2
+task 0 required 185 tags 0:1,3:0,4:2,5:1,7:1 arrival 4,5,8,7,0,9,1,3,2,6 written [r0,r1,r2] s3_r0 * (s0_r1 ; s5_r1 ; s7_r1) * s4_r2
+task 1 required 182 tags 1:0,2:1,4:2,5:2,7:1 arrival 1,0,3,6,8,4,2,7,5,9 written [r0,r1,r2] s1_r0 * (s2_r1 ; delta@r1 ; s7_r1 * s7_r1 ; mu@r1) * (s4_r2 ; s5_r2)
+task 2 required 9 tags 0:1,3:1 arrival 5,9,4,3,1,0,6,7,2,8 written [r1] s0_r1 ; s3_r1
+task 3 required 134 tags 1:1,2:1,7:0 arrival 8,3,6,4,7,5,0,2,9,1 written [r0,r1] s7_r0 * (s1_r1 ; s2_r1)
+task 4 required 241 tags 0:2,4:2,5:1,6:2,7:2 arrival 7,5,3,1,0,6,4,2,9,8 written [r1,r2] s5_r1 * (s0_r2 ; s4_r2 ; s6_r2 ; delta@r2 ; s7_r2 * s7_r2 ; mu@r2)
+task 5 required 36 tags 2:1,5:2 arrival 8,1,4,3,9,6,5,0,2,7 written [r1,r2] s2_r1 * s5_r2
+task 6 required 65 tags 0:1,6:2 arrival 4,8,5,6,3,2,0,7,9,1 written [r1,r2] s0_r1 * s6_r2
+task 7 required 232 tags 3:1,5:2,6:2,7:0 arrival 0,1,2,3,7,4,5,8,9,6 written [r0,r1,r2] s7_r0 * s3_r1 * (s5_r2 ; s6_r2)
+task 8 required 255 tags 0:1,1:0,2:1,3:1,4:1,5:2,6:2,7:0 arrival 9,4,8,0,3,5,7,2,1,6 written [r0,r1,r2] (s1_r0 ; s7_r0) * (s0_r1 ; s2_r1 ; s3_r1 ; delta@r1 ; s4_r1 * s4_r1 ; mu@r1) * (s5_r2 ; s6_r2)
+task 9 required 130 tags 1:2,7:2 arrival 2,4,8,5,0,1,9,3,6,7 written [r2] s1_r2 ; s7_r2
+task 10 required 3 tags 0:2,1:2 arrival 6,4,5,0,8,7,1,9,2,3 written [r2] s0_r2 ; s1_r2
+task 11 required 137 tags 0:2,3:0,7:0 arrival 0,1,3,7,5,6,2,8,9,4 written [r0,r2] (s3_r0 ; delta@r0 ; s7_r0 * s7_r0 ; mu@r0) * s0_r2
+task 12 required 106 tags 1:0,3:0,5:2,6:2 arrival 3,2,9,0,8,7,4,5,6,1 written [r0,r2] (s1_r0 ; s3_r0) * (s5_r2 ; s6_r2)
+task 13 required 115 tags 0:2,1:2,4:2,5:1,6:2 arrival 9,8,6,1,5,2,0,3,7,4 written [r1,r2] s5_r1 * (s0_r2 ; s1_r2 ; s4_r2 ; s6_r2)
+task 14 required 131 tags 0:1,1:2,7:2 arrival 2,7,6,3,0,5,9,4,1,8 written [r1,r2] s0_r1 * (s1_r2 ; delta@r2 ; s7_r2 * s7_r2 ; mu@r2)
+task 15 required 192 tags 6:2,7:1 arrival 8,9,0,5,2,6,4,1,3,7 written [r1,r2] s7_r1 * s6_r2
+task 16 required 176 tags 4:2,5:0,7:0 arrival 1,4,3,6,5,2,9,8,7,0 written [r0,r2] (s5_r0 ; s7_r0) * s4_r2
+task 17 required 49 tags 0:1,4:2,5:1 arrival 4,2,5,8,0,1,7,9,3,6 written [r1,r2] (s0_r1 ; s5_r1) * s4_r2
+task 18 required 134 tags 1:1,2:1,7:0 arrival 3,5,1,8,4,6,9,0,7,2 written [r0,r1] s7_r0 * (s1_r1 ; s2_r1)
+task 19 required 10 tags 1:2,3:1 arrival 9,7,1,3,2,6,0,4,5,8 written [r1,r2] s3_r1 * s1_r2
+performance none
+
+seed 293
+n 4 redraws 2277 max_attempts 267
+prefix_required 255,151,255,255,233,236,100,144,30,255,25,72,191,206,124,206,111,255,239,241
+agent 0 caps 8 trust 96 role 0
+agent 1 caps 92 trust 64 role 0
+agent 2 caps 8 trust 63 role 1
+agent 3 caps 24 trust 32 role 1
+task 0 required 68 tags 2:0,6:0 arrival 3,1,0,2 written [r0] s2_r0 ; s6_r0
+task 1 required 24 tags 3:0,4:0 arrival 0,1,2,3 written [r0] s3_r0 ; s4_r0
+task 2 required 20 tags 2:0,4:1 arrival 0,2,3,1 written [r0,r1] s2_r0 * s4_r1
+task 3 required 12 tags 2:0,3:0 arrival 1,0,2,3 written [r0] s2_r0 ; delta@r0 ; s3_r0 * s3_r0 ; mu@r0
+task 4 required 24 tags 3:0,4:0 arrival 1,0,3,2 written [r0] s3_r0 ; delta@r0 ; s4_r0 * s4_r0 ; mu@r0
+task 5 required 68 tags 2:0,6:0 arrival 1,2,0,3 written [r0] s2_r0 ; delta@r0 ; s6_r0 * s6_r0 ; mu@r0
+task 6 required 80 tags 4:1,6:0 arrival 3,1,2,0 written [r0,r1] s6_r0 * s4_r1
+task 7 required 24 tags 3:1,4:1 arrival 2,1,3,0 written [r1] s3_r1 ; s4_r1
+task 8 required 76 tags 2:0,3:0,6:0 arrival 2,0,1,3 written [r0] s2_r0 ; delta@r0 ; s3_r0 * s3_r0 ; mu@r0 ; s6_r0
+task 9 required 68 tags 2:0,6:0 arrival 2,1,3,0 written [r0] s2_r0 ; s6_r0
+task 10 required 24 tags 3:1,4:0 arrival 0,2,3,1 written [r0,r1] s4_r0 * s3_r1
+task 11 required 76 tags 2:0,3:1,6:0 arrival 3,0,1,2 written [r0,r1] (s2_r0 ; s6_r0) * s3_r1
+task 12 required 12 tags 2:0,3:0 arrival 1,3,0,2 written [r0] s2_r0 ; s3_r0
+task 13 required 68 tags 2:0,6:0 arrival 3,1,2,0 written [r0] s2_r0 ; delta@r0 ; s6_r0 * s6_r0 ; mu@r0
+task 14 required 24 tags 3:0,4:0 arrival 2,1,3,0 written [r0] s3_r0 ; s4_r0
+task 15 required 12 tags 2:0,3:0 arrival 2,3,0,1 written [r0] s2_r0 ; s3_r0
+task 16 required 68 tags 2:0,6:0 arrival 3,1,0,2 written [r0] s2_r0 ; s6_r0
+task 17 required 88 tags 3:0,4:0,6:0 arrival 2,1,3,0 written [r0] s3_r0 ; delta@r0 ; s4_r0 * s4_r0 ; mu@r0 ; s6_r0
+task 18 required 24 tags 3:1,4:1 arrival 0,1,2,3 written [r1] s3_r1 ; s4_r1
+task 19 required 80 tags 4:1,6:0 arrival 1,2,0,3 written [r0,r1] s6_r0 * s4_r1
+performance none
+
+seed 294
+n 9 redraws 117 max_attempts 23
+prefix_required 134,255,104,203,254,191,255,178,218,252,255,212,173,105,110,190,61,215,253,21
+agent 0 caps 4 trust 64 role 2
+agent 1 caps 17 trust 91 role 2
+agent 2 caps 146 trust 73 role 0
+agent 3 caps 202 trust 24 role 0
+agent 4 caps 9 trust 65 role 2
+agent 5 caps 137 trust 31 role 1
+agent 6 caps 35 trust 48 role 2
+agent 7 caps 137 trust 43 role 2
+agent 8 caps 80 trust 95 role 2
+task 0 required 134 tags 1:2,2:2,7:0 arrival 7,8,6,1,4,2,0,5,3 written [r0,r2] s7_r0 * (s1_r2 ; s2_r2)
+task 1 required 113 tags 0:2,4:2,5:2,6:2 arrival 5,0,4,1,8,6,2,3,7 written [r2] s0_r2 ; s4_r2 ; s5_r2 ; s6_r2
+task 2 required 140 tags 2:2,3:1,7:2 arrival 2,6,5,1,7,3,8,4,0 written [r1,r2] s3_r1 * (s2_r2 ; s7_r2)
+task 3 required 203 tags 0:2,1:0,3:2,6:2,7:2 arrival 0,1,2,5,4,7,6,3,8 written [r0,r2] s1_r0 * (s0_r2 ; s3_r2 ; s6_r2 ; s7_r2)
+task 4 required 104 tags 3:1,5:2,6:2 arrival 4,1,5,6,8,2,0,7,3 written [r1,r2] s3_r1 * (s5_r2 ; delta@r2 ; s6_r2 * s6_r2 ; mu@r2)
+task 5 required 139 tags 0:2,1:2,3:1,7:2 arrival 5,3,4,7,6,0,2,8,1 written [r1,r2] s3_r1 * (s0_r2 ; s1_r2 ; s7_r2)
+task 6 required 130 tags 1:2,7:1 arrival 5,3,8,6,2,4,0,1,7 written [r1,r2] s7_r1 * s1_r2
+task 7 required 218 tags 1:2,3:0,4:2,6:2,7:0 arrival 8,0,2,4,5,3,6,1,7 written [r0,r2] (s3_r0 ; delta@r0 ; s7_r0 * s7_r0 ; mu@r0) * (s1_r2 ; delta@r2 ; s4_r2 * s4_r2 ; mu@r2 ; s6_r2)
+task 8 required 144 tags 4:0,7:2 arrival 5,8,7,4,0,1,6,3,2 written [r0,r2] s4_r0 * s7_r2
+task 9 required 70 tags 1:2,2:2,6:0 arrival 7,3,2,4,0,6,5,8,1 written [r0,r2] s6_r0 * (s1_r2 ; delta@r2 ; s2_r2 * s2_r2 ; mu@r2)
+task 10 required 43 tags 0:1,1:2,3:0,5:2 arrival 5,8,0,7,3,6,4,2,1 written [r0,r1,r2] s3_r0 * s0_r1 * (s1_r2 ; s5_r2)
+task 11 required 26 tags 1:2,3:2,4:2 arrival 2,1,5,4,0,6,3,8,7 written [r2] s1_r2 ; s3_r2 ; s4_r2
+task 12 required 66 tags 1:0,6:0 arrival 0,6,3,4,7,5,1,2,8 written [r0] s1_r0 ; s6_r0
+task 13 required 140 tags 2:2,3:0,7:0 arrival 6,1,3,2,5,0,8,7,4 written [r0,r2] (s3_r0 ; s7_r0) * s2_r2
+task 14 required 72 tags 3:1,6:0 arrival 5,8,2,0,4,7,6,3,1 written [r0,r1] s6_r0 * s3_r1
+task 15 required 144 tags 4:2,7:2 arrival 6,8,5,4,1,7,0,3,2 written [r2] s4_r2 ; s7_r2
+task 16 required 185 tags 0:1,3:0,4:0,5:2,7:1 arrival 8,0,7,2,1,3,6,4,5 written [r0,r1,r2] (s3_r0 ; s4_r0) * (s0_r1 ; s7_r1) * s5_r2
+task 17 required 215 tags 0:1,1:0,2:2,4:2,6:0,7:1 arrival 0,7,6,2,8,3,5,4,1 written [r0,r1,r2] (s1_r0 ; s6_r0) * (s0_r1 ; s7_r1) * (s2_r2 ; s4_r2)
+task 18 required 28 tags 2:2,3:0,4:2 arrival 7,3,4,5,6,2,1,0,8 written [r0,r2] s3_r0 * (s2_r2 ; delta@r2 ; s4_r2 * s4_r2 ; mu@r2)
+task 19 required 71 tags 0:2,1:0,2:2,6:0 arrival 2,4,1,8,7,6,3,0,5 written [r0,r2] (s1_r0 ; s6_r0) * (s0_r2 ; s2_r2)
+performance none
+
+seed 295
+n 7 redraws 212 max_attempts 48
+prefix_required 174,20,255,46,118,24,55,18,255,255,255,199,134,255,71,139,255,146,144,22
+agent 0 caps 58 trust 46 role 1
+agent 1 caps 101 trust 77 role 2
+agent 2 caps 19 trust 28 role 1
+agent 3 caps 1 trust 28 role 0
+agent 4 caps 196 trust 76 role 2
+agent 5 caps 8 trust 71 role 2
+agent 6 caps 64 trust 59 role 0
+task 0 required 171 tags 0:2,1:1,3:2,5:2,7:2 arrival 3,1,6,5,4,2,0 written [r1,r2] s1_r1 * (s0_r2 ; s3_r2 ; delta@r2 ; s5_r2 * s5_r2 ; mu@r2 ; s7_r2)
+task 1 required 40 tags 3:2,5:1 arrival 0,3,1,5,6,2,4 written [r1,r2] s5_r1 * s3_r2
+task 2 required 200 tags 3:1,6:0,7:2 arrival 5,0,6,3,2,4,1 written [r0,r1,r2] s6_r0 * s3_r1 * s7_r2
+task 3 required 40 tags 3:1,5:2 arrival 0,5,6,4,3,2,1 written [r1,r2] s3_r1 * s5_r2
+task 4 required 40 tags 3:1,5:2 arrival 5,1,6,3,4,2,0 written [r1,r2] s3_r1 * s5_r2
+task 5 required 84 tags 2:2,4:1,6:2 arrival 3,6,1,4,0,2,5 written [r1,r2] s4_r1 * (s2_r2 ; s6_r2)
+task 6 required 12 tags 2:2,3:1 arrival 3,5,0,4,2,6,1 written [r1,r2] s3_r1 * s2_r2
+task 7 required 225 tags 0:2,5:1,6:2,7:2 arrival 2,0,5,3,6,4,1 written [r1,r2] s5_r1 * (s0_r2 ; delta@r2 ; s6_r2 * s6_r2 ; mu@r2 ; s7_r2)
+task 8 required 35 tags 0:2,1:1,5:2 arrival 0,6,5,4,1,2,3 written [r1,r2] s1_r1 * (s0_r2 ; s5_r2)
+task 9 required 119 tags 0:2,1:1,2:2,4:1,5:2,6:0 arrival 0,6,2,3,1,5,4 written [r0,r1,r2] s6_r0 * (s1_r1 ; s4_r1) * (s0_r2 ; s2_r2 ; delta@r2 ; s5_r2 * s5_r2 ; mu@r2)
+task 10 required 37 tags 0:2,2:2,5:2 arrival 1,0,5,6,2,4,3 written [r2] s0_r2 ; s2_r2 ; delta@r2 ; s5_r2 * s5_r2 ; mu@r2
+task 11 required 67 tags 0:1,1:1,6:2 arrival 4,3,5,6,2,1,0 written [r1,r2] (s0_r1 ; delta@r1 ; s1_r1 * s1_r1 ; mu@r1) * s6_r2
+task 12 required 33 tags 0:0,5:1 arrival 3,4,5,2,6,1,0 written [r0,r1] s0_r0 * s5_r1
+task 13 required 68 tags 2:2,6:0 arrival 3,2,4,6,1,0,5 written [r0,r2] s6_r0 * s2_r2
+task 14 required 130 tags 1:1,7:2 arrival 5,4,0,2,6,1,3 written [r1,r2] s1_r1 * s7_r2
+task 15 required 10 tags 1:1,3:2 arrival 6,4,2,1,3,0,5 written [r1,r2] s1_r1 * s3_r2
+task 16 required 24 tags 3:1,4:1 arrival 6,2,0,1,5,4,3 written [r1] s3_r1 ; s4_r1
+task 17 required 20 tags 2:2,4:1 arrival 5,6,1,3,0,4,2 written [r1,r2] s4_r1 * s2_r2
+task 18 required 160 tags 5:2,7:2 arrival 3,6,5,0,1,4,2 written [r2] s5_r2 ; s7_r2
+task 19 required 129 tags 0:2,7:2 arrival 6,0,3,1,5,4,2 written [r2] s0_r2 ; delta@r2 ; s7_r2 * s7_r2 ; mu@r2
+performance none
+
+seed 296
+n 14 redraws 146 max_attempts 27
+prefix_required 92,248,127,160,223,156,92,28,51,243,255,250,155,130,251,238,65,130,229,116
+agent 0 caps 16 trust 67 role 2
+agent 1 caps 112 trust 32 role 2
+agent 2 caps 184 trust 68 role 2
+agent 3 caps 169 trust 27 role 0
+agent 4 caps 168 trust 31 role 0
+agent 5 caps 129 trust 92 role 0
+agent 6 caps 88 trust 36 role 2
+agent 7 caps 42 trust 80 role 2
+agent 8 caps 17 trust 78 role 1
+agent 9 caps 17 trust 97 role 2
+agent 10 caps 84 trust 49 role 0
+agent 11 caps 100 trust 54 role 0
+agent 12 caps 2 trust 21 role 2
+agent 13 caps 120 trust 64 role 2
+task 0 required 92 tags 2:0,3:2,4:2,6:2 arrival 6,3,11,0,13,1,12,5,8,9,7,2,10,4 written [r0,r2] s2_r0 * (s3_r2 ; delta@r2 ; s4_r2 * s4_r2 ; mu@r2 ; s6_r2)
+task 1 required 19 tags 0:0,1:2,4:1 arrival 9,6,0,3,2,5,7,1,12,11,10,8,4,13 written [r0,r1,r2] s0_r0 * s4_r1 * s1_r2
+task 2 required 12 tags 2:0,3:2 arrival 10,1,3,2,11,0,5,7,13,4,9,6,12,8 written [r0,r2] s2_r0 * s3_r2
+task 3 required 9 tags 0:0,3:2 arrival 7,2,1,9,12,10,5,6,0,4,13,8,3,11 written [r0,r2] s0_r0 * s3_r2
+task 4 required 190 tags 1:2,2:0,3:2,4:0,5:2,7:0 arrival 0,7,12,3,10,8,11,1,4,2,6,9,13,5 written [r0,r2] (s2_r0 ; delta@r0 ; s4_r0 * s4_r0 ; mu@r0 ; s7_r0) * (s1_r2 ; delta@r2 ; s3_r2 * s3_r2 ; mu@r2 ; s5_r2)
+task 5 required 139 tags 0:1,1:2,3:2,7:0 arrival 0,13,8,10,12,7,9,11,1,3,4,5,2,6 written [r0,r1,r2] s7_r0 * s0_r1 * (s1_r2 ; s3_r2)
+task 6 required 84 tags 2:0,4:2,6:2 arrival 0,7,6,5,9,8,2,11,3,1,13,4,10,12 written [r0,r2] s2_r0 * (s4_r2 ; s6_r2)
+task 7 required 84 tags 2:0,4:0,6:0 arrival 2,1,13,6,12,5,8,10,0,3,7,9,11,4 written [r0] s2_r0 ; delta@r0 ; s4_r0 * s4_r0 ; mu@r0 ; s6_r0
+task 8 required 66 tags 1:2,6:2 arrival 9,3,11,8,13,1,0,10,4,12,5,6,7,2 written [r2] s1_r2 ; delta@r2 ; s6_r2 * s6_r2 ; mu@r2
+task 9 required 168 tags 3:2,5:0,7:0 arrival 7,3,8,10,4,13,9,11,1,5,2,12,0,6 written [r0,r2] (s5_r0 ; delta@r0 ; s7_r0 * s7_r0 ; mu@r0) * s3_r2
+task 10 required 195 tags 0:2,1:2,6:2,7:0 arrival 11,7,0,5,6,8,2,4,1,3,10,9,13,12 written [r0,r2] s7_r0 * (s0_r2 ; s1_r2 ; s6_r2)
+task 11 required 168 tags 3:2,5:2,7:2 arrival 10,8,2,7,5,4,6,0,3,12,9,11,13,1 written [r2] s3_r2 ; s5_r2 ; s7_r2
+task 12 required 19 tags 0:2,1:2,4:1 arrival 3,12,5,10,0,1,6,11,4,8,2,13,7,9 written [r1,r2] s4_r1 * (s0_r2 ; delta@r2 ; s1_r2 * s1_r2 ; mu@r2)
+task 13 required 80 tags 4:0,6:0 arrival 6,0,8,12,4,3,7,2,13,5,10,9,11,1 written [r0] s4_r0 ; delta@r0 ; s6_r0 * s6_r0 ; mu@r0
+task 14 required 112 tags 4:2,5:0,6:2 arrival 4,9,1,7,11,5,6,13,2,12,0,10,8,3 written [r0,r2] s5_r0 * (s4_r2 ; s6_r2)
+task 15 required 26 tags 1:2,3:2,4:0 arrival 12,4,7,11,13,0,10,9,3,5,2,8,1,6 written [r0,r2] s4_r0 * (s1_r2 ; s3_r2)
+task 16 required 65 tags 0:2,6:0 arrival 7,0,1,10,5,4,9,12,3,6,11,2,8,13 written [r0,r2] s6_r0 * s0_r2
+task 17 required 135 tags 0:2,1:2,2:0,7:2 arrival 6,5,12,4,0,10,8,9,11,13,1,2,3,7 written [r0,r2] s2_r0 * (s0_r2 ; s1_r2 ; delta@r2 ; s7_r2 * s7_r2 ; mu@r2)
+task 18 required 232 tags 3:2,5:2,6:2,7:0 arrival 8,0,9,4,1,5,3,13,11,10,6,2,7,12 written [r0,r2] s7_r0 * (s3_r2 ; s5_r2 ; s6_r2)
+task 19 required 198 tags 1:2,2:0,6:2,7:2 arrival 10,3,12,5,9,13,11,8,2,4,1,7,0,6 written [r0,r2] s2_r0 * (s1_r2 ; s6_r2 ; delta@r2 ; s7_r2 * s7_r2 ; mu@r2)
+performance none
+
+seed 297
+n 6 redraws 356 max_attempts 48
+prefix_required 255,127,20,139,130,187,255,249,237,255,160,220,208,235,37,255,31,55,202,20
+agent 0 caps 53 trust 85 role 0
+agent 1 caps 198 trust 80 role 0
+agent 2 caps 208 trust 28 role 0
+agent 3 caps 160 trust 97 role 2
+agent 4 caps 208 trust 53 role 2
+agent 5 caps 128 trust 30 role 0
+task 0 required 180 tags 2:0,4:0,5:0,7:0 arrival 1,4,2,0,3,5 written [r0] s2_r0 ; s4_r0 ; s5_r0 ; delta@r0 ; s7_r0 * s7_r0 ; mu@r0
+task 1 required 130 tags 1:0,7:2 arrival 0,4,3,1,2,5 written [r0,r2] s1_r0 * s7_r2
+task 2 required 241 tags 0:0,4:0,5:0,6:0,7:2 arrival 2,5,0,1,4,3 written [r0,r2] (s0_r0 ; s4_r0 ; s5_r0 ; s6_r0) * s7_r2
+task 3 required 144 tags 4:2,7:0 arrival 0,3,5,4,1,2 written [r0,r2] s7_r0 * s4_r2
+task 4 required 130 tags 1:0,7:0 arrival 4,5,1,0,2,3 written [r0] s1_r0 ; s7_r0
+task 5 required 208 tags 4:0,6:2,7:0 arrival 0,2,4,1,5,3 written [r0,r2] (s4_r0 ; delta@r0 ; s7_r0 * s7_r0 ; mu@r0) * s6_r2
+task 6 required 80 tags 4:0,6:2 arrival 1,2,5,4,0,3 written [r0,r2] s4_r0 * s6_r2
+task 7 required 33 tags 0:0,5:0 arrival 0,4,1,3,2,5 written [r0] s0_r0 ; s5_r0
+task 8 required 208 tags 4:0,6:2,7:0 arrival 4,2,5,3,0,1 written [r0,r2] (s4_r0 ; delta@r0 ; s7_r0 * s7_r0 ; mu@r0) * s6_r2
+task 9 required 34 tags 1:0,5:0 arrival 5,3,2,1,4,0 written [r0] s1_r0 ; s5_r0
+task 10 required 97 tags 0:0,5:0,6:2 arrival 3,0,4,2,5,1 written [r0,r2] (s0_r0 ; s5_r0) * s6_r2
+task 11 required 146 tags 1:0,4:2,7:0 arrival 0,1,3,4,2,5 written [r0,r2] (s1_r0 ; s7_r0) * s4_r2
+task 12 required 50 tags 1:0,4:2,5:0 arrival 5,1,0,2,4,3 written [r0,r2] (s1_r0 ; s5_r0) * s4_r2
+task 13 required 80 tags 4:0,6:0 arrival 2,5,0,3,1,4 written [r0] s4_r0 ; s6_r0
+task 14 required 194 tags 1:0,6:2,7:2 arrival 1,4,2,3,5,0 written [r0,r2] s1_r0 * (s6_r2 ; s7_r2)
+task 15 required 192 tags 6:2,7:2 arrival 0,3,4,1,2,5 written [r2] s6_r2 ; s7_r2
+task 16 required 194 tags 1:0,6:0,7:0 arrival 5,2,0,4,3,1 written [r0] s1_r0 ; s6_r0 ; s7_r0
+task 17 required 54 tags 1:0,2:0,4:0,5:0 arrival 2,5,1,0,3,4 written [r0] s1_r0 ; s2_r0 ; s4_r0 ; s5_r0
+task 18 required 34 tags 1:0,5:2 arrival 5,4,1,0,3,2 written [r0,r2] s1_r0 * s5_r2
+task 19 required 225 tags 0:0,5:2,6:2,7:0 arrival 4,0,2,1,3,5 written [r0,r2] (s0_r0 ; delta@r0 ; s7_r0 * s7_r0 ; mu@r0) * (s5_r2 ; s6_r2)
+performance none
+
+seed 298
+n 15 redraws 5 max_attempts 3
+prefix_required 127,115,191,167,255,223,251,91,58,190,255,255,255,61,131,252,180,191,191,36
+agent 0 caps 54 trust 28 role 2
+agent 1 caps 232 trust 21 role 0
+agent 2 caps 240 trust 46 role 2
+agent 3 caps 128 trust 55 role 1
+agent 4 caps 8 trust 63 role 2
+agent 5 caps 60 trust 93 role 2
+agent 6 caps 4 trust 38 role 0
+agent 7 caps 5 trust 27 role 0
+agent 8 caps 24 trust 39 role 1
+agent 9 caps 44 trust 79 role 1
+agent 10 caps 10 trust 28 role 0
+agent 11 caps 48 trust 22 role 0
+agent 12 caps 64 trust 86 role 1
+agent 13 caps 71 trust 66 role 1
+agent 14 caps 2 trust 59 role 2
+task 0 required 127 tags 0:0,1:2,2:0,3:1,4:0,5:0,6:1 arrival 8,11,4,3,1,0,5,7,6,9,2,13,10,12,14 written [r0,r1,r2] (s0_r0 ; s2_r0 ; s4_r0 ; delta@r0 ; s5_r0 * s5_r0 ; mu@r0) * (s3_r1 ; s6_r1) * s1_r2
+task 1 required 115 tags 0:0,1:0,4:0,5:2,6:1 arrival 7,6,8,2,11,13,14,4,1,9,0,5,10,3,12 written [r0,r1,r2] (s0_r0 ; s1_r0 ; s4_r0) * s6_r1 * s5_r2
+task 2 required 191 tags 0:0,1:0,2:1,3:1,4:1,5:1,7:0 arrival 9,1,5,3,13,0,14,6,7,11,4,10,2,12,8 written [r0,r1] (s0_r0 ; s1_r0 ; s7_r0) * (s2_r1 ; s3_r1 ; s4_r1 ; s5_r1)
+task 3 required 167 tags 0:0,1:1,2:2,5:1,7:0 arrival 6,4,0,7,13,12,9,8,3,2,11,1,14,5,10 written [r0,r1,r2] (s0_r0 ; delta@r0 ; s7_r0 * s7_r0 ; mu@r0) * (s1_r1 ; delta@r1 ; s5_r1 * s5_r1 ; mu@r1) * s2_r2
+task 4 required 172 tags 2:0,3:2,5:0,7:1 arrival 5,1,2,9,0,3,8,4,14,12,13,10,7,11,6 written [r0,r1,r2] (s2_r0 ; delta@r0 ; s5_r0 * s5_r0 ; mu@r0) * s7_r1 * s3_r2
+task 5 required 40 tags 3:0,5:2 arrival 3,4,7,11,12,0,9,13,6,14,2,10,5,8,1 written [r0,r2] s3_r0 * s5_r2
+task 6 required 251 tags 0:1,1:0,3:2,4:1,5:2,6:2,7:1 arrival 10,5,8,1,13,6,2,4,3,0,14,7,9,12,11 written [r0,r1,r2] s1_r0 * (s0_r1 ; s4_r1 ; s7_r1) * (s3_r2 ; s5_r2 ; s6_r2)
+task 7 required 199 tags 0:0,1:2,2:2,6:1,7:0 arrival 10,12,1,0,7,14,6,8,5,13,11,9,3,4,2 written [r0,r1,r2] (s0_r0 ; s7_r0) * s6_r1 * (s1_r2 ; delta@r2 ; s2_r2 * s2_r2 ; mu@r2)
+task 8 required 58 tags 1:1,3:0,4:0,5:1 arrival 11,12,8,6,9,14,2,7,13,3,5,0,1,4,10 written [r0,r1] (s3_r0 ; s4_r0) * (s1_r1 ; s5_r1)
+task 9 required 190 tags 1:2,2:1,3:2,4:0,5:0,7:0 arrival 1,7,10,12,9,14,13,11,5,3,0,6,8,2,4 written [r0,r1,r2] (s4_r0 ; delta@r0 ; s5_r0 * s5_r0 ; mu@r0 ; s7_r0) * s2_r1 * (s1_r2 ; delta@r2 ; s3_r2 * s3_r2 ; mu@r2)
+task 10 required 255 tags 0:0,1:2,2:0,3:2,4:0,5:0,6:1,7:2 arrival 10,9,0,4,14,13,11,2,1,8,6,5,7,12,3 written [r0,r1,r2] (s0_r0 ; delta@r0 ; s2_r0 * s2_r0 ; mu@r0 ; delta@r0 ; s4_r0 * s4_r0 ; mu@r0 ; s5_r0) * s6_r1 * (s1_r2 ; s3_r2 ; delta@r2 ; s7_r2 * s7_r2 ; mu@r2)
+task 11 required 255 tags 0:0,1:0,2:0,3:1,4:0,5:1,6:1,7:1 arrival 13,0,6,9,12,14,8,1,5,3,10,7,2,11,4 written [r0,r1] (s0_r0 ; s1_r0 ; delta@r0 ; s2_r0 * s2_r0 ; mu@r0 ; s4_r0) * (s3_r1 ; s5_r1 ; s6_r1 ; delta@r1 ; s7_r1 * s7_r1 ; mu@r1)
+task 12 required 255 tags 0:0,1:0,2:1,3:0,4:0,5:0,6:0,7:2 arrival 6,7,14,12,5,9,10,13,0,1,3,11,2,4,8 written [r0,r1,r2] (s0_r0 ; delta@r0 ; s1_r0 * s1_r0 ; mu@r0 ; delta@r0 ; s3_r0 * s3_r0 ; mu@r0 ; s4_r0 ; s5_r0 ; delta@r0 ; s6_r0 * s6_r0 ; mu@r0) * s2_r1 * s7_r2
+task 13 required 238 tags 1:0,2:1,3:1,5:0,6:0,7:2 arrival 1,13,4,2,7,3,8,0,12,10,9,6,5,14,11 written [r0,r1,r2] (s1_r0 ; s5_r0 ; s6_r0) * (s2_r1 ; s3_r1) * s7_r2
+task 14 required 131 tags 0:1,1:2,7:2 arrival 7,9,2,4,13,6,8,5,3,11,1,12,0,14,10 written [r1,r2] s0_r1 * (s1_r2 ; s7_r2)
+task 15 required 252 tags 2:2,3:0,4:0,5:0,6:1,7:1 arrival 5,4,1,8,2,0,14,9,12,6,10,11,13,7,3 written [r0,r1,r2] (s3_r0 ; s4_r0 ; delta@r0 ; s5_r0 * s5_r0 ; mu@r0) * (s6_r1 ; s7_r1) * s2_r2
+task 16 required 180 tags 2:1,4:2,5:2,7:1 arrival 12,0,11,14,13,9,3,10,5,1,4,7,6,8,2 written [r1,r2] (s2_r1 ; delta@r1 ; s7_r1 * s7_r1 ; mu@r1) * (s4_r2 ; s5_r2)
+task 17 required 191 tags 0:1,1:2,2:0,3:0,4:1,5:2,7:1 arrival 3,0,1,10,4,12,7,5,9,2,14,13,6,8,11 written [r0,r1,r2] (s2_r0 ; s3_r0) * (s0_r1 ; delta@r1 ; s4_r1 * s4_r1 ; mu@r1 ; delta@r1 ; s7_r1 * s7_r1 ; mu@r1) * (s1_r2 ; delta@r2 ; s5_r2 * s5_r2 ; mu@r2)
+task 18 required 191 tags 0:0,1:1,2:1,3:1,4:1,5:0,7:2 arrival 2,14,7,11,1,5,3,10,12,9,6,4,8,0,13 written [r0,r1,r2] (s0_r0 ; s5_r0) * (s1_r1 ; delta@r1 ; s2_r1 * s2_r1 ; mu@r1 ; s3_r1 ; delta@r1 ; s4_r1 * s4_r1 ; mu@r1) * s7_r2
+task 19 required 36 tags 2:1,5:1 arrival 9,13,0,11,14,6,8,2,3,10,1,7,12,4,5 written [r1] s2_r1 ; s5_r1
+performance none
+
+seed 299
+n 12 redraws 86 max_attempts 16
+prefix_required 192,144,95,255,44,218,235,247,97,127,131,255,95,49,102,255,3,150,132,251
+agent 0 caps 86 trust 33 role 1
+agent 1 caps 68 trust 29 role 0
+agent 2 caps 130 trust 87 role 1
+agent 3 caps 146 trust 24 role 1
+agent 4 caps 2 trust 49 role 0
+agent 5 caps 226 trust 59 role 2
+agent 6 caps 141 trust 81 role 2
+agent 7 caps 28 trust 75 role 2
+agent 8 caps 32 trust 78 role 2
+agent 9 caps 128 trust 99 role 1
+agent 10 caps 12 trust 46 role 1
+agent 11 caps 150 trust 36 role 1
+task 0 required 192 tags 6:0,7:2 arrival 8,6,9,0,2,1,7,10,3,11,5,4 written [r0,r2] s6_r0 * s7_r2
+task 1 required 162 tags 1:1,5:2,7:2 arrival 1,2,3,0,4,6,11,8,10,5,7,9 written [r1,r2] s1_r1 * (s5_r2 ; s7_r2)
+task 2 required 95 tags 0:2,1:0,2:1,3:1,4:2,6:2 arrival 11,5,3,8,4,1,7,9,6,10,2,0 written [r0,r1,r2] s1_r0 * (s2_r1 ; s3_r1) * (s0_r2 ; s4_r2 ; delta@r2 ; s6_r2 * s6_r2 ; mu@r2)
+task 3 required 130 tags 1:0,7:1 arrival 11,5,4,0,3,7,10,8,1,9,2,6 written [r0,r1] s1_r0 * s7_r1
+task 4 required 42 tags 1:0,3:2,5:2 arrival 6,0,8,7,9,4,1,2,10,11,3,5 written [r0,r2] s1_r0 * (s3_r2 ; delta@r2 ; s5_r2 * s5_r2 ; mu@r2)
+task 5 required 200 tags 3:2,6:0,7:2 arrival 6,10,11,4,5,7,9,0,2,1,8,3 written [r0,r2] s6_r0 * (s3_r2 ; delta@r2 ; s7_r2 * s7_r2 ; mu@r2)
+task 6 required 104 tags 3:1,5:2,6:1 arrival 3,5,11,2,9,10,8,1,6,4,0,7 written [r1,r2] (s3_r1 ; s6_r1) * s5_r2
+task 7 required 9 tags 0:2,3:1 arrival 4,7,2,0,5,8,11,6,10,9,1,3 written [r1,r2] s3_r1 * s0_r2
+task 8 required 188 tags 2:2,3:1,4:2,5:2,7:1 arrival 7,8,0,1,3,4,5,11,2,6,9,10 written [r1,r2] (s3_r1 ; s7_r1) * (s2_r2 ; s4_r2 ; s5_r2)
+task 9 required 249 tags 0:2,3:2,4:2,5:2,6:1,7:1 arrival 11,3,4,7,6,9,2,8,0,10,1,5 written [r1,r2] (s6_r1 ; s7_r1) * (s0_r2 ; delta@r2 ; s3_r2 * s3_r2 ; mu@r2 ; s4_r2 ; s5_r2)
+task 10 required 131 tags 0:2,1:0,7:1 arrival 4,9,2,7,10,0,3,6,11,5,8,1 written [r0,r1,r2] s1_r0 * s7_r1 * s0_r2
+task 11 required 223 tags 0:2,1:1,2:0,3:1,4:2,6:2,7:1 arrival 7,11,2,9,0,3,5,1,4,6,8,10 written [r0,r1,r2] s2_r0 * (s1_r1 ; s3_r1 ; s7_r1) * (s0_r2 ; s4_r2 ; delta@r2 ; s6_r2 * s6_r2 ; mu@r2)
+task 12 required 80 tags 4:2,6:2 arrival 3,8,5,2,4,7,6,0,10,1,11,9 written [r2] s4_r2 ; s6_r2
+task 13 required 97 tags 0:2,5:2,6:1 arrival 8,0,7,2,1,11,10,6,3,4,9,5 written [r1,r2] s6_r1 * (s0_r2 ; s5_r2)
+task 14 required 159 tags 0:2,1:2,2:1,3:1,4:2,7:1 arrival 2,5,7,8,6,0,1,9,3,11,10,4 written [r1,r2] (s2_r1 ; delta@r1 ; s3_r1 * s3_r1 ; mu@r1 ; s7_r1) * (s0_r2 ; s1_r2 ; delta@r2 ; s4_r2 * s4_r2 ; mu@r2)
+task 15 required 251 tags 0:2,1:1,3:2,4:2,5:2,6:1,7:2 arrival 2,7,8,0,11,6,1,3,9,10,5,4 written [r1,r2] (s1_r1 ; delta@r1 ; s6_r1 * s6_r1 ; mu@r1) * (s0_r2 ; s3_r2 ; s4_r2 ; s5_r2 ; s7_r2)
+task 16 required 80 tags 4:2,6:0 arrival 7,9,0,5,4,2,10,11,3,6,8,1 written [r0,r2] s6_r0 * s4_r2
+task 17 required 231 tags 0:2,1:0,2:0,5:2,6:1,7:1 arrival 5,7,11,0,6,8,3,10,2,9,1,4 written [r0,r1,r2] (s1_r0 ; s2_r0) * (s6_r1 ; s7_r1) * (s0_r2 ; s5_r2)
+task 18 required 55 tags 0:2,1:2,2:0,4:2,5:2 arrival 3,11,10,4,7,6,0,5,2,8,1,9 written [r0,r2] s2_r0 * (s0_r2 ; s1_r2 ; s4_r2 ; s5_r2)
+task 19 required 85 tags 0:2,2:1,4:1,6:2 arrival 4,3,5,8,10,2,7,9,6,0,11,1 written [r1,r2] (s2_r1 ; s4_r1) * (s0_r2 ; s6_r2)
+performance none
+
+seed 330
+n 9 redraws 117 max_attempts 13
+prefix_required 255,48,247,72,255,255,129,148,75,241,239,136,255,215,192,95,27,74,255,239
+agent 0 caps 132 trust 48 role 0
+agent 1 caps 11 trust 97 role 0
+agent 2 caps 141 trust 85 role 1
+agent 3 caps 70 trust 89 role 0
+agent 4 caps 138 trust 32 role 0
+agent 5 caps 33 trust 41 role 0
+agent 6 caps 80 trust 86 role 0
+agent 7 caps 129 trust 72 role 2
+agent 8 caps 16 trust 85 role 1
+task 0 required 40 tags 3:1,5:0 arrival 1,0,6,5,8,7,2,4,3 written [r0,r1] s5_r0 * s3_r1
+task 1 required 41 tags 0:2,3:1,5:0 arrival 4,3,0,7,2,1,8,5,6 written [r0,r1,r2] s5_r0 * s3_r1 * s0_r2
+task 2 required 133 tags 0:2,2:1,7:0 arrival 1,0,5,7,6,2,4,3,8 written [r0,r1,r2] s7_r0 * s2_r1 * s0_r2
+task 3 required 18 tags 1:0,4:1 arrival 7,5,4,3,1,6,2,0,8 written [r0,r1] s1_r0 * s4_r1
+task 4 required 17 tags 0:2,4:1 arrival 2,8,4,1,7,5,0,6,3 written [r1,r2] s4_r1 * s0_r2
+task 5 required 160 tags 5:0,7:0 arrival 7,4,6,0,1,5,2,8,3 written [r0] s5_r0 ; s7_r0
+task 6 required 129 tags 0:0,7:2 arrival 2,1,7,5,6,0,8,4,3 written [r0,r2] s0_r0 * s7_r2
+task 7 required 239 tags 0:2,1:0,2:1,3:0,5:0,6:0,7:2 arrival 8,7,2,1,0,5,3,6,4 written [r0,r1,r2] (s1_r0 ; delta@r0 ; s3_r0 * s3_r0 ; mu@r0 ; s5_r0 ; s6_r0) * s2_r1 * (s0_r2 ; s7_r2)
+task 8 required 197 tags 0:1,2:1,6:0,7:0 arrival 1,3,4,0,6,8,2,7,5 written [r0,r1] (s6_r0 ; delta@r0 ; s7_r0 * s7_r0 ; mu@r0) * (s0_r1 ; s2_r1)
+task 9 required 140 tags 2:0,3:0,7:0 arrival 5,0,6,2,8,3,7,1,4 written [r0] s2_r0 ; s3_r0 ; s7_r0
+task 10 required 176 tags 4:1,5:0,7:1 arrival 1,8,3,6,2,7,4,0,5 written [r0,r1] s5_r0 * (s4_r1 ; s7_r1)
+task 11 required 157 tags 0:0,2:1,3:1,4:0,7:2 arrival 3,0,2,7,4,1,5,6,8 written [r0,r1,r2] (s0_r0 ; delta@r0 ; s4_r0 * s4_r0 ; mu@r0) * (s2_r1 ; s3_r1) * s7_r2
+task 12 required 144 tags 4:0,7:2 arrival 6,5,4,3,2,0,7,8,1 written [r0,r2] s4_r0 * s7_r2
+task 13 required 201 tags 0:2,3:0,6:0,7:1 arrival 5,7,4,3,6,8,1,2,0 written [r0,r1,r2] (s3_r0 ; s6_r0) * s7_r1 * s0_r2
+task 14 required 210 tags 1:0,4:0,6:0,7:2 arrival 6,5,0,7,2,4,1,8,3 written [r0,r2] (s1_r0 ; delta@r0 ; s4_r0 * s4_r0 ; mu@r0 ; s6_r0) * s7_r2
+task 15 required 185 tags 0:1,3:1,4:1,5:0,7:0 arrival 7,1,8,0,3,2,4,5,6 written [r0,r1] (s5_r0 ; s7_r0) * (s0_r1 ; s3_r1 ; s4_r1)
+task 16 required 5 tags 0:1,2:0 arrival 4,7,3,0,6,5,1,2,8 written [r0,r1] s2_r0 * s0_r1
+task 17 required 218 tags 1:0,3:1,4:1,6:0,7:1 arrival 8,4,7,0,6,5,3,1,2 written [r0,r1] (s1_r0 ; delta@r0 ; s6_r0 * s6_r0 ; mu@r0) * (s3_r1 ; s4_r1 ; s7_r1)
+task 18 required 161 tags 0:2,5:0,7:1 arrival 2,8,1,5,0,6,4,3,7 written [r0,r1,r2] s5_r0 * s7_r1 * s0_r2
+task 19 required 129 tags 0:2,7:1 arrival 4,5,0,7,2,6,8,3,1 written [r1,r2] s7_r1 * s0_r2
+performance none
+
+seed 331
+n 15 redraws 162 max_attempts 19
+prefix_required 255,255,50,255,255,162,81,191,254,66,247,214,221,191,36,222,15,72,123,255
+agent 0 caps 209 trust 64 role 1
+agent 1 caps 18 trust 74 role 1
+agent 2 caps 56 trust 57 role 1
+agent 3 caps 4 trust 61 role 1
+agent 4 caps 8 trust 58 role 0
+agent 5 caps 133 trust 80 role 2
+agent 6 caps 135 trust 34 role 1
+agent 7 caps 27 trust 99 role 1
+agent 8 caps 2 trust 39 role 2
+agent 9 caps 4 trust 42 role 0
+agent 10 caps 2 trust 96 role 0
+agent 11 caps 178 trust 61 role 1
+agent 12 caps 3 trust 39 role 1
+agent 13 caps 163 trust 39 role 1
+agent 14 caps 1 trust 84 role 1
+task 0 required 134 tags 1:0,2:0,7:1 arrival 5,14,12,4,0,6,7,2,8,11,3,13,1,10,9 written [r0,r1] (s1_r0 ; s2_r0) * s7_r1
+task 1 required 129 tags 0:1,7:2 arrival 1,0,10,2,8,4,3,9,11,12,5,6,14,13,7 written [r1,r2] s0_r1 * s7_r2
+task 2 required 68 tags 2:2,6:1 arrival 9,6,12,10,5,4,11,8,1,3,13,7,2,0,14 written [r1,r2] s6_r1 * s2_r2
+task 3 required 40 tags 3:0,5:1 arrival 14,7,4,2,5,1,13,12,0,11,6,9,10,8,3 written [r0,r1] s3_r0 * s5_r1
+task 4 required 29 tags 0:2,2:1,3:0,4:1 arrival 7,9,0,12,5,8,6,4,10,11,1,3,13,14,2 written [r0,r1,r2] s3_r0 * (s2_r1 ; delta@r1 ; s4_r1 * s4_r1 ; mu@r1) * s0_r2
+task 5 required 6 tags 1:1,2:0 arrival 4,12,7,9,5,3,6,0,8,2,1,10,14,13,11 written [r0,r1] s2_r0 * s1_r1
+task 6 required 255 tags 0:2,1:0,2:0,3:1,4:1,5:1,6:1,7:1 arrival 7,3,2,13,11,14,1,0,10,5,6,9,4,12,8 written [r0,r1,r2] (s1_r0 ; delta@r0 ; s2_r0 * s2_r0 ; mu@r0) * (s3_r1 ; s4_r1 ; s5_r1 ; s6_r1 ; s7_r1) * s0_r2
+task 7 required 5 tags 0:1,2:2 arrival 11,2,9,10,12,6,4,1,0,13,14,7,3,8,5 written [r1,r2] s0_r1 * s2_r2
+task 8 required 68 tags 2:2,6:1 arrival 11,5,4,12,7,10,13,1,8,9,3,6,2,0,14 written [r1,r2] s6_r1 * s2_r2
+task 9 required 40 tags 3:0,5:1 arrival 12,3,14,1,4,9,8,5,6,10,11,7,2,0,13 written [r0,r1] s3_r0 * s5_r1
+task 10 required 7 tags 0:2,1:1,2:1 arrival 0,4,8,3,6,10,14,11,12,7,2,9,1,5,13 written [r1,r2] (s1_r1 ; s2_r1) * s0_r2
+task 11 required 10 tags 1:1,3:0 arrival 2,6,9,8,7,12,13,3,10,5,4,0,11,1,14 written [r0,r1] s3_r0 * s1_r1
+task 12 required 177 tags 0:1,4:1,5:1,7:1 arrival 8,6,0,5,11,10,1,7,12,9,3,14,2,13,4 written [r1] s0_r1 ; s4_r1 ; s5_r1 ; s7_r1
+task 13 required 132 tags 2:2,7:1 arrival 14,2,0,8,1,10,11,6,7,4,5,13,12,3,9 written [r1,r2] s7_r1 * s2_r2
+task 14 required 17 tags 0:1,4:1 arrival 6,14,12,11,10,2,4,3,0,7,1,5,8,9,13 written [r1] s0_r1 ; s4_r1
+task 15 required 36 tags 2:0,5:1 arrival 14,7,12,1,13,3,2,11,8,4,0,6,9,5,10 written [r0,r1] s2_r0 * s5_r1
+task 16 required 15 tags 0:2,1:1,2:0,3:1 arrival 8,9,6,13,4,5,0,7,12,11,1,2,14,3,10 written [r0,r1,r2] s2_r0 * (s1_r1 ; s3_r1) * s0_r2
+task 17 required 133 tags 0:1,2:0,7:2 arrival 5,7,14,13,0,1,8,11,6,4,3,9,10,12,2 written [r0,r1,r2] s2_r0 * s0_r1 * s7_r2
+task 18 required 94 tags 1:1,2:2,3:0,4:1,6:1 arrival 3,9,6,12,5,11,0,8,13,10,7,4,14,1,2 written [r0,r1,r2] s3_r0 * (s1_r1 ; s4_r1 ; s6_r1) * s2_r2
+task 19 required 131 tags 0:2,1:0,7:1 arrival 5,11,3,0,2,4,14,7,9,12,13,6,10,1,8 written [r0,r1,r2] s1_r0 * s7_r1 * s0_r2
+performance none
+
+seed 332
+n 12 redraws 140 max_attempts 29
+prefix_required 203,255,129,255,68,255,255,18,33,135,235,190,94,18,187,171,33,227,62,127
+agent 0 caps 10 trust 63 role 2
+agent 1 caps 212 trust 33 role 2
+agent 2 caps 32 trust 41 role 0
+agent 3 caps 32 trust 93 role 2
+agent 4 caps 232 trust 36 role 0
+agent 5 caps 98 trust 46 role 0
+agent 6 caps 26 trust 50 role 0
+agent 7 caps 140 trust 30 role 2
+agent 8 caps 4 trust 28 role 1
+agent 9 caps 8 trust 93 role 0
+agent 10 caps 85 trust 25 role 2
+agent 11 caps 43 trust 98 role 2
+task 0 required 132 tags 2:1,7:0 arrival 9,10,2,7,11,3,6,4,1,5,8,0 written [r0,r1] s7_r0 * s2_r1
+task 1 required 60 tags 2:1,3:0,4:2,5:0 arrival 2,1,9,7,11,8,6,3,10,0,4,5 written [r0,r1,r2] (s3_r0 ; delta@r0 ; s5_r0 * s5_r0 ; mu@r0) * s2_r1 * s4_r2
+task 2 required 148 tags 2:1,4:2,7:0 arrival 7,5,8,6,9,10,0,3,2,1,4,11 written [r0,r1,r2] s7_r0 * s2_r1 * s4_r2
+task 3 required 144 tags 4:2,7:2 arrival 0,2,1,4,5,3,6,8,10,7,9,11 written [r2] s4_r2 ; s7_r2
+task 4 required 166 tags 1:2,2:2,5:2,7:2 arrival 0,10,5,4,6,3,1,2,8,9,11,7 written [r2] s1_r2 ; s2_r2 ; s5_r2 ; s7_r2
+task 5 required 251 tags 0:2,1:2,3:0,4:0,5:0,6:0,7:2 arrival 6,4,5,9,7,2,1,11,10,0,3,8 written [r0,r2] (s3_r0 ; s4_r0 ; s5_r0 ; delta@r0 ; s6_r0 * s6_r0 ; mu@r0) * (s0_r2 ; s1_r2 ; delta@r2 ; s7_r2 * s7_r2 ; mu@r2)
+task 6 required 138 tags 1:0,3:2,7:2 arrival 1,2,7,8,9,11,5,3,0,10,4,6 written [r0,r2] s1_r0 * (s3_r2 ; s7_r2)
+task 7 required 5 tags 0:2,2:1 arrival 4,0,5,8,6,10,11,2,7,3,1,9 written [r1,r2] s2_r1 * s0_r2
+task 8 required 165 tags 0:2,2:1,5:2,7:2 arrival 9,5,6,8,3,4,0,2,1,7,11,10 written [r1,r2] s2_r1 * (s0_r2 ; s5_r2 ; delta@r2 ; s7_r2 * s7_r2 ; mu@r2)
+task 9 required 52 tags 2:1,4:2,5:0 arrival 8,11,9,1,5,10,6,3,4,0,7,2 written [r0,r1,r2] s5_r0 * s2_r1 * s4_r2
+task 10 required 68 tags 2:2,6:0 arrival 7,0,11,9,10,3,5,1,2,4,8,6 written [r0,r2] s6_r0 * s2_r2
+task 11 required 208 tags 4:2,6:2,7:0 arrival 9,5,1,4,6,8,0,3,2,11,10,7 written [r0,r2] s7_r0 * (s4_r2 ; s6_r2)
+task 12 required 232 tags 3:0,5:2,6:0,7:2 arrival 0,11,3,9,8,2,7,5,1,4,6,10 written [r0,r2] (s3_r0 ; s6_r0) * (s5_r2 ; s7_r2)
+task 13 required 80 tags 4:0,6:0 arrival 11,3,5,10,0,4,8,6,2,9,7,1 written [r0] s4_r0 ; s6_r0
+task 14 required 34 tags 1:2,5:2 arrival 3,5,0,6,4,7,9,1,11,2,10,8 written [r2] s1_r2 ; delta@r2 ; s5_r2 * s5_r2 ; mu@r2
+task 15 required 78 tags 1:2,2:1,3:2,6:2 arrival 8,7,6,4,5,11,9,10,2,0,1,3 written [r1,r2] s2_r1 * (s1_r2 ; delta@r2 ; s3_r2 * s3_r2 ; mu@r2 ; s6_r2)
+task 16 required 182 tags 1:2,2:2,4:2,5:2,7:2 arrival 1,5,10,8,0,11,7,6,9,4,2,3 written [r2] s1_r2 ; s2_r2 ; delta@r2 ; s4_r2 * s4_r2 ; mu@r2 ; delta@r2 ; s5_r2 * s5_r2 ; mu@r2 ; s7_r2
+task 17 required 144 tags 4:2,7:0 arrival 1,0,4,11,9,2,3,7,8,10,5,6 written [r0,r2] s7_r0 * s4_r2
+task 18 required 126 tags 1:2,2:1,3:0,4:2,5:2,6:2 arrival 4,7,3,6,0,9,11,5,2,10,8,1 written [r0,r1,r2] s3_r0 * s2_r1 * (s1_r2 ; s4_r2 ; s5_r2 ; s6_r2)
+task 19 required 96 tags 5:2,6:0 arrival 10,1,0,11,2,8,3,4,7,9,6,5 written [r0,r2] s6_r0 * s5_r2
+performance none
+
+seed 333
+n 9 redraws 104 max_attempts 20
+prefix_required 251,152,106,144,190,240,83,74,221,10,46,26,229,253,255,182,68,11,50,80
+agent 0 caps 154 trust 77 role 2
+agent 1 caps 27 trust 35 role 0
+agent 2 caps 3 trust 98 role 2
+agent 3 caps 39 trust 20 role 0
+agent 4 caps 58 trust 29 role 2
+agent 5 caps 57 trust 89 role 0
+agent 6 caps 24 trust 31 role 1
+agent 7 caps 170 trust 34 role 0
+agent 8 caps 195 trust 65 role 2
+task 0 required 34 tags 1:0,5:0 arrival 2,5,6,4,1,3,7,8,0 written [r0] s1_r0 ; s5_r0
+task 1 required 152 tags 3:1,4:1,7:0 arrival 1,2,6,7,3,8,4,5,0 written [r0,r1] s7_r0 * (s3_r1 ; delta@r1 ; s4_r1 * s4_r1 ; mu@r1)
+task 2 required 189 tags 0:2,2:0,3:2,4:2,5:2,7:0 arrival 2,7,6,8,0,3,1,4,5 written [r0,r2] (s2_r0 ; s7_r0) * (s0_r2 ; s3_r2 ; s4_r2 ; s5_r2)
+task 3 required 48 tags 4:2,5:0 arrival 1,4,5,3,7,8,2,6,0 written [r0,r2] s5_r0 * s4_r2
+task 4 required 84 tags 2:0,4:0,6:2 arrival 7,4,8,3,5,6,1,0,2 written [r0,r2] (s2_r0 ; s4_r0) * s6_r2
+task 5 required 240 tags 4:2,5:2,6:2,7:0 arrival 8,1,5,6,0,4,3,2,7 written [r0,r2] s7_r0 * (s4_r2 ; s5_r2 ; s6_r2)
+task 6 required 136 tags 3:1,7:0 arrival 8,0,1,5,4,6,7,2,3 written [r0,r1] s7_r0 * s3_r1
+task 7 required 167 tags 0:0,1:2,2:0,5:0,7:0 arrival 0,4,3,5,2,7,1,8,6 written [r0,r2] (s0_r0 ; s2_r0 ; s5_r0 ; s7_r0) * s1_r2
+task 8 required 35 tags 0:0,1:0,5:0 arrival 2,3,4,6,8,1,0,5,7 written [r0] s0_r0 ; delta@r0 ; s1_r0 * s1_r0 ; mu@r0 ; s5_r0
+task 9 required 72 tags 3:0,6:2 arrival 7,0,1,5,3,8,6,4,2 written [r0,r2] s3_r0 * s6_r2
+task 10 required 241 tags 0:0,4:1,5:0,6:2,7:2 arrival 0,4,2,1,8,7,3,6,5 written [r0,r1,r2] (s0_r0 ; s5_r0) * s4_r1 * (s6_r2 ; s7_r2)
+task 11 required 251 tags 0:0,1:2,3:2,4:0,5:0,6:2,7:2 arrival 5,6,7,8,4,3,2,0,1 written [r0,r2] (s0_r0 ; s4_r0 ; s5_r0) * (s1_r2 ; s3_r2 ; s6_r2 ; s7_r2)
+task 12 required 17 tags 0:2,4:0 arrival 4,2,5,6,3,8,7,0,1 written [r0,r2] s4_r0 * s0_r2
+task 13 required 156 tags 2:0,3:2,4:1,7:0 arrival 1,0,5,6,4,7,2,8,3 written [r0,r1,r2] (s2_r0 ; s7_r0) * s4_r1 * s3_r2
+task 14 required 18 tags 1:2,4:1 arrival 5,4,8,2,3,7,0,6,1 written [r1,r2] s4_r1 * s1_r2
+task 15 required 218 tags 1:2,3:1,4:2,6:2,7:0 arrival 6,0,3,8,5,4,7,1,2 written [r0,r1,r2] s7_r0 * s3_r1 * (s1_r2 ; s4_r2 ; delta@r2 ; s6_r2 * s6_r2 ; mu@r2)
+task 16 required 145 tags 0:0,4:0,7:0 arrival 2,1,7,8,6,3,4,0,5 written [r0] s0_r0 ; delta@r0 ; s4_r0 * s4_r0 ; mu@r0 ; s7_r0
+task 17 required 255 tags 0:2,1:0,2:0,3:0,4:0,5:0,6:2,7:2 arrival 2,1,0,7,8,3,6,5,4 written [r0,r2] (s1_r0 ; s2_r0 ; s3_r0 ; delta@r0 ; s4_r0 * s4_r0 ; mu@r0 ; s5_r0) * (s0_r2 ; s6_r2 ; s7_r2)
+task 18 required 61 tags 0:2,2:0,3:0,4:0,5:0 arrival 6,1,0,2,7,4,3,5,8 written [r0,r2] (s2_r0 ; s3_r0 ; s4_r0 ; s5_r0) * s0_r2
+task 19 required 24 tags 3:1,4:2 arrival 6,2,4,3,5,8,0,7,1 written [r1,r2] s3_r1 * s4_r2
+performance none
+
+seed 334
+n 10 redraws 218 max_attempts 43
+prefix_required 228,180,156,255,20,72,66,239,75,255,255,255,191,89,104,255,216,151,69,109
+agent 0 caps 48 trust 76 role 1
+agent 1 caps 64 trust 69 role 0
+agent 2 caps 70 trust 85 role 2
+agent 3 caps 102 trust 57 role 2
+agent 4 caps 34 trust 76 role 2
+agent 5 caps 76 trust 51 role 2
+agent 6 caps 41 trust 35 role 2
+agent 7 caps 128 trust 97 role 0
+agent 8 caps 161 trust 41 role 1
+agent 9 caps 8 trust 53 role 0
+task 0 required 99 tags 0:1,1:2,5:1,6:0 arrival 0,3,1,9,8,7,6,2,5,4 written [r0,r1,r2] s6_r0 * (s0_r1 ; delta@r1 ; s5_r1 * s5_r1 ; mu@r1) * s1_r2
+task 1 required 97 tags 0:2,5:1,6:2 arrival 2,0,6,1,8,5,3,7,4,9 written [r1,r2] s5_r1 * (s0_r2 ; s6_r2)
+task 2 required 17 tags 0:2,4:1 arrival 4,9,6,0,8,7,1,5,3,2 written [r1,r2] s4_r1 * s0_r2
+task 3 required 145 tags 0:1,4:1,7:0 arrival 4,6,2,9,0,3,1,7,8,5 written [r0,r1] s7_r0 * (s0_r1 ; s4_r1)
+task 4 required 112 tags 4:1,5:2,6:0 arrival 9,6,7,3,8,5,2,0,4,1 written [r0,r1,r2] s6_r0 * s4_r1 * s5_r2
+task 5 required 221 tags 0:1,2:2,3:0,4:1,6:2,7:0 arrival 8,9,4,1,3,2,6,7,0,5 written [r0,r1,r2] (s3_r0 ; s7_r0) * (s0_r1 ; delta@r1 ; s4_r1 * s4_r1 ; mu@r1) * (s2_r2 ; delta@r2 ; s6_r2 * s6_r2 ; mu@r2)
+task 6 required 180 tags 2:2,4:1,5:1,7:1 arrival 5,2,0,6,1,4,8,7,3,9 written [r1,r2] (s4_r1 ; s5_r1 ; delta@r1 ; s7_r1 * s7_r1 ; mu@r1) * s2_r2
+task 7 required 136 tags 3:0,7:0 arrival 4,5,2,0,8,3,7,9,6,1 written [r0] s3_r0 ; delta@r0 ; s7_r0 * s7_r0 ; mu@r0
+task 8 required 40 tags 3:0,5:2 arrival 8,1,5,7,2,3,9,0,6,4 written [r0,r2] s3_r0 * s5_r2
+task 9 required 72 tags 3:0,6:2 arrival 1,2,3,5,8,4,7,6,9,0 written [r0,r2] s3_r0 * s6_r2
+task 10 required 72 tags 3:2,6:0 arrival 4,3,6,7,8,0,5,2,1,9 written [r0,r2] s6_r0 * s3_r2
+task 11 required 38 tags 1:2,2:2,5:1 arrival 6,0,8,5,7,9,1,4,2,3 written [r1,r2] s5_r1 * (s1_r2 ; s2_r2)
+task 12 required 3 tags 0:1,1:2 arrival 8,4,7,6,2,1,5,0,9,3 written [r1,r2] s0_r1 * s1_r2
+task 13 required 88 tags 3:2,4:1,6:2 arrival 3,0,5,7,2,9,1,4,8,6 written [r1,r2] s4_r1 * (s3_r2 ; s6_r2)
+task 14 required 161 tags 0:2,5:2,7:1 arrival 8,3,7,2,4,5,0,6,9,1 written [r1,r2] s7_r1 * (s0_r2 ; delta@r2 ; s5_r2 * s5_r2 ; mu@r2)
+task 15 required 224 tags 5:2,6:2,7:1 arrival 6,2,4,5,9,8,0,3,1,7 written [r1,r2] s7_r1 * (s5_r2 ; s6_r2)
+task 16 required 80 tags 4:1,6:0 arrival 0,2,9,6,4,8,1,7,3,5 written [r0,r1] s6_r0 * s4_r1
+task 17 required 151 tags 0:2,1:2,2:2,4:1,7:0 arrival 7,2,0,6,8,4,9,5,1,3 written [r0,r1,r2] s7_r0 * s4_r1 * (s0_r2 ; s1_r2 ; s2_r2)
+task 18 required 37 tags 0:1,2:2,5:2 arrival 9,2,3,5,6,8,7,0,1,4 written [r1,r2] s0_r1 * (s2_r2 ; s5_r2)
+task 19 required 192 tags 6:2,7:1 arrival 7,0,4,6,8,9,2,3,5,1 written [r1,r2] s7_r1 * s6_r2
+performance none
+
+seed 335
+n 15 redraws 9 max_attempts 4
+prefix_required 255,248,251,255,253,172,253,116,181,187,154,35,255,192,213,38,68,39,191,63
+agent 0 caps 101 trust 77 role 1
+agent 1 caps 7 trust 93 role 0
+agent 2 caps 34 trust 34 role 1
+agent 3 caps 32 trust 76 role 0
+agent 4 caps 5 trust 82 role 1
+agent 5 caps 161 trust 61 role 1
+agent 6 caps 64 trust 42 role 0
+agent 7 caps 2 trust 93 role 2
+agent 8 caps 16 trust 77 role 2
+agent 9 caps 51 trust 94 role 0
+agent 10 caps 82 trust 79 role 1
+agent 11 caps 141 trust 63 role 2
+agent 12 caps 58 trust 65 role 0
+agent 13 caps 134 trust 94 role 1
+agent 14 caps 154 trust 70 role 0
+task 0 required 255 tags 0:2,1:0,2:2,3:2,4:1,5:0,6:1,7:1 arrival 10,4,3,0,6,11,7,12,8,2,1,5,13,14,9 written [r0,r1,r2] (s1_r0 ; delta@r0 ; s5_r0 * s5_r0 ; mu@r0) * (s4_r1 ; s6_r1 ; s7_r1) * (s0_r2 ; s2_r2 ; s3_r2)
+task 1 required 34 tags 1:0,5:1 arrival 12,1,11,0,3,10,4,8,5,14,7,6,13,9,2 written [r0,r1] s1_r0 * s5_r1
+task 2 required 153 tags 0:1,3:2,4:2,7:1 arrival 3,7,13,11,9,14,4,5,0,8,10,1,12,6,2 written [r1,r2] (s0_r1 ; s7_r1) * (s3_r2 ; s4_r2)
+task 3 required 114 tags 1:2,4:1,5:0,6:1 arrival 6,5,12,13,0,7,3,8,11,4,1,14,10,2,9 written [r0,r1,r2] s5_r0 * (s4_r1 ; s6_r1) * s1_r2
+task 4 required 253 tags 0:2,2:0,3:0,4:2,5:0,6:1,7:2 arrival 1,9,12,5,14,3,7,10,4,0,2,11,6,8,13 written [r0,r1,r2] (s2_r0 ; s3_r0 ; s5_r0) * s6_r1 * (s0_r2 ; s4_r2 ; s7_r2)
+task 5 required 172 tags 2:0,3:0,5:1,7:1 arrival 7,6,3,8,5,12,0,10,11,14,2,1,9,4,13 written [r0,r1] (s2_r0 ; s3_r0) * (s5_r1 ; delta@r1 ; s7_r1 * s7_r1 ; mu@r1)
+task 6 required 80 tags 4:1,6:1 arrival 11,5,2,12,8,10,3,6,4,0,7,1,13,9,14 written [r1] s4_r1 ; s6_r1
+task 7 required 116 tags 2:1,4:0,5:0,6:1 arrival 0,11,10,4,8,1,3,2,9,6,12,7,13,14,5 written [r0,r1] (s4_r0 ; s5_r0) * (s2_r1 ; s6_r1)
+task 8 required 181 tags 0:2,2:1,4:2,5:0,7:0 arrival 10,4,14,9,2,1,5,3,12,6,0,11,13,7,8 written [r0,r1,r2] (s5_r0 ; s7_r0) * s2_r1 * (s0_r2 ; s4_r2)
+task 9 required 187 tags 0:0,1:2,3:0,4:1,5:0,7:2 arrival 13,4,0,1,14,7,3,10,8,9,2,11,6,12,5 written [r0,r1,r2] (s0_r0 ; s3_r0 ; s5_r0) * s4_r1 * (s1_r2 ; s7_r2)
+task 10 required 154 tags 1:2,3:2,4:1,7:0 arrival 7,13,5,3,0,14,2,9,1,6,12,11,10,8,4 written [r0,r1,r2] s7_r0 * s4_r1 * (s1_r2 ; s3_r2)
+task 11 required 35 tags 0:0,1:1,5:0 arrival 10,12,2,14,0,3,4,6,5,1,7,8,13,11,9 written [r0,r1] (s0_r0 ; s5_r0) * s1_r1
+task 12 required 223 tags 0:2,1:0,2:2,3:2,4:1,6:0,7:0 arrival 0,9,3,4,10,12,1,14,13,11,6,7,8,2,5 written [r0,r1,r2] (s1_r0 ; s6_r0 ; s7_r0) * s4_r1 * (s0_r2 ; s2_r2 ; delta@r2 ; s3_r2 * s3_r2 ; mu@r2)
+task 13 required 192 tags 6:0,7:2 arrival 7,9,0,1,11,10,3,8,2,13,12,14,6,4,5 written [r0,r2] s6_r0 * s7_r2
+task 14 required 213 tags 0:2,2:1,4:1,6:1,7:0 arrival 6,11,2,9,0,4,1,10,12,3,7,14,8,13,5 written [r0,r1,r2] s7_r0 * (s2_r1 ; delta@r1 ; s4_r1 * s4_r1 ; mu@r1 ; s6_r1) * s0_r2
+task 15 required 38 tags 1:0,2:2,5:1 arrival 6,2,9,11,1,12,8,10,14,0,4,7,5,3,13 written [r0,r1,r2] s1_r0 * s5_r1 * s2_r2
+task 16 required 68 tags 2:2,6:0 arrival 0,3,11,2,8,1,4,12,7,9,5,6,13,10,14 written [r0,r2] s6_r0 * s2_r2
+task 17 required 39 tags 0:1,1:1,2:1,5:0 arrival 0,3,14,9,7,4,11,5,10,12,6,1,8,2,13 written [r0,r1] s5_r0 * (s0_r1 ; s1_r1 ; delta@r1 ; s2_r1 * s2_r1 ; mu@r1)
+task 18 required 219 tags 0:0,1:1,3:2,4:2,6:0,7:1 arrival 8,5,7,0,10,3,9,12,1,11,6,2,13,4,14 written [r0,r1,r2] (s0_r0 ; delta@r0 ; s6_r0 * s6_r0 ; mu@r0) * (s1_r1 ; s7_r1) * (s3_r2 ; s4_r2)
+task 19 required 63 tags 0:2,1:0,2:2,3:2,4:1,5:0 arrival 0,10,12,7,8,2,6,14,4,11,13,5,3,1,9 written [r0,r1,r2] (s1_r0 ; s5_r0) * s4_r1 * (s0_r2 ; s2_r2 ; delta@r2 ; s3_r2 * s3_r2 ; mu@r2)
+performance none
+
+seed 336
+n 13 redraws 148 max_attempts 18
+prefix_required 254,72,255,191,245,184,133,6,112,40,169,169,9,61,156,123,58,68,254,154
+agent 0 caps 196 trust 22 role 1
+agent 1 caps 19 trust 65 role 0
+agent 2 caps 73 trust 91 role 0
+agent 3 caps 64 trust 65 role 1
+agent 4 caps 8 trust 90 role 1
+agent 5 caps 20 trust 45 role 2
+agent 6 caps 192 trust 32 role 1
+agent 7 caps 18 trust 85 role 1
+agent 8 caps 65 trust 51 role 0
+agent 9 caps 16 trust 63 role 1
+agent 10 caps 184 trust 90 role 1
+agent 11 caps 10 trust 88 role 0
+agent 12 caps 105 trust 38 role 0
+task 0 required 5 tags 0:0,2:1 arrival 10,9,3,1,11,0,8,7,2,5,12,6,4 written [r0,r1] s0_r0 * s2_r1
+task 1 required 72 tags 3:1,6:1 arrival 3,11,7,0,1,4,10,8,5,2,6,9,12 written [r1] s3_r1 ; delta@r1 ; s6_r1 * s6_r1 ; mu@r1
+task 2 required 178 tags 1:1,4:1,5:0,7:1 arrival 11,2,9,5,12,3,8,0,7,1,6,4,10 written [r0,r1] s5_r0 * (s1_r1 ; delta@r1 ; s4_r1 * s4_r1 ; mu@r1 ; s7_r1)
+task 3 required 5 tags 0:0,2:2 arrival 10,4,2,12,0,3,9,7,1,11,5,8,6 written [r0,r2] s0_r0 * s2_r2
+task 4 required 5 tags 0:0,2:1 arrival 10,4,12,5,11,9,0,1,3,7,2,8,6 written [r0,r1] s0_r0 * s2_r1
+task 5 required 38 tags 1:0,2:1,5:1 arrival 6,1,10,7,12,2,3,5,8,4,0,11,9 written [r0,r1] s1_r0 * (s2_r1 ; s5_r1)
+task 6 required 223 tags 0:0,1:0,2:1,3:1,4:2,6:1,7:1 arrival 11,8,3,2,5,1,4,7,9,0,6,12,10 written [r0,r1,r2] (s0_r0 ; s1_r0) * (s2_r1 ; s3_r1 ; s6_r1 ; s7_r1) * s4_r2
+task 7 required 113 tags 0:0,4:1,5:1,6:0 arrival 4,6,0,10,9,12,8,5,7,3,1,2,11 written [r0,r1] (s0_r0 ; s6_r0) * (s4_r1 ; s5_r1)
+task 8 required 112 tags 4:0,5:1,6:1 arrival 10,6,3,12,7,4,0,1,5,11,2,8,9 written [r0,r1] s4_r0 * (s5_r1 ; s6_r1)
+task 9 required 238 tags 1:1,2:1,3:0,5:0,6:1,7:1 arrival 2,7,8,10,1,0,6,11,5,9,12,3,4 written [r0,r1] (s3_r0 ; s5_r0) * (s1_r1 ; delta@r1 ; s2_r1 * s2_r1 ; mu@r1 ; delta@r1 ; s6_r1 * s6_r1 ; mu@r1 ; s7_r1)
+task 10 required 3 tags 0:0,1:0 arrival 6,9,8,3,0,5,7,2,10,1,11,12,4 written [r0] s0_r0 ; s1_r0
+task 11 required 55 tags 0:0,1:0,2:2,4:2,5:1 arrival 6,5,3,10,0,1,12,4,9,8,7,11,2 written [r0,r1,r2] (s0_r0 ; delta@r0 ; s1_r0 * s1_r0 ; mu@r0) * s5_r1 * (s2_r2 ; delta@r2 ; s4_r2 * s4_r2 ; mu@r2)
+task 12 required 68 tags 2:2,6:0 arrival 1,5,6,3,2,12,10,8,4,9,0,7,11 written [r0,r2] s6_r0 * s2_r2
+task 13 required 68 tags 2:1,6:0 arrival 9,8,7,4,5,1,2,0,12,3,6,11,10 written [r0,r1] s6_r0 * s2_r1
+task 14 required 72 tags 3:1,6:0 arrival 7,12,3,1,6,4,10,2,8,11,9,0,5 written [r0,r1] s6_r0 * s3_r1
+task 15 required 48 tags 4:2,5:1 arrival 0,7,6,12,10,4,1,5,11,2,8,3,9 written [r1,r2] s5_r1 * s4_r2
+task 16 required 126 tags 1:0,2:2,3:0,4:0,5:1,6:0 arrival 6,10,0,2,3,5,1,9,11,4,7,8,12 written [r0,r1,r2] (s1_r0 ; delta@r0 ; s3_r0 * s3_r0 ; mu@r0 ; s4_r0 ; s6_r0) * s5_r1 * s2_r2
+task 17 required 68 tags 2:2,6:0 arrival 12,6,4,7,1,10,8,9,0,3,11,2,5 written [r0,r2] s6_r0 * s2_r2
+task 18 required 255 tags 0:0,1:1,2:2,3:1,4:2,5:1,6:0,7:1 arrival 3,12,4,11,9,7,5,2,8,1,0,6,10 written [r0,r1,r2] (s0_r0 ; s6_r0) * (s1_r1 ; s3_r1 ; s5_r1 ; s7_r1) * (s2_r2 ; s4_r2)
+task 19 required 96 tags 5:1,6:0 arrival 5,10,2,0,4,6,9,3,7,8,1,11,12 written [r0,r1] s6_r0 * s5_r1
+performance none
+
+seed 337
+n 9 redraws 172 max_attempts 30
+prefix_required 220,246,125,255,97,215,162,74,95,254,49,110,35,111,253,230,29,237,159,66
+agent 0 caps 141 trust 61 role 1
+agent 1 caps 104 trust 21 role 2
+agent 2 caps 20 trust 93 role 1
+agent 3 caps 27 trust 70 role 1
+agent 4 caps 192 trust 69 role 1
+agent 5 caps 6 trust 39 role 1
+agent 6 caps 89 trust 52 role 2
+agent 7 caps 64 trust 92 role 0
+agent 8 caps 39 trust 85 role 2
+task 0 required 5 tags 0:1,2:1 arrival 6,8,2,4,0,3,7,1,5 written [r1] s0_r1 ; s2_r1
+task 1 required 48 tags 4:1,5:2 arrival 2,6,4,5,7,3,0,8,1 written [r1,r2] s4_r1 * s5_r2
+task 2 required 136 tags 3:2,7:1 arrival 0,3,4,6,2,1,5,8,7 written [r1,r2] s7_r1 * s3_r2
+task 3 required 6 tags 1:2,2:1 arrival 6,7,2,0,5,8,4,1,3 written [r1,r2] s2_r1 * s1_r2
+task 4 required 196 tags 2:2,6:2,7:1 arrival 5,0,7,8,4,1,2,6,3 written [r1,r2] s7_r1 * (s2_r2 ; delta@r2 ; s6_r2 * s6_r2 ; mu@r2)
+task 5 required 10 tags 1:2,3:2 arrival 5,2,7,8,6,4,1,3,0 written [r2] s1_r2 ; s3_r2
+task 6 required 49 tags 0:2,4:2,5:2 arrival 0,1,6,4,8,3,7,5,2 written [r2] s0_r2 ; delta@r2 ; s4_r2 * s4_r2 ; mu@r2 ; s5_r2
+task 7 required 17 tags 0:1,4:2 arrival 3,1,4,8,7,2,0,6,5 written [r1,r2] s0_r1 * s4_r2
+task 8 required 183 tags 0:2,1:2,2:2,4:1,5:2,7:1 arrival 2,0,3,6,5,8,1,4,7 written [r1,r2] (s4_r1 ; s7_r1) * (s0_r2 ; s1_r2 ; delta@r2 ; s2_r2 * s2_r2 ; mu@r2 ; s5_r2)
+task 9 required 125 tags 0:1,2:2,3:2,4:2,5:2,6:2 arrival 1,3,2,0,6,7,8,5,4 written [r1,r2] s0_r1 * (s2_r2 ; s3_r2 ; s4_r2 ; s5_r2 ; s6_r2)
+task 10 required 80 tags 4:1,6:2 arrival 1,8,2,4,6,5,7,0,3 written [r1,r2] s4_r1 * s6_r2
+task 11 required 110 tags 1:1,2:1,3:1,5:2,6:0 arrival 0,7,4,8,5,6,3,2,1 written [r0,r1,r2] s6_r0 * (s1_r1 ; s2_r1 ; s3_r1) * s5_r2
+task 12 required 84 tags 2:1,4:1,6:2 arrival 0,2,8,1,5,7,4,3,6 written [r1,r2] (s2_r1 ; s4_r1) * s6_r2
+task 13 required 28 tags 2:1,3:2,4:2 arrival 1,2,5,4,0,3,6,7,8 written [r1,r2] s2_r1 * (s3_r2 ; s4_r2)
+task 14 required 6 tags 1:2,2:1 arrival 0,6,1,8,7,2,4,3,5 written [r1,r2] s2_r1 * s1_r2
+task 15 required 78 tags 1:2,2:2,3:1,6:2 arrival 2,5,8,0,1,4,3,7,6 written [r1,r2] s3_r1 * (s1_r2 ; s2_r2 ; s6_r2)
+task 16 required 178 tags 1:2,4:2,5:2,7:1 arrival 5,4,7,6,0,8,1,3,2 written [r1,r2] s7_r1 * (s1_r2 ; s4_r2 ; s5_r2)
+task 17 required 33 tags 0:1,5:2 arrival 6,3,5,8,0,7,1,2,4 written [r1,r2] s0_r1 * s5_r2
+task 18 required 21 tags 0:2,2:1,4:2 arrival 8,1,7,5,3,2,4,6,0 written [r1,r2] s2_r1 * (s0_r2 ; s4_r2)
+task 19 required 130 tags 1:1,7:1 arrival 3,5,0,8,2,4,6,1,7 written [r1] s1_r1 ; delta@r1 ; s7_r1 * s7_r1 ; mu@r1
+performance none
+
+seed 338
+n 14 redraws 63 max_attempts 12
+prefix_required 72,13,33,87,11,238,125,7,146,216,151,102,156,247,204,255,192,154,221,255
+agent 0 caps 8 trust 78 role 2
+agent 1 caps 40 trust 83 role 2
+agent 2 caps 24 trust 80 role 1
+agent 3 caps 147 trust 60 role 2
+agent 4 caps 32 trust 40 role 0
+agent 5 caps 9 trust 43 role 1
+agent 6 caps 14 trust 92 role 1
+agent 7 caps 84 trust 81 role 2
+agent 8 caps 66 trust 90 role 0
+agent 9 caps 70 trust 75 role 1
+agent 10 caps 3 trust 78 role 1
+agent 11 caps 130 trust 86 role 2
+agent 12 caps 2 trust 57 role 2
+agent 13 caps 54 trust 93 role 1
+task 0 required 59 tags 0:2,1:1,3:2,4:1,5:2 arrival 13,3,5,6,1,8,4,7,11,9,10,2,12,0 written [r1,r2] (s1_r1 ; s4_r1) * (s0_r2 ; delta@r2 ; s3_r2 * s3_r2 ; mu@r2 ; delta@r2 ; s5_r2 * s5_r2 ; mu@r2)
+task 1 required 13 tags 0:2,2:1,3:2 arrival 5,6,4,7,10,9,0,8,2,3,13,12,1,11 written [r1,r2] s2_r1 * (s0_r2 ; s3_r2)
+task 2 required 123 tags 0:2,1:1,3:1,4:2,5:1,6:1 arrival 6,4,0,10,8,9,3,7,11,12,5,2,1,13 written [r1,r2] (s1_r1 ; s3_r1 ; s5_r1 ; s6_r1) * (s0_r2 ; delta@r2 ; s4_r2 * s4_r2 ; mu@r2)
+task 3 required 53 tags 0:1,2:1,4:2,5:1 arrival 5,8,1,12,11,13,6,0,3,2,7,4,9,10 written [r1,r2] (s0_r1 ; s2_r1 ; s5_r1) * s4_r2
+task 4 required 11 tags 0:2,1:1,3:1 arrival 7,0,12,4,6,1,13,5,10,11,2,9,3,8 written [r1,r2] (s1_r1 ; s3_r1) * s0_r2
+task 5 required 21 tags 0:2,2:2,4:2 arrival 6,3,2,12,4,5,13,10,1,0,9,7,8,11 written [r2] s0_r2 ; delta@r2 ; s2_r2 * s2_r2 ; mu@r2 ; delta@r2 ; s4_r2 * s4_r2 ; mu@r2
+task 6 required 113 tags 0:1,4:1,5:0,6:1 arrival 7,3,13,11,6,5,12,4,8,1,9,10,0,2 written [r0,r1] s5_r0 * (s0_r1 ; delta@r1 ; s4_r1 * s4_r1 ; mu@r1 ; s6_r1)
+task 7 required 7 tags 0:2,1:1,2:1 arrival 6,13,4,8,10,7,9,2,5,1,11,3,0,12 written [r1,r2] (s1_r1 ; s2_r1) * s0_r2
+task 8 required 191 tags 0:2,1:2,2:1,3:2,4:1,5:1,7:2 arrival 3,11,8,7,2,4,9,12,10,13,5,0,1,6 written [r1,r2] (s2_r1 ; s4_r1 ; s5_r1) * (s0_r2 ; s1_r2 ; s3_r2 ; s7_r2)
+task 9 required 246 tags 1:1,2:1,4:2,5:2,6:1,7:2 arrival 0,12,3,2,1,8,13,10,11,5,7,9,6,4 written [r1,r2] (s1_r1 ; delta@r1 ; s2_r1 * s2_r1 ; mu@r1 ; delta@r1 ; s6_r1 * s6_r1 ; mu@r1) * (s4_r2 ; delta@r2 ; s5_r2 * s5_r2 ; mu@r2 ; s7_r2)
+task 10 required 67 tags 0:2,1:2,6:1 arrival 13,8,5,3,10,6,2,4,0,11,1,9,12,7 written [r1,r2] s6_r1 * (s0_r2 ; s1_r2)
+task 11 required 102 tags 1:1,2:1,5:1,6:2 arrival 11,9,1,5,8,2,6,3,7,13,10,4,0,12 written [r1,r2] (s1_r1 ; s2_r1 ; s5_r1) * s6_r2
+task 12 required 156 tags 2:2,3:2,4:1,7:2 arrival 10,2,0,1,8,6,3,11,7,9,4,13,5,12 written [r1,r2] s4_r1 * (s2_r2 ; s3_r2 ; s7_r2)
+task 13 required 65 tags 0:2,6:1 arrival 11,0,1,2,12,8,4,5,7,9,13,6,3,10 written [r1,r2] s6_r1 * s0_r2
+task 14 required 37 tags 0:2,2:2,5:2 arrival 9,2,13,12,8,0,11,4,3,5,6,10,7,1 written [r2] s0_r2 ; s2_r2 ; s5_r2
+task 15 required 255 tags 0:2,1:1,2:1,3:1,4:1,5:2,6:0,7:2 arrival 10,0,1,2,5,13,12,11,9,4,3,6,7,8 written [r0,r1,r2] s6_r0 * (s1_r1 ; delta@r1 ; s2_r1 * s2_r1 ; mu@r1 ; s3_r1 ; s4_r1) * (s0_r2 ; s5_r2 ; s7_r2)
+task 16 required 192 tags 6:1,7:2 arrival 6,0,12,2,3,4,8,10,7,13,1,5,9,11 written [r1,r2] s6_r1 * s7_r2
+task 17 required 33 tags 0:2,5:0 arrival 3,11,10,4,0,5,13,1,12,7,9,8,6,2 written [r0,r2] s5_r0 * s0_r2
+task 18 required 96 tags 5:0,6:1 arrival 0,2,8,12,6,3,4,10,7,13,11,9,5,1 written [r0,r1] s5_r0 * s6_r1
+task 19 required 200 tags 3:1,6:2,7:2 arrival 10,11,1,9,7,8,4,0,13,2,12,5,3,6 written [r1,r2] s3_r1 * (s6_r2 ; s7_r2)
+performance none
+
+seed 339
+n 13 redraws 63 max_attempts 13
+prefix_required 167,52,255,253,255,192,126,25,225,160,255,235,67,116,75,56,174,36,220,231
+agent 0 caps 20 trust 70 role 0
+agent 1 caps 153 trust 84 role 0
+agent 2 caps 194 trust 27 role 2
+agent 3 caps 210 trust 93 role 0
+agent 4 caps 212 trust 38 role 0
+agent 5 caps 112 trust 66 role 0
+agent 6 caps 64 trust 36 role 2
+agent 7 caps 72 trust 83 role 0
+agent 8 caps 72 trust 69 role 0
+agent 9 caps 56 trust 24 role 0
+agent 10 caps 15 trust 64 role 1
+agent 11 caps 18 trust 67 role 0
+agent 12 caps 49 trust 88 role 1
+task 0 required 151 tags 0:0,1:0,2:0,4:0,7:2 arrival 0,11,3,1,4,5,10,7,8,2,6,12,9 written [r0,r2] (s0_r0 ; delta@r0 ; s1_r0 * s1_r0 ; mu@r0 ; s2_r0 ; delta@r0 ; s4_r0 * s4_r0 ; mu@r0) * s7_r2
+task 1 required 52 tags 2:0,4:0,5:1 arrival 12,8,7,9,0,11,5,4,2,6,3,1,10 written [r0,r1] (s2_r0 ; delta@r0 ; s4_r0 * s4_r0 ; mu@r0) * s5_r1
+task 2 required 44 tags 2:1,3:1,5:0 arrival 11,5,8,1,0,6,10,3,9,12,2,4,7 written [r0,r1] s5_r0 * (s2_r1 ; s3_r1)
+task 3 required 184 tags 3:0,4:0,5:1,7:0 arrival 9,3,5,10,1,6,12,7,2,4,11,8,0 written [r0,r1] (s3_r0 ; delta@r0 ; s4_r0 * s4_r0 ; mu@r0 ; s7_r0) * s5_r1
+task 4 required 85 tags 0:1,2:0,4:1,6:0 arrival 11,1,6,10,0,9,2,3,5,4,8,7,12 written [r0,r1] (s2_r0 ; s6_r0) * (s0_r1 ; s4_r1)
+task 5 required 192 tags 6:0,7:0 arrival 0,1,7,4,2,8,3,12,5,10,11,9,6 written [r0] s6_r0 ; s7_r0
+task 6 required 11 tags 0:0,1:1,3:0 arrival 11,6,7,8,10,1,4,2,12,5,3,9,0 written [r0,r1] (s0_r0 ; s3_r0) * s1_r1
+task 7 required 130 tags 1:2,7:0 arrival 8,10,5,2,4,11,7,9,6,12,0,1,3 written [r0,r2] s7_r0 * s1_r2
+task 8 required 255 tags 0:1,1:2,2:1,3:1,4:1,5:1,6:2,7:0 arrival 0,11,10,2,1,7,12,5,6,4,9,3,8 written [r0,r1,r2] s7_r0 * (s0_r1 ; s2_r1 ; s3_r1 ; s4_r1 ; s5_r1) * (s1_r2 ; s6_r2)
+task 9 required 54 tags 1:1,2:0,4:1,5:1 arrival 4,6,3,5,8,9,7,10,2,12,11,1,0 written [r0,r1] s2_r0 * (s1_r1 ; delta@r1 ; s4_r1 * s4_r1 ; mu@r1 ; s5_r1)
+task 10 required 130 tags 1:0,7:2 arrival 10,6,9,12,0,2,11,8,4,1,7,5,3 written [r0,r2] s1_r0 * s7_r2
+task 11 required 161 tags 0:0,5:0,7:0 arrival 3,4,1,10,0,12,9,11,8,6,2,5,7 written [r0] s0_r0 ; s5_r0 ; s7_r0
+task 12 required 67 tags 0:1,1:1,6:2 arrival 1,6,2,10,3,9,4,5,0,11,12,8,7 written [r1,r2] (s0_r1 ; s1_r1) * s6_r2
+task 13 required 96 tags 5:0,6:2 arrival 12,10,6,5,7,11,9,4,3,1,8,2,0 written [r0,r2] s5_r0 * s6_r2
+task 14 required 60 tags 2:0,3:1,4:0,5:0 arrival 5,3,11,8,7,2,4,10,12,9,0,6,1 written [r0,r1] (s2_r0 ; s4_r0 ; delta@r0 ; s5_r0 * s5_r0 ; mu@r0) * s3_r1
+task 15 required 26 tags 1:1,3:1,4:1 arrival 11,9,1,4,5,3,10,6,0,2,7,12,8 written [r1] s1_r1 ; delta@r1 ; s3_r1 * s3_r1 ; mu@r1 ; s4_r1
+task 16 required 76 tags 2:0,3:0,6:2 arrival 4,11,7,12,9,6,0,5,10,2,8,1,3 written [r0,r2] (s2_r0 ; s3_r0) * s6_r2
+task 17 required 36 tags 2:0,5:1 arrival 8,9,11,2,12,0,1,4,6,7,5,3,10 written [r0,r1] s2_r0 * s5_r1
+task 18 required 220 tags 2:1,3:0,4:1,6:0,7:2 arrival 7,3,10,1,4,12,9,5,6,0,2,8,11 written [r0,r1,r2] (s3_r0 ; s6_r0) * (s2_r1 ; s4_r1) * s7_r2
+task 19 required 15 tags 0:1,1:2,2:0,3:1 arrival 6,8,11,9,2,10,12,7,4,5,1,3,0 written [r0,r1,r2] s2_r0 * (s0_r1 ; s3_r1) * s1_r2
+performance none
+
+seed 340
+n 6 redraws 337 max_attempts 76
+prefix_required 174,255,29,243,255,223,246,207,245,255,12,24,140,129,254,255,204,255,255,255
+agent 0 caps 19 trust 77 role 1
+agent 1 caps 100 trust 30 role 2
+agent 2 caps 20 trust 97 role 0
+agent 3 caps 49 trust 89 role 1
+agent 4 caps 4 trust 22 role 2
+agent 5 caps 209 trust 46 role 0
+task 0 required 129 tags 0:0,7:0 arrival 2,0,3,5,1,4 written [r0] s0_r0 ; s7_r0
+task 1 required 144 tags 4:1,7:0 arrival 2,1,0,3,5,4 written [r0,r1] s7_r0 * s4_r1
+task 2 required 129 tags 0:0,7:0 arrival 2,4,1,3,5,0 written [r0] s0_r0 ; s7_r0
+task 3 required 21 tags 0:1,2:2,4:1 arrival 5,0,1,3,2,4 written [r1,r2] (s0_r1 ; delta@r1 ; s4_r1 * s4_r1 ; mu@r1) * s2_r2
+task 4 required 81 tags 0:1,4:0,6:0 arrival 4,0,2,3,1,5 written [r0,r1] (s4_r0 ; s6_r0) * s0_r1
+task 5 required 7 tags 0:0,1:1,2:0 arrival 3,5,4,1,0,2 written [r0,r1] (s0_r0 ; s2_r0) * s1_r1
+task 6 required 33 tags 0:1,5:2 arrival 1,4,0,2,3,5 written [r1,r2] s0_r1 * s5_r2
+task 7 required 6 tags 1:1,2:0 arrival 5,4,3,1,0,2 written [r0,r1] s2_r0 * s1_r1
+task 8 required 80 tags 4:0,6:2 arrival 3,2,1,4,5,0 written [r0,r2] s4_r0 * s6_r2
+task 9 required 68 tags 2:2,6:0 arrival 1,3,4,0,2,5 written [r0,r2] s6_r0 * s2_r2
+task 10 required 213 tags 0:1,2:2,4:1,6:2,7:0 arrival 2,1,4,3,0,5 written [r0,r1,r2] s7_r0 * (s0_r1 ; s4_r1) * (s2_r2 ; s6_r2)
+task 11 required 69 tags 0:1,2:2,6:0 arrival 4,5,1,2,0,3 written [r0,r1,r2] s6_r0 * s0_r1 * s2_r2
+task 12 required 212 tags 2:0,4:1,6:0,7:0 arrival 3,2,5,4,1,0 written [r0,r1] (s2_r0 ; s6_r0 ; s7_r0) * s4_r1
+task 13 required 160 tags 5:1,7:0 arrival 4,2,3,0,1,5 written [r0,r1] s7_r0 * s5_r1
+task 14 required 33 tags 0:1,5:2 arrival 4,1,3,0,5,2 written [r1,r2] s0_r1 * s5_r2
+task 15 required 35 tags 0:1,1:1,5:2 arrival 0,3,2,4,1,5 written [r1,r2] (s0_r1 ; delta@r1 ; s1_r1 * s1_r1 ; mu@r1) * s5_r2
+task 16 required 21 tags 0:1,2:0,4:1 arrival 4,3,5,0,1,2 written [r0,r1] s2_r0 * (s0_r1 ; delta@r1 ; s4_r1 * s4_r1 ; mu@r1)
+task 17 required 148 tags 2:0,4:1,7:0 arrival 3,5,1,2,0,4 written [r0,r1] (s2_r0 ; delta@r0 ; s7_r0 * s7_r0 ; mu@r0) * s4_r1
+task 18 required 81 tags 0:1,4:1,6:2 arrival 3,2,1,4,5,0 written [r1,r2] (s0_r1 ; s4_r1) * s6_r2
+task 19 required 68 tags 2:2,6:0 arrival 0,3,4,1,2,5 written [r0,r2] s6_r0 * s2_r2
+performance none
+
+seed 341
+n 16 redraws 12 max_attempts 4
+prefix_required 80,190,65,110,202,89,255,120,255,136,239,139,241,36,116,255,146,54,237,24
+agent 0 caps 201 trust 59 role 0
+agent 1 caps 128 trust 35 role 2
+agent 2 caps 89 trust 52 role 2
+agent 3 caps 105 trust 25 role 0
+agent 4 caps 33 trust 76 role 1
+agent 5 caps 99 trust 77 role 0
+agent 6 caps 170 trust 41 role 2
+agent 7 caps 4 trust 68 role 1
+agent 8 caps 3 trust 37 role 2
+agent 9 caps 39 trust 48 role 2
+agent 10 caps 57 trust 37 role 2
+agent 11 caps 210 trust 94 role 1
+agent 12 caps 34 trust 96 role 1
+agent 13 caps 30 trust 81 role 1
+agent 14 caps 32 trust 22 role 0
+agent 15 caps 131 trust 76 role 1
+task 0 required 80 tags 4:2,6:0 arrival 6,13,8,11,1,12,14,9,5,3,0,2,7,4,15,10 written [r0,r2] s6_r0 * s4_r2
+task 1 required 112 tags 4:2,5:2,6:0 arrival 13,5,9,1,12,14,0,3,2,6,8,7,4,10,15,11 written [r0,r2] s6_r0 * (s4_r2 ; s5_r2)
+task 2 required 65 tags 0:2,6:2 arrival 15,2,13,5,0,6,10,1,7,8,4,3,14,12,9,11 written [r2] s0_r2 ; delta@r2 ; s6_r2 * s6_r2 ; mu@r2
+task 3 required 110 tags 1:0,2:1,3:1,5:2,6:2 arrival 0,3,2,1,8,9,12,4,5,10,15,11,14,7,6,13 written [r0,r1,r2] s1_r0 * (s2_r1 ; s3_r1) * (s5_r2 ; s6_r2)
+task 4 required 202 tags 1:0,3:0,6:0,7:1 arrival 6,13,12,0,1,9,11,7,5,3,4,2,15,10,8,14 written [r0,r1] (s1_r0 ; s3_r0 ; delta@r0 ; s6_r0 * s6_r0 ; mu@r0) * s7_r1
+task 5 required 89 tags 0:0,3:0,4:2,6:2 arrival 8,10,15,14,6,12,5,13,9,0,3,4,2,11,1,7 written [r0,r2] (s0_r0 ; s3_r0) * (s4_r2 ; s6_r2)
+task 6 required 70 tags 1:2,2:2,6:2 arrival 1,3,10,11,2,4,12,5,8,6,15,13,9,14,7,0 written [r2] s1_r2 ; delta@r2 ; s2_r2 * s2_r2 ; mu@r2 ; s6_r2
+task 7 required 175 tags 0:2,1:0,2:1,3:2,5:1,7:1 arrival 8,14,11,6,2,12,4,10,5,0,13,9,7,1,3,15 written [r0,r1,r2] s1_r0 * (s2_r1 ; delta@r1 ; s5_r1 * s5_r1 ; mu@r1 ; s7_r1) * (s0_r2 ; s3_r2)
+task 8 required 95 tags 0:0,1:1,2:1,3:0,4:2,6:2 arrival 15,0,5,1,14,12,2,11,7,9,6,3,13,10,4,8 written [r0,r1,r2] (s0_r0 ; s3_r0) * (s1_r1 ; delta@r1 ; s2_r1 * s2_r1 ; mu@r1) * (s4_r2 ; s6_r2)
+task 9 required 136 tags 3:1,7:1 arrival 5,2,12,7,13,0,15,8,3,4,9,14,1,10,11,6 written [r1] s3_r1 ; delta@r1 ; s7_r1 * s7_r1 ; mu@r1
+task 10 required 239 tags 0:1,1:2,2:1,3:1,5:1,6:0,7:2 arrival 14,6,8,1,10,11,15,9,0,7,4,5,3,12,13,2 written [r0,r1,r2] s6_r0 * (s0_r1 ; delta@r1 ; s2_r1 * s2_r1 ; mu@r1 ; s3_r1 ; s5_r1) * (s1_r2 ; s7_r2)
+task 11 required 139 tags 0:1,1:2,3:1,7:1 arrival 7,6,1,3,13,14,15,2,10,5,8,12,4,11,0,9 written [r1,r2] (s0_r1 ; s3_r1 ; s7_r1) * s1_r2
+task 12 required 241 tags 0:2,4:1,5:0,6:1,7:0 arrival 10,3,14,4,2,1,13,9,7,0,15,6,8,5,11,12 written [r0,r1,r2] (s5_r0 ; delta@r0 ; s7_r0 * s7_r0 ; mu@r0) * (s4_r1 ; delta@r1 ; s6_r1 * s6_r1 ; mu@r1) * s0_r2
+task 13 required 36 tags 2:1,5:1 arrival 13,12,7,3,0,6,14,8,5,1,11,9,15,4,2,10 written [r1] s2_r1 ; s5_r1
+task 14 required 116 tags 2:1,4:2,5:2,6:2 arrival 10,13,8,15,14,9,7,1,0,12,2,6,4,11,5,3 written [r1,r2] s2_r1 * (s4_r2 ; s5_r2 ; s6_r2)
+task 15 required 255 tags 0:2,1:2,2:1,3:2,4:1,5:0,6:0,7:1 arrival 3,6,14,7,11,12,0,1,4,8,13,10,2,15,9,5 written [r0,r1,r2] (s5_r0 ; s6_r0) * (s2_r1 ; s4_r1 ; delta@r1 ; s7_r1 * s7_r1 ; mu@r1) * (s0_r2 ; delta@r2 ; s1_r2 * s1_r2 ; mu@r2 ; s3_r2)
+task 16 required 36 tags 2:2,5:2 arrival 3,4,11,12,15,5,2,8,13,0,1,7,14,6,9,10 written [r2] s2_r2 ; s5_r2
+task 17 required 98 tags 1:2,5:2,6:1 arrival 1,7,15,13,8,14,5,12,0,9,4,6,10,2,11,3 written [r1,r2] s6_r1 * (s1_r2 ; s5_r2)
+task 18 required 237 tags 0:0,2:2,3:2,5:1,6:2,7:2 arrival 5,9,13,3,0,15,11,14,10,1,6,4,8,2,12,7 written [r0,r1,r2] s0_r0 * s5_r1 * (s2_r2 ; delta@r2 ; s3_r2 * s3_r2 ; mu@r2 ; s6_r2 ; s7_r2)
+task 19 required 255 tags 0:1,1:1,2:1,3:1,4:1,5:1,6:1,7:1 arrival 0,9,1,7,14,6,13,8,2,3,4,11,15,12,5,10 written [r1] s0_r1 ; s1_r1 ; s2_r1 ; s3_r1 ; s4_r1 ; s5_r1 ; s6_r1 ; s7_r1
+performance none
+
+seed 342
+n 5 redraws 279 max_attempts 41
+prefix_required 250,78,215,127,158,214,35,255,255,254,205,255,122,255,11,191,140,151,126,255
+agent 0 caps 135 trust 61 role 1
+agent 1 caps 34 trust 58 role 0
+agent 2 caps 96 trust 80 role 1
+agent 3 caps 69 trust 78 role 2
+agent 4 caps 16 trust 96 role 0
+task 0 required 20 tags 2:2,4:0 arrival 4,0,1,2,3 written [r0,r2] s4_r0 * s2_r2
+task 1 required 132 tags 2:2,7:1 arrival 1,4,3,2,0 written [r1,r2] s7_r1 * s2_r2
+task 2 required 33 tags 0:1,5:0 arrival 0,2,1,3,4 written [r0,r1] s5_r0 * s0_r1
+task 3 required 6 tags 1:0,2:2 arrival 2,1,4,3,0 written [r0,r2] s1_r0 * s2_r2
+task 4 required 3 tags 0:2,1:1 arrival 4,3,2,1,0 written [r1,r2] s1_r1 * s0_r2
+task 5 required 36 tags 2:2,5:1 arrival 1,2,4,3,0 written [r1,r2] s5_r1 * s2_r2
+task 6 required 35 tags 0:1,1:0,5:1 arrival 2,4,1,0,3 written [r0,r1] s1_r0 * (s0_r1 ; s5_r1)
+task 7 required 66 tags 1:1,6:2 arrival 0,1,4,3,2 written [r1,r2] s1_r1 * s6_r2
+task 8 required 96 tags 5:1,6:1 arrival 1,3,4,0,2 written [r1] s5_r1 ; s6_r1
+task 9 required 68 tags 2:1,6:2 arrival 4,1,0,2,3 written [r1,r2] s2_r1 * s6_r2
+task 10 required 133 tags 0:1,2:1,7:1 arrival 0,4,3,1,2 written [r1] s0_r1 ; s2_r1 ; s7_r1
+task 11 required 146 tags 1:0,4:0,7:1 arrival 3,2,1,4,0 written [r0,r1] (s1_r0 ; s4_r0) * s7_r1
+task 12 required 70 tags 1:1,2:2,6:1 arrival 4,3,2,1,0 written [r1,r2] (s1_r1 ; delta@r1 ; s6_r1 * s6_r1 ; mu@r1) * s2_r2
+task 13 required 53 tags 0:1,2:1,4:0,5:1 arrival 3,0,4,1,2 written [r0,r1] s4_r0 * (s0_r1 ; delta@r1 ; s2_r1 * s2_r1 ; mu@r1 ; delta@r1 ; s5_r1 * s5_r1 ; mu@r1)
+task 14 required 36 tags 2:2,5:0 arrival 0,2,4,3,1 written [r0,r2] s5_r0 * s2_r2
+task 15 required 33 tags 0:2,5:1 arrival 3,1,4,2,0 written [r1,r2] s5_r1 * s0_r2
+task 16 required 34 tags 1:0,5:0 arrival 2,0,1,4,3 written [r0] s1_r0 ; s5_r0
+task 17 required 52 tags 2:2,4:0,5:0 arrival 3,0,4,2,1 written [r0,r2] (s4_r0 ; s5_r0) * s2_r2
+task 18 required 160 tags 5:0,7:1 arrival 4,1,2,0,3 written [r0,r1] s5_r0 * s7_r1
+task 19 required 68 tags 2:2,6:1 arrival 1,0,2,4,3 written [r1,r2] s6_r1 * s2_r2
+performance none
+
+seed 343
+n 11 redraws 21 max_attempts 7
+prefix_required 94,125,70,239,190,111,80,113,99,96,57,253,180,100,255,134,138,255,229,255
+agent 0 caps 54 trust 89 role 2
+agent 1 caps 3 trust 45 role 1
+agent 2 caps 16 trust 59 role 1
+agent 3 caps 153 trust 43 role 2
+agent 4 caps 44 trust 22 role 0
+agent 5 caps 34 trust 74 role 0
+agent 6 caps 120 trust 49 role 1
+agent 7 caps 23 trust 46 role 1
+agent 8 caps 144 trust 77 role 1
+agent 9 caps 14 trust 42 role 2
+agent 10 caps 113 trust 42 role 0
+task 0 required 94 tags 1:0,2:2,3:2,4:1,6:0 arrival 2,9,1,6,4,7,3,10,0,5,8 written [r0,r1,r2] (s1_r0 ; s6_r0) * s4_r1 * (s2_r2 ; s3_r2)
+task 1 required 145 tags 0:2,4:1,7:1 arrival 0,7,1,5,3,4,2,6,8,9,10 written [r1,r2] (s4_r1 ; s7_r1) * s0_r2
+task 2 required 70 tags 1:1,2:0,6:1 arrival 8,4,7,9,10,5,1,3,6,2,0 written [r0,r1] s2_r0 * (s1_r1 ; delta@r1 ; s6_r1 * s6_r1 ; mu@r1)
+task 3 required 239 tags 0:1,1:2,2:1,3:2,5:1,6:0,7:2 arrival 2,8,10,3,6,7,5,0,9,1,4 written [r0,r1,r2] s6_r0 * (s0_r1 ; delta@r1 ; s2_r1 * s2_r1 ; mu@r1 ; s5_r1) * (s1_r2 ; delta@r2 ; s3_r2 * s3_r2 ; mu@r2 ; s7_r2)
+task 4 required 190 tags 1:2,2:0,3:2,4:1,5:2,7:1 arrival 6,3,5,7,1,9,10,4,0,8,2 written [r0,r1,r2] s2_r0 * (s4_r1 ; s7_r1) * (s1_r2 ; s3_r2 ; s5_r2)
+task 5 required 111 tags 0:2,1:2,2:1,3:2,5:2,6:1 arrival 10,4,7,5,2,9,8,6,0,1,3 written [r1,r2] (s2_r1 ; s6_r1) * (s0_r2 ; s1_r2 ; s3_r2 ; delta@r2 ; s5_r2 * s5_r2 ; mu@r2)
+task 6 required 56 tags 3:2,4:0,5:0 arrival 1,4,10,5,3,8,9,2,6,7,0 written [r0,r2] (s4_r0 ; delta@r0 ; s5_r0 * s5_r0 ; mu@r0) * s3_r2
+task 7 required 83 tags 0:0,1:0,4:2,6:0 arrival 1,6,2,10,5,8,4,7,9,3,0 written [r0,r2] (s0_r0 ; s1_r0 ; s6_r0) * s4_r2
+task 8 required 99 tags 0:2,1:0,5:2,6:1 arrival 1,9,10,7,5,2,8,6,0,3,4 written [r0,r1,r2] s1_r0 * s6_r1 * (s0_r2 ; delta@r2 ; s5_r2 * s5_r2 ; mu@r2)
+task 9 required 96 tags 5:0,6:0 arrival 9,1,2,7,10,4,8,5,6,3,0 written [r0] s5_r0 ; delta@r0 ; s6_r0 * s6_r0 ; mu@r0
+task 10 required 57 tags 0:0,3:2,4:1,5:0 arrival 2,5,10,8,3,1,6,7,4,9,0 written [r0,r1,r2] (s0_r0 ; s5_r0) * s4_r1 * s3_r2
+task 11 required 67 tags 0:2,1:1,6:0 arrival 6,2,10,0,3,1,8,4,5,7,9 written [r0,r1,r2] s6_r0 * s1_r1 * s0_r2
+task 12 required 180 tags 2:1,4:1,5:1,7:1 arrival 3,9,5,10,6,0,8,2,4,7,1 written [r1] s2_r1 ; s4_r1 ; s5_r1 ; s7_r1
+task 13 required 110 tags 1:0,2:1,3:2,5:1,6:0 arrival 3,2,8,7,1,10,0,6,5,9,4 written [r0,r1,r2] (s1_r0 ; s6_r0) * (s2_r1 ; s5_r1) * s3_r2
+task 14 required 214 tags 1:1,2:1,4:2,6:1,7:1 arrival 0,5,4,2,7,10,1,9,8,6,3 written [r1,r2] (s1_r1 ; s2_r1 ; s6_r1 ; delta@r1 ; s7_r1 * s7_r1 ; mu@r1) * s4_r2
+task 15 required 134 tags 1:2,2:0,7:1 arrival 4,6,10,5,9,7,1,8,2,0,3 written [r0,r1,r2] s2_r0 * s7_r1 * s1_r2
+task 16 required 138 tags 1:0,3:1,7:1 arrival 9,2,4,3,6,1,8,0,10,5,7 written [r0,r1] s1_r0 * (s3_r1 ; delta@r1 ; s7_r1 * s7_r1 ; mu@r1)
+task 17 required 5 tags 0:1,2:1 arrival 5,6,9,10,2,8,1,3,4,7,0 written [r1] s0_r1 ; delta@r1 ; s2_r1 * s2_r1 ; mu@r1
+task 18 required 143 tags 0:2,1:0,2:1,3:1,7:1 arrival 1,10,9,7,2,4,3,8,6,5,0 written [r0,r1,r2] s1_r0 * (s2_r1 ; delta@r1 ; s3_r1 * s3_r1 ; mu@r1 ; delta@r1 ; s7_r1 * s7_r1 ; mu@r1) * s0_r2
+task 19 required 22 tags 1:0,2:1,4:0 arrival 3,1,2,10,5,8,7,9,4,0,6 written [r0,r1] (s1_r0 ; s4_r0) * s2_r1
+performance none
+
+seed 344
+n 16 redraws 50 max_attempts 15
+prefix_required 109,49,137,68,255,191,106,252,255,156,66,218,216,247,255,51,48,203,190,49
+agent 0 caps 12 trust 52 role 2
+agent 1 caps 144 trust 64 role 0
+agent 2 caps 16 trust 20 role 0
+agent 3 caps 74 trust 45 role 2
+agent 4 caps 45 trust 80 role 1
+agent 5 caps 11 trust 63 role 0
+agent 6 caps 29 trust 60 role 0
+agent 7 caps 8 trust 69 role 1
+agent 8 caps 148 trust 79 role 1
+agent 9 caps 131 trust 78 role 0
+agent 10 caps 4 trust 20 role 2
+agent 11 caps 4 trust 24 role 2
+agent 12 caps 64 trust 57 role 0
+agent 13 caps 26 trust 81 role 0
+agent 14 caps 200 trust 43 role 0
+agent 15 caps 1 trust 39 role 2
+task 0 required 6 tags 1:0,2:1 arrival 7,12,8,3,9,1,11,10,5,0,15,13,6,2,14,4 written [r0,r1] s1_r0 * s2_r1
+task 1 required 49 tags 0:1,4:0,5:1 arrival 2,5,13,4,7,3,9,1,15,6,10,0,12,14,11,8 written [r0,r1] s4_r0 * (s0_r1 ; s5_r1)
+task 2 required 137 tags 0:2,3:1,7:1 arrival 5,0,15,11,6,12,10,7,13,3,2,8,1,9,4,14 written [r1,r2] (s3_r1 ; delta@r1 ; s7_r1 * s7_r1 ; mu@r1) * s0_r2
+task 3 required 68 tags 2:1,6:2 arrival 4,2,7,8,3,0,5,10,12,14,13,15,6,9,11,1 written [r1,r2] s2_r1 * s6_r2
+task 4 required 97 tags 0:2,5:1,6:2 arrival 7,8,3,2,10,4,0,6,13,12,9,11,15,1,14,5 written [r1,r2] s5_r1 * (s0_r2 ; delta@r2 ; s6_r2 * s6_r2 ; mu@r2)
+task 5 required 19 tags 0:0,1:2,4:1 arrival 7,15,4,13,2,5,6,8,10,11,14,12,3,9,1,0 written [r0,r1,r2] s0_r0 * s4_r1 * s1_r2
+task 6 required 68 tags 2:0,6:2 arrival 9,1,0,2,4,3,8,14,6,10,7,5,15,11,13,12 written [r0,r2] s2_r0 * s6_r2
+task 7 required 17 tags 0:0,4:0 arrival 5,0,15,14,4,11,2,1,3,8,10,13,7,9,12,6 written [r0] s0_r0 ; s4_r0
+task 8 required 249 tags 0:1,3:1,4:1,5:1,6:0,7:1 arrival 9,2,5,6,15,4,0,1,3,12,8,7,10,13,11,14 written [r0,r1] s6_r0 * (s0_r1 ; delta@r1 ; s3_r1 * s3_r1 ; mu@r1 ; s4_r1 ; delta@r1 ; s5_r1 * s5_r1 ; mu@r1 ; s7_r1)
+task 9 required 156 tags 2:0,3:1,4:1,7:0 arrival 2,15,0,6,11,9,13,1,12,5,3,14,7,4,10,8 written [r0,r1] (s2_r0 ; s7_r0) * (s3_r1 ; s4_r1)
+task 10 required 255 tags 0:0,1:0,2:1,3:1,4:0,5:1,6:2,7:1 arrival 0,3,15,13,12,5,8,7,10,14,9,4,2,1,6,11 written [r0,r1,r2] (s0_r0 ; delta@r0 ; s1_r0 * s1_r0 ; mu@r0 ; s4_r0) * (s2_r1 ; s3_r1 ; s5_r1 ; s7_r1) * s6_r2
+task 11 required 44 tags 2:1,3:1,5:1 arrival 4,8,5,3,13,6,14,7,15,9,1,2,10,12,11,0 written [r1] s2_r1 ; s3_r1 ; s5_r1
+task 12 required 216 tags 3:2,4:1,6:2,7:1 arrival 9,10,15,12,11,3,6,1,2,5,7,4,8,0,14,13 written [r1,r2] (s4_r1 ; s7_r1) * (s3_r2 ; s6_r2)
+task 13 required 247 tags 0:1,1:0,2:0,4:0,5:1,6:2,7:1 arrival 8,12,14,1,0,10,6,3,7,9,4,13,5,11,2,15 written [r0,r1,r2] (s1_r0 ; s2_r0 ; s4_r0) * (s0_r1 ; s5_r1 ; delta@r1 ; s7_r1 * s7_r1 ; mu@r1) * s6_r2
+task 14 required 227 tags 0:2,1:0,5:1,6:0,7:1 arrival 11,6,8,7,1,0,3,12,5,15,10,4,2,13,14,9 written [r0,r1,r2] (s1_r0 ; s6_r0) * (s5_r1 ; s7_r1) * s0_r2
+task 15 required 218 tags 1:0,3:2,4:1,6:2,7:0 arrival 0,5,9,6,4,7,1,10,8,14,12,11,3,15,2,13 written [r0,r1,r2] (s1_r0 ; s7_r0) * s4_r1 * (s3_r2 ; s6_r2)
+task 16 required 89 tags 0:2,3:1,4:0,6:0 arrival 8,12,0,3,6,9,2,1,10,4,14,13,7,5,15,11 written [r0,r1,r2] (s4_r0 ; s6_r0) * s3_r1 * s0_r2
+task 17 required 203 tags 0:0,1:0,3:1,6:0,7:0 arrival 10,13,8,11,6,4,14,1,0,15,7,5,3,9,2,12 written [r0,r1] (s0_r0 ; s1_r0 ; s6_r0 ; s7_r0) * s3_r1
+task 18 required 193 tags 0:0,6:2,7:0 arrival 4,12,8,11,2,1,13,7,10,6,15,14,9,3,0,5 written [r0,r2] (s0_r0 ; s7_r0) * s6_r2
+task 19 required 49 tags 0:1,4:1,5:1 arrival 8,4,11,5,15,6,3,12,1,14,2,7,10,9,13,0 written [r1] s0_r1 ; s4_r1 ; s5_r1
+performance none
+
+seed 345
+n 8 redraws 296 max_attempts 53
+prefix_required 242,255,221,213,27,255,136,186,251,123,107,184,239,255,112,190,192,218,247,245
+agent 0 caps 1 trust 58 role 2
+agent 1 caps 38 trust 41 role 2
+agent 2 caps 98 trust 20 role 1
+agent 3 caps 16 trust 47 role 0
+agent 4 caps 8 trust 46 role 0
+agent 5 caps 192 trust 99 role 2
+agent 6 caps 2 trust 93 role 2
+agent 7 caps 2 trust 46 role 0
+task 0 required 68 tags 2:2,6:2 arrival 0,2,7,3,4,6,5,1 written [r2] s2_r2 ; s6_r2
+task 1 required 130 tags 1:2,7:2 arrival 3,1,7,5,4,6,0,2 written [r2] s1_r2 ; s7_r2
+task 2 required 84 tags 2:2,4:0,6:1 arrival 1,0,4,6,3,5,7,2 written [r0,r1,r2] s4_r0 * s6_r1 * s2_r2
+task 3 required 74 tags 1:1,3:0,6:1 arrival 3,2,4,5,1,7,0,6 written [r0,r1] s3_r0 * (s1_r1 ; s6_r1)
+task 4 required 100 tags 2:2,5:2,6:1 arrival 3,0,1,2,6,4,7,5 written [r1,r2] s6_r1 * (s2_r2 ; s5_r2)
+task 5 required 222 tags 1:1,2:2,3:0,4:0,6:1,7:2 arrival 5,1,6,0,3,4,2,7 written [r0,r1,r2] (s3_r0 ; s4_r0) * (s1_r1 ; s6_r1) * (s2_r2 ; s7_r2)
+task 6 required 65 tags 0:2,6:1 arrival 2,7,0,4,1,3,5,6 written [r1,r2] s6_r1 * s0_r2
+task 7 required 19 tags 0:2,1:1,4:0 arrival 7,2,3,1,5,6,4,0 written [r0,r1,r2] s4_r0 * s1_r1 * s0_r2
+task 8 required 122 tags 1:1,3:0,4:0,5:1,6:2 arrival 6,2,5,0,7,4,1,3 written [r0,r1,r2] (s3_r0 ; delta@r0 ; s4_r0 * s4_r0 ; mu@r0) * (s1_r1 ; delta@r1 ; s5_r1 * s5_r1 ; mu@r1) * s6_r2
+task 9 required 127 tags 0:2,1:2,2:2,3:0,4:0,5:2,6:1 arrival 6,3,1,2,7,0,5,4 written [r0,r1,r2] (s3_r0 ; s4_r0) * s6_r1 * (s0_r2 ; delta@r2 ; s1_r2 * s1_r2 ; mu@r2 ; s2_r2 ; s5_r2)
+task 10 required 143 tags 0:2,1:0,2:2,3:0,7:2 arrival 2,7,1,0,6,4,3,5 written [r0,r2] (s1_r0 ; s3_r0) * (s0_r2 ; delta@r2 ; s2_r2 * s2_r2 ; mu@r2 ; s7_r2)
+task 11 required 9 tags 0:2,3:0 arrival 5,0,3,1,2,7,6,4 written [r0,r2] s3_r0 * s0_r2
+task 12 required 36 tags 2:2,5:1 arrival 3,5,0,2,4,7,1,6 written [r1,r2] s5_r1 * s2_r2
+task 13 required 82 tags 1:0,4:0,6:1 arrival 0,4,7,1,6,5,3,2 written [r0,r1] (s1_r0 ; s4_r0) * s6_r1
+task 14 required 34 tags 1:2,5:2 arrival 3,6,4,1,7,0,2,5 written [r2] s1_r2 ; delta@r2 ; s5_r2 * s5_r2 ; mu@r2
+task 15 required 76 tags 2:2,3:0,6:2 arrival 1,2,6,7,5,0,3,4 written [r0,r2] s3_r0 * (s2_r2 ; delta@r2 ; s6_r2 * s6_r2 ; mu@r2)
+task 16 required 96 tags 5:2,6:1 arrival 1,2,5,7,0,6,4,3 written [r1,r2] s6_r1 * s5_r2
+task 17 required 115 tags 0:2,1:2,4:0,5:2,6:2 arrival 4,6,3,7,5,1,0,2 written [r0,r2] s4_r0 * (s0_r2 ; s1_r2 ; s5_r2 ; s6_r2)
+task 18 required 198 tags 1:0,2:2,6:2,7:2 arrival 7,5,2,0,1,3,6,4 written [r0,r2] s1_r0 * (s2_r2 ; s6_r2 ; s7_r2)
+task 19 required 38 tags 1:2,2:2,5:2 arrival 3,0,7,5,4,6,1,2 written [r2] s1_r2 ; s2_r2 ; s5_r2
+performance none
+
+seed 346
+n 15 redraws 105 max_attempts 17
+prefix_required 59,255,84,255,51,5,111,148,239,38,223,55,3,65,250,255,119,39,36,239
+agent 0 caps 25 trust 60 role 1
+agent 1 caps 232 trust 54 role 2
+agent 2 caps 153 trust 29 role 0
+agent 3 caps 144 trust 70 role 0
+agent 4 caps 10 trust 73 role 0
+agent 5 caps 138 trust 76 role 1
+agent 6 caps 232 trust 94 role 2
+agent 7 caps 193 trust 81 role 0
+agent 8 caps 194 trust 86 role 0
+agent 9 caps 32 trust 69 role 0
+agent 10 caps 1 trust 22 role 2
+agent 11 caps 161 trust 53 role 1
+agent 12 caps 41 trust 21 role 0
+agent 13 caps 161 trust 61 role 2
+agent 14 caps 130 trust 63 role 0
+task 0 required 59 tags 0:2,1:1,3:2,4:1,5:1 arrival 8,11,9,2,7,14,4,5,13,0,1,10,3,6,12 written [r1,r2] (s1_r1 ; s4_r1 ; s5_r1) * (s0_r2 ; s3_r2)
+task 1 required 120 tags 3:0,4:1,5:2,6:0 arrival 6,1,8,3,9,11,5,10,0,2,14,12,7,13,4 written [r0,r1,r2] (s3_r0 ; s6_r0) * s4_r1 * s5_r2
+task 2 required 130 tags 1:0,7:2 arrival 14,1,5,8,11,10,9,6,2,3,7,4,13,12,0 written [r0,r2] s1_r0 * s7_r2
+task 3 required 144 tags 4:1,7:2 arrival 2,0,7,9,14,4,12,5,10,1,13,6,8,11,3 written [r1,r2] s4_r1 * s7_r2
+task 4 required 72 tags 3:0,6:2 arrival 11,8,3,5,9,1,14,2,13,0,4,12,6,10,7 written [r0,r2] s3_r0 * s6_r2
+task 5 required 177 tags 0:2,4:1,5:2,7:1 arrival 2,1,13,0,10,6,12,7,14,8,3,11,5,4,9 written [r1,r2] (s4_r1 ; s7_r1) * (s0_r2 ; delta@r2 ; s5_r2 * s5_r2 ; mu@r2)
+task 6 required 25 tags 0:2,3:0,4:1 arrival 4,5,8,2,10,0,9,12,7,6,1,11,14,13,3 written [r0,r1,r2] s3_r0 * s4_r1 * s0_r2
+task 7 required 250 tags 1:0,3:2,4:1,5:1,6:2,7:1 arrival 1,13,8,5,7,12,10,3,9,14,4,11,2,6,0 written [r0,r1,r2] s1_r0 * (s4_r1 ; delta@r1 ; s5_r1 * s5_r1 ; mu@r1 ; s7_r1) * (s3_r2 ; s6_r2)
+task 8 required 137 tags 0:2,3:1,7:2 arrival 8,2,1,6,11,0,9,3,4,12,13,7,14,10,5 written [r1,r2] s3_r1 * (s0_r2 ; s7_r2)
+task 9 required 234 tags 1:0,3:1,5:1,6:2,7:2 arrival 4,0,2,8,13,14,1,11,5,9,12,7,3,10,6 written [r0,r1,r2] s1_r0 * (s3_r1 ; s5_r1) * (s6_r2 ; s7_r2)
+task 10 required 161 tags 0:0,5:1,7:0 arrival 9,5,8,14,12,10,2,11,13,1,3,6,0,4,7 written [r0,r1] (s0_r0 ; s7_r0) * s5_r1
+task 11 required 144 tags 4:1,7:1 arrival 11,2,3,8,10,5,0,12,7,4,6,1,13,14,9 written [r1] s4_r1 ; s7_r1
+task 12 required 3 tags 0:2,1:1 arrival 4,14,9,6,0,5,10,11,12,2,13,7,8,1,3 written [r1,r2] s1_r1 * s0_r2
+task 13 required 208 tags 4:0,6:2,7:2 arrival 7,6,1,10,0,11,14,9,12,13,8,5,4,3,2 written [r0,r2] s4_r0 * (s6_r2 ; s7_r2)
+task 14 required 250 tags 1:1,3:1,4:0,5:1,6:0,7:2 arrival 10,9,3,14,11,1,5,2,8,4,7,6,12,13,0 written [r0,r1,r2] (s4_r0 ; s6_r0) * (s1_r1 ; delta@r1 ; s3_r1 * s3_r1 ; mu@r1 ; s5_r1) * s7_r2
+task 15 required 177 tags 0:0,4:1,5:0,7:2 arrival 0,3,14,4,7,12,9,10,2,1,6,13,11,5,8 written [r0,r1,r2] (s0_r0 ; s5_r0) * s4_r1 * s7_r2
+task 16 required 138 tags 1:0,3:2,7:2 arrival 5,4,13,6,0,10,8,9,2,12,14,11,7,3,1 written [r0,r2] s1_r0 * (s3_r2 ; delta@r2 ; s7_r2 * s7_r2 ; mu@r2)
+task 17 required 34 tags 1:1,5:2 arrival 2,11,9,6,12,14,4,10,13,0,8,3,5,1,7 written [r1,r2] s1_r1 * s5_r2
+task 18 required 155 tags 0:2,1:1,3:1,4:1,7:2 arrival 11,1,6,0,5,3,13,8,2,7,4,14,12,9,10 written [r1,r2] (s1_r1 ; s3_r1 ; delta@r1 ; s4_r1 * s4_r1 ; mu@r1) * (s0_r2 ; s7_r2)
+task 19 required 3 tags 0:1,1:1 arrival 0,10,6,14,8,4,12,1,9,13,2,11,3,7,5 written [r1] s0_r1 ; s1_r1
+performance none
+
+seed 347
+n 12 redraws 56 max_attempts 19
+prefix_required 20,48,112,223,5,231,133,145,251,255,210,255,236,120,154,217,115,105,76,255
+agent 0 caps 192 trust 39 role 1
+agent 1 caps 90 trust 21 role 2
+agent 2 caps 128 trust 87 role 2
+agent 3 caps 78 trust 51 role 2
+agent 4 caps 146 trust 47 role 1
+agent 5 caps 8 trust 25 role 2
+agent 6 caps 58 trust 84 role 1
+agent 7 caps 50 trust 29 role 1
+agent 8 caps 160 trust 39 role 2
+agent 9 caps 169 trust 79 role 0
+agent 10 caps 13 trust 21 role 1
+agent 11 caps 196 trust 64 role 1
+task 0 required 20 tags 2:1,4:1 arrival 0,11,2,5,3,6,8,4,10,9,7,1 written [r1] s2_r1 ; delta@r1 ; s4_r1 * s4_r1 ; mu@r1
+task 1 required 48 tags 4:1,5:2 arrival 9,1,6,2,8,4,10,5,3,11,7,0 written [r1,r2] s4_r1 * s5_r2
+task 2 required 255 tags 0:0,1:1,2:1,3:0,4:2,5:2,6:2,7:1 arrival 0,9,2,5,7,3,4,11,10,8,6,1 written [r0,r1,r2] (s0_r0 ; s3_r0) * (s1_r1 ; s2_r1 ; s7_r1) * (s4_r2 ; s5_r2 ; s6_r2)
+task 3 required 136 tags 3:1,7:2 arrival 0,9,11,6,3,2,7,10,5,4,1,8 written [r1,r2] s3_r1 * s7_r2
+task 4 required 40 tags 3:2,5:2 arrival 9,6,4,11,8,5,0,10,7,3,2,1 written [r2] s3_r2 ; s5_r2
+task 5 required 231 tags 0:0,1:2,2:2,5:0,6:1,7:0 arrival 7,5,1,0,10,8,2,9,11,4,3,6 written [r0,r1,r2] (s0_r0 ; s5_r0 ; delta@r0 ; s7_r0 * s7_r0 ; mu@r0) * s6_r1 * (s1_r2 ; s2_r2)
+task 6 required 104 tags 3:2,5:2,6:1 arrival 10,7,4,11,6,3,8,1,5,2,9,0 written [r1,r2] s6_r1 * (s3_r2 ; delta@r2 ; s5_r2 * s5_r2 ; mu@r2)
+task 7 required 34 tags 1:2,5:0 arrival 9,5,10,11,8,0,4,7,1,3,6,2 written [r0,r2] s5_r0 * s1_r2
+task 8 required 136 tags 3:1,7:0 arrival 11,6,4,1,5,7,2,0,10,8,3,9 written [r0,r1] s7_r0 * s3_r1
+task 9 required 159 tags 0:0,1:1,2:2,3:0,4:2,7:0 arrival 10,7,1,5,2,4,9,11,0,3,8,6 written [r0,r1,r2] (s0_r0 ; s3_r0 ; s7_r0) * s1_r1 * (s2_r2 ; s4_r2)
+task 10 required 222 tags 1:2,2:1,3:0,4:2,6:1,7:0 arrival 0,9,4,10,3,6,7,5,8,11,1,2 written [r0,r1,r2] (s3_r0 ; s7_r0) * (s2_r1 ; delta@r1 ; s6_r1 * s6_r1 ; mu@r1) * (s1_r2 ; s4_r2)
+task 11 required 169 tags 0:1,3:0,5:2,7:1 arrival 10,8,7,6,9,3,2,5,0,11,1,4 written [r0,r1,r2] s3_r0 * (s0_r1 ; delta@r1 ; s7_r1 * s7_r1 ; mu@r1) * s5_r2
+task 12 required 233 tags 0:0,3:2,5:1,6:1,7:2 arrival 9,7,2,8,6,5,0,4,10,3,11,1 written [r0,r1,r2] s0_r0 * (s5_r1 ; s6_r1) * (s3_r2 ; s7_r2)
+task 13 required 140 tags 2:2,3:0,7:0 arrival 5,0,4,6,3,11,9,1,2,8,10,7 written [r0,r2] (s3_r0 ; delta@r0 ; s7_r0 * s7_r0 ; mu@r0) * s2_r2
+task 14 required 154 tags 1:1,3:2,4:2,7:1 arrival 6,11,2,8,4,3,1,10,9,7,0,5 written [r1,r2] (s1_r1 ; s7_r1) * (s3_r2 ; s4_r2)
+task 15 required 66 tags 1:1,6:1 arrival 7,3,6,1,2,0,9,11,10,5,4,8 written [r1] s1_r1 ; s6_r1
+task 16 required 201 tags 0:1,3:1,6:1,7:1 arrival 10,6,11,1,0,4,8,7,2,3,5,9 written [r1] s0_r1 ; s3_r1 ; delta@r1 ; s6_r1 * s6_r1 ; mu@r1 ; s7_r1
+task 17 required 105 tags 0:1,3:2,5:2,6:1 arrival 6,10,4,8,7,9,0,5,11,2,1,3 written [r1,r2] (s0_r1 ; delta@r1 ; s6_r1 * s6_r1 ; mu@r1) * (s3_r2 ; s5_r2)
+task 18 required 76 tags 2:2,3:1,6:1 arrival 10,3,9,6,7,4,0,5,8,2,11,1 written [r1,r2] (s3_r1 ; s6_r1) * s2_r2
+task 19 required 170 tags 1:2,3:2,5:1,7:0 arrival 6,10,9,8,4,2,5,3,7,1,0,11 written [r0,r1,r2] s7_r0 * s5_r1 * (s1_r2 ; s3_r2)
+performance none
+
+seed 348
+n 5 redraws 531 max_attempts 115
+prefix_required 12,255,143,255,217,56,255,176,255,79,117,114,14,191,5,109,255,247,189,95
+agent 0 caps 208 trust 22 role 0
+agent 1 caps 132 trust 98 role 0
+agent 2 caps 160 trust 87 role 0
+agent 3 caps 160 trust 69 role 1
+agent 4 caps 37 trust 61 role 2
+task 0 required 37 tags 0:2,2:0,5:0 arrival 4,0,3,2,1 written [r0,r2] (s2_r0 ; delta@r0 ; s5_r0 * s5_r0 ; mu@r0) * s0_r2
+task 1 required 228 tags 2:2,5:2,6:0,7:1 arrival 0,4,1,3,2 written [r0,r1,r2] s6_r0 * s7_r1 * (s2_r2 ; s5_r2)
+task 2 required 65 tags 0:2,6:0 arrival 2,3,0,4,1 written [r0,r2] s6_r0 * s0_r2
+task 3 required 161 tags 0:2,5:1,7:0 arrival 4,2,1,3,0 written [r0,r1,r2] s7_r0 * s5_r1 * s0_r2
+task 4 required 160 tags 5:1,7:0 arrival 4,2,0,1,3 written [r0,r1] s7_r0 * s5_r1
+task 5 required 129 tags 0:2,7:0 arrival 3,1,0,4,2 written [r0,r2] s7_r0 * s0_r2
+task 6 required 132 tags 2:0,7:1 arrival 4,0,1,3,2 written [r0,r1] s2_r0 * s7_r1
+task 7 required 176 tags 4:0,5:2,7:0 arrival 4,2,3,1,0 written [r0,r2] (s4_r0 ; s7_r0) * s5_r2
+task 8 required 68 tags 2:2,6:0 arrival 0,1,4,2,3 written [r0,r2] s6_r0 * s2_r2
+task 9 required 192 tags 6:0,7:1 arrival 3,0,2,1,4 written [r0,r1] s6_r0 * s7_r1
+task 10 required 100 tags 2:0,5:2,6:0 arrival 2,0,3,4,1 written [r0,r2] (s2_r0 ; s6_r0) * s5_r2
+task 11 required 84 tags 2:2,4:0,6:0 arrival 0,4,3,2,1 written [r0,r2] (s4_r0 ; s6_r0) * s2_r2
+task 12 required 132 tags 2:2,7:0 arrival 2,1,0,3,4 written [r0,r2] s7_r0 * s2_r2
+task 13 required 36 tags 2:0,5:1 arrival 0,2,3,4,1 written [r0,r1] s2_r0 * s5_r1
+task 14 required 5 tags 0:2,2:2 arrival 1,3,4,0,2 written [r2] s0_r2 ; s2_r2
+task 15 required 129 tags 0:2,7:0 arrival 4,1,3,0,2 written [r0,r2] s7_r0 * s0_r2
+task 16 required 33 tags 0:2,5:0 arrival 2,3,0,1,4 written [r0,r2] s5_r0 * s0_r2
+task 17 required 21 tags 0:2,2:0,4:0 arrival 4,1,2,0,3 written [r0,r2] (s2_r0 ; delta@r0 ; s4_r0 * s4_r0 ; mu@r0) * s0_r2
+task 18 required 160 tags 5:0,7:0 arrival 1,0,3,4,2 written [r0] s5_r0 ; s7_r0
+task 19 required 20 tags 2:2,4:0 arrival 4,1,0,3,2 written [r0,r2] s4_r0 * s2_r2
+performance none
+
+seed 349
+n 13 redraws 90 max_attempts 20
+prefix_required 225,98,255,255,129,61,112,185,246,251,79,120,53,29,40,187,255,244,219,73
+agent 0 caps 5 trust 85 role 0
+agent 1 caps 140 trust 73 role 2
+agent 2 caps 64 trust 66 role 1
+agent 3 caps 134 trust 51 role 2
+agent 4 caps 128 trust 25 role 0
+agent 5 caps 128 trust 59 role 2
+agent 6 caps 96 trust 71 role 1
+agent 7 caps 200 trust 26 role 1
+agent 8 caps 12 trust 66 role 0
+agent 9 caps 105 trust 57 role 0
+agent 10 caps 66 trust 79 role 0
+agent 11 caps 2 trust 84 role 1
+agent 12 caps 204 trust 49 role 1
+task 0 required 41 tags 0:0,3:2,5:1 arrival 12,10,1,5,9,3,4,11,2,0,7,6,8 written [r0,r1,r2] s0_r0 * s5_r1 * s3_r2
+task 1 required 98 tags 1:1,5:0,6:0 arrival 5,11,7,1,9,3,2,8,10,6,12,4,0 written [r0,r1] (s5_r0 ; s6_r0) * s1_r1
+task 2 required 34 tags 1:0,5:0 arrival 12,2,1,0,8,6,3,5,4,9,10,11,7 written [r0] s1_r0 ; delta@r0 ; s5_r0 * s5_r0 ; mu@r0
+task 3 required 6 tags 1:2,2:0 arrival 10,3,11,4,2,6,1,0,7,9,12,8,5 written [r0,r2] s2_r0 * s1_r2
+task 4 required 227 tags 0:0,1:0,5:0,6:0,7:1 arrival 7,9,8,11,6,3,2,10,1,12,4,0,5 written [r0,r1] (s0_r0 ; s1_r0 ; delta@r0 ; s5_r0 * s5_r0 ; mu@r0 ; delta@r0 ; s6_r0 * s6_r0 ; mu@r0) * s7_r1
+task 5 required 46 tags 1:1,2:0,3:1,5:0 arrival 3,9,5,10,11,2,7,0,6,12,8,1,4 written [r0,r1] (s2_r0 ; s5_r0) * (s1_r1 ; s3_r1)
+task 6 required 79 tags 0:0,1:1,2:1,3:1,6:0 arrival 0,5,4,8,9,11,2,12,7,10,3,1,6 written [r0,r1] (s0_r0 ; delta@r0 ; s6_r0 * s6_r0 ; mu@r0) * (s1_r1 ; s2_r1 ; delta@r1 ; s3_r1 * s3_r1 ; mu@r1)
+task 7 required 108 tags 2:1,3:0,5:0,6:0 arrival 6,9,11,10,4,5,3,0,1,8,2,7,12 written [r0,r1] (s3_r0 ; s5_r0 ; s6_r0) * s2_r1
+task 8 required 98 tags 1:1,5:0,6:1 arrival 8,5,6,3,4,11,2,10,12,0,9,7,1 written [r0,r1] s5_r0 * (s1_r1 ; s6_r1)
+task 9 required 162 tags 1:0,5:0,7:2 arrival 1,2,4,7,0,9,3,10,11,12,8,5,6 written [r0,r2] (s1_r0 ; s5_r0) * s7_r2
+task 10 required 132 tags 2:1,7:0 arrival 6,3,10,9,5,11,4,8,1,0,7,2,12 written [r0,r1] s7_r0 * s2_r1
+task 11 required 140 tags 2:2,3:0,7:1 arrival 8,11,12,7,10,6,0,5,4,2,1,3,9 written [r0,r1,r2] s3_r0 * s7_r1 * s2_r2
+task 12 required 130 tags 1:0,7:2 arrival 6,11,1,3,2,5,12,0,8,10,4,7,9 written [r0,r2] s1_r0 * s7_r2
+task 13 required 130 tags 1:1,7:2 arrival 7,11,9,2,12,3,10,6,1,4,0,5,8 written [r1,r2] s1_r1 * s7_r2
+task 14 required 40 tags 3:2,5:1 arrival 6,9,3,12,8,1,0,5,7,2,4,10,11 written [r1,r2] s5_r1 * s3_r2
+task 15 required 161 tags 0:0,5:1,7:2 arrival 10,6,12,3,4,9,8,1,11,2,5,7,0 written [r0,r1,r2] s0_r0 * s5_r1 * s7_r2
+task 16 required 68 tags 2:2,6:0 arrival 6,3,8,12,0,7,9,4,5,11,10,2,1 written [r0,r2] s6_r0 * s2_r2
+task 17 required 9 tags 0:0,3:0 arrival 6,12,9,0,3,7,5,4,11,2,1,8,10 written [r0] s0_r0 ; s3_r0
+task 18 required 174 tags 1:2,2:2,3:0,5:0,7:1 arrival 9,10,5,0,4,12,11,8,3,2,7,6,1 written [r0,r1,r2] (s3_r0 ; delta@r0 ; s5_r0 * s5_r0 ; mu@r0) * s7_r1 * (s1_r2 ; delta@r2 ; s2_r2 * s2_r2 ; mu@r2)
+task 19 required 204 tags 2:1,3:1,6:0,7:0 arrival 10,3,8,2,1,11,6,9,7,12,4,5,0 written [r0,r1] (s6_r0 ; s7_r0) * (s2_r1 ; s3_r1)
+performance none
+
+seed 350
+n 6 redraws 663 max_attempts 108
+prefix_required 234,255,94,235,17,238,208,72,255,216,237,255,163,88,134,75,255,176,127,3
+agent 0 caps 33 trust 64 role 1
+agent 1 caps 128 trust 25 role 1
+agent 2 caps 8 trust 99 role 2
+agent 3 caps 144 trust 87 role 1
+agent 4 caps 92 trust 54 role 1
+agent 5 caps 128 trust 71 role 0
+task 0 required 24 tags 3:2,4:1 arrival 0,2,3,4,1,5 written [r1,r2] s4_r1 * s3_r2
+task 1 required 12 tags 2:1,3:2 arrival 0,4,2,3,5,1 written [r1,r2] s2_r1 * s3_r2
+task 2 required 5 tags 0:1,2:1 arrival 1,5,0,2,4,3 written [r1] s0_r1 ; delta@r1 ; s2_r1 * s2_r1 ; mu@r1
+task 3 required 48 tags 4:1,5:1 arrival 3,4,2,0,5,1 written [r1] s4_r1 ; s5_r1
+task 4 required 5 tags 0:1,2:1 arrival 0,2,4,3,1,5 written [r1] s0_r1 ; s2_r1
+task 5 required 136 tags 3:1,7:0 arrival 2,3,0,5,4,1 written [r0,r1] s7_r0 * s3_r1
+task 6 required 136 tags 3:1,7:1 arrival 5,1,3,2,0,4 written [r1] s3_r1 ; s7_r1
+task 7 required 132 tags 2:1,7:1 arrival 5,0,1,2,4,3 written [r1] s2_r1 ; delta@r1 ; s7_r1 * s7_r1 ; mu@r1
+task 8 required 152 tags 3:1,4:1,7:0 arrival 0,2,4,3,5,1 written [r0,r1] s7_r0 * (s3_r1 ; s4_r1)
+task 9 required 192 tags 6:1,7:1 arrival 2,3,5,1,0,4 written [r1] s6_r1 ; s7_r1
+task 10 required 132 tags 2:1,7:1 arrival 3,4,0,5,1,2 written [r1] s2_r1 ; s7_r1
+task 11 required 144 tags 4:1,7:1 arrival 5,3,1,0,2,4 written [r1] s4_r1 ; s7_r1
+task 12 required 132 tags 2:1,7:1 arrival 0,3,2,1,4,5 written [r1] s2_r1 ; s7_r1
+task 13 required 76 tags 2:1,3:2,6:1 arrival 2,1,5,3,0,4 written [r1,r2] (s2_r1 ; s6_r1) * s3_r2
+task 14 required 20 tags 2:1,4:1 arrival 0,5,3,1,2,4 written [r1] s2_r1 ; delta@r1 ; s4_r1 * s4_r1 ; mu@r1
+task 15 required 24 tags 3:2,4:1 arrival 4,0,1,2,3,5 written [r1,r2] s4_r1 * s3_r2
+task 16 required 137 tags 0:1,3:1,7:1 arrival 3,1,5,4,0,2 written [r1] s0_r1 ; s3_r1 ; s7_r1
+task 17 required 40 tags 3:1,5:1 arrival 1,0,4,2,5,3 written [r1] s3_r1 ; s5_r1
+task 18 required 132 tags 2:1,7:1 arrival 2,4,5,0,3,1 written [r1] s2_r1 ; s7_r1
+task 19 required 24 tags 3:2,4:1 arrival 0,5,1,4,2,3 written [r1,r2] s4_r1 * s3_r2
+performance none
+
+seed 351
+n 10 redraws 160 max_attempts 32
+prefix_required 213,89,15,207,225,113,208,200,156,119,67,235,243,180,255,5,236,70,132,88
+agent 0 caps 18 trust 25 role 1
+agent 1 caps 160 trust 99 role 0
+agent 2 caps 40 trust 53 role 1
+agent 3 caps 7 trust 86 role 1
+agent 4 caps 170 trust 74 role 0
+agent 5 caps 99 trust 32 role 2
+agent 6 caps 33 trust 20 role 2
+agent 7 caps 64 trust 38 role 2
+agent 8 caps 104 trust 65 role 1
+agent 9 caps 108 trust 34 role 1
+task 0 required 118 tags 1:1,2:1,4:1,5:0,6:1 arrival 0,4,3,6,9,2,7,8,5,1 written [r0,r1] s5_r0 * (s1_r1 ; delta@r1 ; s2_r1 * s2_r1 ; mu@r1 ; delta@r1 ; s4_r1 * s4_r1 ; mu@r1 ; s6_r1)
+task 1 required 162 tags 1:2,5:1,7:0 arrival 4,5,6,7,8,1,3,2,9,0 written [r0,r1,r2] s7_r0 * s5_r1 * s1_r2
+task 2 required 44 tags 2:1,3:1,5:2 arrival 7,4,1,9,6,8,0,5,2,3 written [r1,r2] (s2_r1 ; s3_r1) * s5_r2
+task 3 required 33 tags 0:2,5:0 arrival 5,9,6,2,1,8,3,0,7,4 written [r0,r2] s5_r0 * s0_r2
+task 4 required 116 tags 2:1,4:1,5:0,6:1 arrival 1,4,8,9,7,3,5,6,2,0 written [r0,r1] s5_r0 * (s2_r1 ; s4_r1 ; s6_r1)
+task 5 required 161 tags 0:2,5:0,7:0 arrival 3,9,5,6,7,0,1,2,4,8 written [r0,r2] (s5_r0 ; s7_r0) * s0_r2
+task 6 required 66 tags 1:2,6:1 arrival 4,1,2,7,8,0,5,6,3,9 written [r1,r2] s6_r1 * s1_r2
+task 7 required 173 tags 0:2,2:1,3:0,5:2,7:0 arrival 5,4,3,2,8,1,0,6,9,7 written [r0,r1,r2] (s3_r0 ; s7_r0) * s2_r1 * (s0_r2 ; delta@r2 ; s5_r2 * s5_r2 ; mu@r2)
+task 8 required 38 tags 1:2,2:1,5:0 arrival 4,8,5,2,1,7,0,6,3,9 written [r0,r1,r2] s5_r0 * s2_r1 * s1_r2
+task 9 required 10 tags 1:2,3:1 arrival 0,1,8,3,7,9,6,2,5,4 written [r1,r2] s3_r1 * s1_r2
+task 10 required 67 tags 0:1,1:0,6:2 arrival 6,5,9,8,1,2,3,7,4,0 written [r0,r1,r2] s1_r0 * s0_r1 * s6_r2
+task 11 required 75 tags 0:1,1:0,3:1,6:2 arrival 6,8,3,7,0,1,9,4,5,2 written [r0,r1,r2] s1_r0 * (s0_r1 ; delta@r1 ; s3_r1 * s3_r1 ; mu@r1) * s6_r2
+task 12 required 130 tags 1:1,7:0 arrival 3,2,8,7,4,0,1,5,9,6 written [r0,r1] s7_r0 * s1_r1
+task 13 required 109 tags 0:2,2:1,3:0,5:0,6:2 arrival 5,7,8,6,4,1,0,9,3,2 written [r0,r1,r2] (s3_r0 ; s5_r0) * s2_r1 * (s0_r2 ; s6_r2)
+task 14 required 192 tags 6:1,7:0 arrival 6,0,1,8,4,7,2,5,9,3 written [r0,r1] s7_r0 * s6_r1
+task 15 required 83 tags 0:1,1:2,4:1,6:1 arrival 7,6,8,9,0,1,5,3,2,4 written [r1,r2] (s0_r1 ; delta@r1 ; s4_r1 * s4_r1 ; mu@r1 ; s6_r1) * s1_r2
+task 16 required 96 tags 5:0,6:2 arrival 8,4,3,9,1,5,2,0,7,6 written [r0,r2] s5_r0 * s6_r2
+task 17 required 66 tags 1:0,6:2 arrival 7,5,4,3,1,0,8,9,2,6 written [r0,r2] s1_r0 * s6_r2
+task 18 required 136 tags 3:0,7:0 arrival 3,7,8,0,1,6,5,9,2,4 written [r0] s3_r0 ; s7_r0
+task 19 required 27 tags 0:2,1:2,3:0,4:1 arrival 7,9,1,0,2,8,4,3,6,5 written [r0,r1,r2] s3_r0 * s4_r1 * (s0_r2 ; s1_r2)
+performance none
+
+seed 352
+n 15 redraws 96 max_attempts 18
+prefix_required 65,102,247,220,157,135,20,255,184,48,191,222,117,182,80,255,255,197,217,239
+agent 0 caps 26 trust 50 role 0
+agent 1 caps 8 trust 94 role 0
+agent 2 caps 3 trust 53 role 0
+agent 3 caps 225 trust 26 role 2
+agent 4 caps 32 trust 23 role 2
+agent 5 caps 128 trust 30 role 2
+agent 6 caps 65 trust 22 role 2
+agent 7 caps 146 trust 91 role 0
+agent 8 caps 8 trust 63 role 1
+agent 9 caps 78 trust 90 role 0
+agent 10 caps 240 trust 81 role 2
+agent 11 caps 4 trust 56 role 1
+agent 12 caps 108 trust 87 role 0
+agent 13 caps 67 trust 82 role 2
+agent 14 caps 8 trust 20 role 1
+task 0 required 90 tags 1:0,3:1,4:2,6:0 arrival 2,13,7,6,12,1,4,11,0,5,9,8,14,10,3 written [r0,r1,r2] (s1_r0 ; s6_r0) * s3_r1 * s4_r2
+task 1 required 52 tags 2:1,4:2,5:0 arrival 6,13,4,11,5,3,12,2,14,10,8,0,1,7,9 written [r0,r1,r2] s5_r0 * s2_r1 * s4_r2
+task 2 required 247 tags 0:2,1:2,2:1,4:0,5:0,6:0,7:2 arrival 14,12,7,9,0,8,13,3,10,6,11,1,5,4,2 written [r0,r1,r2] (s4_r0 ; delta@r0 ; s5_r0 * s5_r0 ; mu@r0 ; s6_r0) * s2_r1 * (s0_r2 ; s1_r2 ; s7_r2)
+task 3 required 201 tags 0:2,3:0,6:0,7:0 arrival 7,8,13,12,9,4,5,0,14,10,3,1,6,2,11 written [r0,r2] (s3_r0 ; delta@r0 ; s6_r0 * s6_r0 ; mu@r0 ; s7_r0) * s0_r2
+task 4 required 157 tags 0:0,2:1,3:0,4:2,7:0 arrival 11,5,6,3,7,2,4,8,14,9,1,13,0,12,10 written [r0,r1,r2] (s0_r0 ; s3_r0 ; delta@r0 ; s7_r0 * s7_r0 ; mu@r0) * s2_r1 * s4_r2
+task 5 required 135 tags 0:2,1:0,2:0,7:2 arrival 11,2,4,3,14,1,0,6,10,8,7,12,9,5,13 written [r0,r2] (s1_r0 ; delta@r0 ; s2_r0 * s2_r0 ; mu@r0) * (s0_r2 ; delta@r2 ; s7_r2 * s7_r2 ; mu@r2)
+task 6 required 20 tags 2:0,4:0 arrival 6,7,0,11,2,4,10,8,3,1,5,13,9,12,14 written [r0] s2_r0 ; s4_r0
+task 7 required 51 tags 0:2,1:2,4:0,5:2 arrival 2,11,9,5,0,4,14,1,8,7,13,6,12,3,10 written [r0,r2] s4_r0 * (s0_r2 ; s1_r2 ; s5_r2)
+task 8 required 99 tags 0:0,1:0,5:0,6:0 arrival 4,2,5,13,8,6,11,9,0,1,12,7,10,14,3 written [r0] s0_r0 ; delta@r0 ; s1_r0 * s1_r0 ; mu@r0 ; s5_r0 ; s6_r0
+task 9 required 36 tags 2:1,5:0 arrival 11,2,13,3,8,7,14,4,9,1,10,12,6,5,0 written [r0,r1] s5_r0 * s2_r1
+task 10 required 130 tags 1:0,7:2 arrival 0,2,14,8,9,5,1,12,7,3,11,10,6,4,13 written [r0,r2] s1_r0 * s7_r2
+task 11 required 145 tags 0:2,4:2,7:0 arrival 4,1,7,12,2,9,11,10,8,5,13,3,14,6,0 written [r0,r2] s7_r0 * (s0_r2 ; delta@r2 ; s4_r2 * s4_r2 ; mu@r2)
+task 12 required 144 tags 4:2,7:0 arrival 11,14,7,1,13,6,4,10,0,2,9,3,8,12,5 written [r0,r2] s7_r0 * s4_r2
+task 13 required 129 tags 0:2,7:0 arrival 14,2,10,8,6,7,9,13,0,12,5,4,11,1,3 written [r0,r2] s7_r0 * s0_r2
+task 14 required 227 tags 0:2,1:0,5:2,6:0,7:2 arrival 11,3,14,12,4,10,9,5,6,8,1,13,2,7,0 written [r0,r2] (s1_r0 ; s6_r0) * (s0_r2 ; delta@r2 ; s5_r2 * s5_r2 ; mu@r2 ; delta@r2 ; s7_r2 * s7_r2 ; mu@r2)
+task 15 required 254 tags 1:0,2:0,3:0,4:0,5:2,6:2,7:0 arrival 7,8,3,0,2,10,12,13,6,9,14,11,1,4,5 written [r0,r2] (s1_r0 ; s2_r0 ; s3_r0 ; s4_r0 ; s7_r0) * (s5_r2 ; s6_r2)
+task 16 required 11 tags 0:0,1:2,3:1 arrival 0,5,1,2,3,11,7,9,14,10,6,12,13,8,4 written [r0,r1,r2] s0_r0 * s3_r1 * s1_r2
+task 17 required 76 tags 2:0,3:1,6:2 arrival 3,8,11,4,6,7,14,2,9,12,1,5,0,13,10 written [r0,r1,r2] s2_r0 * s3_r1 * s6_r2
+task 18 required 254 tags 1:2,2:1,3:0,4:2,5:2,6:2,7:0 arrival 4,1,3,12,9,0,6,13,7,8,11,2,10,5,14 written [r0,r1,r2] (s3_r0 ; s7_r0) * s2_r1 * (s1_r2 ; s4_r2 ; s5_r2 ; s6_r2)
+task 19 required 164 tags 2:0,5:0,7:2 arrival 3,8,12,4,5,2,13,1,14,0,7,10,9,11,6 written [r0,r2] (s2_r0 ; s5_r0) * s7_r2
+performance none
+
+seed 353
+n 8 redraws 169 max_attempts 34
+prefix_required 23,34,143,255,48,255,233,11,206,125,255,21,54,247,23,222,255,44,255,35
+agent 0 caps 128 trust 89 role 0
+agent 1 caps 216 trust 84 role 2
+agent 2 caps 144 trust 90 role 1
+agent 3 caps 137 trust 43 role 1
+agent 4 caps 4 trust 76 role 0
+agent 5 caps 32 trust 38 role 0
+agent 6 caps 4 trust 33 role 2
+agent 7 caps 162 trust 89 role 1
+task 0 required 18 tags 1:1,4:2 arrival 6,5,7,3,4,1,0,2 written [r1,r2] s1_r1 * s4_r2
+task 1 required 34 tags 1:1,5:1 arrival 5,1,3,6,7,2,4,0 written [r1] s1_r1 ; s5_r1
+task 2 required 196 tags 2:2,6:2,7:1 arrival 5,2,0,6,7,4,1,3 written [r1,r2] s7_r1 * (s2_r2 ; delta@r2 ; s6_r2 * s6_r2 ; mu@r2)
+task 3 required 216 tags 3:2,4:2,6:2,7:0 arrival 0,4,7,5,3,1,6,2 written [r0,r2] s7_r0 * (s3_r2 ; s4_r2 ; s6_r2)
+task 4 required 80 tags 4:2,6:2 arrival 4,3,7,5,1,0,6,2 written [r2] s4_r2 ; s6_r2
+task 5 required 208 tags 4:1,6:2,7:0 arrival 1,2,0,6,5,7,3,4 written [r0,r1,r2] s7_r0 * s4_r1 * s6_r2
+task 6 required 48 tags 4:2,5:1 arrival 5,4,2,7,6,3,1,0 written [r1,r2] s5_r1 * s4_r2
+task 7 required 42 tags 1:1,3:1,5:1 arrival 2,1,4,0,7,6,5,3 written [r1] s1_r1 ; s3_r1 ; s5_r1
+task 8 required 206 tags 1:1,2:2,3:2,6:2,7:2 arrival 3,5,1,7,4,6,0,2 written [r1,r2] s1_r1 * (s2_r2 ; s3_r2 ; delta@r2 ; s6_r2 * s6_r2 ; mu@r2 ; delta@r2 ; s7_r2 * s7_r2 ; mu@r2)
+task 9 required 145 tags 0:1,4:2,7:1 arrival 2,7,3,4,1,0,6,5 written [r1,r2] (s0_r1 ; delta@r1 ; s7_r1 * s7_r1 ; mu@r1) * s4_r2
+task 10 required 17 tags 0:1,4:1 arrival 0,1,3,7,2,5,4,6 written [r1] s0_r1 ; s4_r1
+task 11 required 21 tags 0:1,2:0,4:2 arrival 3,2,6,5,7,0,4,1 written [r0,r1,r2] s2_r0 * s0_r1 * s4_r2
+task 12 required 46 tags 1:1,2:0,3:2,5:0 arrival 1,4,5,2,7,3,6,0 written [r0,r1,r2] (s2_r0 ; s5_r0) * s1_r1 * s3_r2
+task 13 required 80 tags 4:1,6:2 arrival 5,0,7,6,4,1,2,3 written [r1,r2] s4_r1 * s6_r2
+task 14 required 189 tags 0:1,2:0,3:1,4:1,5:1,7:2 arrival 4,2,1,0,7,5,3,6 written [r0,r1,r2] s2_r0 * (s0_r1 ; s3_r1 ; s4_r1 ; delta@r1 ; s5_r1 * s5_r1 ; mu@r1) * s7_r2
+task 15 required 134 tags 1:1,2:2,7:2 arrival 2,7,0,4,5,6,3,1 written [r1,r2] s1_r1 * (s2_r2 ; s7_r2)
+task 16 required 133 tags 0:1,2:0,7:0 arrival 1,2,5,6,4,3,7,0 written [r0,r1] (s2_r0 ; s7_r0) * s0_r1
+task 17 required 68 tags 2:2,6:2 arrival 1,3,2,4,6,0,7,5 written [r2] s2_r2 ; s6_r2
+task 18 required 180 tags 2:2,4:1,5:1,7:1 arrival 0,4,2,5,3,1,7,6 written [r1,r2] (s4_r1 ; s5_r1 ; s7_r1) * s2_r2
+task 19 required 220 tags 2:2,3:2,4:1,6:2,7:1 arrival 1,6,2,3,7,4,5,0 written [r1,r2] (s4_r1 ; s7_r1) * (s2_r2 ; s3_r2 ; s6_r2)
+performance none
+
+seed 354
+n 5 redraws 790 max_attempts 120
+prefix_required 255,255,254,243,121,129,73,91,208,143,239,255,24,143,249,66,113,62,66,48
+agent 0 caps 56 trust 46 role 0
+agent 1 caps 26 trust 48 role 0
+agent 2 caps 1 trust 90 role 2
+agent 3 caps 145 trust 25 role 2
+agent 4 caps 170 trust 64 role 0
+task 0 required 17 tags 0:2,4:0 arrival 0,3,1,4,2 written [r0,r2] s4_r0 * s0_r2
+task 1 required 154 tags 1:0,3:0,4:0,7:2 arrival 4,2,3,1,0 written [r0,r2] (s1_r0 ; s3_r0 ; delta@r0 ; s4_r0 * s4_r0 ; mu@r0) * s7_r2
+task 2 required 130 tags 1:0,7:2 arrival 1,2,0,3,4 written [r0,r2] s1_r0 * s7_r2
+task 3 required 24 tags 3:0,4:2 arrival 4,3,0,2,1 written [r0,r2] s3_r0 * s4_r2
+task 4 required 136 tags 3:0,7:0 arrival 2,3,4,0,1 written [r0] s3_r0 ; s7_r0
+task 5 required 129 tags 0:2,7:2 arrival 3,2,0,4,1 written [r2] s0_r2 ; delta@r2 ; s7_r2 * s7_r2 ; mu@r2
+task 6 required 144 tags 4:0,7:0 arrival 1,3,4,2,0 written [r0] s4_r0 ; s7_r0
+task 7 required 18 tags 1:0,4:2 arrival 2,3,4,1,0 written [r0,r2] s1_r0 * s4_r2
+task 8 required 129 tags 0:2,7:0 arrival 0,3,1,4,2 written [r0,r2] s7_r0 * s0_r2
+task 9 required 24 tags 3:0,4:2 arrival 0,4,3,2,1 written [r0,r2] s3_r0 * s4_r2
+task 10 required 42 tags 1:0,3:0,5:0 arrival 4,3,1,0,2 written [r0] s1_r0 ; delta@r0 ; s3_r0 * s3_r0 ; mu@r0 ; s5_r0
+task 11 required 26 tags 1:0,3:0,4:2 arrival 0,3,1,2,4 written [r0,r2] (s1_r0 ; delta@r0 ; s3_r0 * s3_r0 ; mu@r0) * s4_r2
+task 12 required 34 tags 1:0,5:0 arrival 1,0,2,4,3 written [r0] s1_r0 ; s5_r0
+task 13 required 24 tags 3:0,4:0 arrival 2,4,3,0,1 written [r0] s3_r0 ; s4_r0
+task 14 required 170 tags 1:0,3:0,5:0,7:2 arrival 1,0,4,2,3 written [r0,r2] (s1_r0 ; s3_r0 ; s5_r0) * s7_r2
+task 15 required 176 tags 4:2,5:0,7:0 arrival 0,2,1,4,3 written [r0,r2] (s5_r0 ; s7_r0) * s4_r2
+task 16 required 129 tags 0:2,7:0 arrival 0,2,3,4,1 written [r0,r2] s7_r0 * s0_r2
+task 17 required 186 tags 1:0,3:0,4:0,5:0,7:2 arrival 3,1,2,0,4 written [r0,r2] (s1_r0 ; s3_r0 ; delta@r0 ; s4_r0 * s4_r0 ; mu@r0 ; delta@r0 ; s5_r0 * s5_r0 ; mu@r0) * s7_r2
+task 18 required 24 tags 3:0,4:2 arrival 2,0,1,4,3 written [r0,r2] s3_r0 * s4_r2
+task 19 required 3 tags 0:2,1:0 arrival 0,2,3,1,4 written [r0,r2] s1_r0 * s0_r2
+performance none
+
+seed 355
+n 4 redraws 161 max_attempts 32
+prefix_required 84,231,255,72,170,141,210,59,222,10,54,255,246,130,140,207,33,253,255,191
+agent 0 caps 145 trust 47 role 0
+agent 1 caps 104 trust 67 role 0
+agent 2 caps 169 trust 42 role 2
+agent 3 caps 84 trust 33 role 2
+task 0 required 229 tags 0:2,2:2,5:2,6:2,7:2 arrival 0,2,3,1 written [r2] s0_r2 ; s2_r2 ; s5_r2 ; s6_r2 ; s7_r2
+task 1 required 65 tags 0:0,6:0 arrival 3,0,1,2 written [r0] s0_r0 ; s6_r0
+task 2 required 168 tags 3:2,5:0,7:0 arrival 2,3,1,0 written [r0,r2] (s5_r0 ; s7_r0) * s3_r2
+task 3 required 152 tags 3:2,4:0,7:2 arrival 0,1,2,3 written [r0,r2] s4_r0 * (s3_r2 ; delta@r2 ; s7_r2 * s7_r2 ; mu@r2)
+task 4 required 21 tags 0:0,2:2,4:0 arrival 2,3,0,1 written [r0,r2] (s0_r0 ; s4_r0) * s2_r2
+task 5 required 141 tags 0:0,2:2,3:2,7:2 arrival 2,1,3,0 written [r0,r2] s0_r0 * (s2_r2 ; s3_r2 ; s7_r2)
+task 6 required 5 tags 0:0,2:2 arrival 2,1,3,0 written [r0,r2] s0_r0 * s2_r2
+task 7 required 212 tags 2:2,4:2,6:2,7:0 arrival 2,0,3,1 written [r0,r2] s7_r0 * (s2_r2 ; s4_r2 ; s6_r2)
+task 8 required 80 tags 4:2,6:2 arrival 2,3,1,0 written [r2] s4_r2 ; s6_r2
+task 9 required 21 tags 0:0,2:2,4:2 arrival 2,1,3,0 written [r0,r2] s0_r0 * (s2_r2 ; s4_r2)
+task 10 required 144 tags 4:2,7:0 arrival 3,0,2,1 written [r0,r2] s7_r0 * s4_r2
+task 11 required 36 tags 2:2,5:2 arrival 1,2,0,3 written [r2] s2_r2 ; s5_r2
+task 12 required 129 tags 0:0,7:0 arrival 3,2,1,0 written [r0] s0_r0 ; s7_r0
+task 13 required 80 tags 4:2,6:2 arrival 2,1,0,3 written [r2] s4_r2 ; s6_r2
+task 14 required 113 tags 0:0,4:0,5:2,6:2 arrival 2,0,3,1 written [r0,r2] (s0_r0 ; delta@r0 ; s4_r0 * s4_r0 ; mu@r0) * (s5_r2 ; s6_r2)
+task 15 required 80 tags 4:0,6:2 arrival 0,2,1,3 written [r0,r2] s4_r0 * s6_r2
+task 16 required 121 tags 0:2,3:2,4:0,5:2,6:2 arrival 1,3,0,2 written [r0,r2] s4_r0 * (s0_r2 ; delta@r2 ; s3_r2 * s3_r2 ; mu@r2 ; s5_r2 ; s6_r2)
+task 17 required 240 tags 4:2,5:2,6:2,7:0 arrival 3,1,0,2 written [r0,r2] s7_r0 * (s4_r2 ; s5_r2 ; delta@r2 ; s6_r2 * s6_r2 ; mu@r2)
+task 18 required 9 tags 0:2,3:2 arrival 3,1,2,0 written [r2] s0_r2 ; s3_r2
+task 19 required 12 tags 2:2,3:0 arrival 2,3,0,1 written [r0,r2] s3_r0 * s2_r2
+performance none
+
+seed 356
+n 15 redraws 38 max_attempts 7
+prefix_required 255,253,72,126,66,229,140,255,177,239,25,192,255,28,92,50,255,255,154,219
+agent 0 caps 129 trust 52 role 0
+agent 1 caps 130 trust 83 role 2
+agent 2 caps 32 trust 59 role 2
+agent 3 caps 224 trust 34 role 2
+agent 4 caps 66 trust 70 role 0
+agent 5 caps 9 trust 37 role 1
+agent 6 caps 64 trust 47 role 0
+agent 7 caps 12 trust 64 role 0
+agent 8 caps 177 trust 60 role 1
+agent 9 caps 240 trust 62 role 2
+agent 10 caps 77 trust 92 role 1
+agent 11 caps 197 trust 74 role 1
+agent 12 caps 18 trust 74 role 2
+agent 13 caps 166 trust 96 role 2
+agent 14 caps 224 trust 25 role 2
+task 0 required 36 tags 2:0,5:1 arrival 12,0,6,10,5,9,7,13,14,3,1,8,4,2,11 written [r0,r1] s2_r0 * s5_r1
+task 1 required 253 tags 0:0,2:2,3:1,4:2,5:1,6:2,7:1 arrival 10,8,9,2,1,6,12,11,14,13,3,0,7,5,4 written [r0,r1,r2] s0_r0 * (s3_r1 ; s5_r1 ; s7_r1) * (s2_r2 ; s4_r2 ; s6_r2)
+task 2 required 72 tags 3:0,6:2 arrival 12,11,2,3,8,6,0,1,10,4,5,13,14,9,7 written [r0,r2] s3_r0 * s6_r2
+task 3 required 51 tags 0:0,1:0,4:2,5:1 arrival 7,14,8,5,4,9,13,3,1,6,12,11,0,10,2 written [r0,r1,r2] (s0_r0 ; s1_r0) * s5_r1 * s4_r2
+task 4 required 66 tags 1:0,6:0 arrival 12,1,13,11,2,4,0,7,14,10,9,8,3,6,5 written [r0] s1_r0 ; s6_r0
+task 5 required 255 tags 0:1,1:2,2:0,3:0,4:2,5:2,6:2,7:1 arrival 5,4,8,6,2,12,14,7,1,3,11,13,0,9,10 written [r0,r1,r2] (s2_r0 ; s3_r0) * (s0_r1 ; s7_r1) * (s1_r2 ; s4_r2 ; s5_r2 ; s6_r2)
+task 6 required 249 tags 0:0,3:0,4:2,5:2,6:0,7:0 arrival 9,14,0,11,8,13,6,5,10,1,4,7,2,12,3 written [r0,r2] (s0_r0 ; s3_r0 ; s6_r0 ; s7_r0) * (s4_r2 ; delta@r2 ; s5_r2 * s5_r2 ; mu@r2)
+task 7 required 255 tags 0:0,1:0,2:1,3:0,4:2,5:2,6:1,7:0 arrival 1,0,7,12,3,11,9,14,13,4,10,2,5,8,6 written [r0,r1,r2] (s0_r0 ; s1_r0 ; delta@r0 ; s3_r0 * s3_r0 ; mu@r0 ; s7_r0) * (s2_r1 ; s6_r1) * (s4_r2 ; delta@r2 ; s5_r2 * s5_r2 ; mu@r2)
+task 8 required 237 tags 0:0,2:2,3:1,5:2,6:0,7:1 arrival 6,9,0,10,1,14,7,13,8,2,4,5,11,12,3 written [r0,r1,r2] (s0_r0 ; s6_r0) * (s3_r1 ; s7_r1) * (s2_r2 ; delta@r2 ; s5_r2 * s5_r2 ; mu@r2)
+task 9 required 67 tags 0:0,1:0,6:2 arrival 13,6,0,14,11,8,10,5,4,3,1,9,2,12,7 written [r0,r2] (s0_r0 ; s1_r0) * s6_r2
+task 10 required 116 tags 2:2,4:1,5:1,6:2 arrival 8,11,6,2,13,12,3,14,4,5,9,1,0,10,7 written [r1,r2] (s4_r1 ; delta@r1 ; s5_r1 * s5_r1 ; mu@r1) * (s2_r2 ; s6_r2)
+task 11 required 192 tags 6:1,7:0 arrival 9,7,5,2,0,4,13,10,14,1,3,6,8,12,11 written [r0,r1] s7_r0 * s6_r1
+task 12 required 137 tags 0:1,3:1,7:2 arrival 14,11,9,2,0,1,7,10,8,13,3,6,4,5,12 written [r1,r2] (s0_r1 ; s3_r1) * s7_r2
+task 13 required 28 tags 2:2,3:1,4:1 arrival 0,13,1,7,9,2,4,3,12,8,14,11,10,5,6 written [r1,r2] (s3_r1 ; s4_r1) * s2_r2
+task 14 required 92 tags 2:2,3:0,4:2,6:2 arrival 7,2,0,4,10,12,5,8,13,14,11,6,3,1,9 written [r0,r2] s3_r0 * (s2_r2 ; delta@r2 ; s4_r2 * s4_r2 ; mu@r2 ; s6_r2)
+task 15 required 29 tags 0:1,2:1,3:1,4:2 arrival 12,1,8,13,7,4,5,11,2,9,3,0,10,6,14 written [r1,r2] (s0_r1 ; delta@r1 ; s2_r1 * s2_r1 ; mu@r1 ; s3_r1) * s4_r2
+task 16 required 250 tags 1:0,3:1,4:2,5:2,6:1,7:1 arrival 5,9,11,12,3,0,1,13,10,14,6,4,2,7,8 written [r0,r1,r2] s1_r0 * (s3_r1 ; delta@r1 ; s6_r1 * s6_r1 ; mu@r1 ; s7_r1) * (s4_r2 ; s5_r2)
+task 17 required 249 tags 0:1,3:0,4:1,5:1,6:2,7:1 arrival 9,4,2,7,6,0,3,8,1,11,13,14,10,12,5 written [r0,r1,r2] s3_r0 * (s0_r1 ; s4_r1 ; s5_r1 ; s7_r1) * s6_r2
+task 18 required 192 tags 6:1,7:0 arrival 2,8,9,12,5,14,6,4,13,10,11,1,7,3,0 written [r0,r1] s7_r0 * s6_r1
+task 19 required 219 tags 0:1,1:0,3:0,4:2,6:1,7:2 arrival 2,8,11,5,10,13,1,12,7,3,9,4,6,0,14 written [r0,r1,r2] (s1_r0 ; s3_r0) * (s0_r1 ; s6_r1) * (s4_r2 ; delta@r2 ; s7_r2 * s7_r2 ; mu@r2)
+performance none
+
+seed 357
+n 13 redraws 44 max_attempts 8
+prefix_required 123,172,51,255,175,255,250,234,253,239,191,251,250,250,181,247,251,210,59,243
+agent 0 caps 2 trust 42 role 0
+agent 1 caps 67 trust 70 role 0
+agent 2 caps 1 trust 55 role 0
+agent 3 caps 135 trust 32 role 1
+agent 4 caps 156 trust 86 role 1
+agent 5 caps 4 trust 46 role 2
+agent 6 caps 2 trust 66 role 2
+agent 7 caps 132 trust 80 role 0
+agent 8 caps 57 trust 69 role 2
+agent 9 caps 80 trust 37 role 1
+agent 10 caps 39 trust 39 role 0
+agent 11 caps 112 trust 89 role 2
+agent 12 caps 34 trust 94 role 0
+task 0 required 123 tags 0:2,1:0,3:2,4:1,5:0,6:0 arrival 7,3,11,6,2,4,1,10,12,8,9,0,5 written [r0,r1,r2] (s1_r0 ; s5_r0 ; s6_r0) * s4_r1 * (s0_r2 ; delta@r2 ; s3_r2 * s3_r2 ; mu@r2)
+task 1 required 216 tags 3:1,4:2,6:2,7:0 arrival 8,6,11,1,2,10,12,9,0,5,7,3,4 written [r0,r1,r2] s7_r0 * s3_r1 * (s4_r2 ; delta@r2 ; s6_r2 * s6_r2 ; mu@r2)
+task 2 required 25 tags 0:0,3:1,4:2 arrival 4,9,5,12,6,2,3,8,10,1,7,0,11 written [r0,r1,r2] s0_r0 * s3_r1 * s4_r2
+task 3 required 97 tags 0:2,5:0,6:1 arrival 9,2,6,1,4,7,10,0,11,5,8,12,3 written [r0,r1,r2] s5_r0 * s6_r1 * s0_r2
+task 4 required 65 tags 0:0,6:1 arrival 4,0,9,12,10,6,1,8,5,2,7,3,11 written [r0,r1] s0_r0 * s6_r1
+task 5 required 124 tags 2:2,3:1,4:2,5:2,6:2 arrival 7,11,1,2,9,4,8,6,5,3,10,0,12 written [r1,r2] s3_r1 * (s2_r2 ; s4_r2 ; s5_r2 ; s6_r2)
+task 6 required 160 tags 5:2,7:0 arrival 10,2,8,0,3,6,12,11,4,1,7,5,9 written [r0,r2] s7_r0 * s5_r2
+task 7 required 132 tags 2:0,7:1 arrival 9,8,1,0,7,3,6,12,4,2,10,5,11 written [r0,r1] s2_r0 * s7_r1
+task 8 required 174 tags 1:2,2:2,3:1,5:2,7:1 arrival 10,9,0,12,6,1,11,2,7,5,8,3,4 written [r1,r2] (s3_r1 ; s7_r1) * (s1_r2 ; delta@r2 ; s2_r2 * s2_r2 ; mu@r2 ; s5_r2)
+task 9 required 67 tags 0:0,1:1,6:1 arrival 7,12,9,10,0,4,1,3,2,11,6,5,8 written [r0,r1] s0_r0 * (s1_r1 ; s6_r1)
+task 10 required 127 tags 0:2,1:1,2:2,3:1,4:1,5:0,6:0 arrival 1,4,10,7,8,12,0,6,11,9,3,5,2 written [r0,r1,r2] (s5_r0 ; s6_r0) * (s1_r1 ; delta@r1 ; s3_r1 * s3_r1 ; mu@r1 ; delta@r1 ; s4_r1 * s4_r1 ; mu@r1) * (s0_r2 ; s2_r2)
+task 11 required 251 tags 0:2,1:1,3:1,4:2,5:2,6:1,7:1 arrival 9,6,11,8,7,3,4,0,1,12,5,2,10 written [r1,r2] (s1_r1 ; s3_r1 ; delta@r1 ; s6_r1 * s6_r1 ; mu@r1 ; s7_r1) * (s0_r2 ; s4_r2 ; s5_r2)
+task 12 required 152 tags 3:2,4:1,7:0 arrival 7,4,12,3,11,5,8,10,9,2,1,6,0 written [r0,r1,r2] s7_r0 * s4_r1 * s3_r2
+task 13 required 121 tags 0:0,3:2,4:1,5:2,6:1 arrival 6,5,3,10,9,11,7,2,0,4,8,1,12 written [r0,r1,r2] s0_r0 * (s4_r1 ; s6_r1) * (s3_r2 ; s5_r2)
+task 14 required 181 tags 0:0,2:2,4:2,5:2,7:0 arrival 8,0,12,4,9,11,5,3,6,2,1,7,10 written [r0,r2] (s0_r0 ; s7_r0) * (s2_r2 ; s4_r2 ; s5_r2)
+task 15 required 247 tags 0:1,1:0,2:2,4:1,5:2,6:0,7:1 arrival 1,12,8,6,9,7,10,2,4,0,5,11,3 written [r0,r1,r2] (s1_r0 ; s6_r0) * (s0_r1 ; delta@r1 ; s4_r1 * s4_r1 ; mu@r1 ; delta@r1 ; s7_r1 * s7_r1 ; mu@r1) * (s2_r2 ; s5_r2)
+task 16 required 35 tags 0:0,1:1,5:2 arrival 1,11,12,6,2,8,5,3,4,7,9,0,10 written [r0,r1,r2] s0_r0 * s1_r1 * s5_r2
+task 17 required 210 tags 1:2,4:1,6:1,7:0 arrival 10,1,12,9,4,7,5,11,8,6,3,0,2 written [r0,r1,r2] s7_r0 * (s4_r1 ; s6_r1) * s1_r2
+task 18 required 255 tags 0:2,1:1,2:1,3:1,4:1,5:0,6:0,7:0 arrival 9,0,12,7,6,4,11,1,5,3,10,8,2 written [r0,r1,r2] (s5_r0 ; s6_r0 ; s7_r0) * (s1_r1 ; delta@r1 ; s2_r1 * s2_r1 ; mu@r1 ; delta@r1 ; s3_r1 * s3_r1 ; mu@r1 ; delta@r1 ; s4_r1 * s4_r1 ; mu@r1) * s0_r2
+task 19 required 6 tags 1:2,2:2 arrival 6,9,10,8,3,4,5,12,1,7,11,2,0 written [r2] s1_r2 ; s2_r2
+performance none
+
+seed 358
+n 5 redraws 405 max_attempts 51
+prefix_required 208,247,193,113,237,28,24,255,247,255,175,249,218,63,40,53,127,177,181,222
+agent 0 caps 8 trust 68 role 0
+agent 1 caps 161 trust 53 role 1
+agent 2 caps 7 trust 95 role 1
+agent 3 caps 145 trust 49 role 2
+agent 4 caps 92 trust 72 role 2
+task 0 required 245 tags 0:1,2:2,4:2,5:1,6:2,7:2 arrival 4,0,3,2,1 written [r1,r2] (s0_r1 ; s5_r1) * (s2_r2 ; delta@r2 ; s4_r2 * s4_r2 ; mu@r2 ; s6_r2 ; s7_r2)
+task 1 required 129 tags 0:1,7:2 arrival 0,2,4,1,3 written [r1,r2] s0_r1 * s7_r2
+task 2 required 5 tags 0:2,2:2 arrival 0,2,1,4,3 written [r2] s0_r2 ; delta@r2 ; s2_r2 * s2_r2 ; mu@r2
+task 3 required 136 tags 3:2,7:1 arrival 2,0,4,1,3 written [r1,r2] s7_r1 * s3_r2
+task 4 required 9 tags 0:1,3:0 arrival 3,4,0,1,2 written [r0,r1] s3_r0 * s0_r1
+task 5 required 12 tags 2:1,3:2 arrival 0,4,2,1,3 written [r1,r2] s2_r1 * s3_r2
+task 6 required 42 tags 1:1,3:2,5:1 arrival 2,1,4,3,0 written [r1,r2] (s1_r1 ; delta@r1 ; s5_r1 * s5_r1 ; mu@r1) * s3_r2
+task 7 required 31 tags 0:1,1:1,2:2,3:2,4:2 arrival 0,1,3,2,4 written [r1,r2] (s0_r1 ; s1_r1) * (s2_r2 ; s3_r2 ; delta@r2 ; s4_r2 * s4_r2 ; mu@r2)
+task 8 required 97 tags 0:2,5:1,6:2 arrival 3,0,4,2,1 written [r1,r2] s5_r1 * (s0_r2 ; delta@r2 ; s6_r2 * s6_r2 ; mu@r2)
+task 9 required 212 tags 2:2,4:2,6:2,7:1 arrival 3,0,1,4,2 written [r1,r2] s7_r1 * (s2_r2 ; delta@r2 ; s4_r2 * s4_r2 ; mu@r2 ; s6_r2)
+task 10 required 129 tags 0:1,7:1 arrival 3,4,2,1,0 written [r1] s0_r1 ; s7_r1
+task 11 required 11 tags 0:1,1:1,3:2 arrival 4,0,3,1,2 written [r1,r2] (s0_r1 ; s1_r1) * s3_r2
+task 12 required 33 tags 0:1,5:1 arrival 1,2,4,3,0 written [r1] s0_r1 ; s5_r1
+task 13 required 28 tags 2:2,3:0,4:2 arrival 2,1,3,0,4 written [r0,r2] s3_r0 * (s2_r2 ; s4_r2)
+task 14 required 145 tags 0:2,4:2,7:1 arrival 3,4,2,1,0 written [r1,r2] s7_r1 * (s0_r2 ; s4_r2)
+task 15 required 191 tags 0:1,1:1,2:1,3:0,4:2,5:1,7:2 arrival 1,2,3,0,4 written [r0,r1,r2] s3_r0 * (s0_r1 ; s1_r1 ; delta@r1 ; s2_r1 * s2_r1 ; mu@r1 ; s5_r1) * (s4_r2 ; s7_r2)
+task 16 required 160 tags 5:1,7:1 arrival 0,3,4,1,2 written [r1] s5_r1 ; s7_r1
+task 17 required 5 tags 0:2,2:2 arrival 3,0,4,2,1 written [r2] s0_r2 ; s2_r2
+task 18 required 104 tags 3:2,5:1,6:2 arrival 2,4,1,0,3 written [r1,r2] s5_r1 * (s3_r2 ; s6_r2)
+task 19 required 40 tags 3:0,5:1 arrival 2,1,4,3,0 written [r0,r1] s3_r0 * s5_r1
+performance none
+
+seed 359
+n 8 redraws 126 max_attempts 26
+prefix_required 237,9,240,93,14,231,200,255,213,73,189,106,251,190,249,160,164,47,104,247
+agent 0 caps 204 trust 72 role 2
+agent 1 caps 64 trust 69 role 1
+agent 2 caps 20 trust 57 role 0
+agent 3 caps 82 trust 38 role 0
+agent 4 caps 32 trust 20 role 2
+agent 5 caps 16 trust 73 role 0
+agent 6 caps 30 trust 20 role 1
+agent 7 caps 72 trust 88 role 0
+task 0 required 68 tags 2:2,6:0 arrival 1,0,4,2,3,6,5,7 written [r0,r2] s6_r0 * s2_r2
+task 1 required 24 tags 3:0,4:1 arrival 6,5,7,2,3,1,0,4 written [r0,r1] s3_r0 * s4_r1
+task 2 required 80 tags 4:1,6:0 arrival 5,3,7,4,1,0,2,6 written [r0,r1] s6_r0 * s4_r1
+task 3 required 88 tags 3:0,4:0,6:2 arrival 5,3,0,7,1,2,6,4 written [r0,r2] (s3_r0 ; s4_r0) * s6_r2
+task 4 required 14 tags 1:0,2:2,3:2 arrival 6,4,1,0,5,2,3,7 written [r0,r2] s1_r0 * (s2_r2 ; delta@r2 ; s3_r2 * s3_r2 ; mu@r2)
+task 5 required 84 tags 2:0,4:1,6:2 arrival 1,5,3,2,4,0,6,7 written [r0,r1,r2] s2_r0 * s4_r1 * s6_r2
+task 6 required 68 tags 2:0,6:1 arrival 3,1,0,5,2,6,7,4 written [r0,r1] s2_r0 * s6_r1
+task 7 required 178 tags 1:0,4:1,5:2,7:2 arrival 6,2,5,0,1,4,7,3 written [r0,r1,r2] s1_r0 * s4_r1 * (s5_r2 ; delta@r2 ; s7_r2 * s7_r2 ; mu@r2)
+task 8 required 36 tags 2:0,5:2 arrival 6,7,5,2,0,3,4,1 written [r0,r2] s2_r0 * s5_r2
+task 9 required 18 tags 1:0,4:1 arrival 3,5,1,4,7,0,2,6 written [r0,r1] s1_r0 * s4_r1
+task 10 required 68 tags 2:1,6:0 arrival 3,1,7,6,2,0,5,4 written [r0,r1] s6_r0 * s2_r1
+task 11 required 6 tags 1:0,2:1 arrival 5,0,1,6,2,4,3,7 written [r0,r1] s1_r0 * s2_r1
+task 12 required 34 tags 1:1,5:2 arrival 5,7,6,2,1,4,0,3 written [r1,r2] s1_r1 * s5_r2
+task 13 required 192 tags 6:2,7:2 arrival 0,2,6,7,4,3,1,5 written [r2] s6_r2 ; s7_r2
+task 14 required 148 tags 2:1,4:0,7:2 arrival 0,5,3,1,6,2,4,7 written [r0,r1,r2] s4_r0 * s2_r1 * s7_r2
+task 15 required 36 tags 2:0,5:2 arrival 2,6,3,1,0,4,7,5 written [r0,r2] s2_r0 * s5_r2
+task 16 required 24 tags 3:1,4:0 arrival 3,4,0,5,6,2,1,7 written [r0,r1] s4_r0 * s3_r1
+task 17 required 72 tags 3:0,6:1 arrival 6,5,7,2,4,0,3,1 written [r0,r1] s3_r0 * s6_r1
+task 18 required 52 tags 2:1,4:0,5:2 arrival 2,4,7,1,6,5,3,0 written [r0,r1,r2] s4_r0 * s2_r1 * s5_r2
+task 19 required 6 tags 1:0,2:0 arrival 0,3,2,1,5,6,4,7 written [r0] s1_r0 ; s2_r0
+performance none
+
