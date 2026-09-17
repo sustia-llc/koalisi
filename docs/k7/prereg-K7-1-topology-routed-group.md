@@ -289,3 +289,137 @@ ambiguous.
   (`rg -n 'agreement sample routing failed' src/` names its one site); the
   per-cell `declines_upstream` count §5 already reports is where it would
   show.
+
+## Amendment 2 (pre-run, 2026-09-17) — the three-lens review
+
+No seed in 90..120 has run. The arm, λ, the bar, the seeds, the world and the
+gates' predicates are unchanged. **Everything in this amendment was written
+after off-block numbers for the confirmatory arm were visible (A2.1), and is
+labelled so.** Owner decisions of 2026-09-17: register `ref-prune` (A2.2); add
+the three readings of A2.4.
+
+### A2.1 — pre-run executions of the confirmatory arm (disclosure)
+
+Commit times: prereg `1948439` 11:32:34, routing code `c13a821` 12:03:26,
+Amendment 1 `b342478` 12:03:47, the binary `0f1145e` 12:17:27. The arm, λ,
+bar and seeds were committed before the first execution below. Every
+execution used `K7_1_SEEDS` (no verdict line); `grp-topo` vs in-battery
+`grp-role`, median PRIMARY:
+
+| seeds | by | `grp-role` | `grp-topo` | ratio | superior |
+|---|---|---:|---:|---:|---:|
+| 330..333 (a **consumed** block) | implementation smoke, 12:10–12:16, plus six falsification runs on a copy | 0.2092 | 0.4225 | 2.0199× | 3/3 |
+| 1000..1006 | review lens 1 | 0.1995 | 0.4571 | 2.2911× | 5/6 |
+| 2000..2006 | review lens 2 | 0.2387 | 0.4508 | 1.8885× | 4/6 |
+| 3000..3030 | review lens 3 (and a scratch probe on 3000..3060, outside the repository) | 0.1876 | 0.4392 | 2.3416× | 30/30 |
+
+§4's registered expectation ("does **not** clear 1.25×") is therefore known
+to disagree with every off-block execution before the run; it stands as
+written. The official run is a replication, on a fresh block, of an effect
+already seen on the same generator. The 330..333 smoke ran the confirmatory
+arm on a consumed block, which §5's X-host carve-out (controls only) does not
+cover. The binary's `K7_1_SEEDS` guard now refuses every block of the seed
+ledger and every block assigned to a later K7 registration (`0..480`).
+
+### A2.2 — `ref-prune`, a registered reference cell (non-gating; owner)
+
+Review lens 3 measured off-block (3000..3030, 3030..3060) that `grp-topo`'s
+final member sets equal those of an engine-free rule on 600 of 600 and 599 of
+600 tasks, PRIMARY bit-identical on 30/30 and 29/30 seeds. The rule is
+registered as an eighth cell:
+
+- **`ref-prune`** — `should_join` always acts; `should_leave` acts iff every
+  distinct demanded `(bit, role)` step covered by the current membership stays
+  covered without the agent (coverage as the world scores it: a member of the
+  step's role holding the bit). No engine, no learning, no outcome signal
+  read. Built in the example from the instance's role map and the `TaskStart`
+  steps.
+- **Disclosure, every group cell against `ref-prune`:** tasks whose final
+  member set is identical (of N), seeds with bit-identical PRIMARY (of 30).
+- **Pre-committed reading.** If `grp-topo` matches `ref-prune` on ≥ 95 % of
+  tasks, every verdict is reported with: *"`grp-topo`'s PRIMARY is the PRIMARY
+  of a learning-free arrival-order redundancy prune; S-learn (i) certifies that
+  the models learn, not that learning changes an outcome."*
+
+Final member sets are reconstructed in the example from the instance's arrival
+orders and the decision trace, and the reconstruction is asserted against the
+harness: PRIMARY recomputed from it equals `WorkflowResult::primary` bitwise
+on every cell and seed, else `RUN-INVALID`.
+
+### A2.3 — outcome decomposition (disclosures, non-gating)
+
+Per cell, and split by realised roster 1 / 2 / 3: tasks, success rate, mean
+covered fraction, mean coverage efficiency, mean final coalition size, tasks
+ending with an empty coalition. Per group cell: join-act and leave-act rates
+split centre-present / centre-absent; the table *(read kind, roster, centre
+vote, blind act votes) → group acts of n*; final members whose role has no
+demand on the task; churn split centre-present / centre-absent.
+`AgreementSample` gains the read kind and the group's act, so these and
+E-follow are read from the ledger with no positional alignment. **E-follow is
+printed for every group cell**, split join / leave, over all centre-present
+reads — the unregistered seed filter of the first binary is removed.
+
+### A2.4 — readings §6 did not cover (owner; written post-smoke)
+
+5. **The mirror of clause 2.** `grp-topo`'s median at or above `grp-role`'s
+   reads *"with the masks held fixed the candidate-blind voters are not
+   load-bearing; EQ5b §3.2's reading was carried by its mask change"*. The
+   EQ5b report is immutable; the sentence is the K7-1 report's.
+6. **Who decides.** If `grp-topo-solo` differs from `grp-topo` on 0 acts,
+   every verdict is reported with: *"on centre-present reads the routed
+   group's act is the act of the candidate's own role query alone; the other
+   voters decided no read; the result concerns who decides, not the
+   aggregation of more than one candidate-informed opinion, and shows no group
+   deliberating about a candidate."* Otherwise the reads where the group's act
+   differs from the centre's argmax are counted per routed cell (E-follow).
+7. **Ratio without superiority.** H-T failing conjunct 2 with the ratio at or
+   above 1.25 reads *"ratio cleared, superiority did not"*; the verdict is
+   `FALSIFIED`.
+
+§6's *"A VALIDATED here would mean…"* sentence is read together with clause 6.
+
+### A2.5 — H-T at a zero control median
+
+Conjunct 1 is evaluated as `control median > 0` **and** `grp-topo median /
+control median ≥ 1.25`; at a control median of exactly 0 the ratio prints
+`n/a` and conjunct 1 fails. This is EQ5b's H-G form
+(`examples/strategy_comparison.rs:11389–11391`).
+
+### A2.6 — corrections to §5's text
+
+- **E-λ / S-live.** *"an act divergence is a count of non-saturated reads"* is
+  withdrawn. Traces are compared by position; after a seed's first divergent
+  act the membership and the learned state differ, so later positions compare
+  different decisions. The positional counts are an upper bound. The
+  uncontaminated readings are *seeds with any act difference* and E-follow.
+  S-live's three counts are printed **per seed** as well as pooled.
+- **H-S's X.** X is the share of `grp-topo`'s successful reads with
+  `sensitive_rows == 0`; the binary prints beside it the count of those reads
+  whose centre is off the roster, and every cell's share in the H-S table.
+- **Context.** Superior-seed counts against `wf-asis` are printed for all six
+  group cells.
+- **Constants not named in §5.** Seed invariance XORs `battery_seed` with
+  `0x9E37_79B9_7F4A_7C15`. S-learn (i)'s non-vacuity tolerance is
+  `S_LEARN_VACUITY_TOL = 1e-9` (`src/decision/group_policy.rs`), EQ5b's.
+
+### A2.7 — mandatory report sentences
+
+- *"`grp-role-blind` differs from `grp-role` in the masks, not the voters; its
+  distance from `grp-topo` does not decompose candidate-sensitivity from
+  coverage semantics."* Clause 1 stays as registered.
+- The blind-origin mass share is mixture mass, not decision influence; it is
+  reported beside E-follow for the same cell.
+- S-route certifies that a non-identity topology was built and counted, not
+  that an output moved; decision liveness is S-live and E-follow.
+- Any churn comparison is quoted with the centre-absent churn of both arms.
+
+### A2.8 — order of operations, aborts, §7
+
+- The version bump to `0.38.0` lands before the official run, so
+  `docs/runs/K7-1.log` names the released tree. X-host and X-battery run on
+  that tree **before** the official run; the binary's `VERDICT:` line cannot
+  see either, and the run is made only if both hold.
+- A run that exits before printing a `VERDICT:` line is `RUN-INVALID`.
+- §7 gains: whether any advantage survives an outcome signal that is not a
+  deterministic function of coverage (`OutcomeSignal::Performance` / `Both`
+  exist in the harness and are unused here).
