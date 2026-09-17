@@ -636,6 +636,11 @@ pub struct AgreementSample {
     /// The own argmax of the internal at the roster position of the candidate's
     /// role; `None` when that role is off the roster.
     pub centre_vote: Option<usize>,
+    /// `true` for a `should_leave` read, `false` for a `should_join` read.
+    pub leave: bool,
+    /// The SP3 act of this read (`p(act) > 0.5`) — the `act` of the
+    /// [`Decision`] the read returned.
+    pub group_act: bool,
     /// `|p(act) − 0.5|` — the read's distance from the SP3 threshold.
     ///
     /// A genuine CW mixture margin under [`GroupVote::CertaintyWeighted`]; under
@@ -782,6 +787,8 @@ struct ReadContext<'a> {
     topology: Option<&'a aif::Topology>,
     /// Whether `topology` has a non-identity row, as [`candidate_star`] reports.
     routed: bool,
+    /// `true` for a `should_leave` read.
+    leave: bool,
     /// Leave-path queries built for this decision.
     leave_queries: u64,
     /// Of those, the ones with `cfg0 == cfg1`.
@@ -822,23 +829,24 @@ fn candidate_star(
 
 /// Build one decision's [`AgreementSample`] by reading the members' own argmaxes
 /// and confidence weights back off the roster, split by candidate-sensitivity
-/// (Amendment A5.1). Purely a disclosure — nothing on the decision path consults
-/// any of it.
-///
-/// `centre` is the roster position of the candidate's role; `topology` is the
-/// routing the read went through, `None` for the internals' own outputs.
+/// (Amendment A5.1). `read` supplies the roster size, the roster position of the
+/// candidate's role, the routing the read went through (`None` for the
+/// internals' own outputs) and the read kind; `group_act` is the SP3 act of the
+/// read. No field of the sample feeds the decision's `act` or `score`. An `Err`
+/// makes `GroupAifPolicy::deterministic_decision` return a decline, count it in
+/// [`GroupAifCounters::declines_upstream`] and push no sample.
 ///
 /// # Errors
 ///
 /// Whatever [`origin_reach`] returns.
 fn agreement_sample(
     members: &[RoleMember],
-    roster: usize,
+    read: &ReadContext<'_>,
     p_act: f64,
-    centre: Option<usize>,
-    topology: Option<&aif::Topology>,
+    group_act: bool,
 ) -> Result<AgreementSample, aif::AifError> {
-    let (sensitive_rows, blind_origin_share) = origin_reach(members, topology)?;
+    let (roster, centre) = (read.roster, read.centre);
+    let (sensitive_rows, blind_origin_share) = origin_reach(members, read.topology)?;
     let mut votes_for_act = 0usize;
     let mut votes_sensitive = 0usize;
     let mut votes_blind = 0usize;
@@ -877,6 +885,8 @@ fn agreement_sample(
         centre_vote: centre
             .and_then(|c| members.get(c))
             .and_then(|m| m.last_vote),
+        leave: read.leave,
+        group_act,
         margin: (p_act - 0.5).abs(),
     })
 }
@@ -1546,6 +1556,7 @@ impl GroupAifPolicy {
                         centre,
                         topology: None,
                         routed: false,
+                        leave,
                         leave_queries,
                         leave_identical,
                     },
@@ -1584,6 +1595,7 @@ impl GroupAifPolicy {
                         centre,
                         topology: Some(&topology),
                         routed,
+                        leave,
                         leave_queries,
                         leave_identical,
                     },
@@ -1625,13 +1637,9 @@ impl GroupAifPolicy {
             return Self::declined();
         }
 
-        let sample = match agreement_sample(
-            group.internal_agents(),
-            read.roster,
-            p_act,
-            read.centre,
-            read.topology,
-        ) {
+        // SP3: act iff p(act) > 0.5; ties decline.
+        let group_act = p_act > 0.5;
+        let sample = match agreement_sample(group.internal_agents(), read, p_act, group_act) {
             Ok(s) => s,
             Err(e) => {
                 tracing::warn!(error = %e, "group agreement sample routing failed");
@@ -1648,9 +1656,8 @@ impl GroupAifPolicy {
         shared.counters.agreement.push(sample);
         drop(shared);
 
-        // SP3: act iff p(act) > 0.5; ties decline.
         Decision {
-            act: p_act > 0.5,
+            act: group_act,
             score: p_act - 0.5,
         }
     }
@@ -3600,6 +3607,42 @@ mod tests {
         }
         // 3 cycles × (6 + 4 + 2): the roster-1 task has two role-1 candidates.
         assert_eq!(centre_present, 36);
+    }
+
+    /// Over [`scripted_stream`] under `Off` and under `lambda = 0.5`: sample `k`
+    /// carries `group_act` equal to decision `k`'s `act` and `leave` equal to the
+    /// kind of call `k` (three joins then three leaves per task), and the stream
+    /// carries at least one act and at least one decline.
+    #[test]
+    fn agreement_samples_carry_the_read_kind_and_the_group_act() {
+        for (name, config) in [
+            ("Off", GroupAifConfig::default()),
+            ("lambda 0.5", star(0.5, GroupAifConfig::default())),
+        ] {
+            let (decisions, c) = scripted_stream(config);
+            assert_eq!(decisions.len(), 54, "{name}");
+            assert_eq!(c.agreement.len(), 54, "{name}: one sample per decision");
+            // (join acts, join declines, leave acts, leave declines)
+            let mut seen = [0usize; 4];
+            for (k, (s, (act, _))) in c.agreement.iter().zip(&decisions).enumerate() {
+                let leave_call = k % 6 >= 3;
+                assert_eq!(
+                    s.leave, leave_call,
+                    "{name}, sample {k}: leave {} on a call with leave {leave_call}",
+                    s.leave
+                );
+                assert_eq!(
+                    s.group_act, *act,
+                    "{name}, sample {k}: group_act {} vs Decision::act {act}",
+                    s.group_act
+                );
+                seen[2 * usize::from(leave_call) + usize::from(!*act)] += 1;
+            }
+            assert!(
+                seen[0] + seen[2] > 0 && seen[1] + seen[3] > 0,
+                "{name}: (join acts, join declines, leave acts, leave declines) = {seen:?}"
+            );
+        }
     }
 
     /// Beliefs and Dirichlet counts of every model, for equality.
