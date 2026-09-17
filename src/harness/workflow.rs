@@ -47,7 +47,9 @@ pub struct WorkflowSpec {
     /// Number of roles, at least `1`; agent roles and step tags are drawn
     /// below it.
     pub roles: u8,
-    /// Attempts a task gets to become role-feasible before generation errors.
+    /// Draws a task gets to become role-feasible, the first included, at
+    /// least `1`; generation errors when a task is still infeasible after
+    /// this many.
     pub redraw_cap: usize,
     /// Fan-out denominator, at least `1`: a same-role adjacent pair draws
     /// `next_u64 % fanout_denom == 0` to write the later step as
@@ -224,6 +226,8 @@ pub enum WorkflowError {
     NoRoles,
     /// `WorkflowSpec::fanout_denom` is `0`.
     ZeroFanoutDenominator,
+    /// `WorkflowSpec::redraw_cap` is `0`.
+    ZeroRedrawCap,
     /// The spec's `required_bits` range starts at `0`, so a task may carry no
     /// step at all.
     EmptyRequirement,
@@ -257,6 +261,7 @@ impl fmt::Display for WorkflowError {
             Self::ZeroFanoutDenominator => {
                 write!(f, "workflow spec: fanout_denom must be at least 1")
             }
+            Self::ZeroRedrawCap => write!(f, "workflow spec: redraw_cap must be at least 1"),
             Self::EmptyRequirement => {
                 write!(f, "workflow spec: required_bits must start at or above 1")
             }
@@ -301,7 +306,8 @@ impl WorkflowSpec {
     /// ascending bit order, then while the task is role-infeasible (some
     /// required bit has no pool holder of its tag) a re-draw of the required
     /// mask (the base spec's task draw) and its tags, counting one re-draw
-    /// and failing at `redraw_cap` attempts; per task its shape (per role in
+    /// and failing once the task has had `redraw_cap` draws; per task its
+    /// shape (per role in
     /// ascending order, the role's steps in ascending bit order as a chain,
     /// one draw per same-role adjacent pair selecting the fan-out); then the
     /// performance draw, if any.
@@ -317,6 +323,9 @@ impl WorkflowSpec {
         }
         if self.fanout_denom == 0 {
             return Err(WorkflowError::ZeroFanoutDenominator);
+        }
+        if self.redraw_cap == 0 {
+            return Err(WorkflowError::ZeroRedrawCap);
         }
         if *self.base.required_bits.start() == 0 {
             return Err(WorkflowError::EmptyRequirement);
@@ -487,12 +496,10 @@ pub struct WorkflowResult {
     pub primary: f64,
     /// Number of leave-sweep removals summed over tasks.
     pub churn: usize,
-    /// Tasks declined before any coalition formed; always `0` here.
-    pub declined: usize,
 }
 
 impl From<WorkflowResult> for InstanceResult {
-    /// `completion_rate` is the success rate; `declined` is dropped.
+    /// `completion_rate` is the success rate.
     fn from(r: WorkflowResult) -> Self {
         Self {
             seed: r.seed,
@@ -648,7 +655,6 @@ pub fn run_workflow_instance(
         mean_cov_eff,
         primary: success_rate * mean_cov_eff,
         churn,
-        declined: 0,
     })
 }
 
@@ -1049,6 +1055,14 @@ mod tests {
             zero_denom.generate(1),
             Err(WorkflowError::ZeroFanoutDenominator)
         ));
+        let zero_cap = WorkflowSpec {
+            redraw_cap: 0,
+            ..WorkflowSpec::default()
+        };
+        assert!(matches!(
+            zero_cap.generate(1),
+            Err(WorkflowError::ZeroRedrawCap)
+        ));
         let empty = WorkflowSpec {
             base: InstanceSpec {
                 required_bits: 0..=3,
@@ -1193,7 +1207,6 @@ mod tests {
         for r in &result.per_seed {
             assert_eq!(r.churn, r.n * spec.base.tasks, "every member leaves once");
             assert_eq!(r.mean_cov_eff, 0.0);
-            assert_eq!(r.declined, 0);
         }
         let flat = BatteryResult::from(result.clone());
         assert_eq!(flat.label, result.label);
