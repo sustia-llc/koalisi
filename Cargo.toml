@@ -167,6 +167,11 @@ required-features = ["harness"]
 name = "metrics_scrape"
 required-features = ["metrics"]
 
+[[example]]
+name = "k7_1"
+path = "examples/k7/k7_1.rs"
+required-features = ["harness", "decision", "process"]
+
 [[test]]
 name = "magnitude_trajectory"
 required-features = ["magnitude"]
