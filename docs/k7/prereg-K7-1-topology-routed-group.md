@@ -268,3 +268,24 @@ centre-absent reads, and nothing about koa#54.
 `docs/runs/K7-1.log`, carrying the verdict line exactly as printed, the bar,
 every gate outcome, the mechanism tables of §5 and a numbered
 implementation / deviation ledger. Immutable once recorded.
+
+## Amendment 1 (pre-run, 2026-09-17) — which quantity §4's two flip numbers are
+
+No battery has run. §4 stands as registered; this names a quantity it left
+ambiguous.
+
+- **A1.1.** In §4's candidate-star bullet, `0.5028` (λ = 0.130) and `0.4914`
+  (λ = 0.135) are values of **`w·(1 − 2λ)`**, the left side of the decline
+  condition `w·(1 − 2λ) ≤ 1/k` at `k = 2` — not values of `p(act)`. The
+  corresponding `p(act)` values, pinned by the unit test
+  `candidate_star_arithmetic_on_delta_outputs` in
+  `src/decision/group_policy.rs` against the closed form to `1e-12`, are
+  **0.5012** at λ = 0.130 (act) and **0.4963** at λ = 0.135 (decline). The
+  flip sits between the two λ under either quantity; no prediction, cell, bar
+  or gate changes.
+- **A1.2 (disclosure).** With routing on, the H-S disclosure is computed
+  through `aif::Topology::route` after the read; an error there is a decline
+  counted in `declines_upstream`. No test reaches that path
+  (`rg -n 'agreement sample routing failed' src/` names its one site); the
+  per-cell `declines_upstream` count §5 already reports is where it would
+  show.
