@@ -1,16 +1,16 @@
 [package]
 name = "koalisi"
-version = "0.35.0"
+version = "0.36.0"
 edition = "2024"
 # Declared floor 1.93.0 — owner decision C-D1 (2026-09-14): KEEP; do not lower
 # in passing. Edition 2024 means resolver 3, so this value also bounds
 # dependency resolution (`cargo update` selects versions compatible with it).
 # The measured floor is feature-conditional and lies below the declaration
-# (measured 2026-09-16 on the current lock):
-#   1.88  default, `magnitude`, `persistence`, `remote`, `process`, `harness`
-#         (1.87 fails on let-chains in the `catgraph 0.23.0` lib)
+# (measured 2026-09-17 on the current lock):
+#   1.88  default, `magnitude`, `persistence`, `remote`, `process`, `harness`,
+#         `metrics` (1.87 fails on let-chains in the `catgraph 0.23.0` lib)
 #   1.89  + `decision`, `magnitude-fast`, `decision,magnitude,process`
-#         (nalgebra 0.35 / safe_arch 1.0 / wide 1.5 declare 1.89)
+#         (nalgebra 0.35 / safe_arch 1.2 / wide 1.7 declare 1.89)
 #   1.92  + `durable` (1.91 fails to compile `diskann`)
 # To re-measure: set `rust-version` to 1.85.0 temporarily, run
 # `cargo +<v> check --all-targets --locked --features <set>` per feature set,
@@ -92,6 +92,15 @@ libp2p = { version = "0.57", features = [
     "cbor",
 ], optional = true }
 
+# Optional: the `metrics` facade (counter / histogram macros) recorded by the
+# tap consumers in `examples/metrics_scrape.rs` (feature `metrics`). Feature-off
+# builds pull neither this nor the exporter below.
+metrics = { version = "0.24", optional = true }
+# Optional: Prometheus exporter for the `metrics` facade, HTTP scrape listener
+# only (`http-listener`); the default `push-gateway` feature and its rustls
+# client stack stay out of the graph. Only compiled under `metrics`.
+metrics-exporter-prometheus = { version = "0.18", default-features = false, features = ["http-listener"], optional = true }
+
 [features]
 default = []
 # Active Inference coalition-decision strategy (pluggable, off by default).
@@ -122,6 +131,10 @@ process = ["magnitude", "dep:catgraph-syntax"]
 # (`src/harness/`, off by default, no dependencies). Registrations are examples
 # gated on it.
 harness = []
+# Prometheus metrics over the three tap surfaces (decision, outcome, topology
+# event), consumed by `examples/metrics_scrape.rs` (off by default). Adds
+# tokio's `net` + `io-util` for the example's loopback self-scrape.
+metrics = ["dep:metrics", "dep:metrics-exporter-prometheus", "tokio/net", "tokio/io-util"]
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "test-util"] }
@@ -148,6 +161,10 @@ required-features = ["remote"]
 [[example]]
 name = "gauntlet"
 required-features = ["harness"]
+
+[[example]]
+name = "metrics_scrape"
+required-features = ["metrics"]
 
 [[test]]
 name = "magnitude_trajectory"

@@ -83,14 +83,35 @@ in the sibling `biome` project.
 - Rust implementation is dispatched to the built-in `general-purpose` agent
   per `.claude/stack/agent-dispatch.md`; review is `/code-review low`.
 
-## Current state — 2026-09-16 (v0.35.0)
+## Current state — 2026-09-17 (v0.36.0)
 
-Full release ledger v0.4.0 → v0.35.0 is the `project-history.md` archive (§1).
+Full release ledger v0.4.0 → v0.36.0 is the `project-history.md` archive (§1).
 The three most recent entries are kept here in brief — read the ledger before
 touching anything with a frozen battery, a pinned decision, or a registered doc.
 
 ### Latest three
 
+- **Metrics example + lock refresh — v0.36.0 (2026-09-17, #25, PR #94)**: #25
+  re-scoped by comment from the deleted `tick_bus`/`alert_bus` to the three
+  tap surfaces, then feature `metrics` (off by default: optional `metrics`
+  0.24 + `metrics-exporter-prometheus` 0.18 `http-listener` only, tokio
+  `net` + `io-util`) and `examples/metrics_scrape.rs` — counters and
+  histograms from a `spawn_decision_tee` sink, an `OutcomeSink` under
+  `spawn_outcome_forwarder` and the `with_event_tap` receiver; one
+  self-scrape of `/metrics`, every series asserted against a recorder-free
+  count and the scripted value; eight perturbations falsified in a copy.
+  No `src/` change. **`cargo update` rides as the PR's first commit** (owner
+  call mid-session; 154 updated / 15 added / 21 removed, `wide` 1.7.1 and
+  `safe_arch` 1.2.0 among them); the feature commit adds 14 lock stanzas
+  and moves none. Fourteen suites identical per test binary on a `3ff92f6`
+  worktree and on the branch (`metrics` lane 106); fmt, clippy (fifteen
+  lanes) and doc (twelve sets) clean; **X-battery PASS on one serial run**
+  (124 raw differing lines, 11 hunks after the column strip, all latency or
+  wall-clock; 33 verdict lines byte-identical); MSRV tiers reproduced
+  (1.88 / 1.89 / 1.92), `metrics` in the 1.88 tier. The service task runs
+  on a bare `tokio::spawn` and owns the manager, so the topology tap closes
+  only after `drop(service)` lets that task end — the example awaits the
+  topology consumer's handle for that reason.
 - **K7 harness scaffold H0 + H1 — v0.35.0 (2026-09-16, #92, PR #93)**: memo →
   owner lock on #92 (six items, all as recommended) → code.
   `src/harness/workflow.rs` (needs `process`) is the Part 9/11 v2w world
@@ -129,27 +150,6 @@ touching anything with a frozen battery, a pinned decision, or a registered doc.
   survivors after the column strip, all 33 verdict lines identical); MSRV
   tiers unchanged on the new lock (1.88 / 1.89 / 1.92), `rust-version`
   1.93 kept.
-- **K7 scaffold — v0.33.0 (2026-09-16, PR #89)**: Phase A of the stack's
-  2026-09-16 K7 round plan. `docs/README.md` (index: K4 verdict trail, seed
-  ledger, immutability rule), `docs/PROTOCOL.md` (the run protocol, moved out
-  of this file), `docs/runs/K4-archive.log` (ONE fresh serial run of the frozen
-  battery at `v0.32.0` pins: 2129 lines, 33 verdict lines, every headline
-  verdict equal to the trail; `docs/runs/README.md` carries the recipe),
-  `strategy_comparison.rs` header-frozen (one comment hunk), and the K7
-  harness: `src/harness/` behind the new default-off feature `harness`
-  (`SplitMix64` + `permutation` + `distinct_bits`; `InstanceSpec` →
-  `Instance`; `SeedRange` / `Arm` / `run_instance` / `run_battery`;
-  `percentile` / `median_iqr` / `superior_count` / tables / `Verdict`) and
-  `examples/gauntlet.rs` (zero registrations; names no K4 helper — `rg -F` of
-  the K4 helper list on it is empty). 19 harness unit tests, 15 falsified
-  red-then-green in a copy. **All twelve suites at baseline**
-  (106/162/135/191/143/126/156/112/159/239 + `durable` 107; `harness` 125),
-  clippy `--all-targets -D warnings` clean at default, the six-feature set,
-  `harness` and `durable`; **MSRV tiers reproduced, `harness` joins the 1.88
-  tier** (1.87 fails on the same catgraph let-chains). Two base-tree reds
-  recorded (`cargo fmt --check` on 38 files; `cargo doc -D warnings` on 8
-  links) — both fixed in v0.34.0. `rg -n strategy_comparison src/` is NOT a
-  zero-hit: two rustdoc lines in `src/algorithms/population.rs` name it.
 
 ### Lineages, verdict trail, seed ledger, run protocol — `docs/`
 
@@ -181,6 +181,7 @@ flagging. Rust implementation is dispatched per
 | `--features durable` | 107 (+1 container-backed restart test; needs Docker) | `cargo test --features durable` |
 | `--features harness` | 126 (+20 K7 harness unit tests incl. the H1 hook order pin) | `cargo test --features harness` |
 | `--features harness,process` | 198 (+ the H0 workflow world: 13 unit tests, the 5-test identity gate `tests/harness_workflow.rs` against `docs/runs/K4-archive.log`) | `cargo test --features harness,process` |
+| `--features metrics` | 106 (the default suite; the feature gates two optional deps and `examples/metrics_scrape.rs`) | `cargo test --features metrics` |
 | All examples | exit 0 | see Reproducers below |
 | Lint + docs | clean | `cargo fmt --check`; `cargo clippy --all-targets -- -D warnings` per feature set; `RUSTDOCFLAGS='-D warnings' cargo doc --no-deps` at every feature (green since v0.34.0) |
 
@@ -188,7 +189,7 @@ flagging. Rust implementation is dispatched per
 
 ```
 koalisi/
-├── Cargo.toml                              git tag deps: catgraph-applied + catgraph-magnitude + catgraph-syntax v0.23.0 in lockstep (one checkout); aif-v0.13.0, surrealdb-live-message v0.2.1, libp2p 0.57, sha2 0.11 (optional); no path deps; declared MSRV 1.93 above the measured tiers 1.88/1.89/1.92 — owner decision C-D1: KEEP, gotcha 34
+├── Cargo.toml                              git tag deps: catgraph-applied + catgraph-magnitude + catgraph-syntax v0.23.0 in lockstep (one checkout); aif-v0.13.0, surrealdb-live-message v0.2.1, libp2p 0.57, sha2 0.11, metrics 0.24 + metrics-exporter-prometheus 0.18 (optional); no path deps; declared MSRV 1.93 above the measured tiers 1.88/1.89/1.92 — owner decision C-D1: KEEP, gotcha 34
 ├── README.md                               user-facing
 ├── CLAUDE.md                               THIS FILE
 ├── config/{default,development,test}.toml  coalition threshold, history capacity; [sdb]+[docker] for the durable feature's upstream SETTINGS (cwd-resolved)
@@ -267,6 +268,7 @@ koalisi/
 │   ├── strategy_comparison.rs              FROZEN K4 archive binary (Parts 1–11; requires ALL THREE: decision,magnitude,process); changes only through src/; its job is the X-battery gate at re-pins against docs/runs/K4-archive.log
 │   ├── gauntlet.rs                         v0.33.0: K7 harness skeleton over src/harness/ (feature `harness`), zero registrations; K7 registrations are one [[example]] each under examples/k7/k7_<n>.rs (K-D3)
 │   ├── remote_coalition_consumer.rs        #38 (v0.25.0): gateway + client in one process over a live CoalitionService (feature `remote`)
+│   ├── metrics_scrape.rs                   #25 (v0.36.0): Prometheus counters + histograms over the decision tee, the outcome forwarder and the topology event tap; self-scrapes /metrics once and asserts every series against a recorder-free count (feature `metrics`)
 │   └── durable_decisions.rs                durable decision log end-to-end (feature `durable`)
 ├── .claude/docs/                           TRACKED internal design docs + references (docs/ reorg 2026-07-27; rest of .claude/ stays gitignored)
 │   ├── phase7-persistence-design.md        Phase 7 EventStore design (#21 deliverable; P7.1–P7.5 phasing)
@@ -656,6 +658,10 @@ timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-tar
 timeout 300s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features harness,process   # 198, incl. the H0 identity gate
 timeout 60s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features harness --example gauntlet
 
+# === with metrics feature (#25, v0.36.0; 106 tests = the default suite) ===
+timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features metrics
+timeout 60s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features metrics --example metrics_scrape   # KOALISI_METRICS_ADDR overrides the loopback listener address
+
 # === with durable feature (needs Docker; container-backed restart test) ===
 timeout 300s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features durable
 timeout 120s cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features durable --example durable_decisions
@@ -685,17 +691,14 @@ What is still open:
 - **K7 lineage** — plan `.claude/stack/2026-09-16-koalisi-tira-programme-sweep.md`
   (ratified 2026-09-16; supersedes §3–§5 of the K7 round plan). Landed: the
   harness (v0.33.0), the K0 board corrections, tira's `aif-v0.14.0`, the H
-  scaffold (v0.35.0, #92). Next in koalisi: M — the #25 metrics example
-  (v0.36.0); then C1 — the `aif-v0.14.0` re-pin PR (v0.37.0, pin-first,
+  scaffold (v0.35.0, #92), M — the #25 metrics example + a lock refresh
+  (v0.36.0). Next in koalisi: C1 — the `aif-v0.14.0` re-pin PR (v0.37.0, pin-first,
   one serial archive run diffed against `docs/runs/K4-archive.log`); then
   C2 — the `K7-1` registration (v0.38.0: prereg `docs/k7/prereg-K7-1-<slug>.md`
   before code, `examples/k7/k7_1.rs`, seeds 90..120, in-battery controls
   `grp-role` / `grp-role-blind` on the H0 workflow world with Part 11 outcome
   semantics) per `docs/PROTOCOL.md`; then `K7-2` (seeds 150..180, released)
   and `K7-3` (360..390) on the same pin.
-- **[#25] Metrics example** — still valid but needs reframing: instrument the
-  `CoalitionService` decision path / topology events, not the deleted
-  `tick_bus`/`alert_bus`.
 - **MSRV — C-D1 DECIDED (owner, 2026-09-14): KEEP `rust-version = 1.93.0`.**
   The v0.23.0 re-pin removed the last DeepCausality edge and the `process`
   tier with it; the measured cross-feature maximum is 1.92 and the
