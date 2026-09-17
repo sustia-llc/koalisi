@@ -1,6 +1,6 @@
 [package]
 name = "koalisi"
-version = "0.36.0"
+version = "0.37.0"
 edition = "2024"
 # Declared floor 1.93.0 — owner decision C-D1 (2026-09-14): KEEP; do not lower
 # in passing. Edition 2024 means resolver 3, so this value also bounds
@@ -10,7 +10,8 @@ edition = "2024"
 #   1.88  default, `magnitude`, `persistence`, `remote`, `process`, `harness`,
 #         `metrics` (1.87 fails on let-chains in the `catgraph 0.23.0` lib)
 #   1.89  + `decision`, `magnitude-fast`, `decision,magnitude,process`
-#         (nalgebra 0.35 / safe_arch 1.2 / wide 1.7 declare 1.89)
+#         (nalgebra 0.35 / safe_arch 1.2 / wide 1.7 declare 1.89, as does
+#         aif 0.14 under `decision`)
 #   1.92  + `durable` (1.91 fails to compile `diskann`)
 # To re-measure: set `rust-version` to 1.85.0 temporarily, run
 # `cargo +<v> check --all-targets --locked --features <set>` per feature set,
@@ -44,7 +45,7 @@ tokio-rayon = "2.1"
 # Optional: Active Inference decision strategy (expected free energy), the
 # engine crate from the `tira` repo. Feature `decision` off compiles none of it
 # nor nalgebra; `ThresholdPolicy` / `ValueCalculator` need neither.
-aif = { git = "https://github.com/sustia-llc/tira", tag = "aif-v0.13.0", optional = true }
+aif = { git = "https://github.com/sustia-llc/tira", tag = "aif-v0.14.0", optional = true }
 # The multimodal AIF bridge builds a `GenerativeModel` over `nalgebra::DMatrix`;
 # the version unifies with the one `aif` pulls. Only compiled under `decision`.
 nalgebra = { version = "0.35", optional = true }
