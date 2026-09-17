@@ -711,6 +711,9 @@ pub struct GroupAifCounters {
     /// [`CoalitionDecisionPolicy::begin_task`] calls whose demand
     /// [`GroupAifPolicy::begin_task`] refused.
     pub begin_task_rejections: u64,
+    /// [`CoalitionDecisionPolicy::observe_outcome`] calls for which
+    /// [`GroupAifPolicy::observe_outcome`] advanced no world model.
+    pub outcome_updates_unapplied: u64,
 }
 
 impl GroupAifCounters {
@@ -1842,9 +1845,14 @@ impl CoalitionDecisionPolicy for GroupAifPolicy {
         }
     }
 
-    /// [`GroupAifPolicy::observe_outcome`] over `per_bit_success`.
+    /// [`GroupAifPolicy::observe_outcome`] over `per_bit_success`; a call that
+    /// advances no world model is counted in
+    /// [`GroupAifCounters::outcome_updates_unapplied`].
     fn observe_outcome(&self, _required: u32, per_bit_success: &[bool]) {
-        let _ = GroupAifPolicy::observe_outcome(self, per_bit_success);
+        if GroupAifPolicy::observe_outcome(self, per_bit_success) == 0 {
+            let mut shared = self.shared.lock().expect("group arm mutex poisoned");
+            shared.counters.outcome_updates_unapplied += 1;
+        }
     }
 }
 
@@ -3727,8 +3735,13 @@ mod tests {
         let c = hooked.counters();
         assert_eq!(c, inherent.counters());
         assert_eq!(
-            (c.reads, c.tasks_observed, c.begin_task_rejections),
-            (8, 4, 0)
+            (
+                c.reads,
+                c.tasks_observed,
+                c.begin_task_rejections,
+                c.outcome_updates_unapplied
+            ),
+            (8, 4, 0, 0)
         );
         assert_eq!(c.roster_sizes, vec![3, 2, 3, 2]);
         assert!(c.s_learn_exact());
@@ -3746,6 +3759,15 @@ mod tests {
         assert_eq!(c.roster_sizes.len(), 4, "a refused task opens nothing");
         assert!(!dynp.should_join(&a0, &coalition, &ctx).act);
         assert_eq!(hooked.counters().declines_no_demand, 1);
+
+        // An outcome with no task in force advances no model and is counted.
+        dynp.observe_outcome(0b001, &[true; 8]);
+        let c = hooked.counters();
+        assert_eq!(
+            (c.outcome_updates_unapplied, c.tasks_observed),
+            (1, 4),
+            "one unapplied outcome, no task observed"
+        );
     }
 
     /// `GroupAifPolicy::new` refuses a `lambda` outside `[0, 1]` or non-finite,

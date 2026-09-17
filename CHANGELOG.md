@@ -44,7 +44,10 @@ Registration, amendments, run and report:
   through the hook.
 - `AgreementSample` gains `leave`, `group_act`, `sensitive_rows`,
   `blind_origin_share`, `centre_vote`; `GroupAifCounters` gains
-  `routed_reads`, `begin_task_rejections`.
+  `routed_reads`, `begin_task_rejections`, `outcome_updates_unapplied`. The
+  last was added by review after the run of record (tree `1688b75`); an
+  off-block smoke (`K7_1_SEEDS=5000..5003`) on the binaries before and after
+  it is byte-identical once the latency column is stripped.
 - **`harness::TracedPolicy`** (feature `harness`): wraps a policy, forwards
   all four trait methods, records `(leave, act, score bits)` per decision.
 - **`examples/k7/k7_1.rs`** (`harness,decision,process`): eight cells over
