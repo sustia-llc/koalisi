@@ -423,3 +423,20 @@ control median ≥ 1.25`; at a control median of exactly 0 the ratio prints
 - §7 gains: whether any advantage survives an outcome signal that is not a
   deterministic function of coverage (`OutcomeSignal::Performance` / `Both`
   exist in the harness and are unused here).
+
+## Amendment 3 (pre-run, 2026-09-17) — A2.1's ledger, continued
+
+No seed in 90..120 has run. Nothing registered changes.
+
+- **A3.1.** Implementing Amendment 2 (`15ddd7c`) added pre-run executions of
+  the confirmatory arm, all under `K7_1_SEEDS`: 4000..4003 (twice, plus
+  falsification runs on a copy) and **4000..4030** — `grp-role` 0.1701,
+  `grp-topo` 0.4437, 2.6094×, 30/30 superior; `grp-topo` matched `ref-prune`
+  on 600 of 600 tasks. The implementer reports no execution on a seed below
+  1000; the binary refuses `0..480`.
+- **A3.2 (disclosure).** On 4000..4030 clause 6's trigger did **not** fire:
+  `grp-topo-solo` differed from `grp-topo` on 56 positional acts, while the
+  group's act differed from the centre's argmax on 1 of 8457 (`grp-topo`),
+  6 of 8458 (`grp-topo-q`) and 0 of 8456 (`grp-topo-solo`) centre-present
+  reads. Clause 6 stands as registered in A2.4: when the trigger does not
+  fire the report gives those per-cell counts instead of the sentence.
