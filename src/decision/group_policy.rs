@@ -135,13 +135,13 @@ use std::sync::Mutex;
 use nalgebra::DVector;
 
 use crate::algorithms::AgentCapabilities;
-use crate::process::{Demand, Role};
+use crate::process::{Demand, Role, Step};
 
 use super::aif_persistent_policy::{
     PersistentAifArm, PersistentAifConfig, PersistentAifState, low_mask, run_replay, set_bits,
     splitmix64,
 };
-use super::{CoalitionDecisionPolicy, Decision, DecisionContext};
+use super::{CoalitionDecisionPolicy, Decision, DecisionContext, TaskStart};
 
 // --- Pinned constants ------------------------------------------------------
 
@@ -383,6 +383,27 @@ impl GroupVote {
     }
 }
 
+/// How the role internals' outputs reach the active slot.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum VoteRouting {
+    /// The active slot is the bare [`VotingAgent`](aif::VotingAgent): every
+    /// internal's own output is aggregated.
+    Off,
+    /// The active slot is an [`aif::RoutedAggregator`] over an [`aif::Topology`]
+    /// built per decision on the realised roster, members indexed by roster
+    /// position, `hops = 1`, every member read out in roster order. The centre
+    /// is the roster position of the candidate's role. With the centre on the
+    /// roster its row is the identity row and every other member's row places
+    /// `lambda` on the centre and `1 − lambda` on itself; with the centre off
+    /// the roster every row is the identity row. `lambda` ranges over `[0, 1]`;
+    /// `0` makes every row the identity row, `1` makes every row the centre's
+    /// output.
+    CandidateStar {
+        /// Weight each non-centre row places on the centre's output.
+        lambda: f64,
+    },
+}
+
 /// Registered configuration of the group arm. The [`Default`] is the
 /// **confirmatory `grp-role`** cell over arm-E1's registered **v5 E1** base.
 #[derive(Debug, Clone, Copy)]
@@ -403,6 +424,10 @@ pub struct GroupAifConfig {
     /// [`GroupVote::CertaintyWeighted`]; only the `grp-role-det` reference leg
     /// differs (Amendment A3.1).
     pub vote: GroupVote,
+    /// How the internals' outputs reach the active slot. A setting other than
+    /// [`VoteRouting::Off`] is accepted only with [`DecisionRead::Deterministic`]
+    /// and [`GroupVote::CertaintyWeighted`].
+    pub routing: VoteRouting,
     /// The role count `R` the arm is configured for (D2: 3). Roles are indexed
     /// `0..n_roles`; a demand step naming a role outside that range is a
     /// [`GroupAifError::RoleOutOfRange`] at [`begin_task`](GroupAifPolicy::begin_task).
@@ -437,6 +462,7 @@ impl Default for GroupAifConfig {
             masks: CoverageMasks::RoleMatched,
             read: DecisionRead::Deterministic,
             vote: GroupVote::CertaintyWeighted,
+            routing: VoteRouting::Off,
             n_roles: DEFAULT_N_ROLES,
             base: v5_e1_base(),
         }
@@ -473,6 +499,16 @@ pub enum GroupAifError {
     /// winner resolution does not agree with the sampled-mixture contract E-seed
     /// registers, and the pairing is not a registered cell in any case.
     UnsupportedReadVote,
+    /// [`VoteRouting::CandidateStar`] with a `lambda` that is non-finite or
+    /// outside `[0, 1]`.
+    InvalidRoutingWeight {
+        /// The offending weight.
+        lambda: f64,
+    },
+    /// A routing other than [`VoteRouting::Off`] combined with
+    /// [`DecisionRead::SeededSampling`] or with a [`GroupVote`] other than
+    /// [`GroupVote::CertaintyWeighted`].
+    UnsupportedRouting,
     /// The engine rejected a model.
     Aif(aif::AifError),
 }
@@ -493,6 +529,15 @@ impl std::fmt::Display for GroupAifError {
                 "group arm: seeded sampling is registered only against the \
                  CertaintyWeighted active slot"
             ),
+            Self::InvalidRoutingWeight { lambda } => write!(
+                f,
+                "group arm: candidate-star routing weight {lambda} is not a finite value in [0, 1]"
+            ),
+            Self::UnsupportedRouting => write!(
+                f,
+                "group arm: vote routing is accepted only with the deterministic read \
+                 and the CertaintyWeighted active slot"
+            ),
             Self::Aif(inner) => write!(f, "group arm: engine rejection: {inner}"),
         }
     }
@@ -502,9 +547,11 @@ impl std::error::Error for GroupAifError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Aif(inner) => Some(inner),
-            Self::RoleOutOfRange { .. } | Self::EmptyDemand { .. } | Self::UnsupportedReadVote => {
-                None
-            }
+            Self::RoleOutOfRange { .. }
+            | Self::EmptyDemand { .. }
+            | Self::UnsupportedReadVote
+            | Self::InvalidRoutingWeight { .. }
+            | Self::UnsupportedRouting => None,
         }
     }
 }
@@ -578,6 +625,17 @@ pub struct AgreementSample {
     /// candidate-blind internals. A5.1's headline: a blind internal resolves its
     /// indifference to a zero-entropy delta, which is the **maximum** weight.
     pub blind_weight_share: f64,
+    /// Readout rows whose effective weight on some candidate-sensitive internal
+    /// is positive. With [`VoteRouting::Off`] the rows are the internals' own
+    /// outputs and this equals [`candidate_sensitive`](Self::candidate_sensitive).
+    pub sensitive_rows: usize,
+    /// `Σᵢ wᵢ·(Σ_{j blind} Wᵢⱼ) / Σᵢ wᵢ` over the readout rows `i`, with `wᵢ =
+    /// exp(−H)` of routed row `i` and `W` the effective routing matrix; `W` is
+    /// the identity with [`VoteRouting::Off`]. `0` when `Σᵢ wᵢ` is `0`.
+    pub blind_origin_share: f64,
+    /// The own argmax of the internal at the roster position of the candidate's
+    /// role; `None` when that role is off the roster.
+    pub centre_vote: Option<usize>,
     /// `|p(act) − 0.5|` — the read's distance from the SP3 threshold.
     ///
     /// A genuine CW mixture margin under [`GroupVote::CertaintyWeighted`]; under
@@ -640,6 +698,14 @@ pub struct GroupAifCounters {
     /// One sample per successful deterministic read — the **E-agree** disclosure.
     /// Empty under [`DecisionRead::SeededSampling`], which exposes no mixture.
     pub agreement: Vec<AgreementSample>,
+    /// Successful reads whose [`VoteRouting::CandidateStar`] topology has a
+    /// non-identity row: the centre on the roster, a roster of at least two and
+    /// `lambda > 0`. Written from the topology build, independently of
+    /// [`agreement`](Self::agreement).
+    pub routed_reads: u64,
+    /// [`CoalitionDecisionPolicy::begin_task`] calls whose demand
+    /// [`GroupAifPolicy::begin_task`] refused.
+    pub begin_task_rejections: u64,
 }
 
 impl GroupAifCounters {
@@ -684,6 +750,9 @@ struct RoleMember {
     /// `exp(−H)` of its last read — the weight the CW aggregator gave it. Recorded
     /// so A5.1's "the blind members carry the maximum weight" is a measurement.
     last_weight: f64,
+    /// The distribution of its last read; `None` before any read and after a
+    /// failed one.
+    last_dist: Option<DVector<f64>>,
     /// Whether this internal's coverage masks carry the candidate's capabilities
     /// (A5.1). Set at construction from the mask computation, not inferred.
     candidate_sensitive: bool,
@@ -703,11 +772,73 @@ struct MaskPair {
     candidate_sensitive: bool,
 }
 
+/// What one deterministic read carries besides the group itself.
+struct ReadContext<'a> {
+    /// Realised roster size.
+    roster: usize,
+    /// Roster position of the candidate's role; `None` when off the roster.
+    centre: Option<usize>,
+    /// The active slot's routing; `None` for a bare `VotingAgent`.
+    topology: Option<&'a aif::Topology>,
+    /// Whether `topology` has a non-identity row, as [`candidate_star`] reports.
+    routed: bool,
+    /// Leave-path queries built for this decision.
+    leave_queries: u64,
+    /// Of those, the ones with `cfg0 == cfg1`.
+    leave_identical: u64,
+}
+
+/// The [`VoteRouting::CandidateStar`] topology over a roster of `n` members
+/// (`hops = 1`, readout `0..n`), and whether any of its rows differs from the
+/// identity row — `centre` is `Some`, `n >= 2` and `lambda > 0`.
+///
+/// With `centre = Some(c)`, row `c` is the identity row and every other row `i`
+/// places `lambda` on `c` and `1 − lambda` on `i`; with `centre = None` every row
+/// is the identity row.
+///
+/// # Errors
+///
+/// Whatever [`aif::Topology::from_adjacency`] returns — `n == 0` among them.
+fn candidate_star(
+    n: usize,
+    centre: Option<usize>,
+    lambda: f64,
+) -> Result<(aif::Topology, bool), aif::AifError> {
+    let rows: Vec<Vec<f64>> = (0..n)
+        .map(|i| {
+            (0..n)
+                .map(|j| match centre {
+                    Some(c) if i != c && j == c => lambda,
+                    Some(c) if i != c && j == i => 1.0 - lambda,
+                    _ if i == j => 1.0,
+                    _ => 0.0,
+                })
+                .collect()
+        })
+        .collect();
+    let topology = aif::Topology::from_adjacency(rows, (0..n).collect(), 1)?;
+    Ok((topology, centre.is_some() && n >= 2 && lambda > 0.0))
+}
+
 /// Build one decision's [`AgreementSample`] by reading the members' own argmaxes
 /// and confidence weights back off the roster, split by candidate-sensitivity
 /// (Amendment A5.1). Purely a disclosure — nothing on the decision path consults
 /// any of it.
-fn agreement_sample(members: &[RoleMember], roster: usize, p_act: f64) -> AgreementSample {
+///
+/// `centre` is the roster position of the candidate's role; `topology` is the
+/// routing the read went through, `None` for the internals' own outputs.
+///
+/// # Errors
+///
+/// Whatever [`origin_reach`] returns.
+fn agreement_sample(
+    members: &[RoleMember],
+    roster: usize,
+    p_act: f64,
+    centre: Option<usize>,
+    topology: Option<&aif::Topology>,
+) -> Result<AgreementSample, aif::AifError> {
+    let (sensitive_rows, blind_origin_share) = origin_reach(members, topology)?;
     let mut votes_for_act = 0usize;
     let mut votes_sensitive = 0usize;
     let mut votes_blind = 0usize;
@@ -734,15 +865,84 @@ fn agreement_sample(members: &[RoleMember], roster: usize, p_act: f64) -> Agreem
     } else {
         0.0
     };
-    AgreementSample {
+    Ok(AgreementSample {
         roster,
         votes_for_act,
         candidate_sensitive,
         votes_for_act_sensitive: votes_sensitive,
         votes_for_act_blind: votes_blind,
         blind_weight_share,
+        sensitive_rows,
+        blind_origin_share,
+        centre_vote: centre
+            .and_then(|c| members.get(c))
+            .and_then(|m| m.last_vote),
         margin: (p_act - 0.5).abs(),
+    })
+}
+
+/// `(sensitive_rows, blind_origin_share)` of [`AgreementSample`] for one read:
+/// over the readout rows of `topology` applied to the members' last
+/// distributions, or over the members' own last distributions with identity
+/// weights when `topology` is `None`. A member without a last distribution
+/// contributes weight `0` when `topology` is `None`.
+///
+/// # Errors
+///
+/// With a `topology`: [`aif::AifError::InvalidLength`] when a member has no last
+/// distribution, and whatever [`aif::Topology::route`] returns.
+fn origin_reach(
+    members: &[RoleMember],
+    topology: Option<&aif::Topology>,
+) -> Result<(usize, f64), aif::AifError> {
+    // `(member index, exp(−H) of the row read out for it)`, in readout order.
+    let rows: Vec<(usize, f64)> = match topology {
+        None => members
+            .iter()
+            .enumerate()
+            .map(|(i, m)| (i, m.last_dist.as_ref().map_or(0.0, confidence_weight)))
+            .collect(),
+        Some(t) => {
+            let mut outputs = Vec::with_capacity(members.len());
+            for m in members {
+                outputs.push(m.last_dist.clone().ok_or(aif::AifError::InvalidLength {
+                    expected: GROUP_N_ACTIONS,
+                    got: 0,
+                })?);
+            }
+            t.readout()
+                .iter()
+                .copied()
+                .zip(t.route(&outputs)?.iter().map(confidence_weight))
+                .collect()
+        }
+    };
+    let weight = |i: usize, j: usize| match topology {
+        Some(t) => t.weight(i, j),
+        None if i == j => 1.0,
+        None => 0.0,
+    };
+
+    let mut sensitive_rows = 0usize;
+    let mut blind_mass = 0.0f64;
+    let mut total = 0.0f64;
+    for &(i, w) in &rows {
+        let mut row_blind = 0.0f64;
+        let mut reaches_sensitive = false;
+        for (j, m) in members.iter().enumerate() {
+            let w_ij = weight(i, j);
+            if m.candidate_sensitive {
+                reaches_sensitive |= w_ij > 0.0;
+            } else {
+                row_blind += w_ij;
+            }
+        }
+        sensitive_rows += usize::from(reaches_sensitive);
+        blind_mass += w * row_blind;
+        total += w;
     }
+    let share = if total > 0.0 { blind_mass / total } else { 0.0 };
+    Ok((sensitive_rows, share))
 }
 
 /// `exp(−H)` of a distribution — the confidence weight `VotingAgent` assigns it.
@@ -804,12 +1004,14 @@ impl aif::InternalAgent for RoleMember {
                     })
                     .map(|(i, _)| i);
                 self.last_weight = confidence_weight(&dist);
+                self.last_dist = Some(dist.clone());
                 dist
             }
             Err(e) => {
                 tracing::warn!(error = %e, "group role member replay failed; declining the read");
                 self.last_vote = None;
                 self.last_weight = 0.0;
+                self.last_dist = None;
                 DVector::zeros(0)
             }
         }
@@ -950,6 +1152,11 @@ impl GroupAifPolicy {
     /// [`GroupAifError::UnsupportedReadVote`] for the seeded-sampling /
     /// discrete-vote pairing, which is constructible upstream and silently
     /// all-declines (Amendment A5.10 L1-14).
+    /// [`GroupAifError::InvalidRoutingWeight`] for a
+    /// [`VoteRouting::CandidateStar`] `lambda` that is non-finite or outside
+    /// `[0, 1]`, and [`GroupAifError::UnsupportedRouting`] for a routing other than
+    /// [`VoteRouting::Off`] with [`DecisionRead::SeededSampling`] or a vote other
+    /// than [`GroupVote::CertaintyWeighted`].
     ///
     /// # Panics
     ///
@@ -965,6 +1172,17 @@ impl GroupAifPolicy {
             && config.vote != GroupVote::CertaintyWeighted
         {
             return Err(GroupAifError::UnsupportedReadVote);
+        }
+        if let VoteRouting::CandidateStar { lambda } = config.routing {
+            // A NaN is inside no range, so this refuses the non-finite values too.
+            if !(0.0..=1.0).contains(&lambda) {
+                return Err(GroupAifError::InvalidRoutingWeight { lambda });
+            }
+            if config.read != DecisionRead::Deterministic
+                || config.vote != GroupVote::CertaintyWeighted
+            {
+                return Err(GroupAifError::UnsupportedRouting);
+            }
         }
         let n_roles = config.n_roles.clamp(1, usize::from(u8::MAX));
         let config = GroupAifConfig { n_roles, ..config };
@@ -1285,6 +1503,7 @@ impl GroupAifPolicy {
                     modalities: required_r.count_ones() as usize,
                     last_vote: None,
                     last_weight: 0.0,
+                    last_dist: None,
                     candidate_sensitive: masks.candidate_sensitive,
                 }),
                 Err(e) => {
@@ -1303,19 +1522,88 @@ impl GroupAifPolicy {
         // it — and adds `GroupVote::Deterministic` as a non-gating reference leg.
         // D2 itself stands. The seeds are hygiene: neither mode's read draws.
         let roster = internals.len();
-        let mut group = aif::GroupAgent::with_slots_seeded(
-            aif::CopyAgent,
-            internals,
-            aif::VotingAgent::with_seed(GROUP_N_ACTIONS, self.config.vote.upstream(), seed),
-            GROUP_N_ACTIONS,
-            seed,
-        );
+        let centre = task.roster.iter().position(|&r| r == agent_role);
+        match self.config.routing {
+            VoteRouting::Off => {
+                let mut group = aif::GroupAgent::with_slots_seeded(
+                    aif::CopyAgent,
+                    internals,
+                    aif::VotingAgent::with_seed(GROUP_N_ACTIONS, self.config.vote.upstream(), seed),
+                    GROUP_N_ACTIONS,
+                    seed,
+                );
 
-        if self.config.read == DecisionRead::SeededSampling {
-            let d = self.sampled_decision(&mut group);
-            self.record_leave_masks(leave_queries, leave_identical);
-            return d;
+                if self.config.read == DecisionRead::SeededSampling {
+                    let d = self.sampled_decision(&mut group);
+                    self.record_leave_masks(leave_queries, leave_identical);
+                    return d;
+                }
+
+                self.deterministic_decision(
+                    &mut group,
+                    &ReadContext {
+                        roster,
+                        centre,
+                        topology: None,
+                        routed: false,
+                        leave_queries,
+                        leave_identical,
+                    },
+                )
+            }
+            VoteRouting::CandidateStar { lambda } => {
+                let (topology, routed) = match candidate_star(roster, centre, lambda) {
+                    Ok(built) => built,
+                    Err(e) => {
+                        tracing::warn!(error = %e, "group routing topology construction failed");
+                        self.count_upstream_decline();
+                        self.record_leave_masks(leave_queries, leave_identical);
+                        return Self::declined();
+                    }
+                };
+                let mut group = aif::GroupAgent::with_slots_seeded(
+                    aif::CopyAgent,
+                    internals,
+                    aif::RoutedAggregator::with_seed(
+                        aif::VotingAgent::with_seed(
+                            GROUP_N_ACTIONS,
+                            self.config.vote.upstream(),
+                            seed,
+                        ),
+                        topology.clone(),
+                        GROUP_N_ACTIONS,
+                        seed,
+                    ),
+                    GROUP_N_ACTIONS,
+                    seed,
+                );
+                self.deterministic_decision(
+                    &mut group,
+                    &ReadContext {
+                        roster,
+                        centre,
+                        topology: Some(&topology),
+                        routed,
+                        leave_queries,
+                        leave_identical,
+                    },
+                )
+            }
         }
+    }
+
+    /// The [`DecisionRead::Deterministic`] read of `group` and the SP3 rule over
+    /// it (`act` iff `p(act) > 0.5`), for any active slot. A failed read, a
+    /// non-finite `p(act)` and a failed [`agreement_sample`] each decline and
+    /// count in [`GroupAifCounters::declines_upstream`]; a successful read counts
+    /// in `reads`, pushes its [`AgreementSample`], and counts in `routed_reads`
+    /// when `read.routed`.
+    fn deterministic_decision<X: aif::Aggregator>(
+        &self,
+        group: &mut aif::GroupAgent<aif::CopyAgent, RoleMember, X>,
+        read: &ReadContext<'_>,
+    ) -> Decision {
+        let (leave_queries, leave_identical) = (read.leave_queries, read.leave_identical);
 
         // D4/D4a-as-amended: the pure read, and NOTHING else. No
         // `record_group_action`, no `group_distribution_recording`.
@@ -1337,9 +1625,24 @@ impl GroupAifPolicy {
             return Self::declined();
         }
 
-        let sample = agreement_sample(group.internal_agents(), roster, p_act);
+        let sample = match agreement_sample(
+            group.internal_agents(),
+            read.roster,
+            p_act,
+            read.centre,
+            read.topology,
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!(error = %e, "group agreement sample routing failed");
+                self.count_upstream_decline();
+                self.record_leave_masks(leave_queries, leave_identical);
+                return Self::declined();
+            }
+        };
         let mut shared = self.shared.lock().expect("group arm mutex poisoned");
         shared.counters.reads += 1;
+        shared.counters.routed_reads += u64::from(read.routed);
         shared.counters.leave_queries += leave_queries;
         shared.counters.leave_queries_identical += leave_identical;
         shared.counters.agreement.push(sample);
@@ -1514,6 +1817,27 @@ impl CoalitionDecisionPolicy for GroupAifPolicy {
         _ctx: &DecisionContext,
     ) -> Decision {
         self.decide(agent, coalition, true)
+    }
+
+    /// [`GroupAifPolicy::begin_task`] over the [`Demand`] with one occurrence per
+    /// entry of `task.steps`. A refusal is warned and counted in
+    /// [`GroupAifCounters::begin_task_rejections`].
+    fn begin_task(&self, task: &TaskStart<'_>) {
+        let demand = Demand::from_steps(
+            task.steps
+                .iter()
+                .map(|&(bit, role)| Step::new(bit, Role::new(role))),
+        );
+        if let Err(e) = GroupAifPolicy::begin_task(self, &demand) {
+            tracing::warn!(error = %e, "group arm refused the task's demand");
+            let mut shared = self.shared.lock().expect("group arm mutex poisoned");
+            shared.counters.begin_task_rejections += 1;
+        }
+    }
+
+    /// [`GroupAifPolicy::observe_outcome`] over `per_bit_success`.
+    fn observe_outcome(&self, _required: u32, per_bit_success: &[bool]) {
+        let _ = GroupAifPolicy::observe_outcome(self, per_bit_success);
     }
 }
 
@@ -2305,6 +2629,7 @@ mod tests {
                 modalities: 2,
                 last_vote: None,
                 last_weight: 0.0,
+                last_dist: None,
                 candidate_sensitive: true,
             }
         };
@@ -2340,6 +2665,7 @@ mod tests {
             modalities: 2,
             last_vote: None,
             last_weight: 0.0,
+            last_dist: None,
             candidate_sensitive: true,
         };
         assert!(matches!(
@@ -2894,6 +3220,532 @@ mod tests {
             "permuting which bit carries which multiplicity must move the read; if it \
              does not, the scale is not aligned with `set_bits(required_r)` order"
         );
+    }
+
+    // --- Vote routing -------------------------------------------------------
+
+    /// One decision of [`scripted_stream`]: `(act, score bits)`.
+    type StreamDecisions = Vec<(bool, u64)>;
+
+    /// Nine tasks — rosters 3, 2, 1, cycled three times — each with three joins
+    /// and three leaves over a five-agent pool (roles 0, 1, 2, 0, 1), and one
+    /// outcome observed after every task so the world models learn in between.
+    /// Per cycle the candidate's role is on the roster with a roster of at least
+    /// two in 6 + 4 + 0 decisions.
+    fn scripted_stream(config: GroupAifConfig) -> (StreamDecisions, GroupAifCounters) {
+        let pool = [
+            TestAgent {
+                id: 0,
+                caps: 0b0001,
+                trust: 50,
+            },
+            TestAgent {
+                id: 1,
+                caps: 0b0010,
+                trust: 50,
+            },
+            TestAgent {
+                id: 2,
+                caps: 0b0100,
+                trust: 50,
+            },
+            TestAgent {
+                id: 3,
+                caps: 0b1001,
+                trust: 50,
+            },
+            TestAgent {
+                id: 4,
+                caps: 0b1010,
+                trust: 50,
+            },
+        ];
+        let p = policy(config, &[(0, 0), (1, 1), (2, 2), (3, 0), (4, 1)]);
+        let tasks = [
+            three_role_demand(),
+            demand(&workflow(&[(Role::new(0), &[0, 3]), (Role::new(1), &[1])])),
+            demand(&workflow(&[(Role::new(1), &[1, 3])])),
+        ];
+        let ctx = DecisionContext {
+            required_capabilities: 0b1111,
+        };
+        let view = |ids: &[usize]| -> Vec<&dyn AgentCapabilities> {
+            ids.iter()
+                .map(|&i| &pool[i] as &dyn AgentCapabilities)
+                .collect()
+        };
+
+        let mut out = Vec::new();
+        for t in 0..9usize {
+            p.begin_task(&tasks[t % 3]).unwrap();
+            for (candidate, coalition) in [
+                (0usize, vec![1usize, 2]),
+                (2, vec![0, 1]),
+                (4, vec![0, 1, 2]),
+            ] {
+                let d = p.should_join(&pool[candidate], &view(&coalition), &ctx);
+                out.push((d.act, d.score.to_bits()));
+            }
+            for leaver in [0usize, 2, 1] {
+                let d = p.should_leave(&pool[leaver], &view(&[0, 1, 2, 3]), &ctx);
+                out.push((d.act, d.score.to_bits()));
+            }
+            let mut succ = [false; 8];
+            for (b, slot) in succ.iter_mut().enumerate().take(4) {
+                *slot = (t + b) % 2 == 0;
+            }
+            p.observe_outcome(&succ);
+        }
+        (out, p.counters())
+    }
+
+    fn star(lambda: f64, base: GroupAifConfig) -> GroupAifConfig {
+        GroupAifConfig {
+            routing: VoteRouting::CandidateStar { lambda },
+            ..base
+        }
+    }
+
+    /// `CandidateStar { lambda: 0.0 }` reproduces `Off` — acts, score bits and
+    /// the whole counter ledger — over [`scripted_stream`], with novelty on and
+    /// off; `lambda: 0.5` does not.
+    #[test]
+    fn candidate_star_at_lambda_zero_is_bit_identical_to_off() {
+        for (name, base) in [
+            ("default", GroupAifConfig::default()),
+            ("novelty off", novelty_off()),
+        ] {
+            let (off, off_counters) = scripted_stream(base);
+            let (id, id_counters) = scripted_stream(star(0.0, base));
+            assert_eq!(off.len(), 54);
+            assert_eq!(off_counters.declines_upstream, 0, "{name}");
+            assert_eq!(off_counters.reads, 54, "{name}");
+            assert_eq!(off_counters.roster_sizes, vec![3, 2, 1, 3, 2, 1, 3, 2, 1]);
+            let first_diff = off.iter().zip(&id).position(|(a, b)| a != b);
+            assert_eq!(
+                first_diff,
+                None,
+                "{name}: lambda = 0 diverges from Off at decision {first_diff:?}: \
+                 Off {:?}, lambda = 0 {:?}",
+                first_diff.map(|i| off[i]),
+                first_diff.map(|i| id[i])
+            );
+            assert_eq!(
+                id_counters.routed_reads, 0,
+                "{name}: lambda = 0 counted {} routed reads",
+                id_counters.routed_reads
+            );
+            assert_eq!(id_counters, off_counters, "{name}: counter ledgers differ");
+
+            let (half, _) = scripted_stream(star(0.5, base));
+            let differing = off.iter().zip(&half).filter(|(a, b)| a != b).count();
+            assert!(
+                differing > 0,
+                "{name}: lambda = 0.5 reproduced Off on all 54 decisions, so the \
+                 identity above cannot fail on this stream"
+            );
+        }
+        // Both answers occur under the default base, join and leave alike.
+        let (off, _) = scripted_stream(GroupAifConfig::default());
+        let acts = off.iter().filter(|(act, _)| *act).count();
+        assert!(
+            acts > 0 && acts < off.len(),
+            "the stream must carry acts and declines, got {acts} acts of {}",
+            off.len()
+        );
+    }
+
+    /// A decision whose candidate's role is off the roster reads identically
+    /// under `lambda = 0.5` and under `Off`, and counts no routed read.
+    #[test]
+    fn centre_absent_decisions_are_bit_identical_to_off() {
+        let a0 = TestAgent {
+            id: 0,
+            caps: 0b001,
+            trust: 50,
+        };
+        let a1 = TestAgent {
+            id: 1,
+            caps: 0b010,
+            trust: 50,
+        };
+        let outsider = TestAgent {
+            id: 2,
+            caps: 0b011,
+            trust: 50,
+        };
+        let coalition: [&dyn AgentCapabilities; 2] = [&a0, &a1];
+        let full: [&dyn AgentCapabilities; 3] = [&a0, &a1, &outsider];
+        let ctx = DecisionContext {
+            required_capabilities: 0b011,
+        };
+        // Roster {r0, r1}; the candidate is role 2.
+        let two_role = demand(&workflow(&[(Role::new(0), &[0]), (Role::new(1), &[1])]));
+
+        let run = |config: GroupAifConfig| {
+            let p = policy(config, &[(0, 0), (1, 1), (2, 2)]);
+            let mut out = Vec::new();
+            for t in 0..4usize {
+                p.begin_task(&two_role).unwrap();
+                let j = p.should_join(&outsider, &coalition, &ctx);
+                out.push((j.act, j.score.to_bits()));
+                let l = p.should_leave(&outsider, &full, &ctx);
+                out.push((l.act, l.score.to_bits()));
+                p.observe_outcome(&[t % 2 == 0, true, false, false, false, false, false, false]);
+            }
+            (out, p.counters())
+        };
+        for (name, base) in [
+            ("default", GroupAifConfig::default()),
+            ("novelty off", novelty_off()),
+        ] {
+            let (off, off_counters) = run(base);
+            let (half, half_counters) = run(star(0.5, base));
+            assert_eq!(
+                half, off,
+                "{name}: a centre-absent read moved under routing"
+            );
+            assert_eq!(
+                (half_counters.reads, half_counters.routed_reads),
+                (8, 0),
+                "{name}: (reads, routed_reads)"
+            );
+            assert_eq!(half_counters, off_counters, "{name}");
+            for s in &half_counters.agreement {
+                assert_eq!(
+                    (s.candidate_sensitive, s.sensitive_rows, s.centre_vote),
+                    (0, 0, None),
+                    "{name}"
+                );
+            }
+        }
+    }
+
+    /// `p(act)` of a `CertaintyWeighted` `VotingAgent` behind the
+    /// [`candidate_star`] topology over `outputs`.
+    fn star_p_act(outputs: &[[f64; 2]], centre: Option<usize>, lambda: f64) -> f64 {
+        use aif::Aggregator as _;
+        let (topology, _) = candidate_star(outputs.len(), centre, lambda).unwrap();
+        let mut routed = aif::RoutedAggregator::with_seed(
+            aif::VotingAgent::with_seed(GROUP_N_ACTIONS, aif::VotingMode::CertaintyWeighted, 1),
+            topology,
+            GROUP_N_ACTIONS,
+            1,
+        );
+        let dists: Vec<DVector<f64>> = outputs
+            .iter()
+            .map(|o| DVector::from_vec(o.to_vec()))
+            .collect();
+        routed
+            .aggregate_weighted_distribution(&dists)
+            .unwrap()
+            .expect("a VotingAgent exposes its mixture")[ACTION_ACT]
+    }
+
+    /// The prereg §4 arithmetic on delta outputs: `k` blind members at `[0, 1]`,
+    /// the centre at `[1, 0]`, `p(act) = k·w·(1 − λ) / (k·w + 1)` with
+    /// `w = exp(−H(λ))`.
+    #[test]
+    fn candidate_star_arithmetic_on_delta_outputs() {
+        const CENTRE: [f64; 2] = [1.0, 0.0];
+        const BLIND: [f64; 2] = [0.0, 1.0];
+        let close = |observed: f64, expected: f64, tol: f64, what: &str| {
+            assert!(
+                (observed - expected).abs() <= tol,
+                "{what}: observed {observed}, expected {expected} ± {tol}"
+            );
+        };
+
+        // k = 2, the centre in the MIDDLE roster position.
+        let k2 = [BLIND, CENTRE, BLIND];
+        close(star_p_act(&k2, Some(1), 0.0), 2.0 / 3.0, 1e-12, "k=2 λ=0");
+        close(star_p_act(&k2, Some(1), 0.5), 0.25, 1e-12, "k=2 λ=0.5");
+        close(star_p_act(&k2, Some(1), 0.25), 0.39949, 1e-4, "k=2 λ=0.25");
+        close(star_p_act(&k2, Some(1), 1.0), 0.0, 1e-12, "k=2 λ=1");
+        // The SP3 flip at k = 2 sits between λ = 0.130 and λ = 0.135.
+        let closed_form = |lambda: f64| {
+            let h = -(lambda * lambda.ln() + (1.0 - lambda) * (1.0 - lambda).ln());
+            let w = (-h).exp();
+            2.0 * w * (1.0 - lambda) / (2.0 * w + 1.0)
+        };
+        let at_130 = star_p_act(&k2, Some(1), 0.130);
+        let at_135 = star_p_act(&k2, Some(1), 0.135);
+        close(at_130, closed_form(0.130), 1e-12, "k=2 λ=0.130 closed form");
+        close(at_135, closed_form(0.135), 1e-12, "k=2 λ=0.135 closed form");
+        close(at_130, 0.5012, 1e-4, "k=2 λ=0.130");
+        close(at_135, 0.4963, 1e-4, "k=2 λ=0.135");
+        assert!(
+            at_130 > 0.5 && at_135 < 0.5,
+            "the flip must sit between λ = 0.130 (observed {at_130}) and λ = 0.135 \
+             (observed {at_135})"
+        );
+
+        // k = 1, the centre LAST.
+        close(
+            star_p_act(&[BLIND, CENTRE], Some(1), 0.5),
+            1.0 / 6.0,
+            1e-12,
+            "k=1 λ=0.5",
+        );
+        // The mirrored case: the centre votes act, the two others decline.
+        close(
+            star_p_act(&[[0.0, 1.0], [1.0, 0.0], [1.0, 0.0]], Some(0), 0.5),
+            0.75,
+            1e-12,
+            "centre act, 2 decliners, λ=0.5",
+        );
+        // No centre: identity rows whatever λ is.
+        close(star_p_act(&k2, None, 0.5), 2.0 / 3.0, 1e-12, "no centre");
+    }
+
+    /// `routed_reads` counts exactly the successful reads with the candidate's
+    /// role on a roster of at least two under `lambda > 0`, and nothing under
+    /// `Off` or `lambda = 0`.
+    #[test]
+    fn routed_reads_counts_the_non_identity_topologies() {
+        let ledger = |c: &GroupAifCounters| {
+            c.agreement
+                .iter()
+                .filter(|s| s.candidate_sensitive >= 1 && s.roster >= 2)
+                .count() as u64
+        };
+        for lambda in [0.5, 1.0] {
+            let (_, c) = scripted_stream(star(lambda, GroupAifConfig::default()));
+            assert_eq!(c.declines_upstream, 0);
+            assert_eq!(
+                c.routed_reads, 30,
+                "λ={lambda}: 3 cycles × (6 + 4 + 0), observed {}",
+                c.routed_reads
+            );
+            assert_eq!(
+                c.routed_reads,
+                ledger(&c),
+                "λ={lambda}: counter {} vs ledger {}",
+                c.routed_reads,
+                ledger(&c)
+            );
+        }
+        let (_, off) = scripted_stream(GroupAifConfig::default());
+        assert_eq!(ledger(&off), 30, "the Off ledger sees the same 30 reads");
+        assert_eq!(off.routed_reads, 0, "Off routes nothing");
+        let (_, id) = scripted_stream(star(0.0, GroupAifConfig::default()));
+        assert_eq!(id.routed_reads, 0, "λ = 0 is an identity topology");
+    }
+
+    /// With routing `Off`, `blind_origin_share` is `blind_weight_share` bit for
+    /// bit and `sensitive_rows` is `candidate_sensitive`, on every sample; with
+    /// `lambda = 1` a centre-present read has every row candidate-sensitive, no
+    /// blind-origin mass, and the group's act equal to the centre's own vote.
+    #[test]
+    fn origin_share_is_the_member_share_at_the_identity() {
+        let blind_masks = GroupAifConfig {
+            masks: CoverageMasks::RoleBlind,
+            ..GroupAifConfig::default()
+        };
+        let mut blind_members_seen = 0usize;
+        for (name, config) in [
+            ("default", GroupAifConfig::default()),
+            ("novelty off", novelty_off()),
+            ("role-blind masks", blind_masks),
+        ] {
+            let (_, c) = scripted_stream(config);
+            assert_eq!(c.agreement.len(), 54, "{name}");
+            for (i, s) in c.agreement.iter().enumerate() {
+                assert_eq!(
+                    s.blind_origin_share.to_bits(),
+                    s.blind_weight_share.to_bits(),
+                    "{name}, sample {i}: origin {} vs member {}",
+                    s.blind_origin_share,
+                    s.blind_weight_share
+                );
+                assert_eq!(
+                    s.sensitive_rows, s.candidate_sensitive,
+                    "{name}, sample {i}: {} sensitive rows vs {} sensitive internals",
+                    s.sensitive_rows, s.candidate_sensitive
+                );
+                blind_members_seen += s.candidate_blind();
+            }
+        }
+        assert!(blind_members_seen > 0, "no blind member was ever weighed");
+
+        let (decisions, c) = scripted_stream(star(1.0, GroupAifConfig::default()));
+        assert_eq!(c.agreement.len(), decisions.len());
+        let mut centre_present = 0usize;
+        for (i, (s, (act, _))) in c.agreement.iter().zip(&decisions).enumerate() {
+            if s.candidate_sensitive == 0 {
+                assert_eq!((s.sensitive_rows, s.centre_vote), (0, None), "sample {i}");
+                assert_eq!(
+                    s.blind_origin_share.to_bits(),
+                    1.0f64.to_bits(),
+                    "sample {i}"
+                );
+                continue;
+            }
+            centre_present += 1;
+            assert_eq!(
+                s.sensitive_rows, s.roster,
+                "sample {i}: {} of {} rows reach the centre at λ = 1",
+                s.sensitive_rows, s.roster
+            );
+            assert_eq!(
+                s.blind_origin_share.to_bits(),
+                0.0f64.to_bits(),
+                "sample {i}: every row is the centre's output at λ = 1"
+            );
+            assert_eq!(
+                s.centre_vote,
+                Some(usize::from(*act)),
+                "sample {i}: the group follows the centre at λ = 1"
+            );
+        }
+        // 3 cycles × (6 + 4 + 2): the roster-1 task has two role-1 candidates.
+        assert_eq!(centre_present, 36);
+    }
+
+    /// Beliefs and Dirichlet counts of every model, for equality.
+    type SnapshotKey = Vec<(
+        ModelLabel,
+        Vec<DVector<f64>>,
+        Option<Vec<nalgebra::DMatrix<f64>>>,
+    )>;
+
+    fn snapshot_key(p: &GroupAifPolicy) -> SnapshotKey {
+        p.model_snapshots()
+            .into_iter()
+            .map(|(label, s)| (label, s.beliefs, s.pa))
+            .collect()
+    }
+
+    /// The two trait hooks, driven through `&dyn CoalitionDecisionPolicy`, leave
+    /// the arm where the inherent `begin_task` / `observe_outcome` leave a twin;
+    /// a refused demand is counted.
+    #[test]
+    fn trait_hooks_forward_to_the_inherent_lifecycle() {
+        let a0 = TestAgent {
+            id: 0,
+            caps: 0b001,
+            trust: 50,
+        };
+        let a1 = TestAgent {
+            id: 1,
+            caps: 0b010,
+            trust: 50,
+        };
+        let a2 = TestAgent {
+            id: 2,
+            caps: 0b100,
+            trust: 50,
+        };
+        let coalition: [&dyn AgentCapabilities; 2] = [&a1, &a2];
+        let full: [&dyn AgentCapabilities; 3] = [&a0, &a1, &a2];
+        let ctx = DecisionContext {
+            required_capabilities: 0b111,
+        };
+        let map = [(0usize, 0u8), (1, 1), (2, 2)];
+        let tasks = [
+            three_role_demand(),
+            demand(&workflow(&[(Role::new(0), &[0]), (Role::new(2), &[2])])),
+        ];
+
+        let hooked = policy(GroupAifConfig::default(), &map);
+        let inherent = policy(GroupAifConfig::default(), &map);
+        let fresh = snapshot_key(&inherent);
+        let mut hooked_out = Vec::new();
+        let mut inherent_out = Vec::new();
+        for t in 0..4usize {
+            let d = &tasks[t % 2];
+            let succ = [
+                t % 2 == 0,
+                true,
+                t % 3 == 0,
+                false,
+                false,
+                false,
+                false,
+                false,
+            ];
+
+            let steps: Vec<(u8, u8)> = d.distinct().map(|s| (s.bit, s.role.index())).collect();
+            let dynp: &dyn CoalitionDecisionPolicy = &hooked;
+            dynp.begin_task(&TaskStart {
+                required: 0b111,
+                steps: &steps,
+            });
+            hooked_out.push(dynp.should_join(&a0, &coalition, &ctx));
+            hooked_out.push(dynp.should_leave(&a0, &full, &ctx));
+            dynp.observe_outcome(0b111, &succ);
+
+            inherent.begin_task(d).unwrap();
+            inherent_out.push(inherent.should_join(&a0, &coalition, &ctx));
+            inherent_out.push(inherent.should_leave(&a0, &full, &ctx));
+            inherent.observe_outcome(&succ);
+        }
+        assert_eq!(hooked_out, inherent_out);
+        let c = hooked.counters();
+        assert_eq!(c, inherent.counters());
+        assert_eq!(
+            (c.reads, c.tasks_observed, c.begin_task_rejections),
+            (8, 4, 0)
+        );
+        assert_eq!(c.roster_sizes, vec![3, 2, 3, 2]);
+        assert!(c.s_learn_exact());
+        assert_eq!(snapshot_key(&hooked), snapshot_key(&inherent));
+        assert_ne!(snapshot_key(&hooked), fresh, "the hooked arm learned");
+
+        // A role outside `0..n_roles` is refused, counted, and clears the task.
+        let dynp: &dyn CoalitionDecisionPolicy = &hooked;
+        dynp.begin_task(&TaskStart {
+            required: 0b001,
+            steps: &[(0, 7)],
+        });
+        let c = hooked.counters();
+        assert_eq!(c.begin_task_rejections, 1);
+        assert_eq!(c.roster_sizes.len(), 4, "a refused task opens nothing");
+        assert!(!dynp.should_join(&a0, &coalition, &ctx).act);
+        assert_eq!(hooked.counters().declines_no_demand, 1);
+    }
+
+    /// `GroupAifPolicy::new` refuses a `lambda` outside `[0, 1]` or non-finite,
+    /// and any routing under seeded sampling or a non-CW vote.
+    #[test]
+    fn routing_construction_refusals() {
+        let build = |config: GroupAifConfig| GroupAifPolicy::new(0, config, roles_map(&[(0, 0)]));
+        for lambda in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -0.1, 1.0 + 1e-9] {
+            assert!(
+                matches!(
+                    build(star(lambda, GroupAifConfig::default())),
+                    Err(GroupAifError::InvalidRoutingWeight { .. })
+                ),
+                "λ = {lambda} must be refused"
+            );
+        }
+        for lambda in [0.0, 0.25, 0.5, 1.0] {
+            assert!(
+                build(star(lambda, GroupAifConfig::default())).is_ok(),
+                "λ = {lambda} must be accepted"
+            );
+        }
+        assert!(matches!(
+            build(star(
+                0.5,
+                GroupAifConfig {
+                    read: DecisionRead::SeededSampling,
+                    ..GroupAifConfig::default()
+                }
+            )),
+            Err(GroupAifError::UnsupportedRouting)
+        ));
+        assert!(matches!(
+            build(star(
+                0.5,
+                GroupAifConfig {
+                    vote: GroupVote::Deterministic,
+                    ..GroupAifConfig::default()
+                }
+            )),
+            Err(GroupAifError::UnsupportedRouting)
+        ));
+        assert_eq!(GroupAifConfig::default().routing, VoteRouting::Off);
     }
 
     /// Object-safety: the arm is usable behind the decision trait object, like

@@ -194,3 +194,7 @@ required-features = ["remote"]
 [[test]]
 name = "harness_workflow"
 required-features = ["harness", "process"]
+
+[[test]]
+name = "k7_group_host"
+required-features = ["harness", "decision", "process"]
