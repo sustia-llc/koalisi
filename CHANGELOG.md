@@ -16,8 +16,64 @@ Planned work — issue-tracked (details in [`CLAUDE.md`](./CLAUDE.md)
   registry (*blocked on the tauhokohoko KEK-granularity answer*), [#32]
   decision/belief streams (the `TaskOutcome` durable home), [#33] federation
   manifests + FAIR provenance.
-- **[#25]** metrics example, reframed onto the `CoalitionService` decision
-  path / topology events.
+
+## [0.36.0] — 2026-09-17
+
+A Prometheus metrics example over the three runtime tap surfaces ([#25], as
+re-scoped on the issue 2026-09-17), and a lock refresh. No `src/` change.
+
+### Added
+- **Feature `metrics`** (off by default): optional `metrics` 0.24 and
+  `metrics-exporter-prometheus` 0.18 (`default-features = false`,
+  `http-listener` only), plus tokio's `net` + `io-util`.
+- **`examples/metrics_scrape.rs`** (`required-features = ["metrics"]`): one
+  consumer per tap surface — `koalisi_decisions_total{kind,act}` +
+  `koalisi_decision_score` from a `spawn_decision_tee` sink,
+  `koalisi_task_outcomes_total{success}` + `koalisi_outcome_members` from an
+  `OutcomeSink` under `spawn_outcome_forwarder`,
+  `koalisi_topology_events_total{event_type}` from the
+  `TemporalHypergraph::with_event_tap` receiver. A scripted workload, a
+  lossless shutdown, one `GET /metrics` against the example's own loopback
+  listener (`KOALISI_METRICS_ADDR` overrides the address), and every scraped
+  counter, histogram count and histogram sum asserted against a
+  recorder-free count and against the scripted value.
+
+### Changed
+- **`Cargo.lock` refreshed** with `cargo update` under `rust-version =
+  "1.93.0"`, as its own commit ahead of the feature (154 packages updated,
+  15 added, 21 removed; `wide` 1.5.0 → 1.7.1, `safe_arch` 1.0.0 → 1.2.0,
+  `simba` 0.10.0 → 0.10.2, `surrealdb` 3.2.1 → 3.2.4 among them). The
+  manifest's dependency requirements are unchanged. The feature commit then
+  adds 14 stanzas and moves none (`git diff --numstat`: 160 insertions, 0
+  deletions).
+- `Cargo.toml` MSRV comment: `metrics` joins the 1.88 tier; the 1.89 tier
+  names `safe_arch` 1.2 / `wide` 1.7.
+
+### Gates
+- Fourteen suites, identical per test binary on `main` (`3ff92f6`
+  worktree) and on the branch: 106 / 162 / 135 / 191 / 143 / 126 / 156 /
+  112, `process` 161, `decision,magnitude,process` 241, `durable` 107,
+  `harness` 126, `harness,process` 198; the new `metrics` lane 106.
+- `cargo fmt --all -- --check` clean; clippy `--all-targets -- -D warnings`
+  clean at `--no-default-features`, default and thirteen feature lanes
+  including `metrics` and the frozen-binary lane; `cargo doc` with `-D
+  warnings` clean at default and eleven feature sets.
+- The example's assertions falsified in a copy of the tree: eight
+  perturbations (one skipped increment per surface, an inverted `act`
+  label, a renamed `event_type`, an extra series, a skipped histogram
+  record, an off-by-one histogram value), each exiting non-zero with the
+  mismatching values in the message.
+- **X-battery PASS on one serial run** of the frozen archive binary on the
+  refreshed lock: 2129 lines, 124 raw differing lines against
+  `docs/runs/K4-archive.log`, 11 hunks after the latency-column strip, all
+  latency or wall-clock figures; all 33 verdict lines byte-identical.
+- MSRV tiers reproduced on the refreshed lock with `rust-version`
+  temporarily at 1.85.0: 1.88 for default, `magnitude`, `persistence`,
+  `remote`, `process`, `harness`, `harness,process`, `metrics` (1.87 fails
+  on catgraph's let-chains); 1.89 for `decision`, `magnitude-fast`,
+  `decision,magnitude,process` (1.88 refused by nalgebra 0.35.0 /
+  safe_arch 1.2.0 / wide 1.7.1); 1.92 for `durable` (1.91 fails to compile
+  `diskann`). `rust-version = "1.93.0"` kept (C-D1).
 
 ## [0.35.0] — 2026-09-16
 

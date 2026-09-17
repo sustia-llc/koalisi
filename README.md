@@ -106,6 +106,7 @@ cargo run --features harness --example gauntlet                                 
 cargo run --features decision --example population_reliability                    # learned-reliability fitness for the structure search (#57)
 cargo run --features durable --example durable_decisions                          # durable decision log (needs Docker)
 cargo run --features remote --example remote_coalition_consumer                   # remote coalition-event gateway + client, one process (#38)
+cargo run --features metrics --example metrics_scrape                             # Prometheus counters/histograms over the decision, outcome and topology-event taps, self-scraped and asserted (#25)
 ```
 
 > **Value models for structure search (population_search).** `search` maximises
@@ -186,6 +187,7 @@ cargo test --features decision,magnitude,process # 241 tests (the full A/B batte
 cargo test --features durable              # 107 tests (+ container-backed restart-durability test; needs Docker)
 cargo test --features harness              # 126 tests (+ the K7 harness: rng, instance generation, battery loop, lifecycle hook, report helpers)
 cargo test --features harness,process      # 198 tests (+ the K7 workflow world and its identity gate against docs/runs/K4-archive.log)
+cargo test --features metrics              # 106 tests (the default suite; the feature gates two optional deps and the metrics_scrape example)
 ```
 
 ## Dependencies
@@ -199,6 +201,7 @@ cargo test --features harness,process      # 198 tests (+ the K7 workflow world 
 - [catgraph-syntax](https://github.com/sustia-llc/catgraph) (tag `v0.23.0`, **optional**, feature `process`) — colored-syntax layer over the free-prop term surface for process-structured tasks; depends on catgraph + catgraph-applied + thiserror only, so no DeepCausality crate is in the dependency graph under any feature
 - ciborium 0.2 + sha2 0.11 (**optional**, feature `persistence`) — CBOR frames and SHA-256 chaining for the append-only event store
 - libp2p 0.57 (**optional**, feature `remote`) — TCP+noise+yamux `request-response` transport for the remote coalition-event gateway
+- metrics 0.24 + metrics-exporter-prometheus 0.18 (`http-listener` only) (**optional**, feature `metrics`) — the metrics facade and the Prometheus scrape listener used by `examples/metrics_scrape.rs`
 
 ## References
 

@@ -1,16 +1,16 @@
 [package]
 name = "koalisi"
-version = "0.35.0"
+version = "0.36.0"
 edition = "2024"
 # Declared floor 1.93.0 — owner decision C-D1 (2026-09-14): KEEP; do not lower
 # in passing. Edition 2024 means resolver 3, so this value also bounds
 # dependency resolution (`cargo update` selects versions compatible with it).
 # The measured floor is feature-conditional and lies below the declaration
-# (measured 2026-09-16 on the current lock):
-#   1.88  default, `magnitude`, `persistence`, `remote`, `process`, `harness`
-#         (1.87 fails on let-chains in the `catgraph 0.23.0` lib)
+# (measured 2026-09-17 on the current lock):
+#   1.88  default, `magnitude`, `persistence`, `remote`, `process`, `harness`,
+#         `metrics` (1.87 fails on let-chains in the `catgraph 0.23.0` lib)
 #   1.89  + `decision`, `magnitude-fast`, `decision,magnitude,process`
-#         (nalgebra 0.35 / safe_arch 1.0 / wide 1.5 declare 1.89)
+#         (nalgebra 0.35 / safe_arch 1.2 / wide 1.7 declare 1.89)
 #   1.92  + `durable` (1.91 fails to compile `diskann`)
 # To re-measure: set `rust-version` to 1.85.0 temporarily, run
 # `cargo +<v> check --all-targets --locked --features <set>` per feature set,
