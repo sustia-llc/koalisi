@@ -93,8 +93,8 @@ dependencies = [
 
 [[package]]
 name = "aif"
-version = "0.13.0"
-source = "git+https://github.com/sustia-llc/tira?tag=aif-v0.13.0#74c8b120f6da798d3d9d4d562332c3943ca9171f"
+version = "0.14.0"
+source = "git+https://github.com/sustia-llc/tira?tag=aif-v0.14.0#1d023034071c01fcbea75778002aa51a6476c28c"
 dependencies = [
  "nalgebra",
  "rand 0.10.2",

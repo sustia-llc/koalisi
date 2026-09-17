@@ -44,7 +44,7 @@ tokio-rayon = "2.1"
 # Optional: Active Inference decision strategy (expected free energy), the
 # engine crate from the `tira` repo. Feature `decision` off compiles none of it
 # nor nalgebra; `ThresholdPolicy` / `ValueCalculator` need neither.
-aif = { git = "https://github.com/sustia-llc/tira", tag = "aif-v0.13.0", optional = true }
+aif = { git = "https://github.com/sustia-llc/tira", tag = "aif-v0.14.0", optional = true }
 # The multimodal AIF bridge builds a `GenerativeModel` over `nalgebra::DMatrix`;
 # the version unifies with the one `aif` pulls. Only compiled under `decision`.
 nalgebra = { version = "0.35", optional = true }
