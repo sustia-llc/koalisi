@@ -91,7 +91,7 @@ touching anything with a frozen battery, a pinned decision, or a registered doc.
 
 ### Latest three
 
-- **K7 harness scaffold H0 + H1 — v0.35.0 (2026-09-16, #92)**: memo →
+- **K7 harness scaffold H0 + H1 — v0.35.0 (2026-09-16, #92, PR #93)**: memo →
   owner lock on #92 (six items, all as recommended) → code.
   `src/harness/workflow.rs` (needs `process`) is the Part 9/11 v2w world
   copied out of the frozen binary — `WorkflowSpec` (v2 prefix + roles +
