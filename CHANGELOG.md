@@ -95,7 +95,13 @@ change for any existing policy.
   `decision,magnitude`, `decision,magnitude,process` (1.88 refused by
   nalgebra 0.35 / safe_arch 1.0 / wide 1.5); 1.92 for `durable` (1.91 fails
   to compile). `rust-version = "1.93.0"` kept (C-D1).
-- `/code-review low`: no findings.
+- `/code-review low`, two passes: the first (implementation commits) no
+  findings; the second (whole branch) three — `redraw_cap = 0` behaved as
+  `1` (now `WorkflowError::ZeroRedrawCap`, the field documented as draws
+  including the first), `WorkflowResult::declined` was always `0`
+  (removed), and `Demand::from_steps` has no production caller yet
+  (kept: owner lock item 2 on [#92], the constructor a K7 arm needs to
+  rebuild the `Demand` from the hook's `steps`).
 
 [#92]: https://github.com/sustia-llc/koalisi/issues/92
 
