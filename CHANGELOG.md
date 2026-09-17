@@ -17,6 +17,45 @@ Planned work — issue-tracked (details in [`CLAUDE.md`](./CLAUDE.md)
   decision/belief streams (the `TaskOutcome` durable home), [#33] federation
   manifests + FAIR provenance.
 
+## [0.37.0] — 2026-09-17
+
+Dependency re-pin: `aif-v0.13.0` → `aif-v0.14.0`, on its own ahead of the
+`K7-1` registration
+([#90](https://github.com/sustia-llc/koalisi/issues/90)). No `src/` change.
+
+### Changed
+- **`aif` re-pinned `aif-v0.13.0` → `aif-v0.14.0`**, the pin its own commit.
+  The tag adds `aif::Topology` and `aif::RoutedAggregator` (tira #46, ext-6);
+  koalisi names neither (`rg -n 'RoutedAggregator|aif::Topology|aif::\{[^}]*Topology'
+  src/ examples/ tests/` prints nothing). `Cargo.lock` moves one
+  stanza: `aif` 0.13.0 → 0.14.0 (`git diff --numstat` on the pin commit: 2
+  insertions, 2 deletions in the lock).
+- `Cargo.toml` MSRV comment: `aif` 0.14 declares `rust-version` 1.89, so
+  under `decision` it joins nalgebra / safe_arch / wide in refusing 1.88.
+
+### Gates
+- Fourteen suites, identical per test binary on `main` (`372bf06` worktree)
+  and on the pinned tree (127 `test result` lines, `cmp` clean): 106 / 162 /
+  135 / 191 / 143 / 126 / 156 / 112, `process` 161,
+  `decision,magnitude,process` 241, `durable` 107, `harness` 126,
+  `harness,process` 198, `metrics` 106.
+- `cargo fmt --all -- --check` clean; clippy `--all-targets -- -D warnings`
+  clean at `--no-default-features`, default and thirteen feature lanes
+  including the frozen-binary lane; `cargo doc` with `-D warnings` clean at
+  default and thirteen feature sets.
+- **X-battery PASS on one serial run** of the frozen archive binary on the
+  pinned tree: 2129 lines, 122 raw differing lines against
+  `docs/runs/K4-archive.log`, 10 hunks after the latency-column strip, all
+  latency figures; all 33 verdict lines byte-identical (`cmp`). No drift.
+- MSRV tiers reproduced with `rust-version` temporarily at 1.85.0: 1.88 for
+  default, `magnitude`, `persistence`, `remote`, `process`, `harness`,
+  `harness,process`, `metrics` (1.87 fails on catgraph's let-chains); 1.89
+  for `decision`, `magnitude-fast`, `decision,magnitude,process` (1.88
+  refused by aif 0.14.0 / nalgebra 0.35.0 / safe_arch 1.2.0 / wide 1.7.1 on
+  the `decision` sets, by the latter three on `magnitude-fast`); 1.92 for
+  `durable` (1.91 fails to compile `diskann`). `rust-version = "1.93.0"`
+  kept (C-D1).
+
 ## [0.36.0] — 2026-09-17
 
 A Prometheus metrics example over the three runtime tap surfaces ([#25], as

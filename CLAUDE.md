@@ -83,14 +83,28 @@ in the sibling `biome` project.
 - Rust implementation is dispatched to the built-in `general-purpose` agent
   per `.claude/stack/agent-dispatch.md`; review is `/code-review low`.
 
-## Current state — 2026-09-17 (v0.36.0)
+## Current state — 2026-09-17 (v0.37.0)
 
-Full release ledger v0.4.0 → v0.36.0 is the `project-history.md` archive (§1).
+Full release ledger v0.4.0 → v0.37.0 is the `project-history.md` archive (§1).
 The three most recent entries are kept here in brief — read the ledger before
 touching anything with a frozen battery, a pinned decision, or a registered doc.
 
 ### Latest three
 
+- **`aif-v0.14.0` re-pin — v0.37.0 (2026-09-17, PR #95)**: `aif-v0.13.0` →
+  `aif-v0.14.0` (tira #46, ext-6: `aif::Topology` + `aif::RoutedAggregator`,
+  additive; koalisi names neither), the pin its own commit and the PR's
+  first; the lock moves the `aif` stanza alone. `cargo update -p aif` also
+  flipped `tempfile`'s ranged `getrandom` edge 0.4.3 → 0.3.4 (both versions
+  already locked; `surrealdb-core`-only) — reverted by hand, `--locked`
+  accepts the result. No `src/` change. Fourteen suites identical per test
+  binary on a `372bf06` worktree and on the pinned tree; fmt, clippy
+  (fifteen lanes) and doc (fourteen sets) clean; **X-battery PASS on one
+  serial run** (122 raw differing lines, 10 hunks after the column strip,
+  all latency; 33 verdict lines byte-identical) — no drift attributable to
+  the pin; MSRV tiers reproduced (1.88 / 1.89 / 1.92). `aif` 0.14 declares
+  `rust-version` 1.89, so the `decision` sets are now refused on 1.88 by
+  `aif` itself as well as by nalgebra / safe_arch / wide.
 - **Metrics example + lock refresh — v0.36.0 (2026-09-17, #25, PR #94)**: #25
   re-scoped by comment from the deleted `tick_bus`/`alert_bus` to the three
   tap surfaces, then feature `metrics` (off by default: optional `metrics`
@@ -137,19 +151,6 @@ touching anything with a frozen battery, a pinned decision, or a registered doc.
   criterion (gotcha 34's Path A noise; every non-latency line identical),
   the re-run reproduced all 33 verdict lines. Base-tree red fixed: two
   `persistence`-gated doc links in `remote.rs`. Review: no findings.
-- **Housekeeping re-pin + trim — v0.34.0 (2026-09-16, PR #91)**: `sha2`
-  0.10 → 0.11, `libp2p` 0.56 → 0.57, `surrealdb-types` 3.2.1 → 3.2.4, lock
-  refreshed (+22/−7 stanzas; `sha2`/`digest` 0.10 and 0.11 now coexist —
-  koalisi on 0.11, the surrealdb stack on 0.10). Whole tree rustfmt-clean
-  under rustfmt 1.9.0 (38 files, whitespace only, the frozen archive binary
-  included); 18 intra-doc links fixed so `cargo doc -D warnings` is green
-  at every feature set; `Cargo.toml`, this file and README trimmed to what
-  they state. **All twelve suites at baseline + `harness` 125; X-battery
-  PASS with zero non-latency diffs** (one serial run vs
-  `docs/runs/K4-archive.log`: 61 raw differing lines, 11 latency/timing
-  survivors after the column strip, all 33 verdict lines identical); MSRV
-  tiers unchanged on the new lock (1.88 / 1.89 / 1.92), `rust-version`
-  1.93 kept.
 
 ### Lineages, verdict trail, seed ledger, run protocol — `docs/`
 
@@ -189,7 +190,7 @@ flagging. Rust implementation is dispatched per
 
 ```
 koalisi/
-├── Cargo.toml                              git tag deps: catgraph-applied + catgraph-magnitude + catgraph-syntax v0.23.0 in lockstep (one checkout); aif-v0.13.0, surrealdb-live-message v0.2.1, libp2p 0.57, sha2 0.11, metrics 0.24 + metrics-exporter-prometheus 0.18 (optional); no path deps; declared MSRV 1.93 above the measured tiers 1.88/1.89/1.92 — owner decision C-D1: KEEP, gotcha 34
+├── Cargo.toml                              git tag deps: catgraph-applied + catgraph-magnitude + catgraph-syntax v0.23.0 in lockstep (one checkout); aif-v0.14.0, surrealdb-live-message v0.2.1, libp2p 0.57, sha2 0.11, metrics 0.24 + metrics-exporter-prometheus 0.18 (optional); no path deps; declared MSRV 1.93 above the measured tiers 1.88/1.89/1.92 — owner decision C-D1: KEEP, gotcha 34
 ├── README.md                               user-facing
 ├── CLAUDE.md                               THIS FILE
 ├── config/{default,development,test}.toml  coalition threshold, history capacity; [sdb]+[docker] for the durable feature's upstream SETTINGS (cwd-resolved)
@@ -692,8 +693,7 @@ What is still open:
   (ratified 2026-09-16; supersedes §3–§5 of the K7 round plan). Landed: the
   harness (v0.33.0), the K0 board corrections, tira's `aif-v0.14.0`, the H
   scaffold (v0.35.0, #92), M — the #25 metrics example + a lock refresh
-  (v0.36.0). Next in koalisi: C1 — the `aif-v0.14.0` re-pin PR (v0.37.0, pin-first,
-  one serial archive run diffed against `docs/runs/K4-archive.log`); then
+  (v0.36.0), C1 — the `aif-v0.14.0` re-pin (v0.37.0). Next in koalisi:
   C2 — the `K7-1` registration (v0.38.0: prereg `docs/k7/prereg-K7-1-<slug>.md`
   before code, `examples/k7/k7_1.rs`, seeds 90..120, in-battery controls
   `grp-role` / `grp-role-blind` on the H0 workflow world with Part 11 outcome
