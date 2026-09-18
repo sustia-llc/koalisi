@@ -83,13 +83,37 @@ in the sibling `biome` project.
 - Rust implementation is dispatched to the built-in `general-purpose` agent
   per `.claude/stack/agent-dispatch.md`; review is `/code-review low`.
 
-## Current state — 2026-09-18 (v0.40.0)
+## Current state — 2026-09-18 (v0.41.0)
 
-Full release ledger v0.4.0 → v0.40.0 is the `project-history.md` archive (§1).
+Full release ledger v0.4.0 → v0.41.0 is the `project-history.md` archive (§1).
 The three most recent entries are kept here in brief — read the ledger before
 touching anything with a frozen battery, a pinned decision, or a registered doc.
 
 ### Latest three
+
+- **`K7-3` scaffold — v0.41.0 (2026-09-18, #100 lock part 1)**: a
+  performance-scored outcome beside the coverage-scored one; no registration,
+  no run. `WorkflowResult::performance_scored: Option<PerformanceScored>`
+  (`success_rate`, `mean_cov_eff`, `primary`) is `Some` iff the instance
+  carries a performance draw — **keyed on the draw, not on `OutcomeSignal`**,
+  so a cell that reads `RoleCoverage` (or nothing, like `ref-prune`) is scored
+  on the same draw as one that reads `Both`. A distinct demanded step counts
+  iff a final member of its role holds the bit and performed on the task.
+  `recon`: `TaskEnd::performed` + `performed_success()` /
+  `performed_cov_eff()`, `Recon::performance_scored` (shares
+  `PerformanceScored::from_sums` with the harness loop, so the two are
+  bitwise equal), pub `step_covered_performed`; a missing row or an index
+  outside a row did not perform. `PerformanceShape` is now returned under
+  every signal. `WorkflowSpec::default().performance` stays `None`.
+  Identity gate: `tests/harness_workflow.rs` + `tests/k7_group_host.rs`
+  unedited and green; nextest `e09fffb` → scaffold `harness,process` 212 →
+  223, `harness,decision,process` 307 → 318. **X-battery NOT RUN** (K7-2
+  prereg §5's condition: the diff is `src/harness/` + koalisi's own version
+  lines). The scaffold's failure messages printed `RefPrune` / always-join
+  values on off-block seed 7000 under the unit tests' `perf_spec()` (0.7 /
+  0.05 / 0.40) — part 2 of the lock names it if those values are chosen.
+  Suites `harness,process` 226, `harness,decision,process` 321, rest
+  untouched.
 
 - **`K7-2` — v0.40.0 (2026-09-18, #97, PR #99)**: `query_novelty` on against off on
   K7-1's routed group `grp-topo` — **`FALSIFIED (novelty moves the outcome)`**,
@@ -129,31 +153,7 @@ touching anything with a frozen battery, a pinned decision, or a registered doc.
   passes. **The MSRV gate changed here (owner)**: verify the declared
   1.93.0 on the sets a change reaches; the tier re-measurement is retired
   (gotcha 34).
-- **`K7-1` — v0.38.0 (2026-09-17, #90, PR #96)**: topology-routed group
-  voting (tira ext-6) vs the candidate-blind group —
-  **`VALIDATED (topology-routed group)`**, `grp-topo` 0.4258 vs in-battery
-  `grp-role` 0.1764 = 2.4144×, 30/30, seeds 90..120, every gate PASS.
-  Owner calls before the prereg: candidate-star adjacency at λ = ½, bar
-  1.25× / ≥ 18-of-30. `GroupAifConfig::routing: VoteRouting` (`Off` default
-  = the old code path; `CandidateStar { lambda }` wraps the active slot in
-  `aif::RoutedAggregator` over a per-decision `aif::Topology`);
-  `GroupAifPolicy` implements the H1 trait hooks; `harness::TracedPolicy`;
-  `examples/k7/k7_1.rs` (eight cells, six in-binary gates, `K7_1_SEEDS`
-  off-block smoke refusing `0..480`); `tests/k7_group_host.rs` (X-host:
-  hosted `grp-role` / `-blind` on 330..360 reproduce
-  `docs/runs/K4-archive.log:2032`/`:2036`/`:2071`). Three pre-run
-  amendments; the 3-lens review's modelling lens measured off-block what
-  the run then confirmed: **`grp-topo`'s final member sets equal an
-  engine-free redundancy prune's on 598 of 600 tasks** (`ref-prune`,
-  registered non-gating by A2.2), the candidate's own role query alone
-  decides every centre-present read (E-follow 9370 of 9370; λ = 1 differs on
-  0 acts), and the control loses on SUCCESS — 0 of 159 roster-3 tasks,
-  *leave / roster 3 / centre declines / 2 blind act votes* evicts on 607 of
-  607. The effect was seen off-block before the run (five smoke blocks,
-  1.89–2.61×); report ledger item 1. X-battery PASS on the second of two
-  serial runs (gotcha 34 again); suites dmp 249, `harness` 129,
-  `harness,process` 201, new `harness,decision,process` 291, rest
-  unchanged; MSRV probed on the changed sets only (owner: skip the rest).
+
 ### Lineages, verdict trail, seed ledger, run protocol — `docs/`
 
 Since v0.33.0 these live in the public repo: **`docs/README.md`** carries the
@@ -183,8 +183,8 @@ flagging. Rust implementation is dispatched per
 | `--features decision,magnitude,process` | 249 (the Part 9 + Part 10 + Part 11 batteries; +8 K7-1 routing / hook / ledger pins) | `cargo test --features decision,magnitude,process` |
 | `--features durable` | 107 (+1 container-backed restart test; needs Docker) | `cargo test --features durable` |
 | `--features harness` | 129 (+20 K7 harness unit tests incl. the H1 hook order pin; +3 `TracedPolicy`) | `cargo test --features harness` |
-| `--features harness,process` | 215 (+ the H0 workflow world: 13 unit tests, the identity gate `tests/harness_workflow.rs` against `docs/runs/K4-archive.log` + the 150..180 generate check; v0.40.0: +13 `harness::recon` unit tests) | `cargo test --features harness,process` |
-| `--features harness,decision,process` | 310 (the K7 lane: the above + the group arm + `tests/k7_group_host.rs` — 3 X-host tests on 330..360, 2 X-carry tests on 90..120, ~75 s in debug — + the 2-test S-nov fixture `tests/k7_2_novelty.rs`; `k7_2`'s own 7 unit tests run with `--example k7_2`) | `cargo test --features harness,decision,process` |
+| `--features harness,process` | 226 (+ the H0 workflow world: 13 unit tests, the identity gate `tests/harness_workflow.rs` against `docs/runs/K4-archive.log` + the 150..180 generate check; v0.40.0: +13 `harness::recon` unit tests; v0.41.0: +11 performance-scored unit tests, 6 in `workflow.rs`, 5 in `recon.rs`) | `cargo test --features harness,process` |
+| `--features harness,decision,process` | 321 (the K7 lane: the above + the group arm + `tests/k7_group_host.rs` — 3 X-host tests on 330..360, 2 X-carry tests on 90..120, ~75 s in debug — + the 2-test S-nov fixture `tests/k7_2_novelty.rs`; `k7_2`'s own 7 unit tests run with `--example k7_2`) | `cargo test --features harness,decision,process` |
 | `--features metrics` | 106 (the default suite; the feature gates two optional deps and `examples/metrics_scrape.rs`) | `cargo test --features metrics` |
 | All examples | exit 0 | see Reproducers below |
 | Lint + docs | clean | `cargo fmt --check`; `cargo clippy --all-targets -- -D warnings` per feature set; `RUSTDOCFLAGS='-D warnings' cargo doc --no-deps` at every feature (green since v0.34.0) |
@@ -223,7 +223,7 @@ koalisi/
 │   │   ├── dcvc.rs                         DCVCDistributor, WorkloadShare
 │   │   ├── aipa.rs                         Integer partitions, bounds, best-partition + 10 unit tests
 │   │   └── population.rs                   P5.2 (#42): population coalition-structure search atop AIPA (SplitMix64 PSO, gbest lineage) + record_trajectory (always compiled, no deps)
-│   ├── harness/                            v0.33.0: the K7 harness (feature `harness`, no deps) — rng.rs (SplitMix64, permutation, distinct_bits), instance.rs (InstanceSpec → Instance over CapabilityAgent; `draw(&mut rng)` since v0.35.0), battery.rs (SeedRange, Arm, run_instance — calls the H1 hooks once per task — run_battery, FLAT_SIGNAL_WIDTH), report.rs (percentile, median_iqr, superior_count, tables, Verdict), workflow.rs (v0.35.0, needs `process`: WorkflowSpec/PerformanceSpec → WorkflowInstance/WorkflowTask, OutcomeSignal, WorkflowArm, run_workflow_instance, run_workflow_battery — the Part 9/11 v2w world copied out of the frozen binary), trace.rs (v0.38.0: TracedPolicy — forwards all four trait methods, records (leave, act, score bits) per decision), recon.rs (v0.40.0, needs `process`: reconstruct — arrival orders + trace → per-task final member sets, PRIMARY, churn — TaskEnd, Recon, ReconError, step_covered, member_set_identity, RosterRow + roster_decomposition, and the engine-free reference policies RefPrune / RefFirst / RefKeep; promoted out of k7_1.rs, which is untouched); registrations are examples, never here
+│   ├── harness/                            v0.33.0: the K7 harness (feature `harness`, no deps) — rng.rs (SplitMix64, permutation, distinct_bits), instance.rs (InstanceSpec → Instance over CapabilityAgent; `draw(&mut rng)` since v0.35.0), battery.rs (SeedRange, Arm, run_instance — calls the H1 hooks once per task — run_battery, FLAT_SIGNAL_WIDTH), report.rs (percentile, median_iqr, superior_count, tables, Verdict), workflow.rs (v0.35.0, needs `process`: WorkflowSpec/PerformanceSpec → WorkflowInstance/WorkflowTask, OutcomeSignal, WorkflowArm, run_workflow_instance, run_workflow_battery — the Part 9/11 v2w world copied out of the frozen binary; v0.41.0: PerformanceScored + WorkflowResult::performance_scored, Some iff the instance carries a performance draw, under any signal), trace.rs (v0.38.0: TracedPolicy — forwards all four trait methods, records (leave, act, score bits) per decision), recon.rs (v0.40.0, needs `process`: reconstruct — arrival orders + trace → per-task final member sets, PRIMARY, churn — TaskEnd, Recon, ReconError, step_covered, member_set_identity, RosterRow + roster_decomposition, and the engine-free reference policies RefPrune / RefFirst / RefKeep; promoted out of k7_1.rs, which is untouched; v0.41.0: TaskEnd::performed + performed_success / performed_cov_eff, Recon::performance_scored, step_covered_performed); registrations are examples, never here
 │   ├── decision/
 │   │   ├── mod.rs                          CoalitionDecisionPolicy (+ the v0.35.0 default no-op lifecycle hooks begin_task(&TaskStart) / observe_outcome(required, &[bool])) + ThresholdPolicy (always compiled)
 │   │   ├── aif_policy.rs                   AifDecisionPolicy + EfeValueCalculator (feature `decision`)
@@ -690,10 +690,10 @@ cargo run --release --manifest-path Cargo.toml --target-dir /tmp/koalisi-target 
 
 # === with harness feature (K7 skeleton v0.33.0; workflow world + lifecycle hook v0.35.0) ===
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features harness
-timeout 300s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features harness,process   # 215, incl. the H0 identity gate
+timeout 300s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features harness,process   # 226, incl. the H0 identity gate
 timeout 60s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features harness --example gauntlet
 
-# === K7-1 / K7-2 (features harness,decision,process, 310 tests incl. X-host, X-carry, S-nov) ===
+# === K7-1 / K7-2 (features harness,decision,process, 321 tests incl. X-host, X-carry, S-nov) ===
 timeout 600s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features harness,decision,process
 timeout 300s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features harness,decision,process --example k7_2   # k7_2's own 7 unit tests (guards, mask mirror vs ledger on 90..93)
 # K7-2's run of record is docs/runs/K7-2.log; the registered block refuses on any build but 0.40.0. Smoke (gate lines only, no cell value):
@@ -738,20 +738,21 @@ What is still open:
   (v0.36.0), C1 — the `aif-v0.14.0` re-pin (v0.37.0), C2 — `K7-1`
   (v0.38.0, `VALIDATED (topology-routed group)`), the
   `surrealdb-live-message` `v0.2.2` re-pin (v0.39.0), G-1 — `K7-2`
-  (v0.40.0, #97, `FALSIFIED (novelty moves the outcome)`). **Next: `K7-3`,
-  the registration that moves the WORLD — part 1 of its lock is on
+  (v0.40.0, #97, `FALSIFIED (novelty moves the outcome)`), the `K7-3`
+  harness scaffold (v0.41.0, `WorkflowResult::performance_scored`). **Next:
+  `K7-3`, the registration that moves the WORLD — part 1 of its lock is on
   [#100](https://github.com/sustia-llc/koalisi/issues/100)**, seeds 540..570.
   K7-2's continuation was re-keyed pre-run (prereg A3.7, owner) on
   `grp-topo`'s H-dead leg, which passed (600 of 600 tasks ≡ `ref-prune`).
-  **It starts with a harness scaffold, its own PR:** `OutcomeSignal` reaches
-  only the `per_bit` vector fed to `observe_outcome`
-  (`src/harness/workflow.rs:612-639`); PRIMARY is scored from coverage alone
-  (`:593-608`), so under `Performance` / `Both` as shipped `ref-prune` cannot
-  lose. The scaffold adds a performance-scored outcome (a step counts iff its
-  covering member of the step's role performed), identity-gated by the
-  existing H0 / X-host / X-carry tests; part 2 of the lock (cells,
-  `PerformanceSpec` values, signal, control) is posted on #100 after it
-  lands, before the prereg. **Any novelty contrast on that world inherits
+  **Part 2 of the lock (owner, on #100) comes before the prereg:** the cells,
+  the `PerformanceSpec` values, the signal the learning arm reads, the
+  control. Two facts it rests on: the group arm's query takes coverage masks
+  and no agent identity (`role_query(required_r, cfg0, cfg1, …)`,
+  `src/decision/group_policy.rs`), and its models observe per role a per-BIT
+  vector — so the arm can learn that a bit fails, not WHO fails; and under
+  #100's predicate a redundant covering member raises success and lowers
+  `cov_eff`, the opposite of K4 Scope B (*all final members performed*).
+  **Any novelty contrast on that world inherits
   K7-2's mechanism** (an identical-mask query follows its replay window once
   the term is gone; a FAILURE in the window flips the sign) — read
   `docs/k7/ab-report-K7-2-novelty-routed-group.md` §3 first. **Numbering

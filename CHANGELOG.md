@@ -17,6 +17,52 @@ Planned work — issue-tracked (details in [`CLAUDE.md`](./CLAUDE.md)
   decision/belief streams (the `TaskOutcome` durable home), [#33] federation
   manifests + FAIR provenance.
 
+## [0.41.0] — 2026-09-18
+
+The harness scaffold for `K7-3`
+([#100](https://github.com/sustia-llc/koalisi/issues/100), design-lock part
+1): a performance-scored outcome beside the coverage-scored one. No
+registration, no run.
+
+### Added
+- **`harness::PerformanceScored`** (`success_rate`, `mean_cov_eff`, `primary`)
+  and **`WorkflowResult::performance_scored: Option<PerformanceScored>`**
+  (features `harness` + `process`). `run_workflow_instance` fills it iff the
+  instance carries a performance draw, under any `OutcomeSignal`: a distinct
+  demanded `(bit, role)` step counts iff a final member of its role holds the
+  bit and performed on the task; success, coverage efficiency and PRIMARY are
+  formed from that count as the coverage-scored fields are from theirs.
+  Without a draw it is `None`.
+- **`src/harness/recon.rs`**: `TaskEnd::performed: Option<usize>` with
+  `performed_success()` / `performed_cov_eff()`, `Recon::performance_scored`,
+  and pub `step_covered_performed`. A task without a row, and an agent index
+  outside a row, did not perform.
+
+### Changed
+- `run_workflow_instance` returns `WorkflowError::PerformanceShape` for a
+  misshapen draw under every signal (before: under `Performance` / `Both`
+  only).
+
+### Gates
+- **Identity.** `tests/harness_workflow.rs` and `tests/k7_group_host.rs` are
+  unedited (`git diff --name-only v0.40.0..HEAD -- tests examples` prints
+  nothing) and pass. `cargo nextest run`, pre-scaffold tree `e09fffb` →
+  scaffold tree: `harness,process` 212 → 223, `harness,decision,process`
+  307 → 318, 0 failed on either side; the 11 added tests are the scaffold's
+  unit tests. `cargo test --features harness,decision,process --example k7_2`
+  7 passed.
+- **X-battery was not run**, by K7-2's prereg §5 condition. `git diff
+  --name-only v0.40.0..HEAD -- src Cargo.toml Cargo.lock` prints `Cargo.lock`,
+  `Cargo.toml`, `src/harness/mod.rs`, `src/harness/recon.rs`,
+  `src/harness/workflow.rs`; the manifest and lock hunks are koalisi's own
+  `version` line; `rg -c 'koalisi::harness|harness::'
+  examples/strategy_comparison.rs` matches nothing.
+- Suites by `cargo test`: `harness,process` 226, `harness,decision,process`
+  321. `cargo clippy --all-targets -- -D warnings` on default, `harness`,
+  `harness,process`, `harness,decision,process`; `RUSTDOCFLAGS='-D warnings'
+  cargo doc --no-deps --features harness,decision,process`; `cargo fmt --all
+  -- --check`.
+
 ## [0.40.0] — 2026-09-18
 
 `K7-2`, the second registration of the K7 lineage

@@ -40,7 +40,7 @@ from temporal hypergraph topology to coalition formation algorithms to
 | `ingest` | Domain-neutral ingestion (K5): `Sample`/`DataSource` traits, generic `SampleMonitor<S>`, `Pacing` + `pump_source`, synthetic NEST-shaped multi-resolution and tauhokohoko-shaped sensor-event fixture sources (seeded, no credentials) |
 | `decision` | `CoalitionDecisionPolicy` trait + always-available `ThresholdPolicy`; optional Active Inference strategy (`EfeValueCalculator`, `AifDecisionPolicy`) behind the `decision` feature; optional categorical-magnitude strategy (`MagnitudeValueCalculator`, `MagnitudePolicy`) behind the `magnitude` feature |
 | `persistence` | Append-only event store (feature `persistence`): hash-chained streams, CBOR frame log (`FileEventStore`), crash-tail recovery, writer task; topology events tap in and replay back into a fresh `EventLog` all queries run on unchanged (P7.1 + P7.2) — see `.claude/docs/phase7-persistence-design.md` |
-| `harness` | The K7 A/B harness (feature `harness`): seeded instance generation, the battery loop (bootstrap join, policy-gated arrivals, one leave sweep), per-seed metrics, report helpers — the plumbing every K7 registration shares; with `process`, the workflow world (`WorkflowSpec`: per-agent roles, per-task declared `Demand`, role-matched step coverage, an optional performance draw) and the per-task lifecycle hook every policy can observe (`begin_task` / `observe_outcome`) |
+| `harness` | The K7 A/B harness (feature `harness`): seeded instance generation, the battery loop (bootstrap join, policy-gated arrivals, one leave sweep), per-seed metrics, report helpers — the plumbing every K7 registration shares; with `process`, the workflow world (`WorkflowSpec`: per-agent roles, per-task declared `Demand`, role-matched step coverage, an optional performance draw and, where an instance carries one, a performance-scored outcome beside the coverage-scored one) and the per-task lifecycle hook every policy can observe (`begin_task` / `observe_outcome`) |
 | `subsystems` | `CoalitionService` — the policy-gated coalition-membership seam (join/leave consult a `CoalitionDecisionPolicy` before mutating the hypergraph) — plus a decision-tap tee (`spawn_decision_tee`), an optional durable decision log (`durable`), and an optional libp2p remote coalition-event gateway (`remote`: bounded buffer, cursor polling, stable `RemoteCoalitionEventV1` wire schema) |
 
 ## Quick start
@@ -190,8 +190,8 @@ cargo test --features process              # 161 tests (+ process-structured wor
 cargo test --features decision,magnitude,process # 249 tests (the full A/B battery surface)
 cargo test --features durable              # 107 tests (+ container-backed restart-durability test; needs Docker)
 cargo test --features harness              # 129 tests (+ the K7 harness: rng, instance generation, battery loop, lifecycle hook, decision trace, report helpers)
-cargo test --features harness,process      # 215 tests (+ the K7 workflow world and its identity gate against docs/runs/K4-archive.log; trace reconstruction and the engine-free reference policies)
-cargo test --features harness,decision,process # 310 tests (+ the group arm hosted on the harness, its identity gates against docs/runs/K4-archive.log and docs/runs/K7-1.log, the novelty fixture)
+cargo test --features harness,process      # 226 tests (+ the K7 workflow world and its identity gate against docs/runs/K4-archive.log; trace reconstruction and the engine-free reference policies; the performance-scored outcome)
+cargo test --features harness,decision,process # 321 tests (+ the group arm hosted on the harness, its identity gates against docs/runs/K4-archive.log and docs/runs/K7-1.log, the novelty fixture)
 cargo test --features metrics              # 106 tests (the default suite; the feature gates two optional deps and the metrics_scrape example)
 ```
 
