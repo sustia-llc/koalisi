@@ -535,3 +535,62 @@ novelty on. A `RUN-INVALID` carries no continuation.
   harness misalignment, and the hand-value test in `src/harness/recon.rs` is
   the independent pin. The gates' configurations are equal to §3's by value;
   no assertion ties them (`GroupAifConfig` derives no `PartialEq`).
+
+## Amendment 4 (pre-run, 2026-09-18) — A3.1's ledger, continued; how `85ef81b` reads Amendment 3
+
+No seed in 150..180 has run. Nothing registered changes. `git diff -U0
+83d2d2d..85ef81b -- examples/k7/k7_2.rs` changes no line naming `BAR_RATIO`,
+`BAR_SEEDS`, `DEAD_TASKS`, `DEAD_SEEDS`, a label string's definition,
+`ratio_ok`, `superior_ok`, `pass` or `criterion`; its `LABEL_*` hunks are the
+deleted unreachable reading (A3.6) and the reading renderer.
+
+### A4.1 — executions by the implementer of `85ef81b` (its report)
+
+| # | environment | tree | output |
+|---|---|---|---|
+| 15 | `K7_2_SEEDS=6000..6003` | pre-commit | gates PASS 3/3 on seven cells; fixed smoke line; `VERDICT: SMOKE (no verdict)` |
+| 16 | same | copy, a reconstruction error forced on `ref-keep` | header; `X-recon — FAIL`, `ref-keep` 0/3, the rest 3/3; `VERDICT: RUN-INVALID` |
+| 17 | same | copy, X-recon comparing `primary + 1.0` | `X-recon — FAIL`, 0/3 on all seven |
+| 18–22 | `K7_2_OFFICIAL=1` on a `0.39.0` build; `K7_2_OFFICIAL=1` with `K7_2_SEEDS`; neither; `K7_2_SEED=…`; `K7_1_SEEDS=…` with `K7_2_SEEDS` | final source | refused, exit 2, no header; no instance generated |
+| 23 | `K7_2_SEEDS=6000..6003` | final source | gates PASS 3/3; `VERDICT: SMOKE (no verdict)` |
+| 24 | `K7_2_SEEDS=6000..6030` | final source | gates PASS 30/30; `VERDICT: SMOKE (no verdict)` |
+
+No byte count or other value-derived line was printed in runs 15–24. Test-side
+hosting was on consumed blocks: X-carry on 90..120, and the example's own
+mirror test, which hosts `grp-topo` and `grp-role` on 90..93 and, once
+falsified in a copy, printed `grp-topo`'s leave-query counts for seed 90.
+
+### A4.2 — readings of Amendment 3 the binary makes
+
+- **Guards.** Checked in the order: a foreign `K7_` name, neither variable,
+  both, the smoke value, `K7_2_OFFICIAL`'s value (anything but `1` refuses),
+  the version. Every refusal exits 2 before the header. `K7_WRITE_FIXTURE` is
+  a `K7_` name and refuses too. The header prints before instance generation.
+- **A reconstruction error** fails X-recon for that cell and seed; the verdict
+  is `RUN-INVALID` and the report then holds the gate detail and the arms
+  table only. A cell that fails to **run** still exits without a `VERDICT:`
+  line (§6 label 1's second limb); under smoke its error text is not printed.
+- **Clauses 6 and 7** are rendered inside label 5's and label 4's reading.
+  Clause 6 is emitted once per direction whose other median is ≤ 0. Clause 5b
+  says *"That bucket is not strictly the largest of the four"* when it is not;
+  5c names which of `grp-topo-nonov`'s two conjuncts passed.
+- **A3.3's readings** use H-dead's task rounding (95 %, rounded up) and print
+  *"the reading does not apply"* below it. Label 5's reading names the
+  *against `ref-prune`* table, as §6 wrote it; the report quotes all three.
+- **Task 0 against tasks ≥ 1** is rendered for all seven cells; act rates from
+  the trace, success and final size from the reconstruction. **The first
+  divergence's task index** is read from the novelty-on cell's replay; pooled
+  is seeds per task index.
+- **The four-class table** takes the act from the trace entry, over every
+  centre-present trace read. *On-roster* is "the role had required bits in the
+  task"; the window keeps that role's last two on-roster tasks; the per-bit
+  outcome is computed as `run_workflow_instance` computes it. A mismatching
+  seed withholds both of the cell's rows and prints the mirror's and the
+  ledger's `(queries, identical)` pairs.
+- **X-carry's roster pin** also carries the log's seventh column (final
+  members whose role has no demand).
+- The header names Amendments 1–4; the string changes in this amendment's
+  commit and nothing else in the binary does.
+- The example's seven unit tests (guards, the hand replay, the mirror against
+  the ledger on 90..93, the withhold path) run with `cargo test --features
+  harness,decision,process --example k7_2`; §9's gate list gains that command.

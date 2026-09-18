@@ -1,6 +1,6 @@
 //! K7-2 — `query_novelty` on against off on the topology-routed group, as
 //! registered in `docs/k7/prereg-K7-2-novelty-routed-group.md` (Amendments
-//! 1–3 included): four `GroupAifPolicy` cells and the `ref-prune`,
+//! 1–4 included): four `GroupAifPolicy` cells and the `ref-prune`,
 //! `ref-first` and `ref-keep` reference cells over `WorkflowSpec::default()`
 //! with `OutcomeSignal::RoleCoverage`, one fresh policy per seed, the header
 //! printed before any cell runs, every gate computed before the report is
@@ -1199,7 +1199,7 @@ fn render_header(
         writeln!(out)?;
     }
     writeln!(out, "- registration: K7-2 (koalisi #97)")?;
-    writeln!(out, "- prereg: `{PREREG}` (Amendments 1–3 included)")?;
+    writeln!(out, "- prereg: `{PREREG}` (Amendments 1–4 included)")?;
     writeln!(out, "- koalisi: v{}", env!("CARGO_PKG_VERSION"))?;
     writeln!(out, "- seeds: {seeds} ({} seeds)", seeds.len())?;
     writeln!(out, "- outcome signal: {SIGNAL:?}")?;
