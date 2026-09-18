@@ -15,7 +15,7 @@ use crate::decision::{CoalitionDecisionPolicy, Decision, DecisionContext, TaskSt
 use crate::process::{Role, Step};
 
 use super::trace::TraceEntry;
-use super::workflow::WorkflowInstance;
+use super::workflow::{PerformanceScored, WorkflowInstance};
 
 /// One task's end state, reconstructed from the arrival order and the trace.
 #[derive(Debug, Clone, PartialEq)]
@@ -26,6 +26,10 @@ pub struct TaskEnd {
     pub steps: usize,
     /// Of `steps`, those covered by a final member of the step's role.
     pub covered: usize,
+    /// Of `steps`, those covered by a final member of the step's role who
+    /// holds the bit and performed on the task; `None` when the instance
+    /// carries no performance draw.
+    pub performed: Option<usize>,
     /// Final members, ascending agent id.
     pub members: Vec<usize>,
     /// Final members whose role has no step in the task's demand.
@@ -51,10 +55,31 @@ impl TaskEnd {
             self.covered as f64 / self.steps as f64
         }
     }
+
+    /// `true` iff the demand is non-empty and every distinct step is
+    /// performed; `None` when `performed` is.
+    #[must_use]
+    pub fn performed_success(&self) -> Option<bool> {
+        self.performed
+            .map(|performed| self.steps > 0 && performed == self.steps)
+    }
+
+    /// `performed / steps` divided by the final member count, `0` for an
+    /// empty coalition or an empty demand; `None` when `performed` is.
+    #[must_use]
+    pub fn performed_cov_eff(&self) -> Option<f64> {
+        self.performed.map(|performed| {
+            if self.members.is_empty() || self.steps == 0 {
+                0.0
+            } else {
+                (performed as f64 / self.steps as f64) / self.members.len() as f64
+            }
+        })
+    }
 }
 
-/// One instance's reconstructed task ends, with PRIMARY and churn recomputed
-/// from them.
+/// One instance's reconstructed task ends, with PRIMARY, churn and the
+/// performance-scored metrics recomputed from them.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Recon {
     /// One end state per task, in task order.
@@ -64,6 +89,10 @@ pub struct Recon {
     pub primary: f64,
     /// Leave entries that acted, summed over tasks.
     pub churn: usize,
+    /// The success rate, mean efficiency and PRIMARY of `tasks` by
+    /// [`TaskEnd::performed_success`] and [`TaskEnd::performed_cov_eff`];
+    /// `None` when the instance carries no performance draw.
+    pub performance_scored: Option<PerformanceScored>,
 }
 
 /// Why a trace does not replay over an instance.
@@ -141,11 +170,37 @@ pub fn step_covered(inst: &WorkflowInstance, members: &[usize], step: Step) -> b
     })
 }
 
+/// Whether some agent index `i` in `members` has role `step.role` in `inst`,
+/// holds `step.bit` and has `row[i]` set. An index outside `inst.roles` or
+/// outside `row`, and a bit at or above 32, cover nothing.
+#[must_use]
+pub fn step_covered_performed(
+    inst: &WorkflowInstance,
+    members: &[usize],
+    step: Step,
+    row: &[bool],
+) -> bool {
+    let Some(mask) = step.capability_mask() else {
+        return false;
+    };
+    members.iter().any(|&i| {
+        inst.roles.get(i).is_some_and(|&r| r == step.role)
+            && inst
+                .agents
+                .get(i)
+                .is_some_and(|a| a.capabilities() & mask != 0)
+            && row.get(i).copied().unwrap_or(false)
+    })
+}
+
 /// Replay `trace` over `inst` in the order `run_workflow_instance` calls a
 /// policy: per task the first arrival joins, each later arrival consumes one
 /// join entry and joins iff it acted, then each arrival that is a member
 /// consumes one leave entry, in arrival order, and leaves iff it acted. Each
-/// task's end state is scored as `run_workflow_instance` scores it.
+/// task's end state is scored as `run_workflow_instance` scores it; when
+/// `inst` carries a performance draw the end states are also
+/// performance-scored against row `t` of the draw for task `t`, a task
+/// without a row counting as nobody having performed.
 ///
 /// # Errors
 ///
@@ -210,6 +265,13 @@ pub fn reconstruct(inst: &WorkflowInstance, trace: &[TraceEntry]) -> Result<Reco
             success_count += 1;
         }
         cov_eff_sum += cov_eff;
+        let performed = inst.performance.as_ref().map(|rows| {
+            let row = rows.get(t).map_or(&[][..], Vec::as_slice);
+            task.demand
+                .distinct()
+                .filter(|&s| step_covered_performed(inst, &members, s, row))
+                .count()
+        });
 
         let mut demanded: Vec<Role> = task.demand.distinct().map(|s| s.role).collect();
         demanded.sort_unstable_by_key(|r| r.index());
@@ -223,6 +285,7 @@ pub fn reconstruct(inst: &WorkflowInstance, trace: &[TraceEntry]) -> Result<Reco
             roster: demanded.len(),
             steps,
             covered,
+            performed,
             members,
             off_demand,
             cov_eff,
@@ -245,10 +308,20 @@ pub fn reconstruct(inst: &WorkflowInstance, trace: &[TraceEntry]) -> Result<Reco
             cov_eff_sum / n_tasks as f64,
         )
     };
+    let performance_scored = inst.performance.as_ref().map(|_| {
+        let mut successes = 0usize;
+        let mut performed_cov_eff_sum = 0.0f64;
+        for end in &tasks {
+            successes += usize::from(end.performed_success() == Some(true));
+            performed_cov_eff_sum += end.performed_cov_eff().unwrap_or(0.0);
+        }
+        PerformanceScored::from_sums(successes, performed_cov_eff_sum, n_tasks)
+    });
     Ok(Recon {
         tasks,
         primary: success_rate * mean_cov_eff,
         churn,
+        performance_scored,
     })
 }
 
@@ -508,7 +581,9 @@ mod tests {
     use super::*;
     use crate::algorithms::CapabilityAgent;
     use crate::harness::trace::TracedPolicy;
-    use crate::harness::workflow::{OutcomeSignal, WorkflowTask, run_workflow_instance};
+    use crate::harness::workflow::{
+        OutcomeSignal, PerformanceSpec, WorkflowSpec, WorkflowTask, run_workflow_instance,
+    };
     use crate::process::{StaffingTable, WorkflowGen, chain, demand, step_expr};
 
     const SEED: u64 = 7;
@@ -686,6 +761,7 @@ mod tests {
                     roster: 2,
                     steps: 3,
                     covered: 2,
+                    performed: None,
                     members: vec![1, 3],
                     off_demand: 1,
                     cov_eff: (2.0 / 3.0) / 2.0,
@@ -694,6 +770,7 @@ mod tests {
                     roster: 2,
                     steps: 2,
                     covered: 2,
+                    performed: None,
                     members: vec![1, 3],
                     off_demand: 0,
                     cov_eff: 0.5,
@@ -702,6 +779,13 @@ mod tests {
         );
         assert!(!recon.tasks[0].success());
         assert!(recon.tasks[1].success());
+        assert_eq!(recon.performance_scored, None, "the instance has no draw");
+        for end in &recon.tasks {
+            assert_eq!(
+                (end.performed_success(), end.performed_cov_eff()),
+                (None, None)
+            );
+        }
         assert_eq!(recon.tasks[0].covered_fraction(), 2.0 / 3.0);
         assert_eq!(recon.tasks[1].covered_fraction(), 1.0);
         // Success rate 1/2, mean cov_eff (1/3 + 1/2) / 2 = 5/12, PRIMARY 5/24.
@@ -837,6 +921,275 @@ mod tests {
         assert!(
             !step_covered(&inst, &[9], Step::new(2, r1)),
             "index 9 is outside the pool"
+        );
+    }
+
+    #[test]
+    fn step_covered_performed_needs_the_role_the_bit_and_the_row_entry() {
+        let inst = two_task_instance();
+        let (r0, r1) = (Role::new(0), Role::new(1));
+        let only = |i: usize| -> Vec<bool> { (0..4).map(|k| k == i).collect() };
+        assert!(step_covered_performed(
+            &inst,
+            &[2],
+            Step::new(2, r1),
+            &only(2)
+        ));
+        assert!(
+            !step_covered_performed(&inst, &[2], Step::new(2, r1), &only(3)),
+            "agent 2 covers and did not perform"
+        );
+        assert!(
+            step_covered_performed(&inst, &[0, 1], Step::new(0, r0), &only(1)),
+            "two coverers, agent 1 performed"
+        );
+        assert!(
+            !step_covered_performed(&inst, &[0, 1], Step::new(1, r0), &only(0)),
+            "agent 0 performed and does not hold bit 1"
+        );
+        assert!(
+            !step_covered_performed(&inst, &[3], Step::new(2, r1), &[true; 4]),
+            "agent 3 performed and holds bit 2 at role 2"
+        );
+        assert!(!step_covered_performed(
+            &inst,
+            &[],
+            Step::new(2, r1),
+            &[true; 4]
+        ));
+        assert!(
+            !step_covered_performed(&inst, &[9], Step::new(2, r1), &[true; 16]),
+            "index 9 is outside the pool"
+        );
+        assert!(
+            !step_covered_performed(&inst, &[2], Step::new(2, r1), &[true, true]),
+            "index 2 is outside the row"
+        );
+        assert!(!step_covered_performed(&inst, &[2], Step::new(2, r1), &[]));
+    }
+
+    /// [`two_task_trace`] with agent 0 kept on task 0: task 0 ends on
+    /// {0, 1, 3}, task 1 on {1, 3}.
+    fn kept_trace() -> Vec<TraceEntry> {
+        let mut trace = two_task_trace();
+        trace[3].act = false;
+        trace
+    }
+
+    fn drawn(rows: Vec<Vec<bool>>) -> WorkflowInstance {
+        WorkflowInstance {
+            performance: Some(rows),
+            ..two_task_instance()
+        }
+    }
+
+    fn assert_scored_bits(got: Option<PerformanceScored>, expected: PerformanceScored, what: &str) {
+        let got = got.unwrap_or_else(|| panic!("{what}: no performance-scored metrics"));
+        assert_eq!(
+            (
+                got.success_rate.to_bits(),
+                got.mean_cov_eff.to_bits(),
+                got.primary.to_bits()
+            ),
+            (
+                expected.success_rate.to_bits(),
+                expected.mean_cov_eff.to_bits(),
+                expected.primary.to_bits()
+            ),
+            "{what}: got {got:?}, expected {expected:?}"
+        );
+    }
+
+    #[test]
+    fn hand_derived_draws_are_performance_scored_to_the_hand_values() {
+        // Task 0 ends on {0, 1, 3} and demands (0, r0), (1, r0), (2, r1):
+        // agents 0 and 1 cover (0, r0), agent 1 alone covers (1, r0), nobody
+        // covers (2, r1) — 2 of 3 covered. Agent 1 did not perform, so only
+        // (0, r0) is performed, through agent 0; agent 2 performed and left.
+        // Task 1 ends on {1, 3} and demands (1, r0), (2, r2); both performed.
+        let inst = drawn(vec![
+            vec![true, false, true, true],
+            vec![false, true, true, true],
+        ]);
+        let recon = reconstruct(&inst, &kept_trace()).unwrap();
+        let ends: Vec<_> = recon
+            .tasks
+            .iter()
+            .map(|e| (e.members.clone(), e.steps, e.covered, e.performed))
+            .collect();
+        assert_eq!(
+            ends,
+            vec![(vec![0, 1, 3], 3, 2, Some(1)), (vec![1, 3], 2, 2, Some(2)),]
+        );
+        assert_eq!(recon.tasks[0].performed_success(), Some(false));
+        assert_eq!(recon.tasks[1].performed_success(), Some(true));
+        assert_eq!(
+            recon.tasks[0].performed_cov_eff(),
+            Some((1.0 / 3.0) / 3.0),
+            "1 of 3 steps over 3 members"
+        );
+        assert_eq!(recon.tasks[1].performed_cov_eff(), Some(0.5));
+        let mean: f64 = ((1.0 / 3.0) / 3.0 + 0.5) / 2.0;
+        assert_scored_bits(
+            recon.performance_scored,
+            PerformanceScored {
+                success_rate: 0.5,
+                mean_cov_eff: mean,
+                primary: 0.5 * mean,
+            },
+            "one performer of two coverers",
+        );
+        // Coverage-scored: (2/3)/3 and 1/2.
+        let cov: f64 = 0.5 * (((2.0 / 3.0) / 3.0 + 0.5) / 2.0);
+        assert_eq!(recon.primary.to_bits(), cov.to_bits());
+
+        // Agent 3, task 1's only coverer of (2, r2), did not perform: the
+        // task is covered and not performed.
+        let inst = drawn(vec![vec![true; 4], vec![false, true, true, false]]);
+        let recon = reconstruct(&inst, &kept_trace()).unwrap();
+        let performed: Vec<_> = recon.tasks.iter().map(|e| e.performed).collect();
+        assert_eq!(performed, vec![Some(2), Some(1)]);
+        assert!(recon.tasks[1].success());
+        assert_eq!(recon.tasks[1].performed_success(), Some(false));
+        let mean: f64 = ((2.0 / 3.0) / 3.0 + (1.0 / 2.0) / 2.0) / 2.0;
+        assert_scored_bits(
+            recon.performance_scored,
+            PerformanceScored {
+                success_rate: 0.0,
+                mean_cov_eff: mean,
+                primary: 0.0 * mean,
+            },
+            "a covered task whose coverer did not perform",
+        );
+        assert_eq!(recon.primary.to_bits(), cov.to_bits());
+    }
+
+    #[test]
+    fn a_missing_row_and_an_index_outside_a_row_did_not_perform() {
+        // Row 0 holds agent 0 alone; task 1 has no row.
+        let inst = drawn(vec![vec![true]]);
+        let recon = reconstruct(&inst, &kept_trace()).unwrap();
+        let performed: Vec<_> = recon.tasks.iter().map(|e| e.performed).collect();
+        assert_eq!(
+            performed,
+            vec![Some(1), Some(0)],
+            "task 0: agent 0 performs (0, r0) and agents 1, 3 are outside the row"
+        );
+        let mean: f64 = ((1.0 / 3.0) / 3.0 + 0.0) / 2.0;
+        assert_scored_bits(
+            recon.performance_scored,
+            PerformanceScored {
+                success_rate: 0.0,
+                mean_cov_eff: mean,
+                primary: 0.0 * mean,
+            },
+            "short draw",
+        );
+
+        // Row 0 holds every agent; task 1, ending on {1, 3}, has no row.
+        let inst = drawn(vec![vec![true; 4]]);
+        let recon = reconstruct(&inst, &kept_trace()).unwrap();
+        let performed: Vec<_> = recon.tasks.iter().map(|e| e.performed).collect();
+        assert_eq!(
+            performed,
+            vec![Some(2), Some(0)],
+            "task 1 has no row, so neither of its 2 covered steps is performed"
+        );
+        let mean: f64 = ((2.0 / 3.0) / 3.0 + 0.0) / 2.0;
+        assert_scored_bits(
+            recon.performance_scored,
+            PerformanceScored {
+                success_rate: 0.0,
+                mean_cov_eff: mean,
+                primary: 0.0 * mean,
+            },
+            "one row for two tasks",
+        );
+    }
+
+    #[test]
+    fn performed_accessors_are_zero_on_an_empty_coalition_and_an_empty_demand() {
+        let empty_coalition = TaskEnd {
+            performed: Some(0),
+            ..end(1, 2, 0, &[], 0)
+        };
+        assert_eq!(empty_coalition.performed_success(), Some(false));
+        assert_eq!(
+            empty_coalition.performed_cov_eff(),
+            Some(0.0),
+            "0 of 2 steps over no member is 0, not 0 / 0"
+        );
+        let empty_demand = TaskEnd {
+            performed: Some(0),
+            ..end(0, 0, 0, &[1, 2], 2)
+        };
+        assert_eq!(
+            empty_demand.performed_success(),
+            Some(false),
+            "0 of 0 steps is not a success"
+        );
+        assert_eq!(
+            empty_demand.performed_cov_eff(),
+            Some(0.0),
+            "0 of 0 steps over 2 members is 0, not 0 / 0"
+        );
+        let all = TaskEnd {
+            performed: Some(4),
+            ..end(2, 4, 4, &[1, 2], 0)
+        };
+        assert_eq!(all.performed_success(), Some(true));
+        assert_eq!(all.performed_cov_eff(), Some(0.5));
+    }
+
+    #[test]
+    fn reconstruction_agrees_with_the_harness_on_generated_draws() {
+        let spec = WorkflowSpec {
+            performance: Some(PerformanceSpec {
+                reliable_prob: 0.7,
+                rho_reliable: 0.05,
+                rho_flaky: 0.40,
+            }),
+            ..WorkflowSpec::default()
+        };
+        let mut unperformed = 0usize;
+        for seed in 7000..7003u64 {
+            let inst = spec.generate(seed).unwrap();
+            let roles: HashMap<usize, Role> = inst.roles.iter().copied().enumerate().collect();
+            for signal in [
+                OutcomeSignal::RoleCoverage,
+                OutcomeSignal::Performance,
+                OutcomeSignal::Both,
+            ] {
+                let inner = RefPrune::new(roles.clone());
+                let traced = TracedPolicy::new(&inner);
+                let mut lat = Vec::new();
+                let result = run_workflow_instance(&traced, &inst, signal, &mut lat).unwrap();
+                let recon = reconstruct(&inst, &traced.entries()).unwrap();
+                assert_eq!(recon.primary.to_bits(), result.primary.to_bits());
+                let harness = result
+                    .performance_scored
+                    .unwrap_or_else(|| panic!("seed {seed}, {signal:?}: harness scored nothing"));
+                assert_scored_bits(
+                    recon.performance_scored,
+                    harness,
+                    &format!("seed {seed}, {signal:?}"),
+                );
+                for (t, end) in recon.tasks.iter().enumerate() {
+                    let performed = end
+                        .performed
+                        .unwrap_or_else(|| panic!("seed {seed}, task {t}: no performed count"));
+                    assert!(
+                        performed <= end.covered,
+                        "seed {seed}, task {t}: {performed} performed of {} covered",
+                        end.covered
+                    );
+                    unperformed += end.covered - performed;
+                }
+            }
+        }
+        assert!(
+            unperformed > 0,
+            "every covered step on 7000..7003 was performed: the comparison is vacuous"
         );
     }
 
@@ -1015,6 +1368,7 @@ mod tests {
             tasks: a.tasks[..1].to_vec(),
             primary: 0.0,
             churn: 0,
+            performance_scored: None,
         };
         assert_eq!(member_set_identity(&a, &shorter), (1, 2));
         assert_eq!(member_set_identity(&shorter, &a), (1, 2));
@@ -1030,6 +1384,7 @@ mod tests {
             roster,
             steps,
             covered,
+            performed: None,
             members: members.to_vec(),
             off_demand: off,
             cov_eff,
@@ -1042,6 +1397,7 @@ mod tests {
             tasks: vec![end(1, 2, 2, &[0], 0), end(2, 4, 2, &[1, 2], 1)],
             primary: 0.0,
             churn: 0,
+            performance_scored: None,
         };
         let second = Recon {
             tasks: vec![
@@ -1051,6 +1407,7 @@ mod tests {
             ],
             primary: 0.0,
             churn: 0,
+            performance_scored: None,
         };
         let rows = roster_decomposition([&first, &second], 4);
         assert_eq!(rows.len(), 5);

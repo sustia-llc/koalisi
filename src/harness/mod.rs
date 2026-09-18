@@ -15,12 +15,14 @@
 //!   `print_per_seed_table`, `print_summary`, `Verdict`.
 //! - [`trace`] — `TracedPolicy`, `TraceEntry`.
 //! - `recon` *(feature `process`)* — `TaskEnd`, `Recon`, `ReconError`,
-//!   `reconstruct`, `step_covered`, `member_set_identity`, `RosterRow`,
-//!   `roster_decomposition`, `RefPrune`, `RefFirst`, `RefKeep`.
+//!   `reconstruct`, `step_covered`, `step_covered_performed`,
+//!   `member_set_identity`, `RosterRow`, `roster_decomposition`, `RefPrune`,
+//!   `RefFirst`, `RefKeep`.
 //! - `workflow` *(feature `process`)* — `WorkflowSpec`, `PerformanceSpec`,
 //!   `WorkflowInstance`, `WorkflowTask`, `OutcomeSignal`, `WorkflowArm`,
-//!   `PolicyFactory`, `WorkflowResult`, `WorkflowBatteryResult`,
-//!   `WorkflowError`, `run_workflow_instance`, `run_workflow_battery`.
+//!   `PolicyFactory`, `WorkflowResult`, `PerformanceScored`,
+//!   `WorkflowBatteryResult`, `WorkflowError`, `run_workflow_instance`,
+//!   `run_workflow_battery`.
 
 pub mod battery;
 pub mod instance;
@@ -39,7 +41,7 @@ pub use instance::{Instance, InstanceSpec, Task};
 #[cfg(feature = "process")]
 pub use recon::{
     Recon, ReconError, RefFirst, RefKeep, RefPrune, RosterRow, TaskEnd, member_set_identity,
-    reconstruct, roster_decomposition, step_covered,
+    reconstruct, roster_decomposition, step_covered, step_covered_performed,
 };
 pub use report::{
     Verdict, median_iqr, percentile, print_per_seed_table, print_summary, superior_count,
@@ -48,7 +50,7 @@ pub use rng::{SplitMix64, distinct_bits, permutation};
 pub use trace::{TraceEntry, TracedPolicy};
 #[cfg(feature = "process")]
 pub use workflow::{
-    OutcomeSignal, PerformanceSpec, PolicyFactory, WorkflowArm, WorkflowBatteryResult,
-    WorkflowError, WorkflowInstance, WorkflowResult, WorkflowSpec, WorkflowTask,
-    run_workflow_battery, run_workflow_instance,
+    OutcomeSignal, PerformanceScored, PerformanceSpec, PolicyFactory, WorkflowArm,
+    WorkflowBatteryResult, WorkflowError, WorkflowInstance, WorkflowResult, WorkflowSpec,
+    WorkflowTask, run_workflow_battery, run_workflow_instance,
 };
