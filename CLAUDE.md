@@ -35,7 +35,7 @@ repository** (owner call, 2026-08-09); their location is in `CLAUDE.local.md`:
 - **`project-history.md`** — the full release ledger v0.4.0 → present verbatim,
   the Phase 5/6/7 narratives, the K1–K6 sections, the downstream/removed-work
   notes, and the obsolete gotchas 1–6 / 8–10.
-- **`ab-lineage-gotchas.md`** — gotchas 20–28, 30–33 and 35 verbatim (the
+- **`ab-lineage-gotchas.md`** — gotchas 20–28, 30–33 and 35–36 verbatim (the
   A/B-registration lineage). Indexed one line each at the end of §Worth
   flagging below; **read the full text there before designing or running any
   K4-lineage registration.**
@@ -315,7 +315,7 @@ of the record lives; location in `CLAUDE.local.md`).
 
 These cost time during the build; future-me should not relearn them.
 Engineering contracts (7, 11–19, 29) are verbatim below. The A/B-lineage
-gotchas (20–28, 30–33, 35) are indexed at the end of this section and live in full
+gotchas (20–28, 30–33, 35–36) are indexed at the end of this section and live in full
 in the `ab-lineage-gotchas.md` archive. Obsolete ones (1–6, 8–10 — all
 kameo / forex / databento-era) are in the `project-history.md` archive §4.
 Both archives are held outside this repo; see `CLAUDE.local.md`.
@@ -571,7 +571,7 @@ Numbering is preserved across all three files.
       `tail -10`; suites with 11+ result lines (`persistence,magnitude`) lose
       the lib-test line and undercount by ~95. Always `tail -20`.
 
-### A/B-lineage gotchas 20–28, 30–33, 35 — index only
+### A/B-lineage gotchas 20–28, 30–33, 35–36 — index only
 
 Full text: the **`ab-lineage-gotchas.md`** archive (held outside this repo; see
 `CLAUDE.local.md`). Each entry records a
@@ -643,6 +643,14 @@ touching the arm it governs.
     ONE voter decide; EQ5b's "blind voters are load-bearing" was carried by its
     mask change; positional trace diffs overstate act divergence; the H1 hook
     carries distinct steps; never smoke the confirmatory contrast before the run.
+36. **K7-2 novelty on the routed group (#97)** — routing removes the
+    candidate-blind VOTERS, not the candidate-blind QUERIES (the centre's own
+    identical-mask reads); without the A-novelty term such a read follows its
+    replay window (success ⇒ decline); the novelty-off arm loses on SUCCESS at
+    the same size; `grp-topo` ≡ `ref-prune` 600 of 600, so key a continuation
+    on the arm-vs-prune leg; `OutcomeSignal` does not reach the score; a
+    "bytes rendered" smoke line and a multiplicative gate falsification both
+    leak; a self-gated test file passes with 0 tests.
 
 ## Reproducers
 
