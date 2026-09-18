@@ -25,6 +25,9 @@
 //! - `grp-topo` against `ref-prune`: the identity row at line 164 (final
 //!   member sets identical on 598 of 600 tasks, PRIMARY bit-identical on 28
 //!   of 30 seeds).
+//! - `harness::roster_decomposition` over `grp-topo`'s and `ref-prune`'s
+//!   reconstructions: the roster rows all / 1 / 2 / 3 at lines 185–188 and
+//!   201–204, every column.
 
 use std::collections::HashMap;
 
@@ -34,7 +37,8 @@ use koalisi::decision::{
 };
 use koalisi::harness::{
     OutcomeSignal, Recon, RefPrune, SeedRange, TracedPolicy, WorkflowInstance, WorkflowResult,
-    WorkflowSpec, median_iqr, member_set_identity, reconstruct, run_workflow_instance,
+    WorkflowSpec, median_iqr, member_set_identity, reconstruct, roster_decomposition,
+    run_workflow_instance,
 };
 use koalisi::process::Role;
 
@@ -74,6 +78,24 @@ const K7_1_REF_PRUNE: [&str; 30] = [
     "0.4575", "0.4667", "0.3442", "0.4933", "0.4183", "0.3508", "0.3758", "0.3867", "0.4625",
     "0.4142", "0.5917", "0.3142", "0.4475", "0.3933", "0.4767", "0.6833", "0.3767", "0.5958",
     "0.4458", "0.4517", "0.3217",
+];
+
+/// `docs/runs/K7-1.log:185`–`:188`, cell `grp-topo`, rosters all / 1 / 2 / 3:
+/// tasks, success rate, mean covered fraction, mean cov_eff, mean final size,
+/// tasks ending empty, final members whose role has no demand.
+const K7_1_GRP_TOPO_ROSTER: [&str; 4] = [
+    "600 | 99.7 % | 0.9982 | 0.4340 | 2.73 | 0 | 0 of 1636",
+    "98 | 100.0 % | 1.0000 | 0.7313 | 1.58 | 0 | 0 of 155",
+    "343 | 99.7 % | 0.9981 | 0.4281 | 2.48 | 0 | 0 of 849",
+    "159 | 99.4 % | 0.9975 | 0.2635 | 3.97 | 0 | 0 of 632",
+];
+
+/// `docs/runs/K7-1.log:201`–`:204`, cell `ref-prune`, the same columns.
+const K7_1_REF_PRUNE_ROSTER: [&str; 4] = [
+    "600 | 100.0 % | 1.0000 | 0.4341 | 2.73 | 0 | 0 of 1639",
+    "98 | 100.0 % | 1.0000 | 0.7313 | 1.58 | 0 | 0 of 155",
+    "343 | 100.0 % | 1.0000 | 0.4281 | 2.48 | 0 | 0 of 851",
+    "159 | 100.0 % | 1.0000 | 0.2638 | 3.98 | 0 | 0 of 633",
 ];
 
 /// `inst.role_map()` with each role id as a `Role`.
@@ -266,6 +288,41 @@ fn assert_carried(
     );
 }
 
+/// `roster_decomposition` over `runs` against the four roster rows (all, 1, 2,
+/// 3) of one cell of `docs/runs/K7-1.log`, the first of them on `first_line`,
+/// each rendered at the log's precision.
+fn assert_roster_rows(label: &str, runs: &[Carried], first_line: usize, expected: &[&str; 4]) {
+    let roles = usize::from(WorkflowSpec::default().roles);
+    let rows = roster_decomposition(runs.iter().map(|r| &r.recon), roles);
+    assert_eq!(rows.len(), expected.len(), "{label}: {} rows", rows.len());
+    let at =
+        |x: Option<f64>, dp: usize| x.map_or_else(|| "n/a".to_owned(), |v| format!("{v:.dp$}"));
+    for (i, (row, expected)) in rows.iter().zip(expected).enumerate() {
+        let observed = format!(
+            "{} | {} % | {} | {} | {} | {} | {} of {}",
+            row.tasks,
+            at(
+                (row.tasks > 0).then(|| 100.0 * row.successes as f64 / row.tasks as f64),
+                1
+            ),
+            at(row.mean_covered_fraction(), 4),
+            at(row.mean_cov_eff(), 4),
+            at(row.mean_final_size(), 2),
+            row.empty,
+            row.off_demand,
+            row.final_members
+        );
+        assert_eq!(
+            &observed,
+            expected,
+            "{label} roster row {:?} over 90..120: observed `{observed}`, docs/runs/K7-1.log:{} \
+             says `{expected}`",
+            row.roster,
+            first_line + i
+        );
+    }
+}
+
 #[test]
 fn hosted_grp_role_nonov_reproduces_the_archive_rows() {
     let (results, counters) = host(GroupAifConfig {
@@ -322,6 +379,8 @@ fn carried_grp_topo_and_ref_prune_reproduce_the_k7_1_rows_and_identity() {
         38,
         ("0.4258", "167.00"),
     );
+    assert_roster_rows("grp-topo", &topo, 185, &K7_1_GRP_TOPO_ROSTER);
+    assert_roster_rows("ref-prune", &prune, 201, &K7_1_REF_PRUNE_ROSTER);
 
     let mut same_tasks = 0usize;
     let mut tasks = 0usize;

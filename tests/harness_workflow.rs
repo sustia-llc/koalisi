@@ -12,6 +12,8 @@
 //!   harness_workflow fixture_matches_the_committed_records`.
 //! - Correction 2: the flat spec at `required_bits: 2..=8` reproduces the
 //!   fixture's pool, arrivals and pre-re-draw required masks at seed 270.
+//! - Generation: `WorkflowSpec::default().generate` is `Ok` on every seed of
+//!   150..180; instances only, no policy.
 
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -72,6 +74,10 @@ const SEEDS_270_300: SeedRange = SeedRange {
 const SEEDS_330_360: SeedRange = SeedRange {
     start: 330,
     end: 360,
+};
+const SEEDS_150_180: SeedRange = SeedRange {
+    start: 150,
+    end: 180,
 };
 
 /// `ρ = δ` over the spec's roles.
@@ -148,6 +154,26 @@ fn identity_gate_330_360_medians() {
     assert_eq!(
         observed_churn, EXPECTED_330_360_MEDIAN_CHURN,
         "median churn over 330..360: observed {observed_churn}, docs/runs/K4-archive.log:2031 says {EXPECTED_330_360_MEDIAN_CHURN}"
+    );
+}
+
+#[test]
+fn the_registered_spec_generates_every_seed_of_150_180() {
+    let spec = WorkflowSpec::default();
+    let failed: Vec<String> = SEEDS_150_180
+        .iter()
+        .filter_map(|seed| {
+            spec.generate(seed)
+                .err()
+                .map(|e| format!("seed {seed}: {e}"))
+        })
+        .collect();
+    assert!(
+        failed.is_empty(),
+        "{} of {} seeds of 150..180 do not generate:\n{}",
+        failed.len(),
+        SEEDS_150_180.len(),
+        failed.join("\n")
     );
 }
 

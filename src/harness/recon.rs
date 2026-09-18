@@ -2,8 +2,9 @@
 //! [`reconstruct`] replays a [`TraceEntry`] sequence over a
 //! [`WorkflowInstance`] into per-task end states ([`TaskEnd`], [`Recon`]),
 //! [`member_set_identity`] and [`roster_decomposition`] summarise
-//! reconstructions as data, and [`RefPrune`] is the engine-free redundancy
-//! prune policy.
+//! reconstructions as data, and [`RefPrune`], [`RefFirst`] and [`RefKeep`]
+//! are the engine-free reference policies: the redundancy prune, the first
+//! arrival alone, and every arrival kept.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -432,6 +433,70 @@ impl CoalitionDecisionPolicy for RefPrune {
             .steps
             .lock()
             .expect("invariant: no panic holds the steps lock") = task.steps.to_vec();
+    }
+}
+
+/// The engine-free first-arrival reference: `should_join` and `should_leave`
+/// decline on every call, whatever the agent, the coalition and the context,
+/// before and after any `begin_task`. Every score is `0.0`.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RefFirst;
+
+impl CoalitionDecisionPolicy for RefFirst {
+    fn should_join(
+        &self,
+        _agent: &dyn AgentCapabilities,
+        _coalition: &[&dyn AgentCapabilities],
+        _ctx: &DecisionContext,
+    ) -> Decision {
+        Decision {
+            act: false,
+            score: 0.0,
+        }
+    }
+
+    fn should_leave(
+        &self,
+        _agent: &dyn AgentCapabilities,
+        _coalition: &[&dyn AgentCapabilities],
+        _ctx: &DecisionContext,
+    ) -> Decision {
+        Decision {
+            act: false,
+            score: 0.0,
+        }
+    }
+}
+
+/// The engine-free keep-everyone reference: `should_join` acts and
+/// `should_leave` declines on every call, whatever the agent, the coalition
+/// and the context, before and after any `begin_task`. Every score is `0.0`.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RefKeep;
+
+impl CoalitionDecisionPolicy for RefKeep {
+    fn should_join(
+        &self,
+        _agent: &dyn AgentCapabilities,
+        _coalition: &[&dyn AgentCapabilities],
+        _ctx: &DecisionContext,
+    ) -> Decision {
+        Decision {
+            act: true,
+            score: 0.0,
+        }
+    }
+
+    fn should_leave(
+        &self,
+        _agent: &dyn AgentCapabilities,
+        _coalition: &[&dyn AgentCapabilities],
+        _ctx: &DecisionContext,
+    ) -> Decision {
+        Decision {
+            act: false,
+            score: 0.0,
+        }
     }
 }
 
@@ -865,6 +930,74 @@ mod tests {
         // Before any begin_task there is no step to keep covered.
         let fresh = RefPrune::new(role_map());
         assert!(fresh.should_leave(&agents[1], &holders, &ctx).act);
+    }
+
+    /// `policy` hosted over the two-task instance: the final member set per
+    /// task from the reconstruction, the harness churn, the recomputed churn.
+    fn hosted_ends(policy: &dyn CoalitionDecisionPolicy) -> (Vec<Vec<usize>>, usize, usize) {
+        let inst = two_task_instance();
+        let traced = TracedPolicy::new(policy);
+        let mut lat = Vec::new();
+        let result =
+            run_workflow_instance(&traced, &inst, OutcomeSignal::RoleCoverage, &mut lat).unwrap();
+        let recon = reconstruct(&inst, &traced.entries()).unwrap();
+        let ends = recon.tasks.iter().map(|t| t.members.clone()).collect();
+        (ends, result.churn, recon.churn)
+    }
+
+    #[test]
+    fn ref_first_ends_every_task_on_its_first_arrival_alone() {
+        // Task 0 arrives 0, 1, 2, 3 and task 1 arrives 3, 2, 0, 1.
+        let (ends, churn, recomputed) = hosted_ends(&RefFirst);
+        assert_eq!(
+            ends,
+            vec![vec![0], vec![3]],
+            "the first arrival alone on every task"
+        );
+        assert_eq!((churn, recomputed), (0, 0), "no leave acts");
+
+        let (agents, _) = pool();
+        let ctx = DecisionContext {
+            required_capabilities: 0b111,
+        };
+        let all: Vec<&dyn AgentCapabilities> =
+            agents.iter().map(|a| a as &dyn AgentCapabilities).collect();
+        let none: Vec<&dyn AgentCapabilities> = Vec::new();
+        for agent in &agents {
+            for coalition in [&all, &none] {
+                let d = RefFirst.should_join(agent, coalition, &ctx);
+                assert_eq!((d.act, d.score.to_bits()), (false, 0), "join");
+                let d = RefFirst.should_leave(agent, coalition, &ctx);
+                assert_eq!((d.act, d.score.to_bits()), (false, 0), "leave");
+            }
+        }
+    }
+
+    #[test]
+    fn ref_keep_ends_every_task_on_every_arrival() {
+        let (ends, churn, recomputed) = hosted_ends(&RefKeep);
+        assert_eq!(
+            ends,
+            vec![vec![0, 1, 2, 3], vec![0, 1, 2, 3]],
+            "every arrival on every task, ascending agent id"
+        );
+        assert_eq!((churn, recomputed), (0, 0), "no leave acts");
+
+        let (agents, _) = pool();
+        let ctx = DecisionContext {
+            required_capabilities: 0b111,
+        };
+        let all: Vec<&dyn AgentCapabilities> =
+            agents.iter().map(|a| a as &dyn AgentCapabilities).collect();
+        let none: Vec<&dyn AgentCapabilities> = Vec::new();
+        for agent in &agents {
+            for coalition in [&all, &none] {
+                let d = RefKeep.should_join(agent, coalition, &ctx);
+                assert_eq!((d.act, d.score.to_bits()), (true, 0), "join");
+                let d = RefKeep.should_leave(agent, coalition, &ctx);
+                assert_eq!((d.act, d.score.to_bits()), (false, 0), "leave");
+            }
+        }
     }
 
     #[test]

@@ -209,3 +209,7 @@ required-features = ["harness", "process"]
 [[test]]
 name = "k7_group_host"
 required-features = ["harness", "decision", "process"]
+
+[[test]]
+name = "k7_2_novelty"
+required-features = ["harness", "decision", "process"]
