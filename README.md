@@ -101,7 +101,7 @@ cargo run --example supervised_monitor
 cargo run --example population_search
 
 # Feature-gated
-cargo run --release --features decision,magnitude,process --example strategy_comparison   # the frozen K4 archive battery (Parts 1–11, ~20 min, serial)
+cargo run --release --features decision,magnitude,process --example strategy_comparison   # the frozen K4 archive battery (Parts 1–11, serial)
 cargo run --features harness --example gauntlet                                   # K7 harness skeleton
 K7_1_SEEDS=5000..5003 cargo run --release --features harness,decision,process --example k7_1   # K7-1 off-block smoke (no verdict; the run of record is docs/runs/K7-1.log)
 K7_2_SEEDS=6000..6003 cargo run --release --features harness,decision,process --example k7_2   # K7-2 smoke: gate lines only, no cell value (the run of record is docs/runs/K7-2.log)

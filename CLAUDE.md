@@ -686,7 +686,7 @@ timeout 60s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-tar
 # === with process feature (EQ5a #76 + #80 ResidualPolicy, 161 tests) ===
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features process
 timeout 300s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision,magnitude,process   # 249
-# NOTE: strategy_comparison is the FROZEN K4 archive; the ~21 min battery runs
+# NOTE: strategy_comparison is the FROZEN K4 archive; the battery runs
 # SERIAL on a quiet machine with NO timeout wrapper — the archive + drift-check
 # recipe is docs/runs/README.md.
 cargo run --release --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision,magnitude,process --example strategy_comparison

@@ -18,7 +18,7 @@ cargo build --release --features decision,magnitude,process --example strategy_c
 target/release/examples/strategy_comparison > docs/runs/K4-archive.log
 ```
 
-The run takes about 20 minutes and prints about 2100 lines.
+The run prints about 2100 lines.
 
 ## Drift check at a dependency re-pin
 
