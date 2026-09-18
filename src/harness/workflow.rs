@@ -479,6 +479,43 @@ fn draw_shape(
     Ok(ColoredExpr::new(source, expr)?)
 }
 
+/// The performance-scored metrics of one policy over one instance that
+/// carries a performance draw: a distinct demanded `(bit, role)` step counts
+/// iff some final member of its role holds its bit and performed on the task.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PerformanceScored {
+    /// Fraction of tasks whose demand is non-empty and whose every distinct
+    /// step counts; `0` for an instance without tasks.
+    pub success_rate: f64,
+    /// Mean over tasks of the counted fraction of distinct steps divided by
+    /// the final member count, a task with an empty coalition or an empty
+    /// demand contributing `0`; `0` for an instance without tasks.
+    pub mean_cov_eff: f64,
+    /// `success_rate * mean_cov_eff`.
+    pub primary: f64,
+}
+
+impl PerformanceScored {
+    /// The metrics of `n_tasks` tasks of which `successes` succeeded and whose
+    /// per-task efficiencies, added in task order from `0.0`, sum to
+    /// `cov_eff_sum`.
+    pub(super) fn from_sums(successes: usize, cov_eff_sum: f64, n_tasks: usize) -> Self {
+        let (success_rate, mean_cov_eff) = if n_tasks == 0 {
+            (0.0, 0.0)
+        } else {
+            (
+                successes as f64 / n_tasks as f64,
+                cov_eff_sum / n_tasks as f64,
+            )
+        };
+        Self {
+            success_rate,
+            mean_cov_eff,
+            primary: success_rate * mean_cov_eff,
+        }
+    }
+}
+
 /// The metrics of one policy over one process-structured instance.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WorkflowResult {
@@ -496,6 +533,9 @@ pub struct WorkflowResult {
     pub primary: f64,
     /// Number of leave-sweep removals summed over tasks.
     pub churn: usize,
+    /// The performance-scored metrics over the same final coalitions; `Some`
+    /// iff the instance carries a performance draw, whatever the signal.
+    pub performance_scored: Option<PerformanceScored>,
 }
 
 impl From<WorkflowResult> for InstanceResult {
@@ -525,16 +565,20 @@ impl From<WorkflowResult> for InstanceResult {
 /// final member of its role holds its bit; the task succeeds iff the demand
 /// is non-empty and every distinct step is covered; its coverage efficiency
 /// is the covered fraction of distinct steps divided by the final member
-/// count, `0` for an empty coalition or an empty demand. Every `should_join`
-/// / `should_leave` call's wall time in microseconds is appended to
+/// count, `0` for an empty coalition or an empty demand. When the instance
+/// carries a performance draw, under any `signal`, the same final coalitions
+/// are also scored into [`WorkflowResult::performance_scored`] with a step
+/// counting iff some final member of its role holds its bit and performed on
+/// the task; without a draw that field is `None`. Every `should_join` /
+/// `should_leave` call's wall time in microseconds is appended to
 /// `latencies_us`.
 ///
 /// # Errors
 ///
 /// [`WorkflowError::SignalNeedsPerformance`] when `signal` reads the
 /// performance draw and the instance has none;
-/// [`WorkflowError::PerformanceShape`] when it has one that is not one row
-/// per task of one entry per agent.
+/// [`WorkflowError::PerformanceShape`] when the instance has one that is not
+/// one row per task of one entry per agent, under any `signal`.
 pub fn run_workflow_instance(
     policy: &dyn CoalitionDecisionPolicy,
     instance: &WorkflowInstance,
@@ -545,6 +589,8 @@ pub fn run_workflow_instance(
     let performance = performance_rows(instance, signal)?;
     let mut success_count = 0usize;
     let mut cov_eff_sum = 0.0f64;
+    let mut performed_success_count = 0usize;
+    let mut performed_cov_eff_sum = 0.0f64;
     let mut churn = 0usize;
 
     for (t, task) in instance.tasks.iter().enumerate() {
@@ -607,6 +653,18 @@ pub fn run_workflow_instance(
         }
         cov_eff_sum += cov_eff;
 
+        if performance.is_some() {
+            let row = performance_row(performance, t);
+            let performed = task
+                .demand
+                .distinct()
+                .filter(|&s| step_covered_performed(instance, &members, s, row))
+                .count();
+            let (success, efficiency) = performed_task_score(d_len, performed, members.len());
+            performed_success_count += usize::from(success);
+            performed_cov_eff_sum += efficiency;
+        }
+
         let universe = task.tags.len();
         let mut per_bit = vec![false; universe];
         match signal {
@@ -655,22 +713,26 @@ pub fn run_workflow_instance(
         mean_cov_eff,
         primary: success_rate * mean_cov_eff,
         churn,
+        performance_scored: performance.map(|_| {
+            PerformanceScored::from_sums(performed_success_count, performed_cov_eff_sum, n_tasks)
+        }),
     })
 }
 
-/// The performance rows `signal` reads, validated to one row per task of one
-/// entry per agent; `None` when the signal reads none.
+/// The instance's performance rows, validated to one row per task of one
+/// entry per agent; `None` when the instance has none and `signal` reads
+/// none.
 fn performance_rows(
     instance: &WorkflowInstance,
     signal: OutcomeSignal,
 ) -> Result<Option<&[Vec<bool>]>, WorkflowError> {
-    if !signal.needs_performance() {
-        return Ok(None);
-    }
-    let rows = instance
-        .performance
-        .as_deref()
-        .ok_or(WorkflowError::SignalNeedsPerformance { signal })?;
+    let Some(rows) = instance.performance.as_deref() else {
+        return if signal.needs_performance() {
+            Err(WorkflowError::SignalNeedsPerformance { signal })
+        } else {
+            Ok(None)
+        };
+    };
     let n = instance.agents.len();
     if rows.len() != instance.tasks.len() || rows.iter().any(|row| row.len() != n) {
         return Err(WorkflowError::PerformanceShape {
@@ -680,8 +742,8 @@ fn performance_rows(
     Ok(Some(rows))
 }
 
-/// Row `t` of the validated performance rows; empty when there are none.
-fn performance_row(rows: Option<&[Vec<bool>]>, t: usize) -> &[bool] {
+/// Row `t` of `rows`; empty when there are no rows or no row `t`.
+pub(super) fn performance_row(rows: Option<&[Vec<bool>]>, t: usize) -> &[bool] {
     rows.and_then(|rows| rows.get(t)).map_or(&[], Vec::as_slice)
 }
 
@@ -703,8 +765,12 @@ fn step_covered(instance: &WorkflowInstance, members: &[usize], step: Step) -> b
     })
 }
 
-/// Some member of `step.role` holds `step.bit` and performed (`row[i]`).
-fn step_covered_performed(
+/// Whether some agent index `i` in `members` has role `step.role` in
+/// `instance`, holds `step.bit` and has `row[i]` set. An index outside
+/// `instance.roles`, `instance.agents` or `row`, and a bit at or above 32,
+/// cover nothing.
+#[must_use]
+pub fn step_covered_performed(
     instance: &WorkflowInstance,
     members: &[usize],
     step: Step,
@@ -715,9 +781,25 @@ fn step_covered_performed(
     };
     members.iter().any(|&i| {
         instance.roles.get(i).is_some_and(|&r| r == step.role)
-            && instance.agents[i].capabilities() & mask != 0
-            && row[i]
+            && instance
+                .agents
+                .get(i)
+                .is_some_and(|a| a.capabilities() & mask != 0)
+            && row.get(i).copied().unwrap_or(false)
     })
+}
+
+/// `(success, efficiency)` of one task with `steps` distinct demanded steps
+/// of which `performed` count, over `members` final members: success iff
+/// `steps > 0` and every step counts; efficiency `performed / steps` divided
+/// by `members`, `0` when either is `0`.
+pub(super) fn performed_task_score(steps: usize, performed: usize, members: usize) -> (bool, f64) {
+    let efficiency = if members == 0 || steps == 0 {
+        0.0
+    } else {
+        (performed as f64 / steps as f64) / members as f64
+    };
+    (steps > 0 && performed == steps, efficiency)
 }
 
 /// Capability views of the agents at `members`, in `members` order.
@@ -989,6 +1071,16 @@ mod tests {
         let (r_both, seen_both) = run(&inst, OutcomeSignal::Both);
         assert_eq!(r_cov, r_perf, "PRIMARY must not read the performance draw");
         assert_eq!(r_cov, r_both, "PRIMARY must not read the performance draw");
+        assert_eq!((r_cov.success_rate, r_cov.primary), (1.0, 0.5), "{r_cov:?}");
+        assert_eq!(
+            r_cov.performance_scored,
+            Some(PerformanceScored {
+                success_rate: 0.0,
+                mean_cov_eff: 0.0,
+                primary: 0.0,
+            }),
+            "the only step's covering member did not perform"
+        );
         assert_eq!(seen_cov, vec![(0b01, vec![true, false])]);
         // Performance: bit 1 is held by agent 1, who performed; bit 0's holder
         // did not.
@@ -1038,6 +1130,219 @@ mod tests {
             matches!(err, WorkflowError::PerformanceShape { seed: 0 }),
             "{err}"
         );
+    }
+
+    /// Three agents, four tasks, every task demanding `(1, r0)` and `(0, r1)`
+    /// and arriving 0, 1, 2: agents 0 and 1 hold bit 0 at role 1, agent 2
+    /// holds bit 1 at role 0.
+    fn scored_instance(performance: Option<Vec<Vec<bool>>>) -> WorkflowInstance {
+        let (r0, r1) = (Role::new(0), Role::new(1));
+        let agents = vec![
+            CapabilityAgent::new(0, 0b01, 50),
+            CapabilityAgent::new(1, 0b01, 50),
+            CapabilityAgent::new(2, 0b10, 50),
+        ];
+        let roles = vec![r1, r1, r0];
+        let table = StaffingTable::from_pool(
+            agents
+                .iter()
+                .zip(&roles)
+                .map(|(a, &r)| (a.capabilities(), r)),
+        );
+        let written = ColoredExpr::new(
+            vec![r0, r1],
+            Free::tensor(step_expr(Step::new(1, r0)), step_expr(Step::new(0, r1))),
+        )
+        .unwrap();
+        let demand = demand(&written);
+        assert_eq!(demand.distinct_len(), 2, "the fixture demands two steps");
+        let task = WorkflowTask {
+            required: 0b11,
+            tags: vec![r1, r0],
+            arrival: vec![0, 1, 2],
+            written,
+            demand,
+        };
+        WorkflowInstance {
+            seed: 0,
+            agents,
+            roles,
+            tasks: vec![task; 4],
+            prefix_required: vec![0b11; 4],
+            table,
+            redraws: 0,
+            max_attempts: 1,
+            performance,
+        }
+    }
+
+    /// Task 0: neither holder of `(0, r1)` performed. Task 1: one of the two
+    /// did. Task 2: everyone performed. Task 3: nobody did.
+    fn scored_rows() -> Vec<Vec<bool>> {
+        vec![
+            vec![false, false, true],
+            vec![false, true, true],
+            vec![true, true, true],
+            vec![false, false, false],
+        ]
+    }
+
+    const ALL_SIGNALS: [OutcomeSignal; 3] = [
+        OutcomeSignal::RoleCoverage,
+        OutcomeSignal::Performance,
+        OutcomeSignal::Both,
+    ];
+
+    #[test]
+    fn performance_scored_counts_a_step_only_when_its_coverer_performed() {
+        let inst = scored_instance(Some(scored_rows()));
+        // Every task ends on {0, 1, 2}, which covers both steps: coverage
+        // scores 2 of 2 over 3 members on all four tasks.
+        let third: f64 = (2.0 / 2.0) / 3.0;
+        let cov_mean: f64 = (third + third + third + third) / 4.0;
+        // Performance scores 1, 2, 2 and 0 of 2 steps over 3 members: two
+        // successes of four, mean (1/6 + 1/3 + 1/3 + 0) / 4 = 5/24, PRIMARY
+        // 5/48.
+        let perf_mean: f64 = ((1.0 / 2.0) / 3.0 + third + third + 0.0) / 4.0;
+        let expected = PerformanceScored {
+            success_rate: 0.5,
+            mean_cov_eff: perf_mean,
+            primary: 0.5 * perf_mean,
+        };
+        assert!((perf_mean - 5.0 / 24.0).abs() < 1e-15, "{perf_mean:?}");
+        let mut results = Vec::new();
+        for signal in ALL_SIGNALS {
+            let (r, _) = run(&inst, signal);
+            assert_eq!(r.success_rate, 1.0, "{signal:?}: {r:?}");
+            assert_eq!(
+                r.mean_cov_eff.to_bits(),
+                cov_mean.to_bits(),
+                "{signal:?}: {r:?}"
+            );
+            assert_eq!(r.primary.to_bits(), cov_mean.to_bits(), "{signal:?}: {r:?}");
+            let scored = r.performance_scored.unwrap_or_else(|| {
+                panic!("{signal:?}: a drawn instance must be performance-scored: {r:?}")
+            });
+            assert_eq!(
+                scored.success_rate, expected.success_rate,
+                "{signal:?}: performance-scored success {}, hand value 0.5 \
+                 (coverage-scored is 1.0)",
+                scored.success_rate
+            );
+            assert_eq!(
+                scored.mean_cov_eff.to_bits(),
+                expected.mean_cov_eff.to_bits(),
+                "{signal:?}: performance-scored mean cov_eff {:?}, hand value {perf_mean:?} \
+                 (coverage-scored is {cov_mean:?})",
+                scored.mean_cov_eff
+            );
+            assert_eq!(
+                scored.primary.to_bits(),
+                expected.primary.to_bits(),
+                "{signal:?}: performance-scored PRIMARY {:?}, hand value {:?}",
+                scored.primary,
+                expected.primary
+            );
+            results.push(r);
+        }
+        assert_eq!(results[0], results[1], "RoleCoverage vs Performance");
+        assert_eq!(results[0], results[2], "RoleCoverage vs Both");
+    }
+
+    #[test]
+    fn performance_scored_is_none_without_a_draw() {
+        let (r, _) = run(&scored_instance(None), OutcomeSignal::RoleCoverage);
+        assert_eq!(r.success_rate, 1.0, "{r:?}");
+        assert_eq!(
+            r.performance_scored, None,
+            "no draw, so nothing to score against"
+        );
+    }
+
+    #[test]
+    fn performance_scored_is_zero_on_empty_coalitions() {
+        // Everyone joins and everyone leaves: every task ends on no member.
+        let inst = scored_instance(Some(vec![vec![true; 3]; 4]));
+        let policy = Fixed::new(true, true);
+        let mut lat = Vec::new();
+        let r =
+            run_workflow_instance(&policy, &inst, OutcomeSignal::RoleCoverage, &mut lat).unwrap();
+        assert_eq!(r.churn, 12, "three leaves on each of four tasks");
+        assert_eq!((r.success_rate, r.mean_cov_eff, r.primary), (0.0, 0.0, 0.0));
+        assert_eq!(
+            r.performance_scored,
+            Some(PerformanceScored {
+                success_rate: 0.0,
+                mean_cov_eff: 0.0,
+                primary: 0.0,
+            }),
+            "an empty coalition scores 0, not 0 / 0"
+        );
+    }
+
+    #[test]
+    fn performance_scored_gives_an_empty_demand_no_success_and_no_efficiency() {
+        // Everyone performed on every task; task 3 demands nothing.
+        let mut inst = scored_instance(Some(vec![vec![true; 3]; 4]));
+        inst.tasks[3].demand = Demand::from_steps(std::iter::empty());
+        let (r, _) = run(&inst, OutcomeSignal::RoleCoverage);
+        let third: f64 = (2.0 / 2.0) / 3.0;
+        let mean: f64 = (third + third + third + 0.0) / 4.0;
+        let scored = r.performance_scored.unwrap();
+        assert_eq!(
+            scored.success_rate, 0.75,
+            "an empty demand is not a success: {scored:?}"
+        );
+        assert_eq!(
+            scored.mean_cov_eff.to_bits(),
+            mean.to_bits(),
+            "performance-scored mean cov_eff {:?}, hand value {mean:?}",
+            scored.mean_cov_eff
+        );
+        assert_eq!(scored.primary.to_bits(), (0.75 * mean).to_bits());
+        // With everyone performing the two scorings agree.
+        assert_eq!(
+            (r.success_rate, r.mean_cov_eff, r.primary),
+            (scored.success_rate, scored.mean_cov_eff, scored.primary)
+        );
+    }
+
+    #[test]
+    fn a_misshapen_draw_is_an_error_under_every_signal() {
+        let bad_shape = two_agent_instance(1, Some(vec![vec![true]]));
+        let mut lat = Vec::new();
+        for signal in ALL_SIGNALS {
+            let result =
+                run_workflow_instance(&Fixed::new(true, false), &bad_shape, signal, &mut lat);
+            assert!(
+                matches!(result, Err(WorkflowError::PerformanceShape { seed: 0 })),
+                "{signal:?}: {result:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn generated_draws_are_performance_scored_identically_under_every_signal() {
+        let spec = WorkflowSpec {
+            performance: Some(perf_spec()),
+            ..WorkflowSpec::default()
+        };
+        for seed in 7000..7003u64 {
+            let inst = spec.generate(seed).unwrap();
+            let (r_cov, _) = run(&inst, OutcomeSignal::RoleCoverage);
+            let (r_perf, _) = run(&inst, OutcomeSignal::Performance);
+            let (r_both, _) = run(&inst, OutcomeSignal::Both);
+            assert_eq!(r_cov, r_perf, "seed {seed}");
+            assert_eq!(r_cov, r_both, "seed {seed}");
+            let scored = r_cov
+                .performance_scored
+                .unwrap_or_else(|| panic!("seed {seed}: drawn, so performance-scored"));
+            assert!(
+                scored.success_rate <= r_cov.success_rate
+                    && scored.mean_cov_eff <= r_cov.mean_cov_eff,
+                "seed {seed}: a performed step is a covered step: {r_cov:?}"
+            );
+        }
     }
 
     #[test]

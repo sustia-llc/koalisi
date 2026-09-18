@@ -19,8 +19,9 @@
 //!   `roster_decomposition`, `RefPrune`, `RefFirst`, `RefKeep`.
 //! - `workflow` *(feature `process`)* — `WorkflowSpec`, `PerformanceSpec`,
 //!   `WorkflowInstance`, `WorkflowTask`, `OutcomeSignal`, `WorkflowArm`,
-//!   `PolicyFactory`, `WorkflowResult`, `WorkflowBatteryResult`,
-//!   `WorkflowError`, `run_workflow_instance`, `run_workflow_battery`.
+//!   `PolicyFactory`, `WorkflowResult`, `PerformanceScored`,
+//!   `WorkflowBatteryResult`, `WorkflowError`, `run_workflow_instance`,
+//!   `run_workflow_battery`, `step_covered_performed`.
 
 pub mod battery;
 pub mod instance;
@@ -48,7 +49,7 @@ pub use rng::{SplitMix64, distinct_bits, permutation};
 pub use trace::{TraceEntry, TracedPolicy};
 #[cfg(feature = "process")]
 pub use workflow::{
-    OutcomeSignal, PerformanceSpec, PolicyFactory, WorkflowArm, WorkflowBatteryResult,
-    WorkflowError, WorkflowInstance, WorkflowResult, WorkflowSpec, WorkflowTask,
-    run_workflow_battery, run_workflow_instance,
+    OutcomeSignal, PerformanceScored, PerformanceSpec, PolicyFactory, WorkflowArm,
+    WorkflowBatteryResult, WorkflowError, WorkflowInstance, WorkflowResult, WorkflowSpec,
+    WorkflowTask, run_workflow_battery, run_workflow_instance, step_covered_performed,
 };
