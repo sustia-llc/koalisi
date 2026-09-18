@@ -32,11 +32,13 @@ registration, no run.
   demanded `(bit, role)` step counts iff a final member of its role holds the
   bit and performed on the task; success, coverage efficiency and PRIMARY are
   formed from that count as the coverage-scored fields are from theirs.
-  Without a draw it is `None`.
+  Without a draw it is `None`. The step predicate is pub:
+  `harness::step_covered_performed`.
 - **`src/harness/recon.rs`**: `TaskEnd::performed: Option<usize>` with
-  `performed_success()` / `performed_cov_eff()`, `Recon::performance_scored`,
-  and pub `step_covered_performed`. A task without a row, and an agent index
-  outside a row, did not perform.
+  `performed_success()` / `performed_cov_eff()`, and
+  `Recon::performance_scored`, over the harness loop's own predicate and task
+  rule. A task without a row, and an agent index outside a row, did not
+  perform.
 
 ### Changed
 - `run_workflow_instance` returns `WorkflowError::PerformanceShape` for a

@@ -660,14 +660,9 @@ pub fn run_workflow_instance(
                 .distinct()
                 .filter(|&s| step_covered_performed(instance, &members, s, row))
                 .count();
-            if d_len > 0 && performed == d_len {
-                performed_success_count += 1;
-            }
-            performed_cov_eff_sum += if members.is_empty() || d_len == 0 {
-                0.0
-            } else {
-                (performed as f64 / d_len as f64) / members.len() as f64
-            };
+            let (success, efficiency) = performed_task_score(d_len, performed, members.len());
+            performed_success_count += usize::from(success);
+            performed_cov_eff_sum += efficiency;
         }
 
         let universe = task.tags.len();
@@ -747,8 +742,8 @@ fn performance_rows(
     Ok(Some(rows))
 }
 
-/// Row `t` of the validated performance rows; empty when there are none.
-fn performance_row(rows: Option<&[Vec<bool>]>, t: usize) -> &[bool] {
+/// Row `t` of `rows`; empty when there are no rows or no row `t`.
+pub(super) fn performance_row(rows: Option<&[Vec<bool>]>, t: usize) -> &[bool] {
     rows.and_then(|rows| rows.get(t)).map_or(&[], Vec::as_slice)
 }
 
@@ -770,8 +765,12 @@ fn step_covered(instance: &WorkflowInstance, members: &[usize], step: Step) -> b
     })
 }
 
-/// Some member of `step.role` holds `step.bit` and performed (`row[i]`).
-fn step_covered_performed(
+/// Whether some agent index `i` in `members` has role `step.role` in
+/// `instance`, holds `step.bit` and has `row[i]` set. An index outside
+/// `instance.roles`, `instance.agents` or `row`, and a bit at or above 32,
+/// cover nothing.
+#[must_use]
+pub fn step_covered_performed(
     instance: &WorkflowInstance,
     members: &[usize],
     step: Step,
@@ -782,9 +781,25 @@ fn step_covered_performed(
     };
     members.iter().any(|&i| {
         instance.roles.get(i).is_some_and(|&r| r == step.role)
-            && instance.agents[i].capabilities() & mask != 0
-            && row[i]
+            && instance
+                .agents
+                .get(i)
+                .is_some_and(|a| a.capabilities() & mask != 0)
+            && row.get(i).copied().unwrap_or(false)
     })
+}
+
+/// `(success, efficiency)` of one task with `steps` distinct demanded steps
+/// of which `performed` count, over `members` final members: success iff
+/// `steps > 0` and every step counts; efficiency `performed / steps` divided
+/// by `members`, `0` when either is `0`.
+pub(super) fn performed_task_score(steps: usize, performed: usize, members: usize) -> (bool, f64) {
+    let efficiency = if members == 0 || steps == 0 {
+        0.0
+    } else {
+        (performed as f64 / steps as f64) / members as f64
+    };
+    (steps > 0 && performed == steps, efficiency)
 }
 
 /// Capability views of the agents at `members`, in `members` order.

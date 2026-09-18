@@ -15,7 +15,10 @@ use crate::decision::{CoalitionDecisionPolicy, Decision, DecisionContext, TaskSt
 use crate::process::{Role, Step};
 
 use super::trace::TraceEntry;
-use super::workflow::{PerformanceScored, WorkflowInstance};
+use super::workflow::{
+    PerformanceScored, WorkflowInstance, performance_row, performed_task_score,
+    step_covered_performed,
+};
 
 /// One task's end state, reconstructed from the arrival order and the trace.
 #[derive(Debug, Clone, PartialEq)]
@@ -61,20 +64,15 @@ impl TaskEnd {
     #[must_use]
     pub fn performed_success(&self) -> Option<bool> {
         self.performed
-            .map(|performed| self.steps > 0 && performed == self.steps)
+            .map(|performed| performed_task_score(self.steps, performed, self.members.len()).0)
     }
 
     /// `performed / steps` divided by the final member count, `0` for an
     /// empty coalition or an empty demand; `None` when `performed` is.
     #[must_use]
     pub fn performed_cov_eff(&self) -> Option<f64> {
-        self.performed.map(|performed| {
-            if self.members.is_empty() || self.steps == 0 {
-                0.0
-            } else {
-                (performed as f64 / self.steps as f64) / self.members.len() as f64
-            }
-        })
+        self.performed
+            .map(|performed| performed_task_score(self.steps, performed, self.members.len()).1)
     }
 }
 
@@ -170,29 +168,6 @@ pub fn step_covered(inst: &WorkflowInstance, members: &[usize], step: Step) -> b
     })
 }
 
-/// Whether some agent index `i` in `members` has role `step.role` in `inst`,
-/// holds `step.bit` and has `row[i]` set. An index outside `inst.roles` or
-/// outside `row`, and a bit at or above 32, cover nothing.
-#[must_use]
-pub fn step_covered_performed(
-    inst: &WorkflowInstance,
-    members: &[usize],
-    step: Step,
-    row: &[bool],
-) -> bool {
-    let Some(mask) = step.capability_mask() else {
-        return false;
-    };
-    members.iter().any(|&i| {
-        inst.roles.get(i).is_some_and(|&r| r == step.role)
-            && inst
-                .agents
-                .get(i)
-                .is_some_and(|a| a.capabilities() & mask != 0)
-            && row.get(i).copied().unwrap_or(false)
-    })
-}
-
 /// Replay `trace` over `inst` in the order `run_workflow_instance` calls a
 /// policy: per task the first arrival joins, each later arrival consumes one
 /// join entry and joins iff it acted, then each arrival that is a member
@@ -265,8 +240,8 @@ pub fn reconstruct(inst: &WorkflowInstance, trace: &[TraceEntry]) -> Result<Reco
             success_count += 1;
         }
         cov_eff_sum += cov_eff;
-        let performed = inst.performance.as_ref().map(|rows| {
-            let row = rows.get(t).map_or(&[][..], Vec::as_slice);
+        let performed = inst.performance.as_deref().map(|rows| {
+            let row = performance_row(Some(rows), t);
             task.demand
                 .distinct()
                 .filter(|&s| step_covered_performed(inst, &members, s, row))

@@ -100,10 +100,13 @@ touching anything with a frozen battery, a pinned decision, or a registered doc.
   on the same draw as one that reads `Both`. A distinct demanded step counts
   iff a final member of its role holds the bit and performed on the task.
   `recon`: `TaskEnd::performed` + `performed_success()` /
-  `performed_cov_eff()`, `Recon::performance_scored` (shares
-  `PerformanceScored::from_sums` with the harness loop, so the two are
-  bitwise equal), pub `step_covered_performed`; a missing row or an index
-  outside a row did not perform. `PerformanceShape` is now returned under
+  `performed_cov_eff()`, `Recon::performance_scored`. **The harness loop and
+  `recon` share one predicate (pub `workflow::step_covered_performed`), one
+  task rule (`performed_task_score`) and one aggregation
+  (`PerformanceScored::from_sums`)** — review finding, applied — so their
+  agreement is by construction; the independent pins are the hand-value
+  fixtures in each file. A missing row or an index outside a row did not
+  perform. `PerformanceShape` is now returned under
   every signal. `WorkflowSpec::default().performance` stays `None`.
   Identity gate: `tests/harness_workflow.rs` + `tests/k7_group_host.rs`
   unedited and green; nextest `e09fffb` → scaffold `harness,process` 212 →
@@ -223,7 +226,7 @@ koalisi/
 │   │   ├── dcvc.rs                         DCVCDistributor, WorkloadShare
 │   │   ├── aipa.rs                         Integer partitions, bounds, best-partition + 10 unit tests
 │   │   └── population.rs                   P5.2 (#42): population coalition-structure search atop AIPA (SplitMix64 PSO, gbest lineage) + record_trajectory (always compiled, no deps)
-│   ├── harness/                            v0.33.0: the K7 harness (feature `harness`, no deps) — rng.rs (SplitMix64, permutation, distinct_bits), instance.rs (InstanceSpec → Instance over CapabilityAgent; `draw(&mut rng)` since v0.35.0), battery.rs (SeedRange, Arm, run_instance — calls the H1 hooks once per task — run_battery, FLAT_SIGNAL_WIDTH), report.rs (percentile, median_iqr, superior_count, tables, Verdict), workflow.rs (v0.35.0, needs `process`: WorkflowSpec/PerformanceSpec → WorkflowInstance/WorkflowTask, OutcomeSignal, WorkflowArm, run_workflow_instance, run_workflow_battery — the Part 9/11 v2w world copied out of the frozen binary; v0.41.0: PerformanceScored + WorkflowResult::performance_scored, Some iff the instance carries a performance draw, under any signal), trace.rs (v0.38.0: TracedPolicy — forwards all four trait methods, records (leave, act, score bits) per decision), recon.rs (v0.40.0, needs `process`: reconstruct — arrival orders + trace → per-task final member sets, PRIMARY, churn — TaskEnd, Recon, ReconError, step_covered, member_set_identity, RosterRow + roster_decomposition, and the engine-free reference policies RefPrune / RefFirst / RefKeep; promoted out of k7_1.rs, which is untouched; v0.41.0: TaskEnd::performed + performed_success / performed_cov_eff, Recon::performance_scored, step_covered_performed); registrations are examples, never here
+│   ├── harness/                            v0.33.0: the K7 harness (feature `harness`, no deps) — rng.rs (SplitMix64, permutation, distinct_bits), instance.rs (InstanceSpec → Instance over CapabilityAgent; `draw(&mut rng)` since v0.35.0), battery.rs (SeedRange, Arm, run_instance — calls the H1 hooks once per task — run_battery, FLAT_SIGNAL_WIDTH), report.rs (percentile, median_iqr, superior_count, tables, Verdict), workflow.rs (v0.35.0, needs `process`: WorkflowSpec/PerformanceSpec → WorkflowInstance/WorkflowTask, OutcomeSignal, WorkflowArm, run_workflow_instance, run_workflow_battery — the Part 9/11 v2w world copied out of the frozen binary; v0.41.0: PerformanceScored + WorkflowResult::performance_scored, Some iff the instance carries a performance draw, under any signal; pub step_covered_performed), trace.rs (v0.38.0: TracedPolicy — forwards all four trait methods, records (leave, act, score bits) per decision), recon.rs (v0.40.0, needs `process`: reconstruct — arrival orders + trace → per-task final member sets, PRIMARY, churn — TaskEnd, Recon, ReconError, step_covered, member_set_identity, RosterRow + roster_decomposition, and the engine-free reference policies RefPrune / RefFirst / RefKeep; promoted out of k7_1.rs, which is untouched; v0.41.0: TaskEnd::performed + performed_success / performed_cov_eff, Recon::performance_scored); registrations are examples, never here
 │   ├── decision/
 │   │   ├── mod.rs                          CoalitionDecisionPolicy (+ the v0.35.0 default no-op lifecycle hooks begin_task(&TaskStart) / observe_outcome(required, &[bool])) + ThresholdPolicy (always compiled)
 │   │   ├── aif_policy.rs                   AifDecisionPolicy + EfeValueCalculator (feature `decision`)
