@@ -114,7 +114,8 @@ touching anything with a frozen battery, a pinned decision, or a registered doc.
   prereg §5's condition: the diff is `src/harness/` + koalisi's own version
   lines). The scaffold's failure messages printed `RefPrune` / always-join
   values on off-block seed 7000 under the unit tests' `perf_spec()` (0.7 /
-  0.05 / 0.40) — part 2 of the lock names it if those values are chosen.
+  0.05 / 0.40); no group-arm value was produced. The K7-3 prereg lists that
+  sighting among its pre-run executions.
   Suites `harness,process` 226, `harness,decision,process` 321, rest
   untouched.
 
