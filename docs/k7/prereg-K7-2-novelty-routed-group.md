@@ -361,3 +361,177 @@ blocks are unchanged.
   changed.
 - **A2.4 — what the pin is not.** Two reads on one hand-built fixture. It says
   nothing about a generated instance, and no criterion of §5 reads it.
+
+## Amendment 3 (pre-run, 2026-09-18) — the three-lens review
+
+No seed in 150..180 has run. The contrast cells, H-live, H-dead, H-move's
+predicate, the five label strings and their precedence, the seeds and the two
+smoke blocks are unchanged. **Everything here was written with A1.2's and
+A2.2's fixture values and A3.1's smoke byte counts visible.** The three lenses
+ran no cargo command, binary, test or probe (their reports). Owner decisions of
+2026-09-18: the zero-median sentence (A3.6), `ref-first` and `ref-keep`
+(A3.3), the continuation key (A3.7), the votes table (A3.4).
+
+### A3.1 — pre-run executions of the binary (§8's ledger, to date)
+
+All by the implementer of `83d2d2d`, all under `K7_2_SEEDS`, as its report
+lists them; none printed a table, median, ratio or per-seed value.
+
+| # | block | tree | output |
+|---|---|---|---|
+| 1–4 | `150..180`, `5000..5003`, `6000..6004`, `garbage` | pre-commit | refused, exit 2; no cell ran |
+| 5 | 6000..6003 | pre-commit, first version | gates PASS 3/3; `smoke: 11541 bytes` |
+| 6–7 | 6000..6003 | copies of it, X-recon (`× 0.5`) and S-determinism perturbed | FAIL + `RUN-INVALID`; 12480, 11335 bytes |
+| 8–12 | 6000..6003 | copies of the final source; X-recon (`+ 1.0`), S-determinism, S-route, S-learn (i), seed invariance perturbed | FAIL + `RUN-INVALID`; 14276, 13139, 13388, 13638, 13141 bytes |
+| 13 | 6000..6030 | final source | gates PASS 30/30; 18810 bytes |
+| 14 | 6000..6003 | final source | gates PASS 3/3; 13064 bytes |
+
+- **Two leaks, disclosed.** (i) The line `smoke: <n> bytes of report rendered
+  and suppressed` was the registrant's brief, not §8's; `n` is a function of
+  every suppressed value. The implementer reports beginning to reason from the
+  gap between runs 5 and 6–7 toward a label on 6000..6003 and stopping before
+  resolving one. (ii) Run 6's `× 0.5` perturbation leaves a zero PRIMARY
+  unchanged, so its `0/3` on every cell shows PRIMARY ≠ 0 for all five cells,
+  `grp-topo-nonov` included, on seeds 6000–6002. §8's *"the output carried no
+  cell value"* is not asserted for runs 5–14.
+- The hand-fixture reads: A1.2's probe; the S-nov falsifications of `2cd5a85`
+  (the depth-0 and depth-1 reads, once under `QUERY_ALPHA` 4.0 in a copy).
+
+### A3.2 — the binary's modes and output
+
+- **No value-derived line under smoke.** The byte-count line and the
+  error-path byte count are replaced by fixed text. A smoke run whose gate
+  fails prints `VERDICT: RUN-INVALID` (K7-1's behaviour; §8 named only the
+  passing line). S-route's line carries, beside the per-cell counts, the count
+  of routed cells whose block total is > 0. A later X-recon falsification
+  perturbs additively.
+- **The registered block needs an explicit opt-in.** It runs only with
+  `K7_2_OFFICIAL=1` and no `K7_2_SEEDS`; with neither, with both, or with any
+  other environment variable whose name starts `K7_`, the binary refuses
+  before generating an instance. In official mode it also refuses unless
+  `CARGO_PKG_VERSION` is `0.40.0` (§9).
+- **The header prints before any cell runs**, and a reconstruction error is an
+  X-recon failure naming the cell and seed, not an abort.
+- The header names Amendments 1–3.
+
+### A3.3 — `ref-first` and `ref-keep`, registered reference cells (non-gating; owner)
+
+Lens 3: when a cell leaves `ref-prune`, `ref-prune` does not say where it
+went.
+
+- **`ref-first`** — `should_join` never acts, `should_leave` never acts. Under
+  the loop's first-arrival rule every task ends as its first arrival alone.
+- **`ref-keep`** — `should_join` always acts, `should_leave` never acts.
+- Both in `src/harness/recon.rs`, engine-free, score `0.0`. X-recon covers all
+  seven cells. §5's *against `ref-prune`* disclosure is printed against each of
+  the three references, for every group cell.
+- **Pre-committed readings**, at the A2.2-of-K7-1 threshold (≥ 95 % of tasks):
+  `grp-topo-nonov` matching `ref-keep` reads *"without the term the routed arm
+  admits as the prune does and evicts no one; the eviction of redundant
+  members is what the term carried"*; matching `ref-first` reads *"without the
+  term the routed arm takes no act after the first arrival"*. Neither enters
+  the criterion.
+
+### A3.4 — added disclosures (non-gating)
+
+- **Task 0 against tasks ≥ 1**, per cell: join-act rate, leave-act rate,
+  success rate, mean final size. No task has been observed before task 0.
+- **The first divergence's task index**, per seed and pooled, both pairs.
+- **The votes table** (owner; K7-1 A2.3's): *(read kind, roster, centre vote,
+  blind act votes) → group acts of n*, every group cell, from the
+  `AgreementSample` ledger.
+- **Centre-present reads by what the centre's query sees**, per group cell and
+  read kind, act rate in each of four classes: the centre's masks identical on
+  its role's required bits (`cfg0 & required_r == cfg1 & required_r`, masks as
+  `coverage_masks` builds them) × whether either of the centre role's last two
+  on-roster tasks ended with `RoleCoverage` `true` on a bit the role requires
+  now. Both are computed in the example from the instance and the
+  reconstruction; the second is a world-side stand-in for the engine's
+  two-task replay window, not a read of it. **Integrity check:** per seed and
+  group cell, the mirror's leave-query count and its unrestricted
+  `cfg0 == cfg1` count over all rostered internals equal
+  `GroupAifCounters::leave_queries` and `leave_queries_identical`; on a
+  mismatch the table is withheld for that cell and the two numbers are printed.
+- *(covered steps, final size)* in §5 compares the **count** of covered steps.
+- X-carry additionally pins the promoted `roster_decomposition` on 90..120
+  against `docs/runs/K7-1.log:185` and `:201`.
+- A test asserts `WorkflowSpec::default().generate` succeeds on every seed of
+  150..180. It builds instances and runs no policy.
+- `tests/k7_2_novelty.rs` gains a `[[test]]` stanza with `required-features`;
+  §9's record of S-nov states its passed count.
+
+### A3.5 — lens 3's derivation (from code and the pinned values; nothing was run)
+
+- `query_novelty` sets `use_param_info_gain` and `use_b_info_gain`. In this
+  query the bit factors have one control and the membership factor is
+  deterministic, so the B term is constant across policies: **the contrast is
+  the A-novelty term alone.** §7's line on the two flags is read with this.
+- An internal whose masks are identical on its required bits is decided, with
+  the term, toward **act** whatever its window holds; without it, by the sign
+  of the replayed window — a replayed success declines, a replayed failure or
+  an empty window acts. A2.2's −0.5 is two delta-decline internals; its −1/3 is
+  `p(act) = 1/6`: a delta-decline centre at weight 1 and one act-delta routed
+  to `[½, ½]` at weight ½. The fixture's "step-adding" join is an
+  identical-mask query **for the centre**, because a role-mate already holds
+  the bit.
+- **Therefore routing removes the candidate-blind voters, not the
+  candidate-blind queries**: the centre's own redundant-leave and
+  subsumed-join reads have identical masks, and there the novelty term and
+  EQ5b A5.1's *indifference resolving to act* are the same term. The contrast
+  prices the centre's query with and without that term. The lock's *"prices
+  the mechanism alone"* and §1's question are read with this sentence; the
+  lock stands as posted.
+- The fixture repeats one task; v2w redraws the required mask and the role
+  tags per task, so battery windows are mostly no-observation on the current
+  bits. The fixture's act pattern is not a forecast of the battery's.
+
+### A3.6 — §6, amended
+
+- **Clause 1**, reworded: *"the contrast is the centre's query with and
+  without the term only where the centre decides"*; the counted sentence is
+  unchanged. Added: E-follow does not see a centre whose soft read coincides
+  with the blind vote; the votes table (A3.4) is where that shows.
+- **Clause 2**, reworded to carry no direction: *"the ratio of medians
+  novelty-off / novelty-on is X× on the unrouted pair and Y× on the routed
+  pair on this block."*
+- **Clause 5**, replaced (no summary word is left to the report): **5a** —
+  S-nov's redundant-member leave read: novelty-off declines where novelty-on
+  acts on 0 of 1 fresh and 1 of 1 warmed; exact ties 0 of 1. **5b** — *"k of m
+  seeds with an act difference have as first divergence a leave read on which
+  `grp-topo` acts and `grp-topo-nonov` declines"*; *modal* is used iff k is
+  strictly the largest of the four buckets. **5c** — §4's consequence, *the
+  lock's dead at the outcome fails*, is **confirmed** iff `grp-topo-nonov`
+  fails either of its H-dead conjuncts and **contradicted** iff it passes both.
+- **Clause 6 (new; owner).** If H-move's ratio conjunct fails because the
+  other cell's median is 0, label 5 is reported with: *"`<cell>`'s median
+  PRIMARY is 0; the ratio is undefined; `<other>` is strictly superior on n/30
+  seeds."* H-move's predicate is unchanged.
+- **Clause 7 (new).** Label 4 with `grp-topo` passing both its H-dead
+  conjuncts is reported with: *"the better cell ends where the engine-free
+  prune ends; the contrast measures the query without the term, not a gain
+  over a rule with no engine."*
+- §6 label 2 has two reachable readings: the act is `p(act) > 0.5` and the
+  score `p(act) − 0.5`, so an act difference at a position is a score-bit
+  difference there.
+
+### A3.7 — continuation, re-keyed (owner)
+
+§6's continuation is replaced: **`grp-topo` passing both its H-dead conjuncts
+⇒ the next registration moves the world**, whatever the label; otherwise K7-3
+is locked next. Ground: that leg is the lock's own condition — the routed arm
+ending where the prune ends under `RoleCoverage` — and K7-3's axis runs with
+novelty on. A `RUN-INVALID` carries no continuation.
+
+### A3.8 — corrections of record
+
+- §4 cites `K4-archive.log:2008` for the `1.0` read; `:2008` says *"maximally
+  confident for act"* and the literal `1.0 → 0.5` is on `:2065`
+  (``rg -n '`1\.0`' docs/runs/K4-archive.log``). §1 and §4's *"0.5 with novelty off"* is
+  EQ5b's pooled description; S-nov's pins show identical-mask internals near 1
+  fresh and near 0 warmed, never at 0.5.
+- X-battery's record (§5) carries the `Cargo.toml` and `Cargo.lock` hunks
+  beside the name-only list, since after §9's bump the list names both.
+- X-recon shares its scoring with the harness loop; it detects a trace /
+  harness misalignment, and the hand-value test in `src/harness/recon.rs` is
+  the independent pin. The gates' configurations are equal to §3's by value;
+  no assertion ties them (`GroupAifConfig` derives no `PartialEq`).
