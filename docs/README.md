@@ -60,11 +60,15 @@ is written; rows land here as each report is recorded.
 | # | Arm / question | Issue | Seeds | Verdict | Pre-registration | Report | Raw output |
 |---|---|---|---|---|---|---|---|
 | K7-1 | topology-routed group voting (tira ext-6) vs the candidate-blind group | #90 | 90..120 | **`VALIDATED (topology-routed group)`** 2.41×, 30/30 | [`k7/prereg-K7-1-topology-routed-group.md`](k7/prereg-K7-1-topology-routed-group.md) | [`k7/ab-report-K7-1-topology-routed-group.md`](k7/ab-report-K7-1-topology-routed-group.md) | [`runs/K7-1.log`](runs/K7-1.log) |
+| K7-2 | novelty on/off on the topology-routed group | #97 | 150..180 | `FALSIFIED (novelty moves the outcome)` — novelty on 3.00×, 30/30 | [`k7/prereg-K7-2-novelty-routed-group.md`](k7/prereg-K7-2-novelty-routed-group.md) | [`k7/ab-report-K7-2-novelty-routed-group.md`](k7/ab-report-K7-2-novelty-routed-group.md) | [`runs/K7-2.log`](runs/K7-2.log) |
 
 Read K7-1's mechanism section before quoting its verdict: the routed arm's
 PRIMARY is that of an engine-free redundancy prune, the candidate's own role
 query alone decides every centre-present read, and the effect was seen
-off-block before the run.
+off-block before the run. Read K7-2's the same way: the better cell ends
+where the engine-free prune ends on 600 of 600 tasks, so its 3.00× measures
+the routed query without the novelty term, not a gain over a rule with no
+engine.
 
 ## Seed ledger
 
@@ -78,7 +82,7 @@ reused across registrations.
 | 60..90 | consumed | v6 |
 | 90..120 | consumed | K7-1 |
 | 120..150 | consumed | EQ1 |
-| 150..180 | **reserved — K7-2** | released by the owner on #97 |
+| 150..180 | consumed | K7-2 |
 | 180..210 | consumed | #63 |
 | 210..240 | consumed | EQ3 |
 | 240..270 | consumed | EQ4 |
