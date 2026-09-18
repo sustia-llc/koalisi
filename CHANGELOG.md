@@ -17,6 +17,61 @@ Planned work — issue-tracked (details in [`CLAUDE.md`](./CLAUDE.md)
   decision/belief streams (the `TaskOutcome` durable home), [#33] federation
   manifests + FAIR provenance.
 
+## [0.40.0] — 2026-09-18
+
+`K7-2`, the second registration of the K7 lineage
+([#97](https://github.com/sustia-llc/koalisi/issues/97)): `query_novelty` on
+against off on K7-1's topology-routed group. **`FALSIFIED (novelty moves the
+outcome)`** — seeds 150..180, novelty on 0.4248 against novelty off 0.1415
+(3.0017×, 30/30), every gate holding; the better cell ends where the
+engine-free `ref-prune` ends on 600 of 600 tasks. Pre-registration
+(Amendments 1–4, all pre-run), report and raw output:
+[`docs/k7/`](docs/k7/prereg-K7-2-novelty-routed-group.md),
+[`docs/runs/K7-2.log`](docs/runs/K7-2.log).
+
+### Added
+- **`src/harness/recon.rs`** (features `harness` + `process`): the instruments
+  K7-1 kept example-side — `reconstruct` (arrival orders + decision trace →
+  per-task final member sets, PRIMARY and churn; `ReconError`), `TaskEnd`,
+  `Recon`, `step_covered`, `member_set_identity`, `RosterRow` +
+  `roster_decomposition`, and three engine-free reference policies:
+  `RefPrune` (join always; leave iff every covered demanded step stays
+  covered), `RefFirst` (never join, never leave), `RefKeep` (join always,
+  never leave). `examples/k7/k7_1.rs` is not edited.
+- **`examples/k7/k7_2.rs`**, its own `[[example]]` (features
+  `harness,decision,process`): seven cells, five in-binary gates (X-recon,
+  S-determinism, seed invariance, S-learn (i), S-route), the counted criterion
+  H-live / H-dead / H-move, one `VERDICT:` line. The registered block runs
+  only with `K7_2_OFFICIAL=1` on a `0.40.0` build; `K7_2_SEEDS` accepts
+  `6000..6003` and `6000..6030` and prints gate lines only; any other `K7_`
+  environment variable refuses.
+- **`tests/k7_group_host.rs`**: X-host for `grp-role-nonov` on 330..360
+  against `docs/runs/K4-archive.log:2037` / `:2076`; X-carry for `grp-topo`,
+  `grp-role` and `ref-prune` on 90..120 against `docs/runs/K7-1.log` (per-seed
+  PRIMARY, pooled rows, the 598-of-600 identity, the roster rows).
+  **`tests/k7_2_novelty.rs`** (S-nov): the routed read on a hand-built
+  fixture, fresh and after one observed task, eight pinned `(act, score
+  bits)` values. `tests/harness_workflow.rs`: `WorkflowSpec::default()`
+  generates every seed of 150..180.
+- `docs/README.md`: the K7-2 row; seed block 150..180 consumed.
+  `CLAUDE.md`: the index line for gotcha 35.
+
+### Gates
+- **X-battery was not run** (prereg §5's condition; owner, 2026-09-18). `git
+  diff --name-only v0.39.0..3a9557c -- src Cargo.toml Cargo.lock` prints
+  `Cargo.lock`, `Cargo.toml`, `src/harness/mod.rs`, `src/harness/recon.rs`; the
+  manifest and lock hunks are koalisi's own `version` line and the `k7_2` /
+  `k7_2_novelty` stanzas; `rg -c 'koalisi::harness|harness::'
+  examples/strategy_comparison.rs` matches nothing.
+- On `3a9557c`, before the run: `cargo nextest run --features
+  harness,decision,process` 307 passed (X-host, X-carry, S-nov, the generate
+  check among them); `cargo test --features harness,decision,process --example
+  k7_2` 7 passed. Suites by `cargo test`: `harness` 129, `harness,process`
+  215, `harness,decision,process` 310; the other lanes' inputs are unchanged.
+- clippy `--all-targets -- -D warnings` on the three harness lanes, `cargo doc`
+  `-D warnings`, `cargo fmt --all -- --check` and `cargo +1.93.0 check
+  --all-targets --locked --features harness,decision,process` clean.
+
 ## [0.39.0] — 2026-09-17
 
 Dependency re-pin: `surrealdb-live-message` `v0.2.1` → `v0.2.2`, on its own
