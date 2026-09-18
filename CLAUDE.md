@@ -91,7 +91,7 @@ touching anything with a frozen battery, a pinned decision, or a registered doc.
 
 ### Latest three
 
-- **`K7-2` — v0.40.0 (2026-09-18, #97)**: `query_novelty` on against off on
+- **`K7-2` — v0.40.0 (2026-09-18, #97, PR #99)**: `query_novelty` on against off on
   K7-1's routed group `grp-topo` — **`FALSIFIED (novelty moves the outcome)`**,
   novelty on 0.4248 vs `grp-topo-nonov` 0.1415 = 3.0017×, 30/30, seeds
   150..180, every gate PASS. The lock's expectation (*live in score and acts,
@@ -730,19 +730,26 @@ What is still open:
   (v0.36.0), C1 — the `aif-v0.14.0` re-pin (v0.37.0), C2 — `K7-1`
   (v0.38.0, `VALIDATED (topology-routed group)`), the
   `surrealdb-live-message` `v0.2.2` re-pin (v0.39.0), G-1 — `K7-2`
-  (v0.40.0, #97, `FALSIFIED (novelty moves the outcome)`). **Next: the
-  registration that moves the WORLD** — K7-2's continuation was re-keyed
-  pre-run (prereg A3.7, owner) on `grp-topo`'s H-dead leg, which passed (600
-  of 600 tasks ≡ `ref-prune`): the same routed arm under an outcome signal
-  that is not a deterministic function of coverage
-  (`OutcomeSignal::Performance` / `Both` with the harness's performance
-  draw), on its own issue, next free K7 number, fresh seed block released
-  there. **Any novelty contrast on that world inherits K7-2's mechanism**
-  (an identical-mask query follows its replay window once the term is gone;
-  a FAILURE in the window flips the sign) — read
-  `docs/k7/ab-report-K7-2-novelty-routed-group.md` §3 before its lock.
-  `K7-3` (360..390) keeps its place and reads both K7 reports before its
-  lock.
+  (v0.40.0, #97, `FALSIFIED (novelty moves the outcome)`). **Next: `K7-3`,
+  the registration that moves the WORLD — part 1 of its lock is on
+  [#100](https://github.com/sustia-llc/koalisi/issues/100)**, seeds 540..570.
+  K7-2's continuation was re-keyed pre-run (prereg A3.7, owner) on
+  `grp-topo`'s H-dead leg, which passed (600 of 600 tasks ≡ `ref-prune`).
+  **It starts with a harness scaffold, its own PR:** `OutcomeSignal` reaches
+  only the `per_bit` vector fed to `observe_outcome`
+  (`src/harness/workflow.rs:612-639`); PRIMARY is scored from coverage alone
+  (`:593-608`), so under `Performance` / `Both` as shipped `ref-prune` cannot
+  lose. The scaffold adds a performance-scored outcome (a step counts iff its
+  covering member of the step's role performed), identity-gated by the
+  existing H0 / X-host / X-carry tests; part 2 of the lock (cells,
+  `PerformanceSpec` values, signal, control) is posted on #100 after it
+  lands, before the prereg. **Any novelty contrast on that world inherits
+  K7-2's mechanism** (an identical-mask query follows its replay window once
+  the term is gone; a FAILURE in the window flips the sign) — read
+  `docs/k7/ab-report-K7-2-novelty-routed-group.md` §3 first. **Numbering
+  (owner, 2026-09-18):** the world-move took `K7-3`; EQ5b candidate (c)
+  (shared vs per-role world models) keeps its question and its block 360..390
+  and takes its number when its own lock is posted.
 - **MSRV — C-D1 DECIDED (owner, 2026-09-14): KEEP `rust-version = 1.93.0`.**
   The v0.23.0 re-pin removed the last DeepCausality edge and the `process`
   tier with it; the measured cross-feature maximum is 1.92 and the
