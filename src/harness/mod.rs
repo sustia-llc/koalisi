@@ -14,6 +14,9 @@
 //! - [`report`] — `percentile`, `median_iqr`, `superior_count`,
 //!   `print_per_seed_table`, `print_summary`, `Verdict`.
 //! - [`trace`] — `TracedPolicy`, `TraceEntry`.
+//! - `recon` *(feature `process`)* — `TaskEnd`, `Recon`, `ReconError`,
+//!   `reconstruct`, `step_covered`, `member_set_identity`, `RosterRow`,
+//!   `roster_decomposition`, `RefPrune`, `RefFirst`, `RefKeep`.
 //! - `workflow` *(feature `process`)* — `WorkflowSpec`, `PerformanceSpec`,
 //!   `WorkflowInstance`, `WorkflowTask`, `OutcomeSignal`, `WorkflowArm`,
 //!   `PolicyFactory`, `WorkflowResult`, `WorkflowBatteryResult`,
@@ -21,6 +24,8 @@
 
 pub mod battery;
 pub mod instance;
+#[cfg(feature = "process")]
+pub mod recon;
 pub mod report;
 pub mod rng;
 pub mod trace;
@@ -31,6 +36,11 @@ pub use battery::{
     Arm, BatteryResult, FLAT_SIGNAL_WIDTH, InstanceResult, SeedRange, run_battery, run_instance,
 };
 pub use instance::{Instance, InstanceSpec, Task};
+#[cfg(feature = "process")]
+pub use recon::{
+    Recon, ReconError, RefFirst, RefKeep, RefPrune, RosterRow, TaskEnd, member_set_identity,
+    reconstruct, roster_decomposition, step_covered,
+};
 pub use report::{
     Verdict, median_iqr, percentile, print_per_seed_table, print_summary, superior_count,
 };

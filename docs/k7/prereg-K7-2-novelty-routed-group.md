@@ -1,0 +1,596 @@
+# Pre-registration: K7-2 — novelty on/off on the topology-routed group
+
+**Status: REGISTERED.** Committed BEFORE implementation. Design-lock of record:
+[koalisi #97](https://github.com/sustia-llc/koalisi/issues/97) — the owner lock
+of 2026-09-17. Four design calls the lock left to this document were taken by
+the owner on 2026-09-18 before it was written: the counted criterion and its
+three-way reading (§5, §6), the smoke policy (§8), the promotion of K7-1's
+example-side instruments into `src/harness/` (§1), and the scope of X-battery
+(§5). Amendments are pre-verdict only, appended here and posted on #97 before
+any affected code runs; after the official run this document is immutable
+([`PROTOCOL.md`](../PROTOCOL.md) §1).
+
+## 1. Registration statement
+
+- **Question (EQ5b candidate (b)).** EQ5b
+  ([report](../ab-report-K4-eq5b-typed-two-engine.md) §3.3) measured
+  `grp-role-nonov` against `grp-role` and could not separate the inherited v5
+  novelty mechanism from the candidate-blind bias: novelty-off also collapses a
+  candidate-blind internal's read from 1.0 to 0.5
+  (`docs/runs/K4-archive.log:2065`). K7-1
+  ([report](ab-report-K7-1-topology-routed-group.md) §3.3) measured that under
+  candidate-star routing at λ = ½ the group's act equals the centre's own
+  argmax on 9370 of 9370 centre-present reads. K7-2 asks: **on that routed
+  arm, what does `query_novelty: true` vs `false` change — in the score, in
+  the acts, and at the outcome?**
+- **Born on:** koalisi `v0.39.0` (merge `ef33af7`): `aif-v0.14.0`, catgraph
+  `v0.23.0` ×3, `surrealdb-live-message` `v0.2.2`, `rust-version` 1.93. `src/`
+  is unchanged since `v0.38.0` (`git log --oneline v0.38.0..ef33af7 -- src`
+  prints nothing).
+- **Seeds:** `150..180`, released by the owner on #97 (ledger: reserved —
+  K7-2).
+- **Placement:** `examples/k7/k7_2.rs`, its own `[[example]]`
+  (`required-features = ["harness", "decision", "process"]`); every library
+  change through `src/`. `examples/k7/k7_1.rs` and
+  `examples/strategy_comparison.rs` are not edited.
+- **Promotion (owner, 2026-09-18).** K7-1's example-side instruments — the
+  trace → final-member-set reconstruction, the `ref-prune` policy, the
+  decomposition by roster — move into `src/harness/` as the first code commit,
+  with their own pins (§5 X-carry). No change to `src/decision/` is planned.
+- **Flat.** One `GroupAgent`, no nested member; tira #51 does not fire.
+- **Standing constraint.** koa#54 (magnitude = demonstrated default) is FINAL;
+  no K7-2 outcome reopens it.
+- **K4-lineage and K7-1 numbers are motivating evidence, never a bar.** Every
+  criterion below is stated against cells run in this battery, on these seeds,
+  at this pin.
+
+## 2. World and outcome semantics
+
+K7-1's, unchanged ([its prereg](prereg-K7-1-topology-routed-group.md) §2):
+`WorkflowSpec::default()` (the v2w draw), `run_workflow_battery` /
+`run_workflow_instance` as shipped, PRIMARY = success rate × mean coverage
+efficiency over the declared distinct `(bit, role)` steps,
+`OutcomeSignal::RoleCoverage`, the H1 lifecycle hooks (`TaskStart::steps`
+carries distinct steps; multiplicity 1 through the hook).
+
+## 3. Cells
+
+Every group cell is `GroupAifPolicy` over `WorldModelTopology::RoleSpecialised`,
+`PrecisionChannel::RoleRestricted`, `CoverageMasks::RoleMatched`,
+`DecisionRead::Deterministic`, `GroupVote::CertaintyWeighted`, `n_roles = 3`,
+one fresh policy per seed built from `WorkflowInstance::role_map`. *Novelty
+off* is `base: PersistentAifConfig { query_novelty: false, ..v5_e1_base() }` —
+EQ5b's `grp-role-nonov` construction
+(`examples/strategy_comparison.rs:11761`). The flag's non-test reads are
+`src/decision/aif_persistent_policy.rs:775`, `:802`, `:803`
+(`rg -n 'query_novelty' src/decision/aif_persistent_policy.rs`): it sets the
+per-decision query's `use_param_info_gain` and `use_b_info_gain` and nothing
+else.
+
+| cell | configuration | role |
+|---|---|---|
+| `grp-topo` | candidate-star routing, λ = ½, novelty on — K7-1's confirmatory cell | **contrast, novelty on** |
+| `grp-topo-nonov` | as `grp-topo`, novelty off | **contrast, novelty off** |
+| `grp-role` | routing off, novelty on (`GroupAifConfig::default()`) | reference — EQ5b's confounded pair |
+| `grp-role-nonov` | routing off, novelty off | reference — EQ5b's confounded pair |
+| `ref-prune` | K7-1 A2.2's engine-free rule: join always; leave iff every covered demanded `(bit, role)` step stays covered without the agent | reference |
+
+Novelty is the only axis inside each pair. All cells report regardless of
+outcome.
+
+## 4. Registered prediction
+
+**From the lock:** on this world — outcome a deterministic function of
+coverage — novelty is **live in the score and the acts and dead at the
+outcome**: the two routed cells compute different scores, take different acts,
+and both end where `ref-prune` ends.
+
+**Registrant's note, derived and unmeasured, written before any number
+exists.** The note changes no cell, criterion or label. EQ5b measured that an
+internal whose two coverage configurations are identical reads `p(act) = 1.0`
+with novelty on and `0.5` with novelty off (`docs/runs/K4-archive.log:2008`,
+`:2065`; the `novelty_off` test helper's rustdoc in
+`src/decision/group_policy.rs`), and that 73.8 % of `grp-role`'s leave queries
+have `cfg0 == cfg1` (`:2071`). A member whose removal changes no covered step
+is such a query for its own role's internal — the centre. If the centre reads
+0.5 there with novelty off, SP3's tie declines, and `grp-topo-nonov` does not
+evict the members `grp-topo` and `ref-prune` evict; by the same arithmetic it
+does not admit a candidate that adds no coverage. Under that reading the
+redundancy prune **is** the novelty term, and the lock's *dead at the outcome*
+fails. §5's S-nov pins the hand-fixture read before the run; the prediction
+above stands as locked whatever S-nov shows.
+
+## 5. Registered legs and gates
+
+Traces are compared by position up to the shorter length. Up to a seed's first
+act difference the two cells of a pair have taken the same acts over the same
+instance, so *seeds with any difference* is uncontaminated; positional totals
+after it are an upper bound (K7-1 prereg A2.6).
+
+### The counted criterion (owner, 2026-09-18)
+
+- **H-live — both conjuncts.** `grp-topo-nonov` against `grp-topo`: seeds with
+  ≥ 1 raw-score-bit difference ≥ **18/30** **and** seeds with ≥ 1 act
+  difference ≥ **18/30**.
+- **H-dead — all four conjuncts.** For **each** of `grp-topo` and
+  `grp-topo-nonov`, against in-battery `ref-prune`: final member set identical
+  on ≥ **570 of 600** tasks **and** PRIMARY bit-identical on ≥ **24/30**
+  seeds. At a block of other than 30 seeds × 20 tasks the thresholds are 95 %
+  of tasks and 80 % of seeds, rounded up.
+- **H-move — read only when H-dead fails.** Either routed cell against the
+  other: the other's median PRIMARY > 0, the ratio of medians ≥ **1.25×**,
+  **and** strictly superior on ≥ **18/30** seeds. The direction is named. (The
+  lineage's standing effect bar.)
+
+### Registered disclosures (all non-gating)
+
+- **S-live**, per seed and pooled, for both pairs (`grp-topo-nonov` vs
+  `grp-topo`; `grp-role-nonov` vs `grp-role`): positional act differences,
+  raw-score-bit differences, seeds with any of each, length difference.
+- **First divergence**, per seed, both pairs: the position of the first act
+  difference, its read kind (join / leave, from the trace entry) and which
+  cell acted; pooled counts by read kind and acting cell.
+- **Against `ref-prune`**, every group cell: tasks with identical final member
+  set, seeds with bit-identical PRIMARY; among the differing tasks, the count
+  whose `(covered steps, final size)` equal `ref-prune`'s.
+- **Inside each pair**: tasks with identical final member set, seeds with
+  bit-identical PRIMARY, ratio of median PRIMARY, strictly-superior seeds in
+  both directions.
+- **E-follow**, every group cell, join / leave split, over all centre-present
+  reads, from the `AgreementSample` ledger.
+- **Outcome decomposition** (K7-1 A2.3's): per cell and by realised roster
+  1 / 2 / 3 — tasks, success rate, mean coverage efficiency, mean final size,
+  tasks ending empty; join-act and leave-act rates split centre-present /
+  centre-absent; churn with the same split.
+- **Candidate reach** per group cell (EQ5b's A5.1 row: zero
+  candidate-sensitive share, mean blind internals, blind CW weight share,
+  leave `cfg0 == cfg1`, act rate sensitive / blind) and the blind-origin mass
+  share beside E-follow.
+- **E-lat.** Median µs/decision per cell. Record-only.
+- **Declines**: `declines_upstream`, `declines_missing_role`,
+  `declines_no_demand` per group cell. A zero score is not a decline.
+
+### Gates (any failure ⇒ `RUN-INVALID`)
+
+- **X-battery — conditional on the diff (owner, 2026-09-18).** The frozen
+  archive binary names nothing in `src/harness/`
+  (`rg -c 'koalisi::harness|harness::' examples/strategy_comparison.rs` matches
+  nothing). On the final tree, `git diff --name-only v0.39.0..HEAD -- src
+  Cargo.toml Cargo.lock` is read: a path under `src/` outside `src/harness/`,
+  or a dependency line in `Cargo.toml` / a stanza other than koalisi's own in
+  `Cargo.lock`, puts the gate on — one fresh serial archive run diffed against
+  `docs/runs/K4-archive.log` with the latency column stripped, a
+  latency-criterion flip re-run once. Otherwise the gate is recorded **not
+  run**, with that command's output, in the report, the CHANGELOG and the PR
+  body.
+- **X-host** (test suite). `tests/k7_group_host.rs`'s two K7-1 tests, plus the
+  harness-hosted `grp-role-nonov` over the **consumed** block 330..360
+  reproducing `docs/runs/K4-archive.log:2037` (median PRIMARY 0.1125, median
+  churn 140.00) and its candidate-reach row `:2076` (23.0 %, 1.35, 0.621, 8201
+  of 11173, 67.1 % / 73.6 %).
+- **X-carry** (test suite; this registration's X-identity). Over the
+  **consumed** block 90..120, §3's `grp-topo` and `grp-role` configurations
+  and the promoted `ref-prune`, hosted by `run_workflow_instance`, reproduce
+  `docs/runs/K7-1.log`: the per-seed PRIMARY columns of lines 45–74 at 4 dp,
+  the pooled rows `:32`, `:34`, `:38` (median PRIMARY, median churn), and —
+  through the promoted reconstruction — `grp-topo`'s identity with `ref-prune`
+  on 598 of 600 tasks and 28 of 30 seeds (`:164`). Novelty has no identity
+  value inside a boolean, so the gate is carried by K7-1's run of record: the
+  novelty-on side of the contrast and both promoted instruments are the ones
+  K7-1 measured.
+- **X-recon** (in-binary). PRIMARY recomputed from the reconstructed final
+  member sets equals `WorkflowResult::primary` bitwise on all five cells, per
+  seed; every trace consumed exactly.
+- **S-determinism.** Every group cell re-run from scratch per seed and
+  compared on trace entries (leave flag, act, raw score bits), PRIMARY bits
+  and churn. **Seed invariance** on `grp-topo` and `grp-topo-nonov`:
+  `battery_seed ^ 0x9E37_79B9_7F4A_7C15` reproduces each bit-for-bit.
+- **S-learn (i).** Per seed and group cell: `GroupAifCounters::s_learn_exact`,
+  `models_moved` with its `expected == 0` exemption at `S_LEARN_VACUITY_TOL`,
+  exempt models disclosed, `begin_task_rejections == 0`.
+- **S-route.** Per seed on `grp-topo` and `grp-topo-nonov`: `routed_reads` ==
+  ledger reads with `candidate_sensitive >= 1` and `roster >= 2`, block total
+  > 0; on `grp-role` and `grp-role-nonov`, `routed_reads == 0`.
+- **S-nov** (test suite; the lever reaches the engine). On a hand-built
+  fixture — no generated instance — one leave read of a member whose removal
+  changes no covered step and one join read of a candidate that adds a covered
+  step, each under §3's `grp-topo` and `grp-topo-nonov` configurations: the raw
+  score bits differ between the two configurations on at least one of the two
+  reads. The test pins the four `(act, score)` values it measures; if they
+  disagree with §4's note, the note is corrected by a pre-run amendment.
+
+## 6. Verdict labels (pre-committed, in precedence order)
+
+1. **`RUN-INVALID`** — any gate fails, or the run exits before printing a
+   `VERDICT:` line.
+2. **`FALSIFIED (novelty not live)`** — H-live fails either conjunct. Score
+   conjunct passing with the act conjunct failing reads *"live in the score,
+   dead at the decision"* (the [#80 report](../ab-report-K4-residual-process-specificity.md)'s
+   class); both failing reads *"inert on the routed arm"*.
+3. **`VALIDATED (novelty live, dead at the outcome)`** — H-live and H-dead
+   both pass. Reads: *"on v2w under `RoleCoverage` the v5 novelty term changes
+   what the routed group computes and which acts it takes, and not where it
+   ends: with it and without it the arm ends where a learning-free
+   arrival-order redundancy prune ends."*
+4. **`FALSIFIED (novelty moves the outcome)`** — H-live passes, H-dead fails,
+   H-move passes. Reads: *"novelty {on|off} is the better routed cell at the
+   lineage bar (X×, n/30)"*, with which of H-dead's four conjuncts failed.
+5. **`FALSIFIED (not dead by count, no effect at the bar)`** — H-live passes,
+   H-dead and H-move fail. Reported with the *against `ref-prune`* and
+   *inside each pair* disclosures in the verdict paragraph.
+
+**Pre-committed scoped clauses, fixed before any number is visible.**
+
+1. **The premise.** The contrast prices the mechanism alone only where the
+   candidate-blind voters decide no read. E-follow is reported for both routed
+   cells under every verdict; if either is below 100 %, the verdict is
+   reported with: *"on `<cell>` the group's act differed from the centre's
+   argmax on n of N centre-present reads; on those reads the contrast is not
+   the centre's query alone."*
+2. **Against EQ5b's pair.** The report gives the in-battery ratio of medians
+   `grp-role-nonov` / `grp-role` beside `grp-topo-nonov` / `grp-topo` and says
+   only: *"novelty-off costs the unrouted group X× and the routed group Y× on
+   this block."* It does not subtract one from the other.
+3. **Where the first divergence falls.** The pooled first-divergence counts by
+   read kind and acting cell are quoted under every verdict.
+4. **H-dead failing on one cell only** is reported as which cell left
+   `ref-prune` and on how many tasks.
+5. **§4's note** is reported as confirmed or contradicted by S-nov's pinned
+   values and by the first-divergence table, under every verdict.
+
+**Continuation (the lock's).** `VALIDATED` ⇒ the next registration moves the
+world (`OutcomeSignal::Performance` / `Both` with the harness's performance
+draw), on its own issue, next free K7 number, fresh seed block. Any
+`FALSIFIED` ⇒ K7-3 is locked next, and its lock reads this report first.
+
+## 7. What this cannot settle
+
+- EQ5b's verdict, K7-1's verdict and every other registered verdict —
+  untouched.
+- Novelty under any outcome signal that is not a deterministic function of
+  coverage.
+- Novelty on the centre-absent reads, which no routing reaches (K7-1 H-S).
+- Any λ but ½, any adjacency rule but the candidate-star, the `Shared`
+  world-model topology (K7-3's axis), the multiplicity channel.
+- The two information-gain flags separately: `query_novelty` sets both.
+- Transfer off the v2w world. One world, one draw family, 30 seeds.
+
+## 8. Pre-run executions (owner, 2026-09-18)
+
+- **The contrast is not visible before the run.** `K7_2_SEEDS` accepts exactly
+  two blocks, **`6000..6003`** and **`6000..6030`**, and refuses every other
+  value. Under it the binary runs every cell and gate and renders every table,
+  prints the header, the gate lines and `VERDICT: SMOKE (no verdict)`, and
+  prints **no** table, median, ratio, count or per-seed value of any cell. The
+  gate lines carry pass counts per cell and nothing else.
+- **No other execution of `grp-topo-nonov` over a generated instance** — by
+  the implementer, a reviewer or a test — precedes the run. The test suite
+  hosts `grp-role` and `grp-role-nonov` on 330..360 and `grp-topo`, `grp-role`
+  and `ref-prune` on 90..120 (reads EQ5b and K7-1 already published); S-nov's
+  fixture is hand-built.
+- Review lenses verify by reading code and by the executions above.
+- The report lists every pre-run execution of the binary: block, commit, who,
+  and that the output carried no cell value.
+
+## 9. Order of operations
+
+The version bump to `0.40.0` lands before the official run, so
+`docs/runs/K7-2.log` names the released tree. X-host, X-carry, S-nov and —
+if §5 puts it on — X-battery run on that tree **before** the official run; the
+binary's `VERDICT:` line cannot see them, and the run is made only if all
+hold. The run is serial on a quiet machine (`pgrep -c 'cargo|rustc'` prints
+0), `--release`.
+
+## 10. Report
+
+`docs/k7/ab-report-K7-2-novelty-routed-group.md`, committed with
+`docs/runs/K7-2.log`, carrying the verdict line exactly as printed, the
+criterion, every gate outcome (X-battery's *not run* with its command output,
+if so), §5's tables, §6's clauses and a numbered implementation / deviation
+ledger including §8's execution list. Immutable once recorded.
+
+## Amendment 1 (pre-run, 2026-09-18) — S-nov's pinned values, §4's note, one unbriefed probe
+
+No generated instance has been run under `grp-topo-nonov`; `examples/k7/k7_2.rs`
+does not exist yet. Cells, criterion, labels, gates' predicates, seeds and smoke
+blocks are unchanged. Commit times: prereg `41d4eef` 08:49:48; library and
+tests `fb6afb8`. **A1.2's values were visible when A1.3 was written.**
+
+- **A1.1 — S-nov, as pinned** (`tests/k7_2_novelty.rs`; fresh policy per read,
+  agents `0b011`@r0, `0b001`@r0, `0b100`@r1, steps `(0,r0) (1,r0) (2,r1)`,
+  λ = ½, seed 11). Raw score bits differ between the two configurations on 2
+  of 2 reads, so the gate's predicate holds.
+
+  | read | novelty | act | score bits |
+  |---|---|---|---|
+  | leave, member whose removal changes no covered step | on | act | `0x3fe0000000000000` |
+  | same | off | act | `0x3fdffffd4d048564` |
+  | join, candidate adding `(1, r0)` | on | act | `0x3fe0000000000000` |
+  | same | off | act | `0x3fdfffff837f4f34` |
+
+- **A1.2 — disclosure: an unbriefed probe on the same hand-built fixture.**
+  While measuring S-nov the implementer ran, once, a temporary test reading the
+  same two queries after 0, 1, 2, 5 and 20 warm-up tasks (by the implementer's
+  report, each `begin_task` + `observe_outcome` with the three required bits
+  `true`), then deleted it; its 20 output lines were read by the registrant. No
+  generated instance was involved, so §8's rule was not crossed; it is a wider
+  look at the `grp-topo-nonov` configuration than S-nov's four reads and is
+  entered in §8's ledger. At warm-up 0 it reproduces A1.1. At every warm-up
+  ≥ 1: the leave read is **act** with novelty on (score ≈ +0.5) and **decline**
+  with novelty off (score −0.5 at warm-up ≥ 2); the join read of the
+  step-adding candidate is **act** with novelty on (≈ +0.5) and **decline**
+  with novelty off (≈ −0.333).
+- **A1.3 — §4's note, corrected.** On a policy that has observed no task the
+  redundant-member leave read acts under both configurations; the note's
+  tie-decline does not occur there. A1.2 shows the on/off act difference the
+  note derives appearing after one observed task, and shows a second one the
+  note did not derive: with novelty off the fixture's step-adding candidate is
+  declined. The note's *"by the same arithmetic it does not admit a candidate
+  that adds no coverage"* is withdrawn as unmeasured. §4's registered
+  prediction stands as locked.
+- **A1.4 — S-nov's predicate is unchanged**: the fresh-fixture reads, as §5
+  registered. No warmed-fixture pin is added.
+
+## Amendment 2 (pre-run, 2026-09-18) — S-nov gains a warmed-fixture pin (owner)
+
+No generated instance has been run under `grp-topo-nonov`. **Written with
+A1.2's values visible.** Owner decision of 2026-09-18, superseding A1.4: S-nov
+pins the warmed fixture as well. Cells, criterion, labels, seeds and smoke
+blocks are unchanged.
+
+- **A2.1 — the added reads.** A1.1's fixture and two queries, each read on a
+  policy that has first observed **one** task: `begin_task` on the fixture's
+  `TaskStart`, then `observe_outcome` with the three required bits `true` and
+  the other five `false`, both through the trait hooks. Depth one is the
+  shallowest at which A1.2 shows an act difference, and its novelty-off leave
+  score is not yet saturated at −0.5.
+- **A2.2 — expected values, from A1.2's probe output, written before the test
+  exists.**
+
+  | read after one observed task | novelty | act | score bits |
+  |---|---|---|---|
+  | leave, member whose removal changes no covered step | on | act | `0x3fdffffff9df29c8` |
+  | same | off | decline | `0xbfdfffffffffffe9` |
+  | join, candidate adding `(1, r0)` | on | act | `0x3fdffffffeb0a8c6` |
+  | same | off | decline | `0xbfd5555555671850` |
+
+- **A2.3 — S-nov's predicate, extended.** §5's fresh-fixture predicate and
+  A1.1's four pins stand. Added: the four values of A2.2 are pinned, and the
+  act differs between the two configurations on **both** warmed reads. A
+  measured value that disagrees with A2.2 is reported on #97 before the pin is
+  changed.
+- **A2.4 — what the pin is not.** Two reads on one hand-built fixture. It says
+  nothing about a generated instance, and no criterion of §5 reads it.
+
+## Amendment 3 (pre-run, 2026-09-18) — the three-lens review
+
+No seed in 150..180 has run. The contrast cells, H-live, H-dead, H-move's
+predicate, the five label strings and their precedence, the seeds and the two
+smoke blocks are unchanged. **Everything here was written with A1.2's and
+A2.2's fixture values and A3.1's smoke byte counts visible.** The three lenses
+ran no cargo command, binary, test or probe (their reports). Owner decisions of
+2026-09-18: the zero-median sentence (A3.6), `ref-first` and `ref-keep`
+(A3.3), the continuation key (A3.7), the votes table (A3.4).
+
+### A3.1 — pre-run executions of the binary (§8's ledger, to date)
+
+All by the implementer of `83d2d2d`, all under `K7_2_SEEDS`, as its report
+lists them; none printed a table, median, ratio or per-seed value.
+
+| # | block | tree | output |
+|---|---|---|---|
+| 1–4 | `150..180`, `5000..5003`, `6000..6004`, `garbage` | pre-commit | refused, exit 2; no cell ran |
+| 5 | 6000..6003 | pre-commit, first version | gates PASS 3/3; `smoke: 11541 bytes` |
+| 6–7 | 6000..6003 | copies of it, X-recon (`× 0.5`) and S-determinism perturbed | FAIL + `RUN-INVALID`; 12480, 11335 bytes |
+| 8–12 | 6000..6003 | copies of the final source; X-recon (`+ 1.0`), S-determinism, S-route, S-learn (i), seed invariance perturbed | FAIL + `RUN-INVALID`; 14276, 13139, 13388, 13638, 13141 bytes |
+| 13 | 6000..6030 | final source | gates PASS 30/30; 18810 bytes |
+| 14 | 6000..6003 | final source | gates PASS 3/3; 13064 bytes |
+
+- **Two leaks, disclosed.** (i) The line `smoke: <n> bytes of report rendered
+  and suppressed` was the registrant's brief, not §8's; `n` is a function of
+  every suppressed value. The implementer reports beginning to reason from the
+  gap between runs 5 and 6–7 toward a label on 6000..6003 and stopping before
+  resolving one. (ii) Run 6's `× 0.5` perturbation leaves a zero PRIMARY
+  unchanged, so its `0/3` on every cell shows PRIMARY ≠ 0 for all five cells,
+  `grp-topo-nonov` included, on seeds 6000–6002. §8's *"the output carried no
+  cell value"* is not asserted for runs 5–14.
+- The hand-fixture reads: A1.2's probe; the S-nov falsifications of `2cd5a85`
+  (the depth-0 and depth-1 reads, once under `QUERY_ALPHA` 4.0 in a copy).
+
+### A3.2 — the binary's modes and output
+
+- **No value-derived line under smoke.** The byte-count line and the
+  error-path byte count are replaced by fixed text. A smoke run whose gate
+  fails prints `VERDICT: RUN-INVALID` (K7-1's behaviour; §8 named only the
+  passing line). S-route's line carries, beside the per-cell counts, the count
+  of routed cells whose block total is > 0. A later X-recon falsification
+  perturbs additively.
+- **The registered block needs an explicit opt-in.** It runs only with
+  `K7_2_OFFICIAL=1` and no `K7_2_SEEDS`; with neither, with both, or with any
+  other environment variable whose name starts `K7_`, the binary refuses
+  before generating an instance. In official mode it also refuses unless
+  `CARGO_PKG_VERSION` is `0.40.0` (§9).
+- **The header prints before any cell runs**, and a reconstruction error is an
+  X-recon failure naming the cell and seed, not an abort.
+- The header names Amendments 1–3.
+
+### A3.3 — `ref-first` and `ref-keep`, registered reference cells (non-gating; owner)
+
+Lens 3: when a cell leaves `ref-prune`, `ref-prune` does not say where it
+went.
+
+- **`ref-first`** — `should_join` never acts, `should_leave` never acts. Under
+  the loop's first-arrival rule every task ends as its first arrival alone.
+- **`ref-keep`** — `should_join` always acts, `should_leave` never acts.
+- Both in `src/harness/recon.rs`, engine-free, score `0.0`. X-recon covers all
+  seven cells. §5's *against `ref-prune`* disclosure is printed against each of
+  the three references, for every group cell.
+- **Pre-committed readings**, at the A2.2-of-K7-1 threshold (≥ 95 % of tasks):
+  `grp-topo-nonov` matching `ref-keep` reads *"without the term the routed arm
+  admits as the prune does and evicts no one; the eviction of redundant
+  members is what the term carried"*; matching `ref-first` reads *"without the
+  term the routed arm takes no act after the first arrival"*. Neither enters
+  the criterion.
+
+### A3.4 — added disclosures (non-gating)
+
+- **Task 0 against tasks ≥ 1**, per cell: join-act rate, leave-act rate,
+  success rate, mean final size. No task has been observed before task 0.
+- **The first divergence's task index**, per seed and pooled, both pairs.
+- **The votes table** (owner; K7-1 A2.3's): *(read kind, roster, centre vote,
+  blind act votes) → group acts of n*, every group cell, from the
+  `AgreementSample` ledger.
+- **Centre-present reads by what the centre's query sees**, per group cell and
+  read kind, act rate in each of four classes: the centre's masks identical on
+  its role's required bits (`cfg0 & required_r == cfg1 & required_r`, masks as
+  `coverage_masks` builds them) × whether either of the centre role's last two
+  on-roster tasks ended with `RoleCoverage` `true` on a bit the role requires
+  now. Both are computed in the example from the instance and the
+  reconstruction; the second is a world-side stand-in for the engine's
+  two-task replay window, not a read of it. **Integrity check:** per seed and
+  group cell, the mirror's leave-query count and its unrestricted
+  `cfg0 == cfg1` count over all rostered internals equal
+  `GroupAifCounters::leave_queries` and `leave_queries_identical`; on a
+  mismatch the table is withheld for that cell and the two numbers are printed.
+- *(covered steps, final size)* in §5 compares the **count** of covered steps.
+- X-carry additionally pins the promoted `roster_decomposition` on 90..120
+  against `docs/runs/K7-1.log:185` and `:201`.
+- A test asserts `WorkflowSpec::default().generate` succeeds on every seed of
+  150..180. It builds instances and runs no policy.
+- `tests/k7_2_novelty.rs` gains a `[[test]]` stanza with `required-features`;
+  §9's record of S-nov states its passed count.
+
+### A3.5 — lens 3's derivation (from code and the pinned values; nothing was run)
+
+- `query_novelty` sets `use_param_info_gain` and `use_b_info_gain`. In this
+  query the bit factors have one control and the membership factor is
+  deterministic, so the B term is constant across policies: **the contrast is
+  the A-novelty term alone.** §7's line on the two flags is read with this.
+- An internal whose masks are identical on its required bits is decided, with
+  the term, toward **act** whatever its window holds; without it, by the sign
+  of the replayed window — a replayed success declines, a replayed failure or
+  an empty window acts. A2.2's −0.5 is two delta-decline internals; its −1/3 is
+  `p(act) = 1/6`: a delta-decline centre at weight 1 and one act-delta routed
+  to `[½, ½]` at weight ½. The fixture's "step-adding" join is an
+  identical-mask query **for the centre**, because a role-mate already holds
+  the bit.
+- **Therefore routing removes the candidate-blind voters, not the
+  candidate-blind queries**: the centre's own redundant-leave and
+  subsumed-join reads have identical masks, and there the novelty term and
+  EQ5b A5.1's *indifference resolving to act* are the same term. The contrast
+  prices the centre's query with and without that term. The lock's *"prices
+  the mechanism alone"* and §1's question are read with this sentence; the
+  lock stands as posted.
+- The fixture repeats one task; v2w redraws the required mask and the role
+  tags per task, so battery windows are mostly no-observation on the current
+  bits. The fixture's act pattern is not a forecast of the battery's.
+
+### A3.6 — §6, amended
+
+- **Clause 1**, reworded: *"the contrast is the centre's query with and
+  without the term only where the centre decides"*; the counted sentence is
+  unchanged. Added: E-follow does not see a centre whose soft read coincides
+  with the blind vote; the votes table (A3.4) is where that shows.
+- **Clause 2**, reworded to carry no direction: *"the ratio of medians
+  novelty-off / novelty-on is X× on the unrouted pair and Y× on the routed
+  pair on this block."*
+- **Clause 5**, replaced (no summary word is left to the report): **5a** —
+  S-nov's redundant-member leave read: novelty-off declines where novelty-on
+  acts on 0 of 1 fresh and 1 of 1 warmed; exact ties 0 of 1. **5b** — *"k of m
+  seeds with an act difference have as first divergence a leave read on which
+  `grp-topo` acts and `grp-topo-nonov` declines"*; *modal* is used iff k is
+  strictly the largest of the four buckets. **5c** — §4's consequence, *the
+  lock's dead at the outcome fails*, is **confirmed** iff `grp-topo-nonov`
+  fails either of its H-dead conjuncts and **contradicted** iff it passes both.
+- **Clause 6 (new; owner).** If H-move's ratio conjunct fails because the
+  other cell's median is 0, label 5 is reported with: *"`<cell>`'s median
+  PRIMARY is 0; the ratio is undefined; `<other>` is strictly superior on n/30
+  seeds."* H-move's predicate is unchanged.
+- **Clause 7 (new).** Label 4 with `grp-topo` passing both its H-dead
+  conjuncts is reported with: *"the better cell ends where the engine-free
+  prune ends; the contrast measures the query without the term, not a gain
+  over a rule with no engine."*
+- §6 label 2 has two reachable readings: the act is `p(act) > 0.5` and the
+  score `p(act) − 0.5`, so an act difference at a position is a score-bit
+  difference there.
+
+### A3.7 — continuation, re-keyed (owner)
+
+§6's continuation is replaced: **`grp-topo` passing both its H-dead conjuncts
+⇒ the next registration moves the world**, whatever the label; otherwise K7-3
+is locked next. Ground: that leg is the lock's own condition — the routed arm
+ending where the prune ends under `RoleCoverage` — and K7-3's axis runs with
+novelty on. A `RUN-INVALID` carries no continuation.
+
+### A3.8 — corrections of record
+
+- §4 cites `K4-archive.log:2008` for the `1.0` read; `:2008` says *"maximally
+  confident for act"* and the literal `1.0 → 0.5` is on `:2065`
+  (``rg -n '`1\.0`' docs/runs/K4-archive.log``). §1 and §4's *"0.5 with novelty off"* is
+  EQ5b's pooled description; S-nov's pins show identical-mask internals near 1
+  fresh and near 0 warmed, never at 0.5.
+- X-battery's record (§5) carries the `Cargo.toml` and `Cargo.lock` hunks
+  beside the name-only list, since after §9's bump the list names both.
+- X-recon shares its scoring with the harness loop; it detects a trace /
+  harness misalignment, and the hand-value test in `src/harness/recon.rs` is
+  the independent pin. The gates' configurations are equal to §3's by value;
+  no assertion ties them (`GroupAifConfig` derives no `PartialEq`).
+
+## Amendment 4 (pre-run, 2026-09-18) — A3.1's ledger, continued; how `85ef81b` reads Amendment 3
+
+No seed in 150..180 has run. Nothing registered changes. `git diff -U0
+83d2d2d..85ef81b -- examples/k7/k7_2.rs` changes no line naming `BAR_RATIO`,
+`BAR_SEEDS`, `DEAD_TASKS`, `DEAD_SEEDS`, a label string's definition,
+`ratio_ok`, `superior_ok`, `pass` or `criterion`; its `LABEL_*` hunks are the
+deleted unreachable reading (A3.6) and the reading renderer.
+
+### A4.1 — executions by the implementer of `85ef81b` (its report)
+
+| # | environment | tree | output |
+|---|---|---|---|
+| 15 | `K7_2_SEEDS=6000..6003` | pre-commit | gates PASS 3/3 on seven cells; fixed smoke line; `VERDICT: SMOKE (no verdict)` |
+| 16 | same | copy, a reconstruction error forced on `ref-keep` | header; `X-recon — FAIL`, `ref-keep` 0/3, the rest 3/3; `VERDICT: RUN-INVALID` |
+| 17 | same | copy, X-recon comparing `primary + 1.0` | `X-recon — FAIL`, 0/3 on all seven |
+| 18–22 | `K7_2_OFFICIAL=1` on a `0.39.0` build; `K7_2_OFFICIAL=1` with `K7_2_SEEDS`; neither; `K7_2_SEED=…`; `K7_1_SEEDS=…` with `K7_2_SEEDS` | final source | refused, exit 2, no header; no instance generated |
+| 23 | `K7_2_SEEDS=6000..6003` | final source | gates PASS 3/3; `VERDICT: SMOKE (no verdict)` |
+| 24 | `K7_2_SEEDS=6000..6030` | final source | gates PASS 30/30; `VERDICT: SMOKE (no verdict)` |
+
+No byte count or other value-derived line was printed in runs 15–24. Test-side
+hosting was on consumed blocks: X-carry on 90..120, and the example's own
+mirror test, which hosts `grp-topo` and `grp-role` on 90..93 and, once
+falsified in a copy, printed `grp-topo`'s leave-query counts for seed 90.
+
+### A4.2 — readings of Amendment 3 the binary makes
+
+- **Guards.** Checked in the order: a foreign `K7_` name, neither variable,
+  both, the smoke value, `K7_2_OFFICIAL`'s value (anything but `1` refuses),
+  the version. Every refusal exits 2 before the header. `K7_WRITE_FIXTURE` is
+  a `K7_` name and refuses too. The header prints before instance generation.
+- **A reconstruction error** fails X-recon for that cell and seed; the verdict
+  is `RUN-INVALID` and the report then holds the gate detail and the arms
+  table only. A cell that fails to **run** still exits without a `VERDICT:`
+  line (§6 label 1's second limb); under smoke its error text is not printed.
+- **Clauses 6 and 7** are rendered inside label 5's and label 4's reading.
+  Clause 6 is emitted once per direction whose other median is ≤ 0. Clause 5b
+  says *"That bucket is not strictly the largest of the four"* when it is not;
+  5c names which of `grp-topo-nonov`'s two conjuncts passed.
+- **A3.3's readings** use H-dead's task rounding (95 %, rounded up) and print
+  *"the reading does not apply"* below it. Label 5's reading names the
+  *against `ref-prune`* table, as §6 wrote it; the report quotes all three.
+- **Task 0 against tasks ≥ 1** is rendered for all seven cells; act rates from
+  the trace, success and final size from the reconstruction. **The first
+  divergence's task index** is read from the novelty-on cell's replay; pooled
+  is seeds per task index.
+- **The four-class table** takes the act from the trace entry, over every
+  centre-present trace read. *On-roster* is "the role had required bits in the
+  task"; the window keeps that role's last two on-roster tasks; the per-bit
+  outcome is computed as `run_workflow_instance` computes it. A mismatching
+  seed withholds both of the cell's rows and prints the mirror's and the
+  ledger's `(queries, identical)` pairs.
+- **X-carry's roster pin** also carries the log's seventh column (final
+  members whose role has no demand).
+- The header names Amendments 1–4; the string changes in this amendment's
+  commit and nothing else in the binary does.
+- The example's seven unit tests (guards, the hand replay, the mirror against
+  the ledger on 90..93, the withhold path) run with `cargo test --features
+  harness,decision,process --example k7_2`; §9's gate list gains that command.
