@@ -330,3 +330,34 @@ tests `fb6afb8`. **A1.2's values were visible when A1.3 was written.**
   prediction stands as locked.
 - **A1.4 — S-nov's predicate is unchanged**: the fresh-fixture reads, as §5
   registered. No warmed-fixture pin is added.
+
+## Amendment 2 (pre-run, 2026-09-18) — S-nov gains a warmed-fixture pin (owner)
+
+No generated instance has been run under `grp-topo-nonov`. **Written with
+A1.2's values visible.** Owner decision of 2026-09-18, superseding A1.4: S-nov
+pins the warmed fixture as well. Cells, criterion, labels, seeds and smoke
+blocks are unchanged.
+
+- **A2.1 — the added reads.** A1.1's fixture and two queries, each read on a
+  policy that has first observed **one** task: `begin_task` on the fixture's
+  `TaskStart`, then `observe_outcome` with the three required bits `true` and
+  the other five `false`, both through the trait hooks. Depth one is the
+  shallowest at which A1.2 shows an act difference, and its novelty-off leave
+  score is not yet saturated at −0.5.
+- **A2.2 — expected values, from A1.2's probe output, written before the test
+  exists.**
+
+  | read after one observed task | novelty | act | score bits |
+  |---|---|---|---|
+  | leave, member whose removal changes no covered step | on | act | `0x3fdffffff9df29c8` |
+  | same | off | decline | `0xbfdfffffffffffe9` |
+  | join, candidate adding `(1, r0)` | on | act | `0x3fdffffffeb0a8c6` |
+  | same | off | decline | `0xbfd5555555671850` |
+
+- **A2.3 — S-nov's predicate, extended.** §5's fresh-fixture predicate and
+  A1.1's four pins stand. Added: the four values of A2.2 are pinned, and the
+  act differs between the two configurations on **both** warmed reads. A
+  measured value that disagrees with A2.2 is reported on #97 before the pin is
+  changed.
+- **A2.4 — what the pin is not.** Two reads on one hand-built fixture. It says
+  nothing about a generated instance, and no criterion of §5 reads it.
