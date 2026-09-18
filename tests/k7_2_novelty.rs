@@ -1,7 +1,10 @@
 //! The K7-2 S-nov gate (features `harness,decision,process`): on a hand-built
 //! fixture, `query_novelty` on against off under candidate-star routing at
 //! λ = ½, through the `CoalitionDecisionPolicy` trait hooks, one fresh
-//! `GroupAifPolicy` per read.
+//! `GroupAifPolicy` per read. Each of the two reads is made twice per
+//! configuration: on a policy that has observed no task, and on a policy that
+//! has observed one task — the fixture's own, with the three required bits
+//! succeeding and the other five failing.
 //!
 //! The fixture: agent 0 holds bits 0 and 1 at role 0, agent 1 holds bit 0 at
 //! role 0, agent 2 holds bit 2 at role 1; the task declares the steps
@@ -23,6 +26,8 @@ use koalisi::process::Role;
 const REQUIRED: u32 = 0b111;
 const STEPS: [(u8, u8); 3] = [(0, 0), (1, 0), (2, 1)];
 const BATTERY_SEED: u64 = 11;
+/// The observed task's per-bit outcome: the three required bits succeed.
+const OUTCOME: [bool; 8] = [true, true, true, false, false, false, false, false];
 
 /// Which of the fixture's two reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,6 +54,18 @@ fn routed(query_novelty: bool) -> GroupAifConfig {
 /// `(act, raw score bits)` of `read` on a fresh `config` policy with the
 /// fixture's task begun through the trait hook.
 fn measure(config: GroupAifConfig, read: Read) -> (bool, u64) {
+    measure_after(config, read, 0)
+}
+
+/// [`measure`] on a policy that has first observed one task: the fixture's
+/// `TaskStart` begun, then [`OUTCOME`] observed, both through the trait hooks.
+fn measure_warmed(config: GroupAifConfig, read: Read) -> (bool, u64) {
+    measure_after(config, read, 1)
+}
+
+/// `(act, raw score bits)` of `read` on a fresh `config` policy that has
+/// observed `observed_tasks` tasks before the read's own task begins.
+fn measure_after(config: GroupAifConfig, read: Read, observed_tasks: u64) -> (bool, u64) {
     let agents = [
         CapabilityAgent::new(0, 0b011, 50),
         CapabilityAgent::new(1, 0b001, 50),
@@ -60,10 +77,15 @@ fn measure(config: GroupAifConfig, read: Read) -> (bool, u64) {
     let policy = GroupAifPolicy::new(BATTERY_SEED, config, roles)
         .unwrap_or_else(|e| panic!("{read:?}: {e}"));
     let hooks: &dyn CoalitionDecisionPolicy = &policy;
-    hooks.begin_task(&TaskStart {
+    let task = TaskStart {
         required: REQUIRED,
         steps: &STEPS,
-    });
+    };
+    for _ in 0..observed_tasks {
+        hooks.begin_task(&task);
+        hooks.observe_outcome(REQUIRED, &OUTCOME);
+    }
+    hooks.begin_task(&task);
     let ctx = DecisionContext {
         required_capabilities: REQUIRED,
     };
@@ -89,6 +111,12 @@ fn measure(config: GroupAifConfig, read: Read) -> (bool, u64) {
         (0, 1, 1, 1),
         "{read:?}: (begin_task_rejections, decisions, reads, routed_reads) — the read must reach \
          the engine through a non-identity topology; counters {c:?}"
+    );
+    assert_eq!(
+        (c.tasks_observed, c.outcome_updates_unapplied),
+        (observed_tasks, 0),
+        "{read:?}: (tasks_observed, outcome_updates_unapplied) — every observed task must advance \
+         a world model; counters {c:?}"
     );
     let sample = c.agreement[0];
     assert_eq!(
@@ -159,4 +187,60 @@ fn novelty_reaches_the_routed_read_and_the_four_values_are_pinned() {
         "{}",
         report.join("; ")
     );
+}
+
+#[test]
+fn after_one_observed_task_the_act_differs_on_both_reads_and_the_four_values_are_pinned() {
+    let leave_on = measure_warmed(routed(true), Read::LeaveRedundant);
+    let leave_off = measure_warmed(routed(false), Read::LeaveRedundant);
+    let join_on = measure_warmed(routed(true), Read::JoinAddsStep);
+    let join_off = measure_warmed(routed(false), Read::JoinAddsStep);
+
+    let mut failures: Vec<String> = Vec::new();
+    let differing = usize::from(leave_on.0 != leave_off.0) + usize::from(join_on.0 != join_off.0);
+    if differing != 2 {
+        failures.push(format!(
+            "act differs between novelty on and off on {differing} of 2 warmed reads, expected \
+             2: leave on {} off {}, join on {} off {}",
+            show(leave_on),
+            show(leave_off),
+            show(join_on),
+            show(join_off)
+        ));
+    }
+
+    let pins: [(&str, Measured, Measured); 4] = [
+        (
+            "warmed leave / novelty on",
+            leave_on,
+            (true, 0x3fdf_ffff_f9df_29c8),
+        ),
+        (
+            "warmed leave / novelty off",
+            leave_off,
+            (false, 0xbfdf_ffff_ffff_ffe9),
+        ),
+        (
+            "warmed join / novelty on",
+            join_on,
+            (true, 0x3fdf_ffff_feb0_a8c6),
+        ),
+        (
+            "warmed join / novelty off",
+            join_off,
+            (false, 0xbfd5_5555_5567_1850),
+        ),
+    ];
+    failures.extend(
+        pins.iter()
+            .filter(|&&(_, observed, expected)| observed != expected)
+            .map(|&(label, observed, expected)| {
+                format!(
+                    "{label}: observed {}, pinned {}",
+                    show(observed),
+                    show(expected)
+                )
+            }),
+    );
+    assert!(failures.is_empty(), "{}", failures.join("; "));
 }
