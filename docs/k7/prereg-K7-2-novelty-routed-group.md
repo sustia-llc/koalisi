@@ -288,3 +288,45 @@ hold. The run is serial on a quiet machine (`pgrep -c 'cargo|rustc'` prints
 criterion, every gate outcome (X-battery's *not run* with its command output,
 if so), §5's tables, §6's clauses and a numbered implementation / deviation
 ledger including §8's execution list. Immutable once recorded.
+
+## Amendment 1 (pre-run, 2026-09-18) — S-nov's pinned values, §4's note, one unbriefed probe
+
+No generated instance has been run under `grp-topo-nonov`; `examples/k7/k7_2.rs`
+does not exist yet. Cells, criterion, labels, gates' predicates, seeds and smoke
+blocks are unchanged. Commit times: prereg `41d4eef` 08:49:48; library and
+tests `fb6afb8`. **A1.2's values were visible when A1.3 was written.**
+
+- **A1.1 — S-nov, as pinned** (`tests/k7_2_novelty.rs`; fresh policy per read,
+  agents `0b011`@r0, `0b001`@r0, `0b100`@r1, steps `(0,r0) (1,r0) (2,r1)`,
+  λ = ½, seed 11). Raw score bits differ between the two configurations on 2
+  of 2 reads, so the gate's predicate holds.
+
+  | read | novelty | act | score bits |
+  |---|---|---|---|
+  | leave, member whose removal changes no covered step | on | act | `0x3fe0000000000000` |
+  | same | off | act | `0x3fdffffd4d048564` |
+  | join, candidate adding `(1, r0)` | on | act | `0x3fe0000000000000` |
+  | same | off | act | `0x3fdfffff837f4f34` |
+
+- **A1.2 — disclosure: an unbriefed probe on the same hand-built fixture.**
+  While measuring S-nov the implementer ran, once, a temporary test reading the
+  same two queries after 0, 1, 2, 5 and 20 warm-up tasks (by the implementer's
+  report, each `begin_task` + `observe_outcome` with the three required bits
+  `true`), then deleted it; its 20 output lines were read by the registrant. No
+  generated instance was involved, so §8's rule was not crossed; it is a wider
+  look at the `grp-topo-nonov` configuration than S-nov's four reads and is
+  entered in §8's ledger. At warm-up 0 it reproduces A1.1. At every warm-up
+  ≥ 1: the leave read is **act** with novelty on (score ≈ +0.5) and **decline**
+  with novelty off (score −0.5 at warm-up ≥ 2); the join read of the
+  step-adding candidate is **act** with novelty on (≈ +0.5) and **decline**
+  with novelty off (≈ −0.333).
+- **A1.3 — §4's note, corrected.** On a policy that has observed no task the
+  redundant-member leave read acts under both configurations; the note's
+  tie-decline does not occur there. A1.2 shows the on/off act difference the
+  note derives appearing after one observed task, and shows a second one the
+  note did not derive: with novelty off the fixture's step-adding candidate is
+  declined. The note's *"by the same arithmetic it does not admit a candidate
+  that adds no coverage"* is withdrawn as unmeasured. §4's registered
+  prediction stands as locked.
+- **A1.4 — S-nov's predicate is unchanged**: the fresh-fixture reads, as §5
+  registered. No warmed-fixture pin is added.
