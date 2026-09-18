@@ -78,7 +78,7 @@ reused across registrations.
 | 60..90 | consumed | v6 |
 | 90..120 | consumed | K7-1 |
 | 120..150 | consumed | EQ1 |
-| 150..180 | **reserved — unconsumed** | released only by an owner decision on the registration's issue |
+| 150..180 | **reserved — K7-2** | released by the owner on #97 |
 | 180..210 | consumed | #63 |
 | 210..240 | consumed | EQ3 |
 | 240..270 | consumed | EQ4 |
