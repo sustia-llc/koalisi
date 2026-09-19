@@ -83,15 +83,24 @@ in the sibling `biome` project.
 - Rust implementation is dispatched to the built-in `general-purpose` agent
   per `.claude/stack/agent-dispatch.md`; review is `/code-review low`.
 
-## Current state — 2026-09-18 (v0.41.0)
+## Current state — 2026-09-19 (v0.42.0)
 
-Full release ledger v0.4.0 → v0.41.0 is the `project-history.md` archive (§1).
+Full release ledger v0.4.0 → v0.42.0 is the `project-history.md` archive (§1).
 The three most recent entries are kept here in brief — read the ledger before
 touching anything with a frozen battery, a pinned decision, or a registered doc.
 
 ### Latest three
 
 Detail for each: its `CHANGELOG.md` section and the ledger.
+
+- **`K7-3` scaffold 2 — v0.42.0 (2026-09-19, #100 lock part 2)**: the trait
+  hook is `observe_outcome(required, per_bit_success, members)` — one
+  `MemberOutcome { agent_id, performed }` per final member, in membership
+  order; every member performed when the instance carries no draw. Breaking
+  for trait implementors and callers; the inherent
+  `PersistentAifArm::observe_outcome` and `GroupAifPolicy::observe_outcome`
+  are unchanged, so no file under `examples/` is edited. No policy reads the
+  argument yet. No registration, no run.
 
 - **`K7-3` scaffold — v0.41.0 (2026-09-18, #100 lock part 1, PR #101)**:
   `WorkflowResult::performance_scored`, `Some` iff the instance carries a
@@ -105,10 +114,6 @@ Detail for each: its `CHANGELOG.md` section and the ledger.
   150..180. The label is scoped: `grp-topo` ≡ the engine-free `ref-prune` on
   600 of 600 tasks. Report: `docs/k7/ab-report-K7-2-novelty-routed-group.md`;
   gotcha 36.
-
-- **`surrealdb-live-message` `v0.2.2` re-pin — v0.39.0 (2026-09-17, PR #98)**:
-  `v0.2.1` → `v0.2.2`, container image tag `v3.2.4`; gate scope `durable`
-  only (owner); the MSRV gate verifies the declared 1.93.0 (gotcha 34).
 
 ### Lineages, verdict trail, seed ledger, run protocol — `docs/`
 
@@ -166,7 +171,7 @@ koalisi/
 │   │   └── population.rs                   population coalition-structure search atop AIPA (SplitMix64 PSO, gbest lineage) + record_trajectory (always compiled, no deps)
 │   ├── harness/                            the K7 harness (feature `harness`, no deps): rng.rs (SplitMix64), instance.rs (InstanceSpec → Instance), battery.rs (run_instance / run_battery; calls the H1 hooks once per task), report.rs (percentiles, tables, Verdict), trace.rs (TracedPolicy: (leave, act, score bits) per decision); with `process`: workflow.rs (the Part 9/11 v2w world — WorkflowSpec/PerformanceSpec, OutcomeSignal, run_workflow_battery, WorkflowResult::performance_scored = Some iff the instance carries a performance draw) and recon.rs (reconstruct: arrival orders + trace → final member sets, PRIMARY, churn, performance score; roster_decomposition; the engine-free RefPrune / RefFirst / RefKeep); registrations are examples, never here
 │   ├── decision/
-│   │   ├── mod.rs                          CoalitionDecisionPolicy (+ the default no-op lifecycle hooks begin_task(&TaskStart) / observe_outcome(required, &[bool])) + ThresholdPolicy (always compiled)
+│   │   ├── mod.rs                          CoalitionDecisionPolicy (+ the default no-op lifecycle hooks begin_task(&TaskStart) / observe_outcome(required, &[bool], &[MemberOutcome])) + ThresholdPolicy (always compiled)
 │   │   ├── aif_policy.rs                   AifDecisionPolicy + EfeValueCalculator (feature `decision`)
 │   │   ├── aif_mm_policy.rs                AifMmDecisionPolicy: a stateless multimodal POMDP per decision from binary union coverage — the K4-v3 bridge (feature `decision`)
 │   │   ├── aif_persistent_policy.rs        PersistentAifArm (arm-E1): a persistent per-bit world model + a fresh query POMDP per decision with a replay window; role_query is the group arm's seam (feature `decision`)
@@ -632,12 +637,12 @@ timeout 300s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-tar
 # recipe is docs/runs/README.md.
 cargo run --release --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision,magnitude,process --example strategy_comparison
 
-# === with harness feature (129 tests; with process 226) ===
+# === with harness feature (131 tests; with process 231) ===
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features harness
-timeout 300s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features harness,process   # 226, incl. the H0 identity gate
+timeout 300s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features harness,process   # 231, incl. the H0 identity gate
 timeout 60s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features harness --example gauntlet
 
-# === K7-1 / K7-2 (features harness,decision,process, 321 tests incl. X-host, X-carry, S-nov) ===
+# === K7-1 / K7-2 (features harness,decision,process, 326 tests incl. X-host, X-carry, S-nov) ===
 timeout 600s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features harness,decision,process
 timeout 300s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features harness,decision,process --example k7_2   # k7_2's own 7 unit tests (guards, mask mirror vs ledger on 90..93)
 # K7-2's run of record is docs/runs/K7-2.log; the registered block refuses on any build but 0.40.0. Smoke (gate lines only, no cell value):
@@ -683,14 +688,15 @@ What is still open:
   (v0.38.0, `VALIDATED (topology-routed group)`), the
   `surrealdb-live-message` `v0.2.2` re-pin (v0.39.0), G-1 — `K7-2`
   (v0.40.0, #97, `FALSIFIED (novelty moves the outcome)`), the `K7-3`
-  harness scaffold (v0.41.0, `WorkflowResult::performance_scored`). **Next:
+  harness scaffold (v0.41.0, `WorkflowResult::performance_scored`) and
+  scaffold 2 (v0.42.0, `MemberOutcome` on the outcome hook). **Next:
   `K7-3`, the registration that moves the WORLD — part 1 of its lock is on
   [#100](https://github.com/sustia-llc/koalisi/issues/100)**, seeds 540..570.
   K7-2's continuation was re-keyed pre-run (prereg A3.7, owner) on
   `grp-topo`'s H-dead leg, which passed (600 of 600 tasks ≡ `ref-prune`).
-  **Part 2 of the lock is posted on #100 (owner, 2026-09-19):** a second
-  scaffold first — `observe_outcome` extended with the final members
-  (`agent_id`, `performed`), its own PR, v0.42.0 — then the prereg. New arm
+  **Part 2 of the lock is posted on #100 (owner, 2026-09-19).** Its second
+  scaffold — `observe_outcome` extended with the final members (`agent_id`,
+  `performed`) — landed as v0.42.0; the prereg is next. New arm
   `grp-id`: one `PersistentAifArm` per agent, the candidate-star centre
   queries the CANDIDATE's model; flat, no tira extension. Seven cells
   (`grp-id`, `grp-topo`, `grp-topo-cov`, `ref-prune`, `ref-prune-id`,

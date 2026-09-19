@@ -56,6 +56,6 @@ pub mod subsystems {
 
 pub use core::CoalitionRuntime;
 pub use decision::{
-    CoalitionDecisionPolicy, Decision, DecisionContext, TaskStart, ThresholdPolicy,
+    CoalitionDecisionPolicy, Decision, DecisionContext, MemberOutcome, TaskStart, ThresholdPolicy,
 };
 pub use ingest::{DataSource, Sample, SampleMonitor, SampleUpdate};

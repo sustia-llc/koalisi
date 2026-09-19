@@ -5,7 +5,7 @@ use std::fmt;
 use std::time::Instant;
 
 use crate::algorithms::{AgentCapabilities, CapabilityAgent};
-use crate::decision::{CoalitionDecisionPolicy, DecisionContext, TaskStart};
+use crate::decision::{CoalitionDecisionPolicy, DecisionContext, MemberOutcome, TaskStart};
 
 use super::instance::{Instance, InstanceSpec};
 
@@ -75,7 +75,8 @@ pub struct InstanceResult {
 /// current membership including the agent) acting removes the agent and
 /// counts one churn; then `observe_outcome` with the required mask and
 /// [`FLAT_SIGNAL_WIDTH`] entries, `per_bit[b]` true iff some final member
-/// holds bit `b`. A task is completed iff the union of the final members'
+/// holds bit `b`, and one [`MemberOutcome`] per final member in membership
+/// order, each with `performed` set. A task is completed iff the union of the final members'
 /// capabilities covers `required`; its coverage efficiency is the fraction of
 /// required bits covered (`1` for an empty requirement) divided by the final
 /// member count, `0` for an empty coalition. Every `should_join` /
@@ -136,7 +137,8 @@ pub fn run_instance(
         let per_bit: Vec<bool> = (0..FLAT_SIGNAL_WIDTH)
             .map(|b| (union >> b) & 1 == 1)
             .collect();
-        policy.observe_outcome(task.required, &per_bit);
+        let outcomes = member_outcomes(agents, &members, |_| true);
+        policy.observe_outcome(task.required, &per_bit, &outcomes);
     }
 
     let n_tasks = instance.tasks.len();
@@ -163,6 +165,22 @@ fn views<'a>(agents: &'a [CapabilityAgent], members: &[usize]) -> Vec<&'a dyn Ag
     members
         .iter()
         .map(|&m| &agents[m] as &dyn AgentCapabilities)
+        .collect()
+}
+
+/// One [`MemberOutcome`] per index `m` of `members`, in `members` order:
+/// `agents[m]`'s agent id, and `performed(m)`.
+pub(super) fn member_outcomes(
+    agents: &[CapabilityAgent],
+    members: &[usize],
+    performed: impl Fn(usize) -> bool,
+) -> Vec<MemberOutcome> {
+    members
+        .iter()
+        .map(|&m| MemberOutcome {
+            agent_id: agents[m].agent_id(),
+            performed: performed(m),
+        })
         .collect()
 }
 
@@ -249,14 +267,15 @@ mod tests {
     }
 
     /// Acts on join and on leave per the two flags; records every coalition
-    /// (as agent ids) it is shown, per call kind, and every call as an
-    /// [`Event`].
+    /// (as agent ids) it is shown, per call kind, every call as an
+    /// [`Event`], and the `members` of every `observe_outcome`.
     struct Fixed {
         join: bool,
         leave: bool,
         seen_join: Mutex<Vec<Vec<usize>>>,
         seen_leave: Mutex<Vec<(usize, Vec<usize>)>>,
         events: Mutex<Vec<Event>>,
+        seen_members: Mutex<Vec<Vec<MemberOutcome>>>,
     }
 
     impl Fixed {
@@ -267,6 +286,7 @@ mod tests {
                 seen_join: Mutex::new(Vec::new()),
                 seen_leave: Mutex::new(Vec::new()),
                 events: Mutex::new(Vec::new()),
+                seen_members: Mutex::new(Vec::new()),
             }
         }
     }
@@ -314,11 +334,17 @@ mod tests {
             });
         }
 
-        fn observe_outcome(&self, required: u32, per_bit_success: &[bool]) {
+        fn observe_outcome(
+            &self,
+            required: u32,
+            per_bit_success: &[bool],
+            members: &[MemberOutcome],
+        ) {
             self.events.lock().unwrap().push(Event::ObserveOutcome {
                 required,
                 per_bit: per_bit_success.to_vec(),
             });
+            self.seen_members.lock().unwrap().push(members.to_vec());
         }
     }
 
@@ -569,6 +595,55 @@ mod tests {
                     expected.get(first_diff.unwrap_or(0))
                 );
             }
+        }
+    }
+
+    #[test]
+    fn observe_outcome_receives_the_final_member_ids_in_order_all_performed() {
+        // Agent ids differ from pool indices: index 0 is id 10, 1 is 20, 2 is 30.
+        let instance = Instance {
+            seed: 0,
+            agents: vec![
+                CapabilityAgent::new(10, 0b001, 50),
+                CapabilityAgent::new(20, 0b010, 50),
+                CapabilityAgent::new(30, 0b100, 50),
+            ],
+            tasks: vec![
+                Task {
+                    required: 0b111,
+                    arrival: vec![2, 0, 1],
+                },
+                Task {
+                    required: 0b011,
+                    arrival: vec![1, 2, 0],
+                },
+            ],
+        };
+        let performed = |ids: &[usize]| -> Vec<MemberOutcome> {
+            ids.iter()
+                .map(|&agent_id| MemberOutcome {
+                    agent_id,
+                    performed: true,
+                })
+                .collect()
+        };
+        // (join, leave, the final member ids of task 0 and of task 1)
+        let cases: [(bool, bool, [&[usize]; 2]); 3] = [
+            (true, false, [&[30, 10, 20], &[20, 30, 10]]),
+            (false, false, [&[30], &[20]]),
+            (true, true, [&[], &[]]),
+        ];
+        for (join, leave, ids) in cases {
+            let policy = Fixed::new(join, leave);
+            let mut latencies = Vec::new();
+            run_instance(&policy, &instance, &mut latencies);
+            let seen = policy.seen_members.lock().unwrap().clone();
+            let expected = vec![performed(ids[0]), performed(ids[1])];
+            assert_eq!(
+                seen, expected,
+                "join {join}, leave {leave}: the hook received {seen:?}; the final members \
+                 by agent id in membership order, all performed, are {expected:?}"
+            );
         }
     }
 

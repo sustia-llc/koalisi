@@ -15,12 +15,12 @@ use catgraph_syntax::frobenius::FrobeniusOr;
 use catgraph_syntax::text::print as print_expr;
 
 use crate::algorithms::{AgentCapabilities, CapabilityAgent};
-use crate::decision::{CoalitionDecisionPolicy, DecisionContext, RoleId, TaskStart};
+use crate::decision::{CoalitionDecisionPolicy, DecisionContext, MemberOutcome, RoleId, TaskStart};
 use crate::process::{
     Demand, Role, StaffingTable, Step, Workflow, WorkflowGen, chain, demand, spider_expr, step_expr,
 };
 
-use super::battery::{BatteryResult, InstanceResult, SeedRange};
+use super::battery::{BatteryResult, InstanceResult, SeedRange, member_outcomes};
 use super::instance::InstanceSpec;
 use super::rng::SplitMix64;
 
@@ -560,8 +560,11 @@ impl From<WorkflowResult> for InstanceResult {
 /// leave sweep in arrival order over the post-join membership, where
 /// `should_leave` (the coalition shown is the current membership including
 /// the agent) acting removes the agent and counts one churn; then
-/// `observe_outcome` with the context mask and the per-bit `signal` over one
-/// entry per tag of the task. A distinct demanded step is covered iff some
+/// `observe_outcome` with the context mask, the per-bit `signal` over one
+/// entry per tag of the task, and one [`MemberOutcome`] per final member in
+/// membership order — `performed` set for every member when the instance
+/// carries no performance draw, else the member's entry of the task's row. A
+/// distinct demanded step is covered iff some
 /// final member of its role holds its bit; the task succeeds iff the demand
 /// is non-empty and every distinct step is covered; its coverage efficiency
 /// is the covered fraction of distinct steps divided by the final member
@@ -694,7 +697,8 @@ pub fn run_workflow_instance(
                 }
             }
         }
-        policy.observe_outcome(required, &per_bit);
+        let outcomes = task_member_outcomes(agents, &members, performance, t);
+        policy.observe_outcome(required, &per_bit, &outcomes);
     }
 
     let n_tasks = instance.tasks.len();
@@ -785,7 +789,27 @@ pub fn step_covered_performed(
                 .agents
                 .get(i)
                 .is_some_and(|a| a.capabilities() & mask != 0)
-            && row.get(i).copied().unwrap_or(false)
+            && member_performed(row, i)
+    })
+}
+
+/// `row[i]`; `false` for an index outside `row`.
+fn member_performed(row: &[bool], i: usize) -> bool {
+    row.get(i).copied().unwrap_or(false)
+}
+
+/// One [`MemberOutcome`] per index of `members`, in `members` order, for task
+/// `t`: every member performed when `rows` is `None`; otherwise member `i`
+/// performed iff row `t` exists and holds a set entry `i`.
+fn task_member_outcomes(
+    agents: &[CapabilityAgent],
+    members: &[usize],
+    rows: Option<&[Vec<bool>]>,
+    t: usize,
+) -> Vec<MemberOutcome> {
+    let row = rows.map(|_| performance_row(rows, t));
+    member_outcomes(agents, members, |i| {
+        row.is_none_or(|row| member_performed(row, i))
     })
 }
 
@@ -908,11 +932,12 @@ mod tests {
     }
 
     /// Acts on join and on leave per the two flags; records every call as an
-    /// [`Event`].
+    /// [`Event`], and the `members` of every `observe_outcome`.
     struct Fixed {
         join: bool,
         leave: bool,
         events: Mutex<Vec<Event>>,
+        seen_members: Mutex<Vec<Vec<MemberOutcome>>>,
     }
 
     impl Fixed {
@@ -921,6 +946,7 @@ mod tests {
                 join,
                 leave,
                 events: Mutex::new(Vec::new()),
+                seen_members: Mutex::new(Vec::new()),
             }
         }
 
@@ -974,11 +1000,17 @@ mod tests {
             });
         }
 
-        fn observe_outcome(&self, required: u32, per_bit_success: &[bool]) {
+        fn observe_outcome(
+            &self,
+            required: u32,
+            per_bit_success: &[bool],
+            members: &[MemberOutcome],
+        ) {
             self.events.lock().unwrap().push(Event::ObserveOutcome {
                 required,
                 per_bit: per_bit_success.to_vec(),
             });
+            self.seen_members.lock().unwrap().push(members.to_vec());
         }
     }
 
@@ -1304,6 +1336,131 @@ mod tests {
         assert_eq!(
             (r.success_rate, r.mean_cov_eff, r.primary),
             (scored.success_rate, scored.mean_cov_eff, scored.primary)
+        );
+    }
+
+    /// [`scored_instance`] with agent ids 10, 20, 30 at pool indices 0, 1, 2
+    /// and the four tasks arriving `2, 0, 1` / `1, 2, 0` / `0, 1, 2` /
+    /// `2, 1, 0`.
+    fn member_instance(performance: Option<Vec<Vec<bool>>>) -> WorkflowInstance {
+        let mut inst = scored_instance(performance);
+        inst.agents = vec![
+            CapabilityAgent::new(10, 0b01, 50),
+            CapabilityAgent::new(20, 0b01, 50),
+            CapabilityAgent::new(30, 0b10, 50),
+        ];
+        let arrivals = [[2, 0, 1], [1, 2, 0], [0, 1, 2], [2, 1, 0]];
+        for (task, arrival) in inst.tasks.iter_mut().zip(arrivals) {
+            task.arrival = arrival.to_vec();
+        }
+        inst
+    }
+
+    fn outcomes_of(pairs: &[(usize, bool)]) -> Vec<MemberOutcome> {
+        pairs
+            .iter()
+            .map(|&(agent_id, performed)| MemberOutcome {
+                agent_id,
+                performed,
+            })
+            .collect()
+    }
+
+    fn seen_members(
+        instance: &WorkflowInstance,
+        signal: OutcomeSignal,
+        join: bool,
+        leave: bool,
+    ) -> Vec<Vec<MemberOutcome>> {
+        let policy = Fixed::new(join, leave);
+        let mut lat = Vec::new();
+        run_workflow_instance(&policy, instance, signal, &mut lat).unwrap();
+        policy.seen_members.lock().unwrap().clone()
+    }
+
+    #[test]
+    fn observe_outcome_receives_final_member_ids_in_order_with_the_rows_performed() {
+        let inst = member_instance(Some(scored_rows()));
+        // Always-join / never-leave: the final members are the arrival order.
+        let all_join = vec![
+            outcomes_of(&[(30, true), (10, false), (20, false)]),
+            outcomes_of(&[(20, true), (30, true), (10, false)]),
+            outcomes_of(&[(10, true), (20, true), (30, true)]),
+            outcomes_of(&[(30, false), (20, false), (10, false)]),
+        ];
+        // Never-join: the bootstrap member alone.
+        let bootstrap = vec![
+            outcomes_of(&[(30, true)]),
+            outcomes_of(&[(20, true)]),
+            outcomes_of(&[(10, true)]),
+            outcomes_of(&[(30, false)]),
+        ];
+        // Always-join / always-leave: every task ends on no member.
+        let emptied: Vec<Vec<MemberOutcome>> = vec![Vec::new(); 4];
+        for signal in ALL_SIGNALS {
+            for (join, leave, expected) in [
+                (true, false, &all_join),
+                (false, false, &bootstrap),
+                (true, true, &emptied),
+            ] {
+                let seen = seen_members(&inst, signal, join, leave);
+                assert_eq!(
+                    &seen, expected,
+                    "{signal:?}, join {join}, leave {leave}: the hook received {seen:?}; \
+                     the final members by agent id in membership order, each with its \
+                     row entry, are {expected:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn observe_outcome_reports_every_member_performed_without_a_draw() {
+        let inst = member_instance(None);
+        let expected = vec![
+            outcomes_of(&[(30, true), (10, true), (20, true)]),
+            outcomes_of(&[(20, true), (30, true), (10, true)]),
+            outcomes_of(&[(10, true), (20, true), (30, true)]),
+            outcomes_of(&[(30, true), (20, true), (10, true)]),
+        ];
+        let seen = seen_members(&inst, OutcomeSignal::RoleCoverage, true, false);
+        assert_eq!(
+            seen, expected,
+            "no draw: the hook received {seen:?}; every final member performed is \
+             {expected:?}"
+        );
+    }
+
+    #[test]
+    fn a_short_or_missing_row_did_not_perform() {
+        let inst = member_instance(None);
+        let members = [2usize, 0, 1];
+        // Row 0 holds index 0 alone; there is no row 1.
+        let rows = vec![vec![true]];
+        let short = task_member_outcomes(&inst.agents, &members, Some(&rows), 0);
+        assert_eq!(
+            short,
+            outcomes_of(&[(30, false), (10, true), (20, false)]),
+            "row [true]: {short:?}; indices 2 and 1 lie outside the row and did not \
+             perform, index 0 did"
+        );
+        let missing = task_member_outcomes(&inst.agents, &members, Some(&rows), 1);
+        assert_eq!(
+            missing,
+            outcomes_of(&[(30, false), (10, false), (20, false)]),
+            "no row 1: {missing:?}; nobody performed"
+        );
+        let no_rows = task_member_outcomes(&inst.agents, &members, Some(&[]), 0);
+        assert_eq!(
+            no_rows,
+            outcomes_of(&[(30, false), (10, false), (20, false)]),
+            "a draw of no rows: {no_rows:?}; nobody performed"
+        );
+        let no_draw = task_member_outcomes(&inst.agents, &members, None, 0);
+        assert_eq!(
+            no_draw,
+            outcomes_of(&[(30, true), (10, true), (20, true)]),
+            "no draw: {no_draw:?}; everybody performed"
         );
     }
 

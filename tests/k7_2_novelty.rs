@@ -83,7 +83,7 @@ fn measure_after(config: GroupAifConfig, read: Read, observed_tasks: u64) -> (bo
     };
     for _ in 0..observed_tasks {
         hooks.begin_task(&task);
-        hooks.observe_outcome(REQUIRED, &OUTCOME);
+        hooks.observe_outcome(REQUIRED, &OUTCOME, &[]);
     }
     hooks.begin_task(&task);
     let ctx = DecisionContext {
