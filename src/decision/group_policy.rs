@@ -129,7 +129,7 @@
 //! [`Agent::act`](aif::Agent::act) samples, and only the exploratory
 //! [`DecisionRead::SeededSampling`] cell calls it.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Mutex;
 
 use nalgebra::DVector;
@@ -153,6 +153,9 @@ const ACTION_ACT: usize = 1;
 
 /// The registered role count `R` (D2).
 pub const DEFAULT_N_ROLES: usize = 3;
+
+/// Offset added to an agent id before it is hashed into its agent model's seed.
+const AGENT_MODEL_SEED_BASE: u64 = 1 << 63;
 
 /// S-learn (i)'s **prereg-pinned** non-vacuity tolerance (Amendment A5.4),
 /// compared on Dirichlet pA counts.
@@ -261,6 +264,20 @@ pub enum WorldModelTopology {
     /// One model observing the whole task, read through `R` role-restricted
     /// views — the non-gating reference legs `grp-role-fresh` / `grp-mult-fresh`.
     Shared,
+    /// The `R` role models of [`RoleSpecialised`](Self::RoleSpecialised), which
+    /// observe as they do there, plus one model per agent of the role map given
+    /// to [`GroupAifPolicy::new`]. On a decision the internal of the candidate's
+    /// own role queries the candidate's agent model; every other internal
+    /// queries its role model. An agent model observes through
+    /// [`CoalitionDecisionPolicy::observe_outcome`] alone: per
+    /// [`MemberOutcome`] whose agent is in the role map and has been shown to a
+    /// `should_join` / `should_leave` call, the mask `required_r(own role) &
+    /// capabilities` (capabilities as last shown) with every bit of it read as
+    /// the entry's `performed`, and nothing when that mask is `0`.
+    /// [`GroupAifCounters::model_updates`] and
+    /// [`GroupAifPolicy::model_snapshots`] cover the role models;
+    /// [`GroupAifPolicy::agent_model_updates`] covers the agent models.
+    AgentKeyed,
 }
 
 /// Which precision channel drives the internals (D3).
@@ -1066,6 +1083,12 @@ struct Shared {
     expected: Vec<u64>,
     /// Monotonic decision counter — derives the per-decision seed (hygiene only).
     decision_counter: u64,
+    /// Applied-update count per agent model, keyed by agent id; an agent whose
+    /// model has applied no update has no entry.
+    agent_updates: HashMap<usize, u64>,
+    /// `agent_id → capabilities` as last shown to a decision, written under
+    /// [`WorldModelTopology::AgentKeyed`] alone. Looked up, never iterated.
+    shown_caps: HashMap<usize, u32>,
 }
 
 /// The arm's persistent world models (Amendment A1.1).
@@ -1142,6 +1165,11 @@ impl Models {
 /// report measures. Construct one arm per seed and drop it, as the battery does.
 pub struct GroupAifPolicy {
     models: Models,
+    /// One model per agent of `agent_roles` under
+    /// [`WorldModelTopology::AgentKeyed`], empty otherwise. Looked up by agent id
+    /// on the decision and observation paths; iterated, in ascending id order,
+    /// by [`agent_model_updates`](Self::agent_model_updates) alone.
+    agent_models: BTreeMap<usize, PersistentAifArm>,
     config: GroupAifConfig,
     /// `agent_id → Role`. Only ever *looked up*, never iterated — no `HashMap`
     /// ordering reaches a decision.
@@ -1201,7 +1229,7 @@ impl GroupAifPolicy {
         let config = GroupAifConfig { n_roles, ..config };
 
         let models = match config.topology {
-            WorldModelTopology::RoleSpecialised => {
+            WorldModelTopology::RoleSpecialised | WorldModelTopology::AgentKeyed => {
                 let mut built = Vec::with_capacity(n_roles);
                 for r in 0..n_roles {
                     // Distinct per-model seeds are hygiene: the world model never
@@ -1218,6 +1246,18 @@ impl GroupAifPolicy {
             }
         };
 
+        let mut agent_models = BTreeMap::new();
+        if config.topology == WorldModelTopology::AgentKeyed {
+            for &agent_id in agent_roles.keys() {
+                // Hygiene, as for the role models: the world model never samples.
+                // The role seeds hash `1..=255`; `AGENT_MODEL_SEED_BASE` keeps the
+                // agent seeds off that range for every id below `2^63`.
+                let seed =
+                    battery_seed ^ splitmix64(AGENT_MODEL_SEED_BASE.wrapping_add(agent_id as u64));
+                agent_models.insert(agent_id, PersistentAifArm::new(seed, config.base)?);
+            }
+        }
+
         let n_bits = models
             .at(0)
             .expect("invariant: every topology builds at least one model")
@@ -1226,6 +1266,7 @@ impl GroupAifPolicy {
 
         Ok(Self {
             models,
+            agent_models,
             config,
             agent_roles,
             battery_seed,
@@ -1236,6 +1277,8 @@ impl GroupAifPolicy {
                 updates: vec![0; model_count],
                 expected: vec![0; model_count],
                 decision_counter: 0,
+                agent_updates: HashMap::new(),
+                shown_caps: HashMap::new(),
             }),
         })
     }
@@ -1334,7 +1377,8 @@ impl GroupAifPolicy {
     /// the leave sweep, exactly as arm-E1's
     /// [`observe_outcome`](PersistentAifArm::observe_outcome) is called.
     ///
-    /// Under [`WorldModelTopology::RoleSpecialised`] each **demanding** role's model
+    /// Under [`WorldModelTopology::RoleSpecialised`] and
+    /// [`WorldModelTopology::AgentKeyed`] each **demanding** role's model
     /// observes its own `required_r`; roles that left the roster observe nothing and
     /// their expected-update count does not advance. Under
     /// [`WorldModelTopology::Shared`] the one model observes the union — arm-E1's
@@ -1423,6 +1467,76 @@ impl GroupAifPolicy {
             .collect()
     }
 
+    /// `(agent_id, updates)` per agent model, ascending in agent id: one entry
+    /// per agent of the role map under [`WorldModelTopology::AgentKeyed`], none
+    /// under the other topologies. `updates` counts the observations the engine
+    /// applied to that agent's model.
+    ///
+    /// # Panics
+    ///
+    /// Only on a poisoned arm mutex.
+    #[must_use]
+    pub fn agent_model_updates(&self) -> Vec<(usize, u64)> {
+        let shared = self
+            .shared
+            .lock()
+            .expect("invariant: no panic holds the group arm mutex");
+        self.agent_models
+            .keys()
+            .map(|&id| (id, shared.agent_updates.get(&id).copied().unwrap_or(0)))
+            .collect()
+    }
+
+    /// The snapshot of `agent_id`'s agent model; `None` when there is none — an
+    /// agent absent from the role map, or a topology other than
+    /// [`WorldModelTopology::AgentKeyed`].
+    #[must_use]
+    pub fn agent_model_snapshot(&self, agent_id: usize) -> Option<PersistentAifState> {
+        self.agent_models
+            .get(&agent_id)
+            .map(PersistentAifArm::state_snapshot)
+    }
+
+    /// Observe `members` into the agent models, against the task in force: per
+    /// entry whose agent has a role, a model and shown capabilities, the mask
+    /// `required_r(own role) & capabilities` with every bit read as the entry's
+    /// `performed`; nothing for an entry whose mask is `0`, and nothing at all
+    /// with no task in force or no agent models.
+    fn observe_members(&self, members: &[MemberOutcome]) {
+        if self.agent_models.is_empty() {
+            return;
+        }
+        let mut shared = self
+            .shared
+            .lock()
+            .expect("invariant: no panic holds the group arm mutex");
+        let Some(required) = shared.task.as_ref().map(|task| task.required.clone()) else {
+            return;
+        };
+        for member in members {
+            let id = member.agent_id;
+            let (Some(role), Some(model), Some(&caps)) = (
+                self.agent_roles.get(&id),
+                self.agent_models.get(&id),
+                shared.shown_caps.get(&id),
+            ) else {
+                continue;
+            };
+            let required_r = required
+                .get(usize::from(role.index()))
+                .copied()
+                .unwrap_or(0);
+            let mask = required_r & caps & low_mask(self.n_bits);
+            if mask == 0 {
+                continue;
+            }
+            let outcome = vec![member.performed; self.n_bits];
+            if model.observe_outcome_checked(mask, &outcome) {
+                *shared.agent_updates.entry(id).or_insert(0) += 1;
+            }
+        }
+    }
+
     /// The configuration in force (post-clamp).
     #[must_use]
     pub fn config(&self) -> GroupAifConfig {
@@ -1472,10 +1586,16 @@ impl GroupAifPolicy {
 
         shared.decision_counter = shared.decision_counter.wrapping_add(1);
         let seed = self.battery_seed ^ splitmix64(shared.decision_counter);
-        drop(shared);
 
         let agent_id = agent.agent_id();
         let agent_caps = agent.capabilities();
+        if self.config.topology == WorldModelTopology::AgentKeyed {
+            shared.shown_caps.insert(agent_id, agent_caps);
+            for &(_, id, caps) in &members {
+                shared.shown_caps.insert(id, caps);
+            }
+        }
+        drop(shared);
 
         let mut internals: Vec<RoleMember> = Vec::with_capacity(task.roster.len());
         // A5.1 disclosure, accumulated as the queries are built rather than
@@ -1499,7 +1619,7 @@ impl GroupAifPolicy {
                 PrecisionChannel::MultiplicityWeighted => Some(self.scale_for(&task, role)),
             };
 
-            let Some(model) = self.models.view(role) else {
+            let Some(model) = self.query_model(role, agent_role, agent_id) else {
                 self.count_upstream_decline();
                 self.record_leave_masks(leave_queries, leave_identical);
                 tracing::warn!(
@@ -1662,6 +1782,24 @@ impl GroupAifPolicy {
         Decision {
             act: group_act,
             score: p_act - 0.5,
+        }
+    }
+
+    /// The model internal `role` queries on a decision about the agent
+    /// `agent_id` of role `agent_role`: under
+    /// [`WorldModelTopology::AgentKeyed`] with `role == agent_role`, that agent's
+    /// model; otherwise `role`'s view of the role / shared models. `None` when
+    /// the model does not exist.
+    fn query_model(
+        &self,
+        role: Role,
+        agent_role: Role,
+        agent_id: usize,
+    ) -> Option<&PersistentAifArm> {
+        if self.config.topology == WorldModelTopology::AgentKeyed && role == agent_role {
+            self.agent_models.get(&agent_id)
+        } else {
+            self.models.view(role)
         }
     }
 
@@ -1847,16 +1985,17 @@ impl CoalitionDecisionPolicy for GroupAifPolicy {
 
     /// [`GroupAifPolicy::observe_outcome`] over `per_bit_success`; a call that
     /// advances no world model is counted in
-    /// [`GroupAifCounters::outcome_updates_unapplied`]. `_members` is not read.
-    fn observe_outcome(
-        &self,
-        _required: u32,
-        per_bit_success: &[bool],
-        _members: &[MemberOutcome],
-    ) {
+    /// [`GroupAifCounters::outcome_updates_unapplied`]. Under
+    /// [`WorldModelTopology::AgentKeyed`], when `per_bit_success` has the world
+    /// model's width, `members` is then observed into the agent models as that
+    /// variant describes; under the other topologies `members` is not read.
+    fn observe_outcome(&self, _required: u32, per_bit_success: &[bool], members: &[MemberOutcome]) {
         if GroupAifPolicy::observe_outcome(self, per_bit_success) == 0 {
             let mut shared = self.shared.lock().expect("group arm mutex poisoned");
             shared.counters.outcome_updates_unapplied += 1;
+        }
+        if per_bit_success.len() == self.n_bits {
+            self.observe_members(members);
         }
     }
 }

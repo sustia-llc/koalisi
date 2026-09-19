@@ -16,7 +16,7 @@
 //! - [`trace`] — `TracedPolicy`, `TraceEntry`.
 //! - `recon` *(feature `process`)* — `TaskEnd`, `Recon`, `ReconError`,
 //!   `reconstruct`, `step_covered`, `member_set_identity`, `RosterRow`,
-//!   `roster_decomposition`, `RefPrune`, `RefFirst`, `RefKeep`.
+//!   `roster_decomposition`, `RefPrune`, `RefPruneId`, `RefFirst`, `RefKeep`.
 //! - `workflow` *(feature `process`)* — `WorkflowSpec`, `PerformanceSpec`,
 //!   `WorkflowInstance`, `WorkflowTask`, `OutcomeSignal`, `WorkflowArm`,
 //!   `PolicyFactory`, `WorkflowResult`, `PerformanceScored`,
@@ -39,8 +39,8 @@ pub use battery::{
 pub use instance::{Instance, InstanceSpec, Task};
 #[cfg(feature = "process")]
 pub use recon::{
-    Recon, ReconError, RefFirst, RefKeep, RefPrune, RosterRow, TaskEnd, member_set_identity,
-    reconstruct, roster_decomposition, step_covered,
+    Recon, ReconError, RefFirst, RefKeep, RefPrune, RefPruneId, RosterRow, TaskEnd,
+    member_set_identity, reconstruct, roster_decomposition, step_covered,
 };
 pub use report::{
     Verdict, median_iqr, percentile, print_per_seed_table, print_summary, superior_count,
