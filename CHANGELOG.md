@@ -17,6 +17,51 @@ Planned work — issue-tracked (details in [`CLAUDE.md`](./CLAUDE.md)
   decision/belief streams (the `TaskOutcome` durable home), [#33] federation
   manifests + FAIR provenance.
 
+## [0.42.0] — 2026-09-19
+
+The second harness scaffold for `K7-3`
+([#100](https://github.com/sustia-llc/koalisi/issues/100), design-lock part
+2): the outcome hook names the task's final members. No registration, no run.
+
+### Changed
+- **`CoalitionDecisionPolicy::observe_outcome`** takes a third argument,
+  `members: &[MemberOutcome]` — one entry per final member of the task, in
+  membership order. **Breaking** for implementors and callers of the trait
+  hook; the default still does nothing. The inherent
+  `PersistentAifArm::observe_outcome` and `GroupAifPolicy::observe_outcome`
+  are unchanged.
+- `run_workflow_instance` (features `harness` + `process`): a member's
+  `performed` is its entry in the task's performance row — a task without a
+  row, and an agent index outside a row, did not perform; every member
+  performed when the instance carries no draw. `run_instance` reports every
+  member performed. `TracedPolicy` forwards the argument; `GroupAifPolicy`'s
+  hook ignores it.
+
+### Added
+- **`decision::MemberOutcome`** (`agent_id`, `performed`), re-exported at the
+  crate root.
+
+### Gates
+- **Identity.** `cargo nextest run`, base `dcb9daf` → scaffold tree:
+  `harness,process` 223 → 228, `harness,decision,process` 318 → 323, 0 failed
+  on either side; the sorted PASS names differ by the five added tests alone.
+  `tests/harness_workflow.rs` and `tests/k7_2_novelty.rs` change by the hook
+  signature; `git diff --name-only v0.41.0..HEAD -- examples` prints nothing.
+  `cargo test --features harness,decision,process --example k7_2` 7 passed.
+- **X-battery PASS**, on by K7-2's prereg §5 condition (the diff names
+  `src/decision/mod.rs`, `src/decision/group_policy.rs` and `src/lib.rs`).
+  One serial release run of `strategy_comparison` on the 0.42.0 tree against
+  `docs/runs/K4-archive.log`: 2129 lines each; with the latency column
+  stripped 11 line pairs differ, each a latency or wall-clock figure; the 33
+  `VERDICT|FALSIFIED|VALIDATED` lines are byte-identical (`cmp`).
+- Suites by `cargo test`: `harness` 131, `harness,process` 231,
+  `harness,decision,process` 326. `cargo nextest run` on default, `decision`
+  and `decision,magnitude,process`: 103, 159, 246 passed. `cargo clippy
+  --all-targets -- -D warnings` on those six lanes and
+  `--no-default-features`; `RUSTDOCFLAGS='-D warnings' cargo doc --no-deps
+  --features harness,decision,process`; `cargo fmt --all -- --check`; `cargo
+  +1.93.0 check --all-targets --locked --features harness,decision,process`.
+
 ## [0.41.0] — 2026-09-18
 
 The harness scaffold for `K7-3`
