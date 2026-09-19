@@ -21,7 +21,8 @@ use std::sync::Mutex;
 use catgraph_applied::prop::colored::ColoredExpr;
 use koalisi::algorithms::{AgentCapabilities, CapabilityAgent};
 use koalisi::decision::{
-    CoalitionDecisionPolicy, Decision, DecisionContext, MagnitudePolicy, RoleModulation,
+    CoalitionDecisionPolicy, Decision, DecisionContext, MagnitudePolicy, MemberOutcome,
+    RoleModulation,
 };
 use koalisi::harness::{
     InstanceSpec, OutcomeSignal, SeedRange, WorkflowArm, WorkflowInstance, WorkflowSpec,
@@ -316,7 +317,7 @@ struct AlwaysJoin {
 }
 
 impl CoalitionDecisionPolicy for AlwaysJoin {
-    fn observe_outcome(&self, required: u32, per_bit_success: &[bool]) {
+    fn observe_outcome(&self, required: u32, per_bit_success: &[bool], _members: &[MemberOutcome]) {
         self.seen
             .lock()
             .expect("invariant: no panic holds the lock")

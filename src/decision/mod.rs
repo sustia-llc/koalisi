@@ -45,7 +45,8 @@
 //! [`CoalitionDecisionPolicy::begin_task`] once before the task's first
 //! `should_join`, with a [`TaskStart`], and
 //! [`CoalitionDecisionPolicy::observe_outcome`] once after its leave sweep,
-//! with the task's required mask and a per-bit success signal.
+//! with the task's required mask, a per-bit success signal and one
+//! [`MemberOutcome`] per final member.
 
 use crate::algorithms::{AgentCapabilities, ValueCalculator};
 use std::future::Future;
@@ -87,6 +88,17 @@ pub struct DecisionContext {
 pub struct TaskStart<'a> {
     pub required: u32,
     pub steps: &'a [(u8, u8)],
+}
+
+/// One final member of a task's coalition, handed to
+/// [`CoalitionDecisionPolicy::observe_outcome`].
+///
+/// `agent_id` is the member's [`AgentCapabilities::agent_id`]. `performed` is
+/// whether the member performed on the task.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MemberOutcome {
+    pub agent_id: usize,
+    pub performed: bool,
 }
 
 /// A strategy for deciding whether an agent should join or leave a coalition.
@@ -169,10 +181,17 @@ pub trait CoalitionDecisionPolicy: Send + Sync {
 
     /// Called once per task after its leave sweep. `required` is the task's
     /// capability bitmask; `per_bit_success[b]` is the task's success signal
-    /// for bit `b`.
+    /// for bit `b`; `members` is the task's final coalition, one
+    /// [`MemberOutcome`] per member in membership order.
     ///
     /// The default does nothing.
-    fn observe_outcome(&self, _required: u32, _per_bit_success: &[bool]) {}
+    fn observe_outcome(
+        &self,
+        _required: u32,
+        _per_bit_success: &[bool],
+        _members: &[MemberOutcome],
+    ) {
+    }
 }
 
 /// Marginal-value decision policy backed by a

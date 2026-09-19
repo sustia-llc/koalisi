@@ -141,7 +141,7 @@ use super::aif_persistent_policy::{
     PersistentAifArm, PersistentAifConfig, PersistentAifState, low_mask, run_replay, set_bits,
     splitmix64,
 };
-use super::{CoalitionDecisionPolicy, Decision, DecisionContext, TaskStart};
+use super::{CoalitionDecisionPolicy, Decision, DecisionContext, MemberOutcome, TaskStart};
 
 // --- Pinned constants ------------------------------------------------------
 
@@ -1847,8 +1847,13 @@ impl CoalitionDecisionPolicy for GroupAifPolicy {
 
     /// [`GroupAifPolicy::observe_outcome`] over `per_bit_success`; a call that
     /// advances no world model is counted in
-    /// [`GroupAifCounters::outcome_updates_unapplied`].
-    fn observe_outcome(&self, _required: u32, per_bit_success: &[bool]) {
+    /// [`GroupAifCounters::outcome_updates_unapplied`]. `_members` is not read.
+    fn observe_outcome(
+        &self,
+        _required: u32,
+        per_bit_success: &[bool],
+        _members: &[MemberOutcome],
+    ) {
         if GroupAifPolicy::observe_outcome(self, per_bit_success) == 0 {
             let mut shared = self.shared.lock().expect("group arm mutex poisoned");
             shared.counters.outcome_updates_unapplied += 1;
@@ -3724,7 +3729,7 @@ mod tests {
             });
             hooked_out.push(dynp.should_join(&a0, &coalition, &ctx));
             hooked_out.push(dynp.should_leave(&a0, &full, &ctx));
-            dynp.observe_outcome(0b111, &succ);
+            dynp.observe_outcome(0b111, &succ, &[]);
 
             inherent.begin_task(d).unwrap();
             inherent_out.push(inherent.should_join(&a0, &coalition, &ctx));
@@ -3761,7 +3766,7 @@ mod tests {
         assert_eq!(hooked.counters().declines_no_demand, 1);
 
         // An outcome with no task in force advances no model and is counted.
-        dynp.observe_outcome(0b001, &[true; 8]);
+        dynp.observe_outcome(0b001, &[true; 8], &[]);
         let c = hooked.counters();
         assert_eq!(
             (c.outcome_updates_unapplied, c.tasks_observed),

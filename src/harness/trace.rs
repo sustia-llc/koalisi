@@ -4,7 +4,9 @@
 use std::sync::Mutex;
 
 use crate::algorithms::AgentCapabilities;
-use crate::decision::{CoalitionDecisionPolicy, Decision, DecisionContext, TaskStart};
+use crate::decision::{
+    CoalitionDecisionPolicy, Decision, DecisionContext, MemberOutcome, TaskStart,
+};
 
 /// One recorded membership decision.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,8 +86,9 @@ impl CoalitionDecisionPolicy for TracedPolicy<'_> {
         self.inner.begin_task(task);
     }
 
-    fn observe_outcome(&self, required: u32, per_bit_success: &[bool]) {
-        self.inner.observe_outcome(required, per_bit_success);
+    fn observe_outcome(&self, required: u32, per_bit_success: &[bool], members: &[MemberOutcome]) {
+        self.inner
+            .observe_outcome(required, per_bit_success, members);
     }
 }
 
@@ -104,10 +107,11 @@ mod tests {
     }
 
     /// Answers call `k` (joins and leaves counted together) with `script[k]`
-    /// and records every call.
+    /// and records every call, and the `members` of every `observe_outcome`.
     struct Scripted {
         script: Vec<Decision>,
         calls: Mutex<Vec<Call>>,
+        members_seen: Mutex<Vec<Vec<MemberOutcome>>>,
     }
 
     impl Scripted {
@@ -115,6 +119,7 @@ mod tests {
             Self {
                 script,
                 calls: Mutex::new(Vec::new()),
+                members_seen: Mutex::new(Vec::new()),
             }
         }
 
@@ -155,11 +160,17 @@ mod tests {
             });
         }
 
-        fn observe_outcome(&self, required: u32, per_bit_success: &[bool]) {
+        fn observe_outcome(
+            &self,
+            required: u32,
+            per_bit_success: &[bool],
+            members: &[MemberOutcome],
+        ) {
             self.calls.lock().unwrap().push(Call::Outcome {
                 required,
                 per_bit: per_bit_success.to_vec(),
             });
+            self.members_seen.lock().unwrap().push(members.to_vec());
         }
     }
 
@@ -228,7 +239,7 @@ mod tests {
             required: 0b101,
             steps: &steps,
         });
-        traced.observe_outcome(0b101, &[true, false, true]);
+        traced.observe_outcome(0b101, &[true, false, true], &[]);
         assert_eq!(
             *inner.calls.lock().unwrap(),
             vec![
@@ -241,6 +252,37 @@ mod tests {
                     per_bit: vec![true, false, true]
                 },
             ]
+        );
+        assert!(traced.entries().is_empty());
+    }
+
+    #[test]
+    fn observe_outcome_forwards_members_unchanged() {
+        let inner = Scripted::new(Vec::new());
+        let traced = TracedPolicy::new(&inner);
+        // Ids out of ascending order, one repeated, mixed `performed`.
+        let members = [
+            MemberOutcome {
+                agent_id: 7,
+                performed: false,
+            },
+            MemberOutcome {
+                agent_id: 2,
+                performed: true,
+            },
+            MemberOutcome {
+                agent_id: 7,
+                performed: true,
+            },
+        ];
+        traced.observe_outcome(0b11, &[true, false], &members);
+        traced.observe_outcome(0b01, &[false, false], &[]);
+        let seen = inner.members_seen.lock().unwrap().clone();
+        assert_eq!(
+            seen,
+            vec![members.to_vec(), Vec::new()],
+            "the inner policy saw {seen:?}; forwarded verbatim it is the three \
+             members (7, false), (2, true), (7, true), then none"
         );
         assert!(traced.entries().is_empty());
     }
