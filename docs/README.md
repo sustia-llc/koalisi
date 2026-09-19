@@ -89,6 +89,7 @@ reused across registrations.
 | 270..300 | consumed | EQ5a |
 | 300..330 | consumed | #80 |
 | 330..360 | consumed | EQ5b |
+| 540..570 | reserved | K7-3 |
 
 ## Immutability rule
 
