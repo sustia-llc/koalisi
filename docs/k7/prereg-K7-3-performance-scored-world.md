@@ -366,3 +366,67 @@ only if all hold. The run is serial on a quiet machine (`pgrep -c
 criterion, every gate outcome, §5's tables, §6's clauses and a numbered
 implementation / deviation ledger whose item 1 is §8's execution list,
 the seed-7000 sighting included. Immutable once recorded.
+
+## Amendment 1 (pre-run, 2026-09-19) — S-id's pinned values, a fixture finding, one reading of §3
+
+No generated instance has been run under `grp-id` or `ref-prune-id`;
+`examples/k7/k7_3.rs` does not exist yet. Cells, criterion, labels, the
+registered gates' predicates, seeds and smoke blocks are unchanged. Commits:
+prereg `f654a52`; library and tests `54fcd33`. **A1.1's and A1.2's values were
+visible when A1.3 was written.**
+
+- **A1.1 — S-id, as pinned** (`tests/k7_3_identity.rs`). Agents 0, 1, 4 = bits
+  0, 1 @ r0; 2 = bit 2 @ r1; 3 = bit 0 @ r1; 5 = bit 0 @ r0. Steps `(0,r0)
+  (1,r0) (2,r1)`, λ = ½, seed 11, a fresh policy per read. *Warmed* = one
+  observed task through the trait hooks: agents 0..=3 each read for leave out
+  of `{0,1,2,3}`, then the three required bits `true` with members `0:
+  performed, 1: not, 2: performed, 3: not`. The read is the leave of the
+  candidate out of `{candidate, its role-mate of 0 / 1, 2}`.
+
+  | read | store | act | score bits |
+  |---|---|---|---|
+  | fresh, agent 0; fresh, agent 1 | `grp-id` | act | `0x3fe0000000000000` |
+  | fresh, agent 0; fresh, agent 1 | `grp-topo` | act | `0x3fe0000000000000` |
+  | warmed, agent 0 (performed) | `grp-id` | act | `0x3fdffffff9df29c8` |
+  | warmed, agent 1 (did not perform) | `grp-id` | act | `0x3fdffffffb2e8100` |
+  | warmed, agent 4 (never a member) | `grp-id` | act | `0x3fdffffffb2e8100` |
+  | warmed, agent 0; warmed, agent 1 | `grp-topo` | act | `0x3fdffffff9df29c8` |
+
+  The two warmed role-mates differ in score bits under `grp-id` and are
+  bit-equal under `grp-topo`, so the gate's predicate holds. `RefPruneId`'s
+  acts and `(p, n)` records over five hand-written tasks were derived before
+  the first run and passed unmodified (the implementer's report); the sequence
+  carries one exact tie, `(1, 2)` against `(0, 0)`, which evicts.
+- **A1.2 — what the fixture shows beside the predicate.** The non-performer's
+  warmed read is bit-equal to the read of a role-mate that was never a member;
+  the separation in A1.1 is carried by the performer's success observation.
+  All nine reads act. A lever that records a non-performer as no-observation
+  left the score-bit pins green (the implementer's falsification F2b), so the
+  score bits cannot see a dropped failure observation.
+- **A1.3 — S-id's predicate, extended.** §5's predicate and A1.1's pins stand.
+  Added: a test compares the warmed agent models' pA rows (success / failure /
+  no-observation, per bit) against an untouched agent's model through
+  `GroupAifPolicy::agent_model_snapshot`; under F2b it goes red. §4's note and
+  §6's clause 5 are unchanged: A1.2 is one task and one read shape on a
+  hand-built fixture, and no criterion reads it.
+- **A1.4 — a reading of §3 the library makes.** `MemberOutcome` carries no
+  capabilities. `required_r(own role) & capabilities` takes an agent's
+  capabilities as last shown to a `should_join` / `should_leave` call, in
+  `grp-id` and in `RefPruneId` alike; both are still built from the role map
+  alone. §2's leave sweep reads every member, so every final member has been
+  shown. A member never shown observes and counts nothing; on `grp-id` S-learn
+  (id), whose expected count is computed from the instance's capabilities,
+  reads that as a deficit.
+- **A1.5 — executions to date** (the implementer's report). Every execution of
+  `grp-id` and `RefPruneId` was `tests/k7_3_identity.rs` on A1.1's fixture and
+  its five-task prune sequence: on the tree, three development runs, one
+  post-lint run and two full `harness,decision,process` lanes; in a `cp -r`
+  copy with its own target dir, one baseline and 20 lever runs. `rg -n
+  'generate' tests/k7_3_identity.rs` matches its module-doc line alone, and
+  `rg -l 'RefPruneId|AgentKeyed' src tests examples` lists
+  `src/decision/group_policy.rs`, `src/harness/recon.rs`,
+  `src/harness/mod.rs` and that test file.
+- **A1.6 — names.** `grp-id`'s store is `WorldModelTopology::AgentKeyed`;
+  S-learn (id) reads `GroupAifPolicy::agent_model_updates`. The agent models
+  are outside `ModelLabel`, `model_updates` and `model_snapshots`, which the
+  frozen examples match exhaustively (`rg -n 'ModelLabel::' examples`).
