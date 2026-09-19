@@ -178,6 +178,11 @@ name = "k7_2"
 path = "examples/k7/k7_2.rs"
 required-features = ["harness", "decision", "process"]
 
+[[example]]
+name = "k7_3"
+path = "examples/k7/k7_3.rs"
+required-features = ["harness", "decision", "process"]
+
 [[test]]
 name = "magnitude_trajectory"
 required-features = ["magnitude"]
