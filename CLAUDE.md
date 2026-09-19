@@ -168,6 +168,8 @@ koalisi/
 │   ├── decision/
 │   │   ├── mod.rs                          CoalitionDecisionPolicy (+ the default no-op lifecycle hooks begin_task(&TaskStart) / observe_outcome(required, &[bool])) + ThresholdPolicy (always compiled)
 │   │   ├── aif_policy.rs                   AifDecisionPolicy + EfeValueCalculator (feature `decision`)
+│   │   ├── aif_mm_policy.rs                AifMmDecisionPolicy: a stateless multimodal POMDP per decision from binary union coverage — the K4-v3 bridge (feature `decision`)
+│   │   ├── aif_persistent_policy.rs        PersistentAifArm (arm-E1): a persistent per-bit world model + a fresh query POMDP per decision with a replay window; role_query is the group arm's seam (feature `decision`)
 │   │   ├── reliability_value.rs            ReliabilityCoverage: reliability-weighted coverage ValueCalculator from the persistent world-model snapshot (feature `decision`; gotcha 24)
 │   │   ├── group_policy.rs                 GroupAifPolicy: aif::GroupAgent, R=3 role internals over arm-E1 world models, CertaintyWeighted, deterministic group_distribution read; VoteRouting {Off, CandidateStar{lambda}} → aif::RoutedAggregator over a per-decision aif::Topology; the H1 trait hooks; ledger fields (features `decision`+`process`; gotcha 33)
 │   │   └── magnitude_policy.rs             MagnitudePolicy + MagnitudeValueCalculator + CouplingModel + CoalitionEvaluator cache (feature `magnitude`; gotcha 15); relevant_masks/magnitude_or_zero pub(crate) for magnitude_history
@@ -686,9 +688,16 @@ What is still open:
   [#100](https://github.com/sustia-llc/koalisi/issues/100)**, seeds 540..570.
   K7-2's continuation was re-keyed pre-run (prereg A3.7, owner) on
   `grp-topo`'s H-dead leg, which passed (600 of 600 tasks ≡ `ref-prune`).
-  **Part 2 of the lock (owner, on #100) comes before the prereg:** the cells,
-  the `PerformanceSpec` values, the signal the learning arm reads, the
-  control. Two facts it rests on: the group arm's query takes coverage masks
+  **Part 2 of the lock is posted on #100 (owner, 2026-09-19):** a second
+  scaffold first — `observe_outcome` extended with the final members
+  (`agent_id`, `performed`), its own PR, v0.42.0 — then the prereg. New arm
+  `grp-id`: one `PersistentAifArm` per agent, the candidate-star centre
+  queries the CANDIDATE's model; flat, no tira extension. Seven cells
+  (`grp-id`, `grp-topo`, `grp-topo-cov`, `ref-prune`, `ref-prune-id`,
+  `ref-keep`, `ref-first`), learning cells read `Both`, `PerformanceSpec`
+  0.7 / 0.05 / 0.40, three-way counted criterion `grp-id` vs `ref-prune` on
+  `performance_scored.primary`; the registration ships as v0.43.0. Two facts
+  it rests on: the group arm's query takes coverage masks
   and no agent identity (`role_query(required_r, cfg0, cfg1, …)`,
   `src/decision/group_policy.rs`), and its models observe per role a per-BIT
   vector — so the arm can learn that a bit fails, not WHO fails; and under
