@@ -27,18 +27,39 @@ the `ab-lineage-gotchas.md` archive with a one-line index entry here. **Keep
 this file under 150k chars** — past that the harness truncates it and the tail
 silently stops reaching the session.
 
+**Rolling session log (owner, 2026-09-20 — E-D3):** the live
+`session-log.md` holds the **current lineage only**; at a lineage close it
+splits verbatim into `session-log-<range>.md` and the live file restarts
+under its banner. `CHANGELOG.md` follows the same shape — sections before
+`v0.30.0` are archived (see above), and the next split is a new archive file,
+never an edit to an old one.
+
+**One record per fact class, a pointer everywhere else** (owner, 2026-09-20 —
+the refocus plan's §1.26). What landed → `CHANGELOG.md` + the release ledger;
+current state and sequence → `plans/current-roadmap.md`; cross-repo seams →
+the stack roadmap; a mechanism that cost a run → one gotcha; the session
+narrative → `session-log.md`; measured corrections to a plan section → that
+plan's execution record; a registered verdict, bar or number → the immutable
+prereg/report under `docs/`. At close-session, `rg` two or three distinctive
+phrases of what was just written across the other notes files — a hit means a
+copy was written where a pointer belongs.
+
 ## Where the rest of the record lives
 
-This file is the working state. Two archives are held **outside this
-repository** (owner call, 2026-08-09); their location is in `CLAUDE.local.md`:
+This file is the working state. Three archives are held **outside this
+repository** (owner call, 2026-08-09; the third added 2026-09-20); their
+location is in `CLAUDE.local.md`:
 
 - **`project-history.md`** — the full release ledger v0.4.0 → present verbatim,
   the Phase 5/6/7 narratives, the K1–K6 sections, the downstream/removed-work
   notes, and the obsolete gotchas 1–6 / 8–10.
-- **`ab-lineage-gotchas.md`** — gotchas 20–28, 30–33 and 35–36 verbatim (the
+- **`ab-lineage-gotchas.md`** — gotchas 20–28, 30–33 and 35–37 verbatim (the
   A/B-registration lineage). Indexed one line each at the end of §Worth
   flagging below; **read the full text there before designing or running any
   K4-lineage registration.**
+- **`changelog-archive-pre-v0.30.0.md`** — this repo's `CHANGELOG.md` sections
+  v0.29.0 → v0.1.0 verbatim (moved 2026-09-20; the live file starts at
+  `[0.30.0]` and carries the banner). Same directory as the other two.
 - **`docs/`** (in-repo, public) — the A/B showcase trail, indexed by
   `docs/README.md` (verdict trail + seed ledger) with the run protocol in
   `docs/PROTOCOL.md` and raw run outputs under `docs/runs/`. Registered docs
@@ -83,11 +104,18 @@ in the sibling `biome` project.
 - Rust implementation is dispatched to the built-in `general-purpose` agent
   per `.claude/stack/agent-dispatch.md`; review is `/code-review low`.
 
-## Current state — 2026-09-19 (v0.42.0)
+## Current state — 2026-09-20 (v0.42.0; last code release 2026-09-19)
 
 Full release ledger v0.4.0 → v0.42.0 is the `project-history.md` archive (§1).
 The three most recent entries are kept here in brief — read the ledger before
 touching anything with a frozen battery, a pinned decision, or a registered doc.
+
+**2026-09-20 cut no release** (Phase N of the refocus plan, no code): the
+superseded programme sweep moved to `.claude/stack/completed/`, every carried
+phase got a board issue (#103–#111 opened; #31/#32/#33 carried by comment),
+the duty that a koalisi phase open a tira extension's downstream lock was
+retired, and this file's sections v0.29.0 → v0.1.0 of `CHANGELOG.md` were
+archived. `K7-3` stays PAUSED; next is R0 (`v0.43.0`).
 
 ### Latest three
 
@@ -255,19 +283,20 @@ koalisi/
     └── fixtures/k7-workflow-v2w.txt        the committed print of every generated v2w instance on 270..300 and 330..360 (regenerate with K7_WRITE_FIXTURE=1 — only when the world changes by design)
 ```
 
-Two further files belong to this project but are **not in this tree** — the
-`project-history.md` and `ab-lineage-gotchas.md` archives (see §Where the rest
-of the record lives; location in `CLAUDE.local.md`).
+Three further files belong to this project but are **not in this tree** — the
+`project-history.md`, `ab-lineage-gotchas.md` and
+`changelog-archive-pre-v0.30.0.md` archives (see §Where the rest of the record
+lives; location in `CLAUDE.local.md`).
 
 ## Worth flagging (gotchas)
 
 These cost time during the build; future-me should not relearn them.
 Engineering contracts (7, 11–19, 29) are verbatim below. The A/B-lineage
-gotchas (20–28, 30–33, 35–36) are indexed at the end of this section and live in full
+gotchas (20–28, 30–33, 35–37) are indexed at the end of this section and live in full
 in the `ab-lineage-gotchas.md` archive. Obsolete ones (1–6, 8–10 — all
 kameo / forex / databento-era) are in the `project-history.md` archive §4.
-Both archives are held outside this repo; see `CLAUDE.local.md`.
-Numbering is preserved across all three files.
+The archives are held outside this repo; see `CLAUDE.local.md`.
+Numbering is preserved across all of them.
 
 7. **Cargo target dir + timeout convention (project-wide).**
    - We use `--manifest-path Cargo.toml --target-dir /tmp/koalisi-target` to avoid contention with the IDE's own `cargo check`. Run from inside the `koalisi` worktree.
@@ -519,7 +548,7 @@ Numbering is preserved across all three files.
       `tail -10`; suites with 11+ result lines (`persistence,magnitude`) lose
       the lib-test line and undercount by ~95. Always `tail -20`.
 
-### A/B-lineage gotchas 20–28, 30–33, 35–36 — index only
+### A/B-lineage gotchas 20–28, 30–33, 35–37 — index only
 
 Full text: the **`ab-lineage-gotchas.md`** archive (held outside this repo; see
 `CLAUDE.local.md`). Each entry records a
@@ -599,6 +628,15 @@ touching the arm it governs.
     on the arm-vs-prune leg; `OutcomeSignal` does not reach the score; a
     "bytes rendered" smoke line and a multiplicative gate falsification both
     leak; a self-gated test file passes with 0 tests.
+37. **Why three K7 registrations in a row reached the engine-free prune —
+    the equivalence is DEFINITIONAL, not empirical (#100)** — `RefPrune`
+    joins unconditionally and leaves iff redundant (`src/harness/recon.rs:454-478`),
+    so ANY policy with those two act-sets IS `ref-prune` on member sets before
+    any run; the world's single arrival-order leave sweep
+    (`src/harness/workflow.rs:558-562`, `:614-628`) fixes the tie-break, so an
+    arm that evaluates candidates ABSOLUTELY inherits arrival order; the escape
+    is a COMPARATIVE read and needs no new plumbing; `RefPruneId` is the
+    engine-free twin that BOUNDS every arm — run the engine-free pair first.
 
 ## Reproducers
 
@@ -666,56 +704,64 @@ The 2026-07-03 design gate is RESOLVED (both inputs received). Phase narratives
 are in the `project-history.md` archive §2, along with the gate record itself.
 What is still open:
 
-- **Phase 7 implementation** — [#31](https://github.com/sustia-llc/koalisi/issues/31)
-  P7.3 sealing + revocation registry is next, **blocked on the tauhokohoko
-  KEK-granularity answer for belief sealing**; then
-  [#32](https://github.com/sustia-llc/koalisi/issues/32) P7.4 decision/belief
-  streams, then [#33](https://github.com/sustia-llc/koalisi/issues/33) P7.5
-  federation manifests + FAIR provenance. Design of record:
-  `.claude/docs/phase7-persistence-design.md`; open calls in its §17 (SHA-256 vs
-  BLAKE3; ciphertext reclamation; cross-federation `EventRef` addressing —
-  resolve at #33).
+- **Phase 7 implementation**, in this order (the reorder is the ratified one;
+  each issue carries its own scope comment, 2026-09-20):
+  [#32](https://github.com/sustia-llc/koalisi/issues/32) P7.4 decision streams
+  **minus the belief leg** → [#31](https://github.com/sustia-llc/koalisi/issues/31)
+  P7.3 sealing + revocation registry **plus #32's belief leg** →
+  [#33](https://github.com/sustia-llc/koalisi/issues/33) P7.5 federation
+  manifests + FAIR provenance. **Not blocked on the tauhokohoko
+  KEK-granularity answer**: if no reply has landed at #31's kickoff the owner
+  rules granularity in-house and records it on #31 before any belief-sealing
+  code. Design of record: `.claude/docs/phase7-persistence-design.md`; open
+  calls in its §17 (SHA-256 vs BLAKE3; ciphertext reclamation;
+  cross-federation `EventRef` addressing — resolve at #33).
 - **Phase 5 remainder** — [#20](https://github.com/sustia-llc/koalisi/issues/20)
   keeps the LLM-dependent meta-layer (configurator + velocity-rewrite loop +
   transferability). Both LLM-free slices shipped (#41 v0.12.0, #42 v0.13.0). The
   only still-NEST-dependent piece is the NEST-H4 calibration-copilot deployment
   framing, which activates whenever ownership lands.
-- **K7 lineage** — plan `.claude/stack/2026-09-16-koalisi-tira-programme-sweep.md`
-  (ratified 2026-09-16; supersedes §3–§5 of the K7 round plan). Landed: the
-  harness (v0.33.0), the K0 board corrections, tira's `aif-v0.14.0`, the H
-  scaffold (v0.35.0, #92), M — the #25 metrics example + a lock refresh
-  (v0.36.0), C1 — the `aif-v0.14.0` re-pin (v0.37.0), C2 — `K7-1`
-  (v0.38.0, `VALIDATED (topology-routed group)`), the
-  `surrealdb-live-message` `v0.2.2` re-pin (v0.39.0), G-1 — `K7-2`
-  (v0.40.0, #97, `FALSIFIED (novelty moves the outcome)`), the `K7-3`
-  harness scaffold (v0.41.0, `WorkflowResult::performance_scored`) and
-  scaffold 2 (v0.42.0, `MemberOutcome` on the outcome hook). **Next:
-  `K7-3`, the registration that moves the WORLD — part 1 of its lock is on
-  [#100](https://github.com/sustia-llc/koalisi/issues/100)**, seeds 540..570.
-  K7-2's continuation was re-keyed pre-run (prereg A3.7, owner) on
-  `grp-topo`'s H-dead leg, which passed (600 of 600 tasks ≡ `ref-prune`).
-  **Part 2 of the lock is posted on #100 (owner, 2026-09-19).** Its second
-  scaffold — `observe_outcome` extended with the final members (`agent_id`,
-  `performed`) — landed as v0.42.0; the prereg is next. New arm
-  `grp-id`: one `PersistentAifArm` per agent, the candidate-star centre
-  queries the CANDIDATE's model; flat, no tira extension. Seven cells
-  (`grp-id`, `grp-topo`, `grp-topo-cov`, `ref-prune`, `ref-prune-id`,
-  `ref-keep`, `ref-first`), learning cells read `Both`, `PerformanceSpec`
-  0.7 / 0.05 / 0.40, three-way counted criterion `grp-id` vs `ref-prune` on
-  `performance_scored.primary`; the registration ships as v0.43.0. Two facts
-  it rests on: the group arm's query takes coverage masks
-  and no agent identity (`role_query(required_r, cfg0, cfg1, …)`,
-  `src/decision/group_policy.rs`), and its models observe per role a per-BIT
-  vector — so the arm can learn that a bit fails, not WHO fails; and under
-  #100's predicate a redundant covering member raises success and lowers
-  `cov_eff`, the opposite of K4 Scope B (*all final members performed*).
-  **Any novelty contrast on that world inherits
-  K7-2's mechanism** (an identical-mask query follows its replay window once
-  the term is gone; a FAILURE in the window flips the sign) — read
-  `docs/k7/ab-report-K7-2-novelty-routed-group.md` §3 first. **Numbering
-  (owner, 2026-09-18):** the world-move took `K7-3`; EQ5b candidate (c)
-  (shared vs per-role world models) keeps its question and its block 360..390
-  and takes its number when its own lock is posted.
+- **K7 lineage** — plan of record `.claude/stack/2026-09-20-koalisi-refocus.md`
+  (ratified 2026-09-20; supersedes the remaining phases of the 2026-09-16
+  programme sweep, now `.claude/stack/completed/`). Landed: the harness
+  (v0.33.0), the board corrections, tira's `aif-v0.14.0`, the H scaffold
+  (v0.35.0, #92), the #25 metrics example + a lock refresh (v0.36.0), the
+  `aif-v0.14.0` re-pin (v0.37.0), `K7-1` (v0.38.0, `VALIDATED
+  (topology-routed group)`), the `surrealdb-live-message` `v0.2.2` re-pin
+  (v0.39.0), `K7-2` (v0.40.0, #97, `FALSIFIED (novelty moves the outcome)`),
+  the `K7-3` harness scaffold (v0.41.0, `WorkflowResult::performance_scored`),
+  scaffold 2 (v0.42.0, `MemberOutcome` on the outcome hook) and the plan's
+  Phase N (2026-09-20, no code — the board and the notes).
+  **`K7-3` is PAUSED pre-run** ([#100](https://github.com/sustia-llc/koalisi/issues/100));
+  its prereg, library change and binary sit on branch
+  `k7-3-performance-scored-world` at version 0.42.0, and **no seed of
+  540..570 has run**. The pre-run review derived that `grp-id` as locked
+  evaluates each candidate absolutely, so it inherits the world's
+  arrival-order tie-break and reproduces the engine-free `ref-prune` —
+  gotcha 37. **Next, in order:**
+  1. **R0** (`v0.43.0`) — the engine-free pre-test: `RefPruneId` against
+     `RefPrune` on `performance_scored.primary`, off-block, a test with no
+     `VERDICT:` line and no seed block consumed. If reading identity moves
+     nothing with no engine, no engine-bearing arm can win on this world.
+  2. **F** (`v0.44.0`) — the four `K7-3` review findings plus the promotion of
+     registration-agnostic code into `src/harness/report.rs`, forward-only
+     (`k7_1.rs`, `k7_2.rs`, `strategy_comparison.rs` keep their private
+     copies and are not edited).
+  3. **R1** — `grp-id` re-locked as a **comparative** read (the centre scores
+     the candidate against each same-step role-mate it can see), lock part 3
+     on #100, then one amendment, then one serial run on **540..570**.
+  4. Then #32 → #31 → #33 (P7.4 / P7.3 / P7.5), then #103 (EQ5b (c), block
+     360..390), then the tag-gated phases from #105–#111.
+  **A lock is not postable** until it names one read on which the arm's act
+  differs from the engine-free reference and the term that makes it differ,
+  and names which of two same-step coverers survives and through what input;
+  "arrival order", or a term that cannot fire, means the arm is not
+  registered. **Any novelty contrast on this world inherits K7-2's
+  mechanism** — read `docs/k7/ab-report-K7-2-novelty-routed-group.md` §3
+  first. **Numbering (owner, 2026-09-18):** the world-move took `K7-3`;
+  every later registration takes the next free number when its own lock is
+  posted, and the forward seed blocks are provisional notes — the
+  authoritative ledger is `docs/README.md`.
 - **MSRV — C-D1 DECIDED (owner, 2026-09-14): KEEP `rust-version = 1.93.0`.**
   The v0.23.0 re-pin removed the last DeepCausality edge and the `process`
   tier with it; the measured cross-feature maximum is 1.92 and the
