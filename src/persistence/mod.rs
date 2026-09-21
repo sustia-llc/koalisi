@@ -3,9 +3,12 @@
 //! This is the Phase 7 (issue #21) source-of-truth store: a segmented,
 //! append-only, per-stream hash-chained frame log. Everything else — the K3
 //! `durable` `SurrealDB` bus, future dashboards, search indexes — is a projection
-//! rebuildable from this log. P7.1 ships the core chained log only; sealing +
-//! crypto-deletion (P7.3), causal decision/belief streams (P7.4), and federation
-//! (P7.5) are later phases.
+//! rebuildable from this log. [`spawn_topology_forwarder`] writes `Topology`
+//! records; [`spawn_decision_store_forwarder`] (and, with feature `durable`,
+//! `subsystems::durable::spawn_decision_log_bus_tee`) writes `Decisions`
+//! records, each carrying at most one causal parent into `Topology`. Sealing +
+//! crypto-deletion (P7.3), belief snapshots, and federation (P7.5) are later
+//! phases.
 //!
 //! ## Streams are independent
 //!
@@ -46,6 +49,7 @@
 //! and [`PersistenceError::ManifestRevoked`] are reserved for later phases.
 
 mod chain;
+mod decision;
 mod envelope;
 mod errors;
 mod replay;
@@ -54,6 +58,9 @@ mod tee;
 mod wire;
 mod writer;
 
+#[cfg(feature = "durable")]
+pub(crate) use decision::forward_decision_trace;
+pub use decision::spawn_decision_store_forwarder;
 pub use envelope::{
     EventRef, HashAlgorithm, KeyId, Payload, Record, RecordHash, SequenceNo, StoredRecord,
     StreamHead, StreamId,
@@ -62,5 +69,8 @@ pub use errors::PersistenceError;
 pub use replay::replay_into_event_log;
 pub use store::{EventStore, FileEventStore, FileStoreConfig};
 pub use tee::spawn_topology_forwarder;
-pub use wire::{WIRE_TOPOLOGY_SCHEMA_VERSION, WireConversionError, WireTopologyEvent};
+pub use wire::{
+    WIRE_DECISION_SCHEMA_VERSION, WIRE_TOPOLOGY_SCHEMA_VERSION, WireConversionError, WireDecision,
+    WireLineage, WireTopologyEvent,
+};
 pub use writer::spawn_store_writer;

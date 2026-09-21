@@ -65,7 +65,7 @@ impl DecisionKind {
     }
 }
 
-/// A record of one policy-consulted join/leave decision, emitted on the
+/// A record of one join/leave decision, emitted on the
 /// [`CoalitionService`]'s optional decision tap.
 ///
 /// This is a plain koalisi struct — deliberately free of any durable-messaging
@@ -85,6 +85,73 @@ pub struct DecisionRecord {
     pub score: f64,
 }
 
+/// A [`DecisionRecord`] plus the topology position the decision was taken at,
+/// emitted on the tap installed by [`CoalitionService::spawn_with_trace_tap`].
+///
+/// Both position fields are read by the service task immediately before it
+/// calls the manager for this decision:
+///
+/// - `event_log_len` — the length of the manager's in-memory event log
+///   ([`TemporalHypergraph::events_ref`](crate::topology::TemporalHypergraph::events_ref)).
+///   A mutation recorded by this decision (an `act == true` join or leave) is
+///   not counted. A mutation recorded between the read and the policy consult
+///   by another holder of the same graph is not counted either.
+/// - `timestamp` — the manager's logical clock
+///   ([`CoalitionManager::current_timestamp`]), i.e. the timestamp the next
+///   recorded mutation receives.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DecisionTrace {
+    /// The decision, identical to what [`CoalitionService::spawn_with_tap`]'s
+    /// tap would carry for it.
+    pub record: DecisionRecord,
+    /// In-memory event-log length before the manager call.
+    pub event_log_len: u64,
+    /// Logical-clock value before the manager call.
+    pub timestamp: u64,
+}
+
+/// Topology position read before a manager call; see [`DecisionTrace`].
+#[derive(Clone, Copy)]
+struct DecisionPosition {
+    event_log_len: u64,
+    timestamp: u64,
+}
+
+/// Read the [`DecisionPosition`] iff a trace tap is installed; `None` (and no
+/// lock taken) otherwise.
+async fn decision_position<V, HE>(
+    trace_tap: Option<&mpsc::Sender<DecisionTrace>>,
+    manager: &CoalitionManager<V, HE>,
+) -> Option<DecisionPosition>
+where
+    V: VertexTrait + Clone + 'static,
+    HE: HyperedgeTrait + Clone + 'static,
+{
+    trace_tap?;
+    let len = manager.graph().events_ref().read().await.len();
+    let timestamp = manager.current_timestamp().value();
+    Some(DecisionPosition {
+        // usize → u64: an in-memory log length always fits.
+        event_log_len: len as u64,
+        timestamp,
+    })
+}
+
+fn decision_record(
+    coalition: HyperedgeIndex,
+    agent: VertexIndex,
+    kind: DecisionKind,
+    decision: &Decision,
+) -> DecisionRecord {
+    DecisionRecord {
+        coalition: format!("coalition-{}", usize::from(coalition)),
+        agent_id: usize::from(agent),
+        kind,
+        act: decision.act,
+        score: decision.score,
+    }
+}
+
 /// Emit a [`DecisionRecord`] on the tap without ever stalling or failing the
 /// decision path.
 ///
@@ -99,13 +166,7 @@ fn emit_decision(
     decision: &Decision,
 ) {
     let Some(tx) = tap else { return };
-    let record = DecisionRecord {
-        coalition: format!("coalition-{}", usize::from(coalition)),
-        agent_id: usize::from(agent),
-        kind,
-        act: decision.act,
-        score: decision.score,
-    };
+    let record = decision_record(coalition, agent, kind, decision);
     match tx.try_send(record) {
         Ok(()) => {}
         Err(mpsc::error::TrySendError::Full(_)) => {
@@ -118,6 +179,42 @@ fn emit_decision(
             tracing::warn!(
                 kind = kind.as_str(),
                 "decision tap closed — dropping decision record (decision unaffected)"
+            );
+        }
+    }
+}
+
+/// Emit a [`DecisionTrace`] on the trace tap, with the same non-blocking
+/// drop-with-warn contract as [`emit_decision`]. A no-op unless both the tap
+/// and the position read before the manager call are present.
+fn emit_trace(
+    trace_tap: Option<&mpsc::Sender<DecisionTrace>>,
+    position: Option<DecisionPosition>,
+    coalition: HyperedgeIndex,
+    agent: VertexIndex,
+    kind: DecisionKind,
+    decision: &Decision,
+) {
+    let (Some(tx), Some(position)) = (trace_tap, position) else {
+        return;
+    };
+    let trace = DecisionTrace {
+        record: decision_record(coalition, agent, kind, decision),
+        event_log_len: position.event_log_len,
+        timestamp: position.timestamp,
+    };
+    match tx.try_send(trace) {
+        Ok(()) => {}
+        Err(mpsc::error::TrySendError::Full(_)) => {
+            tracing::warn!(
+                kind = kind.as_str(),
+                "decision trace tap full — dropping decision trace (decision unaffected)"
+            );
+        }
+        Err(mpsc::error::TrySendError::Closed(_)) => {
+            tracing::warn!(
+                kind = kind.as_str(),
+                "decision trace tap closed — dropping decision trace (decision unaffected)"
             );
         }
     }
@@ -303,12 +400,14 @@ impl CoalitionService {
         V: VertexTrait + Clone + AgentCapabilities + 'static,
         HE: HyperedgeTrait + Clone + 'static,
     {
-        Self::spawn_inner(manager, policy, ctx, None)
+        Self::spawn_inner(manager, policy, ctx, None, None)
     }
 
-    /// Like [`spawn`](Self::spawn) but with a decision tap: every
-    /// policy-consulted join/leave that yields a [`Decision`] emits a
-    /// [`DecisionRecord`] on `tap`.
+    /// Like [`spawn`](Self::spawn) but with a decision tap: every join or
+    /// leave the manager answers with a [`Decision`] emits a
+    /// [`DecisionRecord`] on `tap` — including a leave of an agent that is not
+    /// a member, which the manager answers with `act == false` without
+    /// consulting the policy. A manager error emits nothing.
     ///
     /// The tap is drained by a downstream consumer (e.g. the `durable` feature's
     /// decision-event forwarder). It is best-effort: a full or closed tap drops
@@ -324,7 +423,32 @@ impl CoalitionService {
         V: VertexTrait + Clone + AgentCapabilities + 'static,
         HE: HyperedgeTrait + Clone + 'static,
     {
-        Self::spawn_inner(manager, policy, ctx, Some(tap))
+        Self::spawn_inner(manager, policy, ctx, Some(tap), None)
+    }
+
+    /// Like [`spawn`](Self::spawn) but with a decision trace tap: every join or
+    /// leave the manager answers with a [`Decision`] emits a [`DecisionTrace`]
+    /// on `tap` — the [`DecisionRecord`] plus the event-log length and logical
+    /// clock read before the manager call. That includes a leave of an agent
+    /// that is not a member, which the manager answers with `act == false`
+    /// without consulting the policy. A manager error emits nothing.
+    ///
+    /// The tap has the same contract as [`spawn_with_tap`](Self::spawn_with_tap)'s:
+    /// a full or closed tap drops the trace with a `warn` and never stalls or
+    /// fails a decision. The position read (one event-log read lock and one
+    /// clock load per join/leave) happens only on a service spawned through
+    /// this constructor.
+    pub fn spawn_with_trace_tap<V, HE>(
+        manager: CoalitionManager<V, HE>,
+        policy: Box<dyn CoalitionDecisionPolicy>,
+        ctx: DecisionContext,
+        tap: mpsc::Sender<DecisionTrace>,
+    ) -> CoalitionServiceHandle
+    where
+        V: VertexTrait + Clone + AgentCapabilities + 'static,
+        HE: HyperedgeTrait + Clone + 'static,
+    {
+        Self::spawn_inner(manager, policy, ctx, None, Some(tap))
     }
 
     fn spawn_inner<V, HE>(
@@ -332,6 +456,7 @@ impl CoalitionService {
         policy: Box<dyn CoalitionDecisionPolicy>,
         ctx: DecisionContext,
         tap: Option<mpsc::Sender<DecisionRecord>>,
+        trace_tap: Option<mpsc::Sender<DecisionTrace>>,
     ) -> CoalitionServiceHandle
     where
         V: VertexTrait + Clone + AgentCapabilities + 'static,
@@ -341,9 +466,10 @@ impl CoalitionService {
         tracing::info!(
             required_capabilities = ctx.required_capabilities,
             decision_tap = tap.is_some(),
+            decision_trace_tap = trace_tap.is_some(),
             "CoalitionService started"
         );
-        tokio::spawn(service_loop(rx, manager, policy, ctx, tap));
+        tokio::spawn(service_loop(rx, manager, policy, ctx, tap, trace_tap));
         CoalitionServiceHandle { tx }
     }
 }
@@ -354,6 +480,7 @@ async fn service_loop<V, HE>(
     policy: Box<dyn CoalitionDecisionPolicy>,
     ctx: DecisionContext,
     tap: Option<mpsc::Sender<DecisionRecord>>,
+    trace_tap: Option<mpsc::Sender<DecisionTrace>>,
 ) where
     V: VertexTrait + Clone + AgentCapabilities + 'static,
     HE: HyperedgeTrait + Clone + 'static,
@@ -365,6 +492,7 @@ async fn service_loop<V, HE>(
                 coalition,
                 reply,
             } => {
+                let position = decision_position(trace_tap.as_ref(), &manager).await;
                 let r = manager
                     .try_join_coalition(agent, coalition, policy.as_ref(), &ctx)
                     .await
@@ -373,6 +501,14 @@ async fn service_loop<V, HE>(
                 // a manager error (no Decision produced) is not tapped.
                 if let Ok(decision) = &r {
                     emit_decision(tap.as_ref(), coalition, agent, DecisionKind::Join, decision);
+                    emit_trace(
+                        trace_tap.as_ref(),
+                        position,
+                        coalition,
+                        agent,
+                        DecisionKind::Join,
+                        decision,
+                    );
                 }
                 let _ = reply.send(r);
             }
@@ -381,6 +517,7 @@ async fn service_loop<V, HE>(
                 coalition,
                 reply,
             } => {
+                let position = decision_position(trace_tap.as_ref(), &manager).await;
                 let r = manager
                     .try_leave_coalition(agent, coalition, policy.as_ref(), &ctx)
                     .await
@@ -388,6 +525,14 @@ async fn service_loop<V, HE>(
                 if let Ok(decision) = &r {
                     emit_decision(
                         tap.as_ref(),
+                        coalition,
+                        agent,
+                        DecisionKind::Leave,
+                        decision,
+                    );
+                    emit_trace(
+                        trace_tap.as_ref(),
+                        position,
                         coalition,
                         agent,
                         DecisionKind::Leave,
@@ -492,6 +637,58 @@ mod tests {
         let members = service.members(coalition).await.expect("members");
         assert_eq!(members.len(), 2, "candidate actually added");
         assert!(members.contains(&candidate));
+    }
+
+    /// The trace tap carries the record plus the event-log length and clock
+    /// read before the manager call. `seed()` records 3 events at timestamps
+    /// 0..=2 (log length 3, clock 3); the join records event 3 at timestamp 3
+    /// (length 4, clock 4) before the declined leave.
+    #[tokio::test]
+    async fn trace_tap_reads_the_position_before_the_manager_call() {
+        let (manager, candidate, coalition) = seed().await;
+
+        let (tap_tx, mut tap_rx) = mpsc::channel(8);
+        let service = CoalitionService::spawn_with_trace_tap(
+            manager,
+            Box::new(ThresholdPolicy::new(AdditiveCalculator, 0.0, 0.0)),
+            DecisionContext::default(),
+            tap_tx,
+        );
+
+        // Candidate: 50 + 10·1 + 80 = 140 — the join marginal and the leave's
+        // marginal of staying.
+        let join = service.join(candidate, coalition).await.expect("join");
+        let leave = service.leave(candidate, coalition).await.expect("leave");
+        assert!(join.act && !leave.act);
+
+        let label = format!("coalition-{}", usize::from(coalition));
+        let expected = [
+            DecisionTrace {
+                record: DecisionRecord {
+                    coalition: label.clone(),
+                    agent_id: usize::from(candidate),
+                    kind: DecisionKind::Join,
+                    act: true,
+                    score: 140.0,
+                },
+                event_log_len: 3,
+                timestamp: 3,
+            },
+            DecisionTrace {
+                record: DecisionRecord {
+                    coalition: label,
+                    agent_id: usize::from(candidate),
+                    kind: DecisionKind::Leave,
+                    act: false,
+                    score: 140.0,
+                },
+                event_log_len: 4,
+                timestamp: 4,
+            },
+        ];
+        for want in expected {
+            assert_eq!(tap_rx.recv().await.expect("trace"), want);
+        }
     }
 
     /// A closed tap must NOT stall or fail decisions: the record is dropped with
