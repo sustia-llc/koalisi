@@ -33,6 +33,13 @@ outputs and the re-pin drift check are [`runs/README.md`](runs/README.md).
    binary printed it, the bar it was scored against, every gate outcome, the
    mechanism measured, and a numbered ledger of what the run established. It
    is never rewritten.
+9. **Withdrawal.** A registration whose official run has not happened is
+   withdrawn by an owner decision on its issue, never deleted. The
+   pre-registration stays under `docs/` with a `Withdrawal` section appended:
+   the date and decision, what preceded it, the pre-run executions its report
+   would have listed, and where any code not on `main` is preserved. Its seed
+   block is retired unconsumed, its row in [`README.md`](README.md) reads
+   `WITHDRAWN (not run)`, and its number is not reused.
 
 ## 2. Running anything whose output feeds a verdict
 
@@ -73,7 +80,8 @@ labelled so in the PR body.
 
 The ledger is in [`README.md`](README.md#seed-ledger). A registration names
 its block in the design-lock; a reserved block is released only by an owner
-decision on the registration's issue; a consumed block is never reused.
+decision on the registration's issue; a consumed or retired block is never
+reused.
 
 ## 6. Naming
 

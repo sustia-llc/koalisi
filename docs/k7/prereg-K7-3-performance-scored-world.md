@@ -430,3 +430,34 @@ visible when A1.3 was written.**
   S-learn (id) reads `GroupAifPolicy::agent_model_updates`. The agent models
   are outside `ModelLabel`, `model_updates` and `model_snapshots`, which the
   frozen examples match exhaustively (`rg -n 'ModelLabel::' examples`).
+
+## Withdrawal (2026-09-21, before any run)
+
+**`K7-3` is withdrawn and never ran.** No seed in `540..570` was executed under
+any cell; the block is retired unconsumed ([`README.md`](../README.md#seed-ledger)).
+Owner decision, 2026-09-21, recorded on
+[#100](https://github.com/sustia-llc/koalisi/issues/100).
+
+- **What preceded it.** The owner paused the run after the three-lens review
+  (#100, 2026-09-19): `grp-id` as locked reads each candidate absolutely, so
+  §2's arrival-order leave sweep decides which of two same-step coverers
+  survives. `RefPruneId` was then measured against `RefPrune` off-block on §2's
+  world — `v0.43.0`, PR #112, `tests/ref_prune_id.rs`, seeds `9000..9030`:
+  `median performance-scored PRIMARY ref-prune-id 0.2391 (0x3fce99b563bf8f5c)
+  ref-prune 0.2363 (0x3fce3f77ba0afcd9); final member sets identical on 344 of
+  600 tasks; PRIMARY bit-identical on 4 of 30 seeds; ref-prune-id above on 13
+  seeds, ref-prune above on 13`. That is the second half of §5's secondary
+  read 1; at §5's thresholds it passes none of H-equiv (570 of 600 tasks, 24
+  of 30 seeds), H-beats and H-below (18 of 30 seeds each). The owner re-posed
+  the question rather than re-lock the arm on this world.
+- **Where the code is.** `harness::RefPruneId` and its pins are on `main`
+  from `v0.43.0`. The `AgentKeyed` store, `tests/k7_3_identity.rs` and
+  `examples/k7/k7_3.rs` are not; they are preserved at tag `k7-3-withdrawn`
+  (commit `51678a3`).
+- **Pre-run executions**, the list §10's report would have carried: the
+  seed-7000 sighting (§8); Amendment 1's A1.5; the 25 executions of the
+  binary, including the gate-falsification leak on smoke block `8000..8003`
+  (#100, 2026-09-19); the R0 executions (PR #112's body).
+- **What it leaves.** No verdict and no §6 label. §4's note is neither
+  confirmed nor contradicted. The re-posed question takes the next free
+  number at its own lock.

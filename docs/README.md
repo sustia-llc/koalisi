@@ -61,6 +61,7 @@ is written; rows land here as each report is recorded.
 |---|---|---|---|---|---|---|---|
 | K7-1 | topology-routed group voting (tira ext-6) vs the candidate-blind group | #90 | 90..120 | **`VALIDATED (topology-routed group)`** 2.41×, 30/30 | [`k7/prereg-K7-1-topology-routed-group.md`](k7/prereg-K7-1-topology-routed-group.md) | [`k7/ab-report-K7-1-topology-routed-group.md`](k7/ab-report-K7-1-topology-routed-group.md) | [`runs/K7-1.log`](runs/K7-1.log) |
 | K7-2 | novelty on/off on the topology-routed group | #97 | 150..180 | `FALSIFIED (novelty moves the outcome)` — novelty on 3.00×, 30/30 | [`k7/prereg-K7-2-novelty-routed-group.md`](k7/prereg-K7-2-novelty-routed-group.md) | [`k7/ab-report-K7-2-novelty-routed-group.md`](k7/ab-report-K7-2-novelty-routed-group.md) | [`runs/K7-2.log`](runs/K7-2.log) |
+| K7-3 | the identity-keyed routed group on a performance-scored world | #100 | 540..570 (retired) | `WITHDRAWN (not run)` | [`k7/prereg-K7-3-performance-scored-world.md`](k7/prereg-K7-3-performance-scored-world.md) — its Withdrawal section | — | — |
 
 Read K7-1's mechanism section before quoting its verdict: the routed arm's
 PRIMARY is that of an engine-free redundancy prune, the candidate's own role
@@ -68,12 +69,14 @@ query alone decides every centre-present read, and the effect was seen
 off-block before the run. Read K7-2's the same way: the better cell ends
 where the engine-free prune ends on 600 of 600 tasks, so its 3.00× measures
 the routed query without the novelty term, not a gain over a rule with no
-engine.
+engine. K7-3 was withdrawn before its run ([`PROTOCOL.md`](PROTOCOL.md) §1
+item 9); its pre-registration's Withdrawal section records why.
 
 ## Seed ledger
 
 Each registered run consumes a fresh block of 30 seeds; a block is never
-reused across registrations.
+reused across registrations. A withdrawn registration's block is retired
+unconsumed and is not reused either.
 
 | block | status | consumer |
 |---|---|---|
@@ -89,6 +92,7 @@ reused across registrations.
 | 270..300 | consumed | EQ5a |
 | 300..330 | consumed | #80 |
 | 330..360 | consumed | EQ5b |
+| 540..570 | retired, not run | K7-3 (withdrawn) |
 
 ## Immutability rule
 

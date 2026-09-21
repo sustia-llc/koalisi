@@ -18,11 +18,18 @@ Planned work — issue-tracked (details in [`CLAUDE.md`](./CLAUDE.md)
   manifests + FAIR provenance. #31 does not wait on the tauhokohoko
   KEK-granularity answer: without a reply at its kickoff the granularity is
   ruled in-house and recorded on #31 before any belief-sealing code.
-- **K7 lineage**: the `K7-3` review findings and the promotion of
-  registration-agnostic code into `src/harness/report.rs`; the `K7-3`
-  registration ([#100], paused before its run on seeds 540..570); EQ5b (c)
+- **K7 lineage**: the question `K7-3` asked, re-posed — off-block
+  engine-free probes for a world on which `RefPruneId` beats `RefPrune`, then
+  a new lock that carries `K7-3`'s four review findings and the promotion of
+  registration-agnostic code into `src/harness/report.rs`; EQ5b (c)
   ([#103]); the multi-coalition harness scaffold and the tira-extension
   re-pins and registrations ([#104]–[#111]).
+
+### Changed
+- **`K7-3` withdrawn before its run** ([#100]): its pre-registration is in
+  `docs/k7/` with an appended Withdrawal section, seeds 540..570 are retired
+  unconsumed, and `docs/PROTOCOL.md` §1 gains the withdrawal rule (item 9).
+  The branch's code is preserved at tag `k7-3-withdrawn`.
 
 ## [0.43.0] — 2026-09-21
 
