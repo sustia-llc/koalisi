@@ -110,9 +110,11 @@ Full release ledger v0.4.0 → v0.43.0 is the `project-history.md` archive (§1)
 The three most recent entries are kept here in brief — read the ledger before
 touching anything with a frozen battery, a pinned decision, or a registered doc.
 
-`K7-3` stays PAUSED. Phase R0 of the refocus plan landed as v0.43.0; next is
-Phase F (`v0.44.0`), and whether R1 runs as written is the owner's reading of
-R0 under the plan's §5.
+Phase R0 of the refocus plan landed as v0.43.0. On its reading the owner
+re-posed the question (2026-09-21): `K7-3` is WITHDRAWN before its run
+(`docs/PROTOCOL.md` §1 item 9), 540..570 retired unconsumed, Phase F folded
+into the next lock, R1 not run. Next is a lock session whose first act is
+off-block engine-free probes of the world.
 
 ### Latest three
 
@@ -123,7 +125,8 @@ Detail for each: its `CHANGELOG.md` section and the ledger.
   0.7 / 0.05 / 0.40 world the median `performance_scored.primary` is 0.2391
   for `RefPruneId` and 0.2363 for `RefPrune`; final member sets identical on
   344 of 600 tasks; each above on 13 seeds. A test, no registration; it is a
-  pre-run sighting of `K7-3`'s secondary read 1, owed to Amendment 2.
+  pre-run sighting of `K7-3`'s secondary read 1, listed in its Withdrawal
+  section.
 
 - **`K7-3` scaffold 2 — v0.42.0 (2026-09-19, #100 lock part 2)**: the trait
   hook is `observe_outcome(required, per_bit_success, members)` — one
@@ -146,7 +149,7 @@ Detail for each: its `CHANGELOG.md` section and the ledger.
 Since v0.33.0 these live in the public repo: **`docs/README.md`** carries the
 K4 verdict trail (17 rows, every prereg + report by path), the K7 lineage
 rows as they land (K7-1 since v0.38.0, K7-2 since v0.40.0), and the **seed
-ledger** (90..120 consumed by K7-1, 150..180 by K7-2); **`docs/PROTOCOL.md`** is the standing run
+ledger** (90..120 consumed by K7-1, 150..180 by K7-2, 540..570 retired by the withdrawn K7-3); **`docs/PROTOCOL.md`** is the standing run
 protocol (design-lock → prereg → 3-lens review → serial run → immutable
 report; pin-first; latency-column-stripped diff; review on every PR);
 **`docs/runs/`** holds the committed raw outputs and the re-pin drift recipe.
@@ -259,7 +262,7 @@ koalisi/
 │   ├── README.md                           the index — K4 verdict trail (17 rows, every prereg/report by path), K7 rows, seed ledger, immutability rule, layout
 │   ├── PROTOCOL.md                         the run protocol (design-lock → prereg → 3-lens review → serial run → immutable report; gates; review; seeds; naming)
 │   ├── runs/                               committed raw outputs — README.md (archive + drift-check recipe), K4-archive.log (one serial run at v0.32.0 pins), K7-<n>.log per registration
-│   ├── k7/                                 the K7 lineage, all immutable: a prereg (+ amendments) and an ab-report per registration — K7-1 topology-routed-group, K7-2 novelty-routed-group
+│   ├── k7/                                 the K7 lineage, all immutable: a prereg (+ amendments) and an ab-report per registration — K7-1 topology-routed-group, K7-2 novelty-routed-group; K7-3 performance-scored-world, prereg only (withdrawn before its run)
 │   ├── prereg-*.md + ab-report-*.md        the K4 lineage: 13 prereg + 16 report pairs/singles (v1/v2, K1, K6 report-only), each row of docs/README.md names both files; per-registration gotchas indexed at the end of §Worth flagging
 │   └── baseline-aif-scalar-scope-b.md, per-bit-outcome-plumbing-design.md, k4-arm-choice-memo.md   the three memos (v4/v5 baseline anchor; per-bit design note, gotcha 23; arm-choice decision memo — DECIDED B+D, FINAL)
 └── tests/
@@ -732,26 +735,26 @@ What is still open:
   scaffold 2 (v0.42.0, `MemberOutcome` on the outcome hook), the plan's
   Phase N (2026-09-20, no code — the board and the notes) and its Phase R0
   (v0.43.0, `RefPruneId` against `RefPrune` as a test).
-  **`K7-3` is PAUSED pre-run** ([#100](https://github.com/sustia-llc/koalisi/issues/100));
-  its prereg, library change and binary sit on branch
-  `k7-3-performance-scored-world` at version 0.42.0, and **no seed of
-  540..570 has run**. The pre-run review derived that `grp-id` as locked
-  evaluates each candidate absolutely, so it inherits the world's
-  arrival-order tie-break and reproduces the engine-free `ref-prune` —
-  gotcha 37. **Next, in order:**
-  1. **R0 landed** (`v0.43.0`): on seeds 9000..9030, median
-     `performance_scored.primary` 0.2391 (`RefPruneId`) against 0.2363
-     (`RefPrune`); final member sets identical on 344 of 600 tasks; each
-     above on 13 of 30 seeds. Whether that is "identity moves nothing" in the
-     plan's §5 sense is the owner's call before R1.
-  2. **F** (`v0.44.0`) — the four `K7-3` review findings plus the promotion of
-     registration-agnostic code into `src/harness/report.rs`, forward-only
-     (`k7_1.rs`, `k7_2.rs`, `strategy_comparison.rs` keep their private
-     copies and are not edited).
-  3. **R1** — `grp-id` re-locked as a **comparative** read (the centre scores
-     the candidate against each same-step role-mate it can see), lock part 3
-     on #100, then one amendment, then one serial run on **540..570**.
-  4. Then #32 → #31 → #33 (P7.4 / P7.3 / P7.5), then #103 (EQ5b (c), block
+  **`K7-3` is WITHDRAWN before its run** ([#100](https://github.com/sustia-llc/koalisi/issues/100);
+  owner, 2026-09-21): no seed of 540..570 ran and the block is retired; the
+  prereg is in `docs/k7/` with its Withdrawal section; the branch's
+  `AgentKeyed` store, `tests/k7_3_identity.rs` and `examples/k7/k7_3.rs` are
+  preserved at tag `k7-3-withdrawn`. The pre-run review derived that
+  `grp-id` as locked reads each candidate absolutely and inherits the world's
+  arrival-order tie-break (gotcha 37); R0 (`v0.43.0`) then measured the
+  engine-free identity prune on that world: median
+  `performance_scored.primary` 0.2391 (`RefPruneId`) against 0.2363
+  (`RefPrune`) on seeds 9000..9030, member sets identical on 344 of 600
+  tasks, each above on 13 of 30 seeds. **Next, in order:**
+  1. **The re-posed question** — a lock session whose first act is cheap
+     off-block engine-free probes (`.claude/stack/agent-dispatch.md` §19):
+     vary the `PerformanceSpec` and tasks per seed until `RefPruneId` beats
+     `RefPrune` at K7-3's bar; an arm is locked only on such a world, and
+     takes the next free number. The lock carries K7-3's four review
+     findings and the promotion of registration-agnostic code into
+     `src/harness/report.rs`, forward-only (`k7_1.rs`, `k7_2.rs`,
+     `strategy_comparison.rs` keep their private copies).
+  2. Then #32 → #31 → #33 (P7.4 / P7.3 / P7.5), then #103 (EQ5b (c), block
      360..390), then the tag-gated phases from #105–#111.
   **A lock is not postable** until it names one read on which the arm's act
   differs from the engine-free reference and the term that makes it differ,
@@ -759,10 +762,10 @@ What is still open:
   "arrival order", or a term that cannot fire, means the arm is not
   registered. **Any novelty contrast on this world inherits K7-2's
   mechanism** — read `docs/k7/ab-report-K7-2-novelty-routed-group.md` §3
-  first. **Numbering (owner, 2026-09-18):** the world-move took `K7-3`;
-  every later registration takes the next free number when its own lock is
-  posted, and the forward seed blocks are provisional notes — the
-  authoritative ledger is `docs/README.md`.
+  first. **Numbering (owner, 2026-09-18):** the world-move took `K7-3`, and
+  a withdrawn number is not reused; every later registration takes the next
+  free number when its own lock is posted, and the forward seed blocks are
+  provisional notes — the authoritative ledger is `docs/README.md`.
 - **MSRV — C-D1 DECIDED (owner, 2026-09-14): KEEP `rust-version = 1.93.0`.**
   The v0.23.0 re-pin removed the last DeepCausality edge and the `process`
   tier with it; the measured cross-feature maximum is 1.92 and the
