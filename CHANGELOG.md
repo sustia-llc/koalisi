@@ -12,24 +12,98 @@ Planned work — issue-tracked (details in [`CLAUDE.md`](./CLAUDE.md)
 - **Phase 5 — SwarmAgentic meta-layer remainder** ([#20]): configurator,
   velocity-rewrite loop, transferability (needs an LLM backend behind
   `src/llm/mod.rs`).
-- **Phase 7 — Persistence implementation**, in this order: [#32] decision
-  streams (the `TaskOutcome` durable home) minus the belief leg → [#31]
-  sealing + revocation registry plus #32's belief leg → [#33] federation
-  manifests + FAIR provenance. #31 does not wait on the tauhokohoko
-  KEK-granularity answer: without a reply at its kickoff the granularity is
-  ruled in-house and recorded on #31 before any belief-sealing code.
-- **K7 lineage**: the question `K7-3` asked, re-posed — off-block
-  engine-free probes for a world on which `RefPruneId` beats `RefPrune`, then
-  a new lock that carries `K7-3`'s four review findings and the promotion of
-  registration-agnostic code into `src/harness/report.rs`; EQ5b (c)
-  ([#103]); the multi-coalition harness scaffold and the tira-extension
-  re-pins and registrations ([#104]–[#111]).
+- **Phase 7 — Persistence implementation**, in this order: [#31] sealing +
+  revocation registry plus #32's belief leg → [#33] federation manifests +
+  FAIR provenance. #31 does not wait on the tauhokohoko KEK-granularity
+  answer: without a reply at its kickoff the granularity is ruled in-house
+  and recorded on #31 before any belief-sealing code.
+- **K7 lineage**: EQ5b (c) ([#103]); the multi-coalition harness scaffold and
+  the tira-extension re-pins and registrations ([#104]–[#111]).
+
+## [0.44.0] — 2026-09-21
+
+Phase 7's `Decisions` stream, minus the belief leg ([#32]): each persisted
+decision carries one causal parent into the `Topology` stream.
+
+### Added
+- **`DecisionTrace`** and **`CoalitionService::spawn_with_trace_tap`**
+  (`subsystems::coalition_actor`, always compiled): the trace is the
+  `DecisionRecord` plus `event_log_len` and `timestamp`, the manager's
+  in-memory event-log length and logical clock, read by the service task
+  before it calls the manager. Emitted for every join or leave the manager
+  answers with a `Decision`, including a leave of a non-member, which the
+  manager answers with `act == false` without consulting the policy; a
+  manager error emits nothing. Non-blocking `try_send`, drop-with-warn.
+  `DecisionRecord`, `spawn` and `spawn_with_tap` keep their signatures.
+- **`persistence::WireDecision`** and `WIRE_DECISION_SCHEMA_VERSION = 1`: the
+  serde mirror of `DecisionRecord` (`agent_id` as `u64`, `kind` as `"join"` /
+  `"leave"`), with inherent `from_record` / `try_into_record`; an unknown
+  kind is a `WireConversionError`.
+- **`persistence::spawn_decision_store_forwarder`** (feature `persistence`):
+  writes each trace to the `Decisions` stream as a CBOR `WireDecision` with
+  the trace's `timestamp` and one parent, `Topology` sequence number
+  `event_log_len − 1` (no parent when the length is 0). It forwards with
+  `send().await`; the store writer still makes one `append` attempt per
+  record, so delivery from the tap onward is at-most-once. The parent is the
+  event-log entry at that index only when the `Topology` tap was installed on
+  an empty log and dropped nothing.
+- **`subsystems::durable::spawn_decision_log_bus_tee`** (features
+  `persistence` + `durable`): per trace, the `Decisions` record first, then
+  the `DecisionEvent` on the durable bus.
+- **`persistence::WireLineage`**: an uninhabited enum reserved for [#20]; no
+  producer.
+- **`tests/decision_stream.rs`** (feature `persistence`, 4 tests):
+  `decision_records_carry_the_decision_time_topology_parent` (hand-derived
+  parents 4, 5, 5, 5, 6, 6 on a six-decision fixture; each `act == true`
+  join's own event is the `Topology` record after its parent; both streams
+  verify), `full_writer_channel_drops_no_decision` (writer channel capacity
+  1, 32 traces, 32 records), `wire_decision_round_trips_both_kinds_and_rejects_unknown`,
+  `record_parent_is_absent_on_an_empty_log`. **`tests/decision_log_bus_tee.rs`**
+  (features `persistence,durable`, container-backed):
+  `every_trace_reaches_the_decisions_stream_and_the_bus`. One unit test in
+  `coalition_actor`: `trace_tap_reads_the_position_before_the_manager_call`.
 
 ### Changed
-- **`K7-3` withdrawn before its run** ([#100]): its pre-registration is in
-  `docs/k7/` with an appended Withdrawal section, seeds 540..570 are retired
-  unconsumed, and `docs/PROTOCOL.md` §1 gains the withdrawal rule (item 9).
-  The branch's code is preserved at tag `k7-3-withdrawn`.
+- `WireConversionError`'s `Display` reads `wire conversion failed: …` (was
+  `wire topology conversion failed: …`).
+- Rustdoc: the decision tap no longer calls its records "policy-consulted"
+  (a non-member leave is tapped without a consult); the store writer's
+  delivery section names the forwarders' `send().await`.
+- **`K7-3` withdrawn before its run** ([#100], PR #113): its
+  pre-registration is in `docs/k7/` with an appended Withdrawal section,
+  seeds 540..570 are retired unconsumed, and `docs/PROTOCOL.md` §1 gains the
+  withdrawal rule (item 9). The branch's code is preserved at tag
+  `k7-3-withdrawn`.
+
+### Gates
+- **Falsified in a copy**: the length read moved after the manager call
+  turns `decision_records_carry_the_decision_time_topology_parent` red
+  (parent `SequenceNo(5)`, the join's own event, for expected 4) and the unit
+  test red; `send().await` → `try_send` turns
+  `full_writer_channel_drops_no_decision` red (32 traces, 1 record); swapped
+  kind labels turn the round-trip test red; dropping the bus send turns
+  `every_trace_reaches_the_decisions_stream_and_the_bus` red (0 of 3).
+- `cargo nextest run`: default 104, `persistence` 128,
+  `persistence,magnitude` 158, `durable` 105, `persistence,durable` 130,
+  0 failed; both container tests booted SurrealDB (no SKIP line).
+  `cargo test --doc --features persistence,durable`: 3 passed, 2 ignored.
+  `cargo clippy --all-targets -- -D warnings` on `--no-default-features`,
+  default, `persistence`, `durable`, `persistence,durable`;
+  `RUSTDOCFLAGS='-D warnings' cargo doc --no-deps` on `persistence` and
+  `persistence,durable`; `cargo fmt --check`; `cargo +1.93.0 check
+  --all-targets --locked --features persistence,durable`.
+- `cargo test` on every other lane, each one test above v0.43.0 (the
+  always-compiled trace-tap unit test): `decision` 163, `magnitude` 136,
+  `decision,magnitude` 192, `magnitude-fast` 144, `remote` 113, `process`
+  162, `decision,magnitude,process` 250, `harness` 132, `harness,process`
+  235, `harness,decision,process` 330, `metrics` 107.
+- **K4 archive gate** (the diff reaches the decision path): one serial
+  release run of `examples/strategy_comparison.rs` on a quiet machine
+  (`pgrep -c 'cargo|rustc'` 0), diffed against `docs/runs/K4-archive.log`
+  per `docs/runs/README.md`. The 33 `VERDICT|FALSIFIED|VALIDATED` lines are
+  byte-identical; after the latency-column strip, 10 lines differ, every
+  one a latency value (three `latency µs` table rows, seven lines of
+  latency prose). PASS.
 
 ## [0.43.0] — 2026-09-21
 

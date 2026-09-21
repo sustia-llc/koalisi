@@ -483,10 +483,17 @@ stream record is a node in a DAG across streams — structurally the EPP
 `EffectLog` shape (a causal trace, not a flat log).
 
 v1 semantics (deliberately coarse): the decision forwarder attaches **one
-parent — the `Topology` stream head at decision time** ("the graph state
-this decision saw"). `DecisionRecord` itself stays untouched: in-memory,
-serde-free, hot-path (the K3 tap contract). Richer antecedent sets (the
-specific membership/weight events that fed a decision, belief-snapshot
+parent — the `Topology` record for the graph state the decision saw**.
+Shipped in P7.4 (v0.44.0) as: the service task reads the in-memory event-log
+length L before it calls the manager and emits it on a `DecisionTrace`
+alongside the untouched `DecisionRecord`; the parent is `Topology` sequence
+number L − 1 (none when L = 0). That names the event-log entry at index
+L − 1 only when the `Topology` tap was installed on an empty log and dropped
+nothing. The store's `Topology` head read by the forwarder at append time is
+NOT used: it is not synchronized with the decision and can name the
+decision's own membership event. `DecisionRecord` itself stays untouched:
+in-memory, serde-free, hot-path (the K3 tap contract). Richer antecedent sets
+(the specific membership/weight events that fed a decision, belief-snapshot
 parents) fit the same schema later without a format break.
 
 Cross-federation parent references are an open call (§17): `(stream, seq)`

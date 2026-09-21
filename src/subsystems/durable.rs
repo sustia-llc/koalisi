@@ -2,7 +2,7 @@
 //!
 //! This is the SurrealDB-backed *membership/decision-messaging tier* for issue
 //! #6. It sits entirely off the hot path: the latency-sensitive coalition seams
-//! stay on `tokio::sync`, and only policy-consulted join/leave *decisions* — tapped
+//! stay on `tokio::sync`, and only join/leave *decisions* — tapped
 //! from [`CoalitionService`](crate::subsystems::coalition_actor::CoalitionService)
 //! via its optional [`DecisionRecord`] tap — are forwarded into a durable,
 //! restart-replayable log.
@@ -34,6 +34,12 @@
 //! addresses exactly one recipient; a fan-out to many log agents would be a
 //! trivial extension but adds nothing for a single durable record.)
 //!
+//! ## With feature `persistence`
+//!
+//! `spawn_decision_log_bus_tee` drains a decision *trace* tap and, per trace,
+//! writes the `Decisions` stream record of the `persistence` log first and
+//! publishes the [`DecisionEvent`] on this bus second.
+//!
 //! ## Settings resolution (downstream gotcha)
 //!
 //! `surrealdb-live-message` owns a process-global `SETTINGS` (`LazyLock`) that
@@ -57,7 +63,11 @@ use tokio_util::task::TaskTracker;
 
 use surrealdb_live_message::subsystems::agents::{Agent, Coalition};
 
+#[cfg(feature = "persistence")]
+use crate::persistence::{Record, StreamId, forward_decision_trace, next_trace};
 use crate::subsystems::coalition_actor::DecisionRecord;
+#[cfg(feature = "persistence")]
+use crate::subsystems::coalition_actor::DecisionTrace;
 
 /// Durable, serializable mirror of a core
 /// [`crate::subsystems::coalition_actor::DecisionRecord`].
@@ -183,5 +193,57 @@ pub fn spawn_decision_forwarder(
             }
         }
         tracing::debug!("decision forwarder stopped");
+    })
+}
+
+/// Log one trace to the `Decisions` stream, then publish its record to the bus.
+#[cfg(feature = "persistence")]
+async fn tee_one(
+    trace: DecisionTrace,
+    writer_tx: &mpsc::Sender<(StreamId, Record)>,
+    producer: &Agent,
+    log_sink: &str,
+) {
+    forward_decision_trace(&trace, writer_tx).await;
+    if let Err(e) = producer
+        .send(log_sink, DecisionEvent::from(trace.record))
+        .await
+    {
+        tracing::warn!("durable decision forward failed: {e}");
+    }
+}
+
+/// Spawn a task that drains a decision trace tap
+/// ([`CoalitionService::spawn_with_trace_tap`](crate::subsystems::coalition_actor::CoalitionService::spawn_with_trace_tap))
+/// into BOTH the persistence log and the durable bus (features `persistence` +
+/// `durable`).
+///
+/// Per trace, in order: the `Decisions` stream record is built and sent on
+/// `writer_tx` exactly as
+/// [`spawn_decision_store_forwarder`](crate::persistence::spawn_decision_store_forwarder)
+/// does (same record, same `send().await` wait for capacity, same
+/// drop-with-warn on an encode failure or a closed writer channel); then
+/// `producer` [`Agent::send`]s the trace's [`DecisionEvent`] to `log_sink`. A
+/// bus send failure is logged and skipped.
+///
+/// Ends when either `token` is cancelled or `rx` closes. On cancellation it
+/// first tees whatever is already buffered in `rx`, then stops. Spawned on
+/// `tracker` so the caller's shutdown covers it; the returned [`JoinHandle`]
+/// may be dropped.
+#[cfg(feature = "persistence")]
+#[allow(clippy::must_use_candidate)]
+pub fn spawn_decision_log_bus_tee(
+    mut rx: mpsc::Receiver<DecisionTrace>,
+    writer_tx: mpsc::Sender<(StreamId, Record)>,
+    producer: Agent,
+    log_sink: String,
+    tracker: &TaskTracker,
+    token: CancellationToken,
+) -> JoinHandle<()> {
+    tracker.spawn(async move {
+        while let Some(trace) = next_trace(&mut rx, &token).await {
+            tee_one(trace, &writer_tx, &producer, &log_sink).await;
+        }
+        tracing::debug!("decision log/bus tee stopped");
     })
 }

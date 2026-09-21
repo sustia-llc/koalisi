@@ -11,9 +11,12 @@
 //!
 //! ## Delivery is at-most-once from the tee onward
 //!
-//! Producers `try_send` (non-blocking); a full or closed channel drops the
-//! record — the tap contract. This task then makes a **single** `append`
-//! attempt per record: on failure it logs and drops, with no retry or replay
+//! The taps upstream of the forwarders `try_send` (non-blocking); a full or
+//! closed tap drops the record — the tap contract. The forwarders
+//! ([`spawn_topology_forwarder`](super::spawn_topology_forwarder),
+//! [`spawn_decision_store_forwarder`](super::spawn_decision_store_forwarder))
+//! `send().await` into this task's channel. This task then makes a **single**
+//! `append` attempt per record: on failure it logs and drops, with no retry or replay
 //! (and the failing stream wedges — see [`PersistenceError::StreamWedged`]).
 //! There is no cursor-replay analogue to the K3 durable bus here, so end-to-end
 //! delivery is at-most-once; durable retry/replay is a later-phase concern.

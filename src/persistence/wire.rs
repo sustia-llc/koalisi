@@ -1,5 +1,7 @@
-//! Versioned wire projection of [`TemporalEvent`] for the `Topology` stream
-//! (Phase 7 / P7.2, sustia-llc/koalisi#30).
+//! Versioned wire projections for the persisted streams: [`TemporalEvent`] on
+//! the `Topology` stream (Phase 7 / P7.2, sustia-llc/koalisi#30) and
+//! [`DecisionRecord`] on the `Decisions` stream (P7.4,
+//! sustia-llc/koalisi#32).
 //!
 //! Per the §4 "wire projection, not serde on domain types" decision,
 //! [`TemporalEvent`] itself does NOT gain serde derives. Instead this module
@@ -8,6 +10,8 @@
 //! becomes `Vec<u64>`, and the `V`/`HE` weights become caller-chosen
 //! serializable projections `VW`/`HW`. The wire schema is frozen and versioned
 //! by [`WIRE_TOPOLOGY_SCHEMA_VERSION`], independently of the in-memory enum.
+//! [`WireDecision`] is the same kind of mirror for [`DecisionRecord`],
+//! versioned by [`WIRE_DECISION_SCHEMA_VERSION`].
 //!
 //! Persisting raw `VertexIndex`/`HyperedgeIndex` values is legitimate: catgraph
 //! indices are stable and never reused (CLAUDE.md gotcha 12), and the in-memory
@@ -17,6 +21,7 @@ use std::fmt::{Debug, Display};
 
 use serde::{Deserialize, Serialize};
 
+use crate::subsystems::coalition_actor::{DecisionKind, DecisionRecord};
 use crate::topology::{HyperedgeIndex, SnapshotId, TemporalEvent, Timestamp, VertexIndex};
 
 /// Wire-schema version of the `Topology` stream payload. Bump on any change to
@@ -24,8 +29,12 @@ use crate::topology::{HyperedgeIndex, SnapshotId, TemporalEvent, Timestamp, Vert
 /// `schema_version` exceeds this.
 pub const WIRE_TOPOLOGY_SCHEMA_VERSION: u16 = 1;
 
-/// A weight projection failed to convert back to its in-memory type during
-/// [`WireTopologyEvent::try_into_event`].
+/// Wire-schema version of the `Decisions` stream payload. Bump on any change
+/// to [`WireDecision`]'s shape.
+pub const WIRE_DECISION_SCHEMA_VERSION: u16 = 1;
+
+/// A wire projection failed to convert back to its in-memory type, in
+/// [`WireTopologyEvent::try_into_event`] or [`WireDecision::try_into_record`].
 ///
 /// Deliberately lightweight and seq-free:
 /// [`replay_into_event_log`](super::replay_into_event_log) wraps it into
@@ -39,7 +48,7 @@ pub struct WireConversionError {
 
 impl Display for WireConversionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "wire topology conversion failed: {}", self.message)
+        write!(f, "wire conversion failed: {}", self.message)
     }
 }
 
@@ -574,6 +583,73 @@ impl<VW, HW> WireTopologyEvent<VW, HW> {
         })
     }
 }
+
+/// Serde-derived wire mirror of [`DecisionRecord`], the `Decisions` stream
+/// payload.
+///
+/// `agent_id` widens to `u64`; `kind` is [`DecisionKind::as_str`] (`"join"` /
+/// `"leave"`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WireDecision {
+    /// Stable coalition label (`"coalition-<n>"`).
+    pub coalition: String,
+    /// Topology vertex index of the agent the decision was about.
+    pub agent_id: u64,
+    /// [`DecisionKind::as_str`] of the decision's kind.
+    pub kind: String,
+    /// Whether the policy recommended acting (joining / leaving).
+    pub act: bool,
+    /// Underlying scalar the decision was made from.
+    pub score: f64,
+}
+
+impl WireDecision {
+    /// Project a [`DecisionRecord`] onto its wire mirror.
+    #[must_use]
+    pub fn from_record(record: &DecisionRecord) -> Self {
+        Self {
+            coalition: record.coalition.clone(),
+            agent_id: usize_u64(record.agent_id),
+            kind: record.kind.as_str().to_owned(),
+            act: record.act,
+            score: record.score,
+        }
+    }
+
+    /// Reconstruct a [`DecisionRecord`] from this wire mirror.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`WireConversionError`] if `kind` is neither `"join"` nor
+    /// `"leave"`, or (on a 32-bit target) if `agent_id` exceeds `usize`.
+    pub fn try_into_record(self) -> Result<DecisionRecord, WireConversionError> {
+        let kind = match self.kind.as_str() {
+            "join" => DecisionKind::Join,
+            "leave" => DecisionKind::Leave,
+            other => {
+                return Err(WireConversionError {
+                    message: format!("unknown decision kind {other:?}"),
+                });
+            }
+        };
+        let agent_id = usize::try_from(self.agent_id).map_err(|_| WireConversionError {
+            message: format!("agent id {} exceeds usize on this target", self.agent_id),
+        })?;
+        Ok(DecisionRecord {
+            coalition: self.coalition,
+            agent_id,
+            kind,
+            act: self.act,
+            score: self.score,
+        })
+    }
+}
+
+/// **RESERVED** wire payload for the `Lineage` stream
+/// ([`StreamId::Lineage`](super::StreamId::Lineage)), held for #20. It has no
+/// variants and no producer, so no value of it can be constructed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WireLineage {}
 
 #[cfg(test)]
 mod tests {

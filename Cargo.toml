@@ -1,6 +1,6 @@
 [package]
 name = "koalisi"
-version = "0.43.0"
+version = "0.44.0"
 edition = "2024"
 # Declared floor 1.93.0 — owner decision C-D1 (2026-09-14): KEEP; do not lower
 # in passing. Edition 2024 means resolver 3, so this value also bounds
@@ -197,6 +197,14 @@ required-features = ["persistence"]
 [[test]]
 name = "replay_parity"
 required-features = ["persistence", "magnitude"]
+
+[[test]]
+name = "decision_stream"
+required-features = ["persistence"]
+
+[[test]]
+name = "decision_log_bus_tee"
+required-features = ["persistence", "durable"]
 
 [[test]]
 name = "remote_integration"

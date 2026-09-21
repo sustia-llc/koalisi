@@ -104,21 +104,30 @@ in the sibling `biome` project.
 - Rust implementation is dispatched to the built-in `general-purpose` agent
   per `.claude/stack/agent-dispatch.md`; review is `/code-review low`.
 
-## Current state — 2026-09-21 (v0.43.0)
+## Current state — 2026-09-21 (v0.44.0)
 
-Full release ledger v0.4.0 → v0.43.0 is the `project-history.md` archive (§1).
+Full release ledger v0.4.0 → v0.44.0 is the `project-history.md` archive (§1).
 The three most recent entries are kept here in brief — read the ledger before
 touching anything with a frozen battery, a pinned decision, or a registered doc.
 
-Phase R0 of the refocus plan landed as v0.43.0. On its reading the owner
-re-posed the question (2026-09-21): `K7-3` is WITHDRAWN before its run
-(`docs/PROTOCOL.md` §1 item 9), 540..570 retired unconsumed, Phase F folded
-into the next lock, R1 not run. Next is a lock session whose first act is
-off-block engine-free probes of the world.
+Phase G-3 of the refocus plan landed as v0.44.0: the persistence log's
+`Decisions` stream, minus the belief leg (#32). Earlier the same day `K7-3`
+was WITHDRAWN before its run (`docs/PROTOCOL.md` §1 item 9, 540..570 retired
+unconsumed), and the re-posed question it asked was closed by the owner with
+no engine registration: no number taken, no seed block consumed. Next is #31.
 
 ### Latest three
 
 Detail for each: its `CHANGELOG.md` section and the ledger.
+
+- **G-3 — v0.44.0 (2026-09-21, #32 minus beliefs)**:
+  `CoalitionService::spawn_with_trace_tap` emits a `DecisionTrace` — the
+  `DecisionRecord` plus the event-log length and logical clock read before
+  the manager call; `spawn_decision_store_forwarder` writes it to the
+  `Decisions` stream as a CBOR `WireDecision` whose one parent is `Topology`
+  sequence number length − 1; `spawn_decision_log_bus_tee` (`persistence` +
+  `durable`) writes the log record, then publishes to the bus. `WireLineage`
+  is reserved. Delivery stays at-most-once from the tap onward (gotcha 17).
 
 - **R0 — v0.43.0 (2026-09-21, #100)**: `harness::RefPruneId`, carried from
   `54fcd33`, and `tests/ref_prune_id.rs`. On seeds 9000..9030 of the
@@ -136,13 +145,6 @@ Detail for each: its `CHANGELOG.md` section and the ledger.
   `PersistentAifArm::observe_outcome` and `GroupAifPolicy::observe_outcome`
   are unchanged, so no file under `examples/` is edited. No policy reads the
   argument yet. No registration, no run.
-
-- **`K7-3` scaffold — v0.41.0 (2026-09-18, #100 lock part 1, PR #101)**:
-  `WorkflowResult::performance_scored`, `Some` iff the instance carries a
-  performance draw — keyed on the draw, not on `OutcomeSignal`; the harness
-  loop and `recon` share predicate, task rule and aggregation. No
-  registration, no run; X-battery NOT RUN. The K7-3 prereg lists the
-  scaffold's seed-7000 sighting among its pre-run executions.
 
 ### Lineages, verdict trail, seed ledger, run protocol — `docs/`
 
@@ -231,14 +233,15 @@ koalisi/
 │   │   ├── chain.rs                        FrameV1 (private serde mirror), FRAME_VERSION, hashing, back-link check
 │   │   ├── store.rs                        EventStore trait + FileEventStore (segments, rotation, torn-tail recovery, wedge)
 │   │   ├── writer.rs                       spawn_store_writer (spawn_blocking, drain-on-cancel)
-│   │   ├── wire.rs                         WireTopologyEvent<VW,HW> (13-variant serde mirror, u64 fields) + schema version
+│   │   ├── wire.rs                         WireTopologyEvent<VW,HW> (13-variant serde mirror, u64 fields) + WireDecision (DecisionRecord mirror) + their schema versions + WireLineage (uninhabited, reserved for #20)
 │   │   ├── tee.rs                          spawn_topology_forwarder (tap → CBOR → store writer; shutdown disciplines)
+│   │   ├── decision.rs                     spawn_decision_store_forwarder (trace tap → CBOR WireDecision, one Topology parent = event_log_len − 1 → store writer; send().await, drain-on-cancel)
 │   │   └── replay.rs                       replay_into_event_log (batched read → fresh EventLog; quiescence precondition)
 │   └── subsystems/
-│       ├── coalition_actor.rs              CoalitionService + handle (policy-gated membership seam) + DecisionRecord tap + spawn_decision_tee (always compiled) — THE runtime seam
+│       ├── coalition_actor.rs              CoalitionService + handle (policy-gated membership seam) + DecisionRecord tap + DecisionTrace tap (spawn_with_trace_tap: event-log length + clock read before the manager call) + spawn_decision_tee (always compiled) — THE runtime seam
 │       ├── outcome.rs                      TaskOutcome + OutcomeSink fan-out + emit_outcome tap + spawn_outcome_forwarder (always compiled; the L2 outcome seam)
 │       ├── remote.rs                       libp2p request-response coalition-event gateway + EventBuffer + RemoteCoalitionClient (feature `remote`; gotcha 29)
-│       └── durable.rs                      DecisionEvent + DurableDecisionBus + forwarder (feature `durable`; gotcha 14)
+│       └── durable.rs                      DecisionEvent + DurableDecisionBus + forwarder (feature `durable`; gotcha 14) + spawn_decision_log_bus_tee (with `persistence`: Decisions record first, then the bus)
 ├── examples/
 │   ├── topology_coalition.rs               coalition lifecycle + time-travel queries
 │   ├── algorithm_values.rs                 value calculators + DCVC + AIPA
@@ -278,6 +281,8 @@ koalisi/
     ├── topology_replay.rs                  3 tests (13-variant round-trip, reconstruction equality, schema/Sealed rejection; feature `persistence`)
     ├── remote_integration.rs               1 test (loopback round-trip service → tee → gateway → client, cursor deltas + seq ordering; feature `remote`)
     ├── replay_parity.rs                    1 test (magnitude_history live == replayed — THE parity gate; features `persistence,magnitude`)
+    ├── decision_stream.rs                  4 tests (hand-derived Decisions-stream parents on a six-decision fixture + own-event check + both chains verify; capacity-1 writer channel loses no trace; WireDecision round-trip; no parent at log length 0; feature `persistence`)
+    ├── decision_log_bus_tee.rs             1 container-backed test (every trace reaches the Decisions stream and the durable bus; features `persistence,durable`)
     ├── harness_workflow.rs                 6 tests (the H0 identity gate — Part 9 `wf-asis` rows on 270..300 + Part 11 medians on 330..360 from docs/runs/K4-archive.log, the instance fixture, the v2-prefix pin, a hand-derived role-mismatch case, the 150..180 generate check; features `harness,process`)
     ├── k7_group_host.rs                    5 tests (3 X-host: harness-hosted grp-role / -blind / -nonov on 330..360 reproduce docs/runs/K4-archive.log; 2 X-carry: grp-role, grp-topo and RefPrune on 90..120 reproduce docs/runs/K7-1.log; ~75 s in debug; features `harness,decision,process`)
     ├── k7_2_novelty.rs                     2 tests (K7-2's S-nov: the routed λ=½ read on a hand-built fixture under novelty on / off, fresh and after one observed task — eight pinned (act, score bits) values; features `harness,decision,process`)
@@ -638,14 +643,14 @@ touching the arm it governs.
     (`src/harness/workflow.rs:558-562`, `:614-628`) fixes the tie-break, so an
     arm that evaluates candidates ABSOLUTELY inherits arrival order; the escape
     is a COMPARATIVE read and needs no new plumbing; `RefPruneId` is the
-    engine-free twin that BOUNDS every arm — run the engine-free pair first.
+    engine-free twin — run the engine-free pair first.
 
 ## Reproducers
 
 All assume `cwd = koalisi/`.
 
 ```sh
-# === default features (106 tests) ===
+# === default features (107 tests) ===
 timeout 60s  cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target
 timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example topology_coalition
 timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example algorithm_values
@@ -653,36 +658,37 @@ timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-tar
 timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example supervised_monitor
 timeout 30s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --example population_search
 
-# === decision-layer feature combos (162 / 135 / 191 tests) ===
+# === decision-layer feature combos (163 / 136 / 192 tests) ===
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features magnitude
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision,magnitude
-timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features magnitude-fast   # 143 (EQ3 L2+L3 + probes)
+timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features magnitude-fast   # 144 (EQ3 L2+L3 + probes)
 # strategy_comparison needs ALL THREE features — see the process block below.
 timeout 60s  cargo run --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision --example population_reliability
 
-# === with persistence feature (P7.1 store + P7.2 replay, 126 tests) ===
+# === with persistence feature (P7.1 store + P7.2 replay + P7.4 decision stream, 131 tests) ===
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features persistence
-timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features persistence,magnitude   # 156, incl. the replay parity gate
+timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features persistence,magnitude   # 161, incl. the replay parity gate
+timeout 300s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features persistence,durable   # 133; needs Docker (the log/bus tee test + the restart test)
 
-# === with remote feature (gateway, 112 tests) ===
+# === with remote feature (gateway, 113 tests) ===
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features remote
 timeout 60s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features remote --example remote_coalition_consumer
 
-# === with process feature (161 tests) ===
+# === with process feature (162 tests) ===
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features process
-timeout 300s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision,magnitude,process   # 249
+timeout 300s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision,magnitude,process   # 250
 # NOTE: strategy_comparison is the FROZEN K4 archive; the battery runs
 # SERIAL on a quiet machine with NO timeout wrapper — the archive + drift-check
 # recipe is docs/runs/README.md.
 cargo run --release --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision,magnitude,process --example strategy_comparison
 
-# === with harness feature (131 tests; with process 234) ===
+# === with harness feature (132 tests; with process 235) ===
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features harness
-timeout 300s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features harness,process   # 234, incl. the H0 identity gate and R0
+timeout 300s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features harness,process   # 235, incl. the H0 identity gate and R0
 timeout 60s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features harness --example gauntlet
 
-# === K7-1 / K7-2 (features harness,decision,process, 329 tests incl. X-host, X-carry, S-nov) ===
+# === K7-1 / K7-2 (features harness,decision,process, 330 tests incl. X-host, X-carry, S-nov) ===
 timeout 600s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features harness,decision,process
 timeout 300s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features harness,decision,process --example k7_2   # k7_2's own 7 unit tests (guards, mask mirror vs ledger on 90..93)
 # K7-2's run of record is docs/runs/K7-2.log; the registered block refuses on any build but 0.40.0. Smoke (gate lines only, no cell value):
@@ -690,11 +696,11 @@ K7_2_SEEDS=6000..6003 cargo run --release --manifest-path Cargo.toml --target-di
 # The run of record is docs/runs/K7-1.log (serial, quiet machine; a 30-seed off-block smoke measured 66 s in release). Off-block smoke only:
 K7_1_SEEDS=5000..5003 cargo run --release --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features harness,decision,process --example k7_1
 
-# === with metrics feature (106 tests = the default suite) ===
+# === with metrics feature (107 tests = the default suite) ===
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features metrics
 timeout 60s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features metrics --example metrics_scrape   # KOALISI_METRICS_ADDR overrides the loopback listener address
 
-# === with durable feature (107 tests; needs Docker; container-backed restart test) ===
+# === with durable feature (108 tests; needs Docker; container-backed restart test) ===
 timeout 300s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features durable
 timeout 120s cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features durable --example durable_decisions
 ```
@@ -709,7 +715,8 @@ What is still open:
 - **Phase 7 implementation**, in this order (the reorder is the ratified one;
   each issue carries its own scope comment, 2026-09-20):
   [#32](https://github.com/sustia-llc/koalisi/issues/32) P7.4 decision streams
-  **minus the belief leg** → [#31](https://github.com/sustia-llc/koalisi/issues/31)
+  **minus the belief leg** — DONE v0.44.0 (the issue stays open for its
+  belief leg) → [#31](https://github.com/sustia-llc/koalisi/issues/31)
   P7.3 sealing + revocation registry **plus #32's belief leg** →
   [#33](https://github.com/sustia-llc/koalisi/issues/33) P7.5 federation
   manifests + FAIR provenance. **Not blocked on the tauhokohoko
@@ -745,17 +752,14 @@ What is still open:
   engine-free identity prune on that world: median
   `performance_scored.primary` 0.2391 (`RefPruneId`) against 0.2363
   (`RefPrune`) on seeds 9000..9030, member sets identical on 344 of 600
-  tasks, each above on 13 of 30 seeds. **Next, in order:**
-  1. **The re-posed question** — a lock session whose first act is cheap
-     off-block engine-free probes (`.claude/stack/agent-dispatch.md` §19):
-     vary the `PerformanceSpec` and tasks per seed until `RefPruneId` beats
-     `RefPrune` at K7-3's bar; an arm is locked only on such a world, and
-     takes the next free number. The lock carries K7-3's four review
-     findings and the promotion of registration-agnostic code into
-     `src/harness/report.rs`, forward-only (`k7_1.rs`, `k7_2.rs`,
-     `strategy_comparison.rs` keep their private copies).
-  2. Then #32 → #31 → #33 (P7.4 / P7.3 / P7.5), then #103 (EQ5b (c), block
-     360..390), then the tag-gated phases from #105–#111.
+  tasks, each above on 13 of 30 seeds. **The re-posed question is CLOSED
+  (owner, 2026-09-21) with no engine registration**: no number taken, no
+  seed block consumed. K7-3's four review findings and the promotion of
+  registration-agnostic code into `src/harness/report.rs` (forward-only:
+  `k7_1.rs`, `k7_2.rs`, `strategy_comparison.rs` keep their private copies)
+  carry to the next registration binary written. **Next, in order:** #31 →
+  #33 (P7.3 / P7.5), then #103 (EQ5b (c), block 360..390), then the
+  tag-gated phases from #105–#111.
   **A lock is not postable** until it names one read on which the arm's act
   differs from the engine-free reference and the term that makes it differ,
   and names which of two same-step coverers survives and through what input;

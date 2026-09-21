@@ -2983,7 +2983,7 @@ dependencies = [
 
 [[package]]
 name = "koalisi"
-version = "0.43.0"
+version = "0.44.0"
 dependencies = [
  "aif",
  "anyhow",
