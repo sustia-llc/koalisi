@@ -39,7 +39,7 @@ from temporal hypergraph topology to coalition formation algorithms to
 | `algorithms` | `ValueCalculator` trait + 4 base calculators + a feedback-weighting `FeedbackCalculator` wrapper (history/failure signals from a shared `FeedbackStore`), `DCVCDistributor`, AIPA partition search, population coalition-structure search (`search`/`record_trajectory`, #42) |
 | `ingest` | Domain-neutral ingestion (K5): `Sample`/`DataSource` traits, generic `SampleMonitor<S>`, `Pacing` + `pump_source`, synthetic NEST-shaped multi-resolution and tauhokohoko-shaped sensor-event fixture sources (seeded, no credentials) |
 | `decision` | `CoalitionDecisionPolicy` trait + always-available `ThresholdPolicy`; optional Active Inference strategy (`EfeValueCalculator`, `AifDecisionPolicy`) behind the `decision` feature; optional categorical-magnitude strategy (`MagnitudeValueCalculator`, `MagnitudePolicy`) behind the `magnitude` feature |
-| `persistence` | Append-only event store (feature `persistence`): hash-chained streams, CBOR frame log (`FileEventStore`), crash-tail recovery, writer task; topology events tap in and replay back into a fresh `EventLog` all queries run on unchanged (P7.1 + P7.2) — see `.claude/docs/phase7-persistence-design.md` |
+| `persistence` | Append-only event store (feature `persistence`): hash-chained streams, CBOR frame log (`FileEventStore`), crash-tail recovery, writer task; topology events tap in and replay back into a fresh `EventLog` all queries run on unchanged (P7.1 + P7.2); join/leave decisions land on a `Decisions` stream, each with one causal parent into `Topology`, and with `durable` also on, a tee writes each decision to the log and then to the bus (P7.4, minus belief snapshots) — see `.claude/docs/phase7-persistence-design.md` |
 | `harness` | The K7 A/B harness (feature `harness`): seeded instance generation, the battery loop (bootstrap join, policy-gated arrivals, one leave sweep), per-seed metrics, report helpers — the plumbing every K7 registration shares; with `process`, the workflow world (`WorkflowSpec`: per-agent roles, per-task declared `Demand`, role-matched step coverage, an optional performance draw and, where an instance carries one, a performance-scored outcome beside the coverage-scored one) and the per-task lifecycle hook every policy can observe (`begin_task` / `observe_outcome`, the latter with the task's per-bit signal and its final members, each with whether it performed) |
 | `subsystems` | `CoalitionService` — the policy-gated coalition-membership seam (join/leave consult a `CoalitionDecisionPolicy` before mutating the hypergraph) — plus a decision-tap tee (`spawn_decision_tee`), an optional durable decision log (`durable`), and an optional libp2p remote coalition-event gateway (`remote`: bounded buffer, cursor polling, stable `RemoteCoalitionEventV1` wire schema) |
 
@@ -178,21 +178,22 @@ upstream side.
 ## Tests
 
 ```sh
-cargo test                                 # 106 tests (core + topology + algorithms + population search + decision + ingestion + decision-tap tee)
-cargo test --features decision             # 162 tests (+ Active Inference decision strategies: scalar, multimodal, persistent + the derived ReliabilityCoverage calculator)
-cargo test --features magnitude            # 135 tests (+ categorical-magnitude decision strategy + typed-role modulation + trajectory analytics)
-cargo test --features decision,magnitude   # 191 tests (both decision arms)
-cargo test --features magnitude-fast       # 143 tests (+ EQ3 opt-in levers + read-only probes)
-cargo test --features persistence          # 126 tests (+ chained event store + topology replay)
-cargo test --features persistence,magnitude # 156 tests (incl. the live-vs-replayed parity gate)
-cargo test --features remote               # 112 tests (+ gateway event buffer + loopback round-trip)
-cargo test --features process              # 161 tests (+ process-structured workflows + the unstaffable-residual policy)
-cargo test --features decision,magnitude,process # 249 tests (the full A/B battery surface)
-cargo test --features durable              # 107 tests (+ container-backed restart-durability test; needs Docker)
-cargo test --features harness              # 131 tests (+ the K7 harness: rng, instance generation, battery loop, lifecycle hook, decision trace, report helpers)
-cargo test --features harness,process      # 234 tests (+ the K7 workflow world and its identity gate against docs/runs/K4-archive.log; trace reconstruction and the engine-free reference policies; the performance-scored outcome)
-cargo test --features harness,decision,process # 329 tests (+ the group arm hosted on the harness, its identity gates against docs/runs/K4-archive.log and docs/runs/K7-1.log, the novelty fixture)
-cargo test --features metrics              # 106 tests (the default suite; the feature gates two optional deps and the metrics_scrape example)
+cargo test                                 # 107 tests (core + topology + algorithms + population search + decision + ingestion + decision-tap tee + decision trace tap)
+cargo test --features decision             # 163 tests (+ Active Inference decision strategies: scalar, multimodal, persistent + the derived ReliabilityCoverage calculator)
+cargo test --features magnitude            # 136 tests (+ categorical-magnitude decision strategy + typed-role modulation + trajectory analytics)
+cargo test --features decision,magnitude   # 192 tests (both decision arms)
+cargo test --features magnitude-fast       # 144 tests (+ EQ3 opt-in levers + read-only probes)
+cargo test --features persistence          # 131 tests (+ chained event store + topology replay + the Decisions stream)
+cargo test --features persistence,magnitude # 161 tests (incl. the live-vs-replayed parity gate)
+cargo test --features persistence,durable  # 133 tests (+ the log-then-bus decision tee; needs Docker)
+cargo test --features remote               # 113 tests (+ gateway event buffer + loopback round-trip)
+cargo test --features process              # 162 tests (+ process-structured workflows + the unstaffable-residual policy)
+cargo test --features decision,magnitude,process # 250 tests (the full A/B battery surface)
+cargo test --features durable              # 108 tests (+ container-backed restart-durability test; needs Docker)
+cargo test --features harness              # 132 tests (+ the K7 harness: rng, instance generation, battery loop, lifecycle hook, decision trace, report helpers)
+cargo test --features harness,process      # 235 tests (+ the K7 workflow world and its identity gate against docs/runs/K4-archive.log; trace reconstruction and the engine-free reference policies; the performance-scored outcome)
+cargo test --features harness,decision,process # 330 tests (+ the group arm hosted on the harness, its identity gates against docs/runs/K4-archive.log and docs/runs/K7-1.log, the novelty fixture)
+cargo test --features metrics              # 107 tests (the default suite; the feature gates two optional deps and the metrics_scrape example)
 ```
 
 ## Dependencies
