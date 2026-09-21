@@ -104,22 +104,26 @@ in the sibling `biome` project.
 - Rust implementation is dispatched to the built-in `general-purpose` agent
   per `.claude/stack/agent-dispatch.md`; review is `/code-review low`.
 
-## Current state — 2026-09-20 (v0.42.0; last code release 2026-09-19)
+## Current state — 2026-09-21 (v0.43.0)
 
-Full release ledger v0.4.0 → v0.42.0 is the `project-history.md` archive (§1).
+Full release ledger v0.4.0 → v0.43.0 is the `project-history.md` archive (§1).
 The three most recent entries are kept here in brief — read the ledger before
 touching anything with a frozen battery, a pinned decision, or a registered doc.
 
-**2026-09-20 cut no release** (Phase N of the refocus plan, no code): the
-superseded programme sweep moved to `.claude/stack/completed/`, every carried
-phase got a board issue (#103–#111 opened; #31/#32/#33 carried by comment),
-the duty that a koalisi phase open a tira extension's downstream lock was
-retired, and this file's sections v0.29.0 → v0.1.0 of `CHANGELOG.md` were
-archived. `K7-3` stays PAUSED; next is R0 (`v0.43.0`).
+`K7-3` stays PAUSED. Phase R0 of the refocus plan landed as v0.43.0; next is
+Phase F (`v0.44.0`), and whether R1 runs as written is the owner's reading of
+R0 under the plan's §5.
 
 ### Latest three
 
 Detail for each: its `CHANGELOG.md` section and the ledger.
+
+- **R0 — v0.43.0 (2026-09-21, #100)**: `harness::RefPruneId`, carried from
+  `54fcd33`, and `tests/ref_prune_id.rs`. On seeds 9000..9030 of the
+  0.7 / 0.05 / 0.40 world the median `performance_scored.primary` is 0.2391
+  for `RefPruneId` and 0.2363 for `RefPrune`; final member sets identical on
+  344 of 600 tasks; each above on 13 seeds. A test, no registration; it is a
+  pre-run sighting of `K7-3`'s secondary read 1, owed to Amendment 2.
 
 - **`K7-3` scaffold 2 — v0.42.0 (2026-09-19, #100 lock part 2)**: the trait
   hook is `observe_outcome(required, per_bit_success, members)` — one
@@ -136,12 +140,6 @@ Detail for each: its `CHANGELOG.md` section and the ledger.
   loop and `recon` share predicate, task rule and aggregation. No
   registration, no run; X-battery NOT RUN. The K7-3 prereg lists the
   scaffold's seed-7000 sighting among its pre-run executions.
-
-- **`K7-2` — v0.40.0 (2026-09-18, #97, PR #99)**: **`FALSIFIED (novelty moves
-  the outcome)`**, `grp-topo` 0.4248 vs `grp-topo-nonov` 0.1415, 30/30, seeds
-  150..180. The label is scoped: `grp-topo` ≡ the engine-free `ref-prune` on
-  600 of 600 tasks. Report: `docs/k7/ab-report-K7-2-novelty-routed-group.md`;
-  gotcha 36.
 
 ### Lineages, verdict trail, seed ledger, run protocol — `docs/`
 
@@ -197,7 +195,7 @@ koalisi/
 │   │   ├── dcvc.rs                         DCVCDistributor, WorkloadShare
 │   │   ├── aipa.rs                         Integer partitions, bounds, best-partition + 10 unit tests
 │   │   └── population.rs                   population coalition-structure search atop AIPA (SplitMix64 PSO, gbest lineage) + record_trajectory (always compiled, no deps)
-│   ├── harness/                            the K7 harness (feature `harness`, no deps): rng.rs (SplitMix64), instance.rs (InstanceSpec → Instance), battery.rs (run_instance / run_battery; calls the H1 hooks once per task), report.rs (percentiles, tables, Verdict), trace.rs (TracedPolicy: (leave, act, score bits) per decision); with `process`: workflow.rs (the Part 9/11 v2w world — WorkflowSpec/PerformanceSpec, OutcomeSignal, run_workflow_battery, WorkflowResult::performance_scored = Some iff the instance carries a performance draw) and recon.rs (reconstruct: arrival orders + trace → final member sets, PRIMARY, churn, performance score; roster_decomposition; the engine-free RefPrune / RefFirst / RefKeep); registrations are examples, never here
+│   ├── harness/                            the K7 harness (feature `harness`, no deps): rng.rs (SplitMix64), instance.rs (InstanceSpec → Instance), battery.rs (run_instance / run_battery; calls the H1 hooks once per task), report.rs (percentiles, tables, Verdict), trace.rs (TracedPolicy: (leave, act, score bits) per decision); with `process`: workflow.rs (the Part 9/11 v2w world — WorkflowSpec/PerformanceSpec, OutcomeSignal, run_workflow_battery, WorkflowResult::performance_scored = Some iff the instance carries a performance draw) and recon.rs (reconstruct: arrival orders + trace → final member sets, PRIMARY, churn, performance score; roster_decomposition; the engine-free RefPrune / RefPruneId / RefFirst / RefKeep); registrations are examples, never here
 │   ├── decision/
 │   │   ├── mod.rs                          CoalitionDecisionPolicy (+ the default no-op lifecycle hooks begin_task(&TaskStart) / observe_outcome(required, &[bool], &[MemberOutcome])) + ThresholdPolicy (always compiled)
 │   │   ├── aif_policy.rs                   AifDecisionPolicy + EfeValueCalculator (feature `decision`)
@@ -280,6 +278,7 @@ koalisi/
     ├── harness_workflow.rs                 6 tests (the H0 identity gate — Part 9 `wf-asis` rows on 270..300 + Part 11 medians on 330..360 from docs/runs/K4-archive.log, the instance fixture, the v2-prefix pin, a hand-derived role-mismatch case, the 150..180 generate check; features `harness,process`)
     ├── k7_group_host.rs                    5 tests (3 X-host: harness-hosted grp-role / -blind / -nonov on 330..360 reproduce docs/runs/K4-archive.log; 2 X-carry: grp-role, grp-topo and RefPrune on 90..120 reproduce docs/runs/K7-1.log; ~75 s in debug; features `harness,decision,process`)
     ├── k7_2_novelty.rs                     2 tests (K7-2's S-nov: the routed λ=½ read on a hand-built fixture under novelty on / off, fresh and after one observed task — eight pinned (act, score bits) values; features `harness,decision,process`)
+    ├── ref_prune_id.rs                     3 tests (RefPruneId's hand-derived acts + records; R0 — RefPruneId vs RefPrune on seeds 9000..9030 of the 0.7/0.05/0.40 world, median ordering pinned; features `harness,process`)
     └── fixtures/k7-workflow-v2w.txt        the committed print of every generated v2w instance on 270..300 and 330..360 (regenerate with K7_WRITE_FIXTURE=1 — only when the world changes by design)
 ```
 
@@ -675,12 +674,12 @@ timeout 300s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-tar
 # recipe is docs/runs/README.md.
 cargo run --release --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features decision,magnitude,process --example strategy_comparison
 
-# === with harness feature (131 tests; with process 231) ===
+# === with harness feature (131 tests; with process 234) ===
 timeout 120s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features harness
-timeout 300s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features harness,process   # 231, incl. the H0 identity gate
+timeout 300s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features harness,process   # 234, incl. the H0 identity gate and R0
 timeout 60s  cargo run  --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features harness --example gauntlet
 
-# === K7-1 / K7-2 (features harness,decision,process, 326 tests incl. X-host, X-carry, S-nov) ===
+# === K7-1 / K7-2 (features harness,decision,process, 329 tests incl. X-host, X-carry, S-nov) ===
 timeout 600s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features harness,decision,process
 timeout 300s cargo test --manifest-path Cargo.toml --target-dir /tmp/koalisi-target --features harness,decision,process --example k7_2   # k7_2's own 7 unit tests (guards, mask mirror vs ledger on 90..93)
 # K7-2's run of record is docs/runs/K7-2.log; the registered block refuses on any build but 0.40.0. Smoke (gate lines only, no cell value):
@@ -730,8 +729,9 @@ What is still open:
   (topology-routed group)`), the `surrealdb-live-message` `v0.2.2` re-pin
   (v0.39.0), `K7-2` (v0.40.0, #97, `FALSIFIED (novelty moves the outcome)`),
   the `K7-3` harness scaffold (v0.41.0, `WorkflowResult::performance_scored`),
-  scaffold 2 (v0.42.0, `MemberOutcome` on the outcome hook) and the plan's
-  Phase N (2026-09-20, no code — the board and the notes).
+  scaffold 2 (v0.42.0, `MemberOutcome` on the outcome hook), the plan's
+  Phase N (2026-09-20, no code — the board and the notes) and its Phase R0
+  (v0.43.0, `RefPruneId` against `RefPrune` as a test).
   **`K7-3` is PAUSED pre-run** ([#100](https://github.com/sustia-llc/koalisi/issues/100));
   its prereg, library change and binary sit on branch
   `k7-3-performance-scored-world` at version 0.42.0, and **no seed of
@@ -739,10 +739,11 @@ What is still open:
   evaluates each candidate absolutely, so it inherits the world's
   arrival-order tie-break and reproduces the engine-free `ref-prune` —
   gotcha 37. **Next, in order:**
-  1. **R0** (`v0.43.0`) — the engine-free pre-test: `RefPruneId` against
-     `RefPrune` on `performance_scored.primary`, off-block, a test with no
-     `VERDICT:` line and no seed block consumed. If reading identity moves
-     nothing with no engine, no engine-bearing arm can win on this world.
+  1. **R0 landed** (`v0.43.0`): on seeds 9000..9030, median
+     `performance_scored.primary` 0.2391 (`RefPruneId`) against 0.2363
+     (`RefPrune`); final member sets identical on 344 of 600 tasks; each
+     above on 13 of 30 seeds. Whether that is "identity moves nothing" in the
+     plan's §5 sense is the owner's call before R1.
   2. **F** (`v0.44.0`) — the four `K7-3` review findings plus the promotion of
      registration-agnostic code into `src/harness/report.rs`, forward-only
      (`k7_1.rs`, `k7_2.rs`, `strategy_comparison.rs` keep their private

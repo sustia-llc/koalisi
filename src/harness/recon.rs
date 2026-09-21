@@ -2,16 +2,18 @@
 //! [`reconstruct`] replays a [`TraceEntry`] sequence over a
 //! [`WorkflowInstance`] into per-task end states ([`TaskEnd`], [`Recon`]),
 //! [`member_set_identity`] and [`roster_decomposition`] summarise
-//! reconstructions as data, and [`RefPrune`], [`RefFirst`] and [`RefKeep`]
-//! are the engine-free reference policies: the redundancy prune, the first
-//! arrival alone, and every arrival kept.
+//! reconstructions as data, and [`RefPrune`], [`RefPruneId`], [`RefFirst`]
+//! and [`RefKeep`] are the engine-free reference policies: the redundancy
+//! prune, the identity prune, the first arrival alone, and every arrival kept.
 
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Mutex;
 
 use crate::algorithms::AgentCapabilities;
-use crate::decision::{CoalitionDecisionPolicy, Decision, DecisionContext, TaskStart};
+use crate::decision::{
+    CoalitionDecisionPolicy, Decision, DecisionContext, MemberOutcome, TaskStart,
+};
 use crate::process::{Role, Step};
 
 use super::trace::TraceEntry;
@@ -481,6 +483,185 @@ impl CoalitionDecisionPolicy for RefPrune {
             .steps
             .lock()
             .expect("invariant: no panic holds the steps lock") = task.steps.to_vec();
+    }
+}
+
+/// What [`RefPruneId`] holds behind its lock.
+#[derive(Default)]
+struct PruneIdState {
+    /// The last `begin_task`'s steps.
+    steps: Vec<(u8, u8)>,
+    /// `agent_id → capabilities` as last shown to a decision.
+    shown_caps: HashMap<usize, u32>,
+    /// `agent_id → (p, n)`.
+    records: HashMap<usize, (u64, u64)>,
+}
+
+/// The engine-free identity prune. Per agent it keeps `(p, n)`: `n` counts the
+/// [`MemberOutcome`]s handed to `observe_outcome` that name the agent while
+/// the OR of the last `begin_task`'s step bits at the agent's role meets the
+/// agent's capabilities — capabilities as last shown to a `should_join` /
+/// `should_leave` call, as the candidate or in the coalition — and `p` counts
+/// those with `performed` set; an agent absent from the map given to
+/// [`RefPruneId::new`], or never shown, or with an empty meet, counts
+/// nothing. An agent's record is `(p + 1) / (n + 2)`, and two records are
+/// compared as the integers `(p₁ + 1)(n₂ + 2)` and `(p₂ + 1)(n₁ + 2)`.
+/// `should_join` acts on every call. `should_leave` acts iff [`RefPrune`]'s
+/// leave would act on the same call and, for every step of the last
+/// `begin_task` that the agent covers, some other member of the coalition
+/// shown covers it with a record at least the agent's; coverage is
+/// [`RefPrune`]'s. Every score is `0.0`.
+pub struct RefPruneId {
+    roles: HashMap<usize, Role>,
+    state: Mutex<PruneIdState>,
+}
+
+impl RefPruneId {
+    /// An identity prune over the `agent_id → Role` map `roles`, with no task
+    /// begun, no agent shown and every record at `(0, 0)`.
+    #[must_use]
+    pub fn new(roles: HashMap<usize, Role>) -> Self {
+        Self {
+            roles,
+            state: Mutex::new(PruneIdState::default()),
+        }
+    }
+
+    /// `(p, n)` of `agent_id`; `(0, 0)` for an agent that has counted nothing.
+    ///
+    /// # Panics
+    ///
+    /// Only on a poisoned lock.
+    #[must_use]
+    pub fn record(&self, agent_id: usize) -> (u64, u64) {
+        self.state
+            .lock()
+            .expect("invariant: no panic holds the state lock")
+            .records
+            .get(&agent_id)
+            .copied()
+            .unwrap_or((0, 0))
+    }
+
+    /// The member `id` with capabilities `caps` has role index `role` and
+    /// holds `bit`.
+    fn covers(&self, id: usize, caps: u32, (bit, role): (u8, u8)) -> bool {
+        1u32.checked_shl(u32::from(bit)).is_some_and(|mask| {
+            caps & mask != 0 && self.roles.get(&id).is_some_and(|r| r.index() == role)
+        })
+    }
+
+    /// Record `(p_a, n_a)` is at least record `(p_b, n_b)`.
+    fn at_least((p_a, n_a): (u64, u64), (p_b, n_b): (u64, u64)) -> bool {
+        (u128::from(p_a) + 1) * (u128::from(n_b) + 2)
+            >= (u128::from(p_b) + 1) * (u128::from(n_a) + 2)
+    }
+
+    fn show(state: &mut PruneIdState, agent: &dyn AgentCapabilities) {
+        state
+            .shown_caps
+            .insert(agent.agent_id(), agent.capabilities());
+    }
+}
+
+impl CoalitionDecisionPolicy for RefPruneId {
+    fn should_join(
+        &self,
+        agent: &dyn AgentCapabilities,
+        coalition: &[&dyn AgentCapabilities],
+        _ctx: &DecisionContext,
+    ) -> Decision {
+        let mut state = self
+            .state
+            .lock()
+            .expect("invariant: no panic holds the state lock");
+        Self::show(&mut state, agent);
+        for m in coalition {
+            Self::show(&mut state, *m);
+        }
+        Decision {
+            act: true,
+            score: 0.0,
+        }
+    }
+
+    fn should_leave(
+        &self,
+        agent: &dyn AgentCapabilities,
+        coalition: &[&dyn AgentCapabilities],
+        _ctx: &DecisionContext,
+    ) -> Decision {
+        let mut state = self
+            .state
+            .lock()
+            .expect("invariant: no panic holds the state lock");
+        Self::show(&mut state, agent);
+        for m in coalition {
+            Self::show(&mut state, *m);
+        }
+        let (id, caps) = (agent.agent_id(), agent.capabilities());
+        let record = |a: usize| state.records.get(&a).copied().unwrap_or((0, 0));
+        let covered = |without: Option<usize>, step: (u8, u8)| {
+            coalition.iter().any(|m| {
+                Some(m.agent_id()) != without && self.covers(m.agent_id(), m.capabilities(), step)
+            })
+        };
+        let redundant = state
+            .steps
+            .iter()
+            .all(|&step| !covered(None, step) || covered(Some(id), step));
+        let outranked = state
+            .steps
+            .iter()
+            .filter(|&&step| self.covers(id, caps, step))
+            .all(|&step| {
+                coalition.iter().any(|m| {
+                    m.agent_id() != id
+                        && self.covers(m.agent_id(), m.capabilities(), step)
+                        && Self::at_least(record(m.agent_id()), record(id))
+                })
+            });
+        Decision {
+            act: redundant && outranked,
+            score: 0.0,
+        }
+    }
+
+    fn begin_task(&self, task: &TaskStart<'_>) {
+        self.state
+            .lock()
+            .expect("invariant: no panic holds the state lock")
+            .steps = task.steps.to_vec();
+    }
+
+    fn observe_outcome(
+        &self,
+        _required: u32,
+        _per_bit_success: &[bool],
+        members: &[MemberOutcome],
+    ) {
+        let mut state = self
+            .state
+            .lock()
+            .expect("invariant: no panic holds the state lock");
+        for member in members {
+            let id = member.agent_id;
+            let (Some(role), Some(&caps)) = (self.roles.get(&id), state.shown_caps.get(&id)) else {
+                continue;
+            };
+            let required_r = state
+                .steps
+                .iter()
+                .filter(|&&(_, r)| r == role.index())
+                .filter_map(|&(bit, _)| 1u32.checked_shl(u32::from(bit)))
+                .fold(0u32, |acc, mask| acc | mask);
+            if required_r & caps == 0 {
+                continue;
+            }
+            let (p, n) = state.records.entry(id).or_insert((0, 0));
+            *n += 1;
+            *p += u64::from(member.performed);
+        }
     }
 }
 

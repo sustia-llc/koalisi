@@ -190,8 +190,8 @@ cargo test --features process              # 161 tests (+ process-structured wor
 cargo test --features decision,magnitude,process # 249 tests (the full A/B battery surface)
 cargo test --features durable              # 107 tests (+ container-backed restart-durability test; needs Docker)
 cargo test --features harness              # 131 tests (+ the K7 harness: rng, instance generation, battery loop, lifecycle hook, decision trace, report helpers)
-cargo test --features harness,process      # 231 tests (+ the K7 workflow world and its identity gate against docs/runs/K4-archive.log; trace reconstruction and the engine-free reference policies; the performance-scored outcome)
-cargo test --features harness,decision,process # 326 tests (+ the group arm hosted on the harness, its identity gates against docs/runs/K4-archive.log and docs/runs/K7-1.log, the novelty fixture)
+cargo test --features harness,process      # 234 tests (+ the K7 workflow world and its identity gate against docs/runs/K4-archive.log; trace reconstruction and the engine-free reference policies; the performance-scored outcome)
+cargo test --features harness,decision,process # 329 tests (+ the group arm hosted on the harness, its identity gates against docs/runs/K4-archive.log and docs/runs/K7-1.log, the novelty fixture)
 cargo test --features metrics              # 106 tests (the default suite; the feature gates two optional deps and the metrics_scrape example)
 ```
 

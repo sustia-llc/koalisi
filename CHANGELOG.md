@@ -17,6 +17,53 @@ Planned work — issue-tracked (details in [`CLAUDE.md`](./CLAUDE.md)
   decision/belief streams (the `TaskOutcome` durable home), [#33] federation
   manifests + FAIR provenance.
 
+## [0.43.0] — 2026-09-21
+
+Phase R0 of the refocus plan: the engine-free identity prune measured against
+the redundancy prune on the performance-scored world, as a test. No
+registration, no `VERDICT:` line, no seed block consumed; `K7-3` stays paused
+([#100](https://github.com/sustia-llc/koalisi/issues/100)).
+
+### Added
+- **`harness::RefPruneId`** (features `harness` + `process`): the engine-free
+  identity prune. Per agent it keeps `(p, n)` over the tasks on which the
+  agent is a final member holding a demanded bit of its role, `p` counting
+  those it performed; its record is `(p + 1) / (n + 2)`, compared as integer
+  cross-products. `should_join` acts on every call; `should_leave` acts iff
+  `RefPrune`'s would and every demanded step the agent covers has another
+  shown member covering it with a record at least the agent's. Every score is
+  `0.0`. Byte-identical to `src/harness/{mod,recon}.rs` at `54fcd33` on branch
+  `k7-3-performance-scored-world`.
+- **`tests/ref_prune_id.rs`** (features `harness,process`, 3 tests): the two
+  hand-derived `RefPruneId` pins from that commit's `tests/k7_3_identity.rs`,
+  and `r0_ref_prune_id_against_ref_prune_off_block` — over seeds
+  `9000..9030` of `WorkflowSpec::default()` with the performance draw
+  `0.7 / 0.05 / 0.40`, one fresh `RefPruneId` and one fresh `RefPrune` per
+  seed under `OutcomeSignal::Both`. It asserts `RefPruneId`'s median
+  `performance_scored.primary` is above `RefPrune`'s and prints:
+  `median performance-scored PRIMARY ref-prune-id 0.2391 (0x3fce99b563bf8f5c)
+  ref-prune 0.2363 (0x3fce3f77ba0afcd9); final member sets identical on 344 of
+  600 tasks; PRIMARY bit-identical on 4 of 30 seeds; ref-prune-id above on 13
+  seeds, ref-prune above on 13`.
+
+### Gates
+- **Falsified in a copy**: `RefPruneId::should_leave` acting on `RefPrune`'s
+  predicate alone turns the R0 test red (both medians `0x3fce3f77ba0afcd9`,
+  600 of 600 tasks, 30 of 30 seeds) and the hand-derivation pin red at task
+  3; the record pin, which calls no leave, stays green.
+- `cargo nextest run`: `harness,process` 231, `harness,decision,process` 326,
+  0 failed; `cargo test --doc` 3 passed on each. `cargo clippy --all-targets
+  -- -D warnings` on `harness`, `harness,process` and
+  `harness,decision,process`; `RUSTDOCFLAGS='-D warnings' cargo doc --no-deps
+  --features harness,decision,process`; `cargo fmt --check`; `cargo +1.93.0
+  check --all-targets --locked` on `harness,process` and
+  `harness,decision,process`.
+- **X-battery not run**: `git diff --name-only v0.42.0..HEAD -- src Cargo.toml
+  Cargo.lock` names `src/harness/mod.rs`, `src/harness/recon.rs`,
+  `Cargo.toml` (the version and one `[[test]]` stanza) and `Cargo.lock`
+  (koalisi's own stanza); `rg -c 'koalisi::harness|harness::'
+  examples/strategy_comparison.rs` matches nothing.
+
 ## [0.42.0] — 2026-09-19
 
 The second harness scaffold for `K7-3`
