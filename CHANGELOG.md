@@ -12,10 +12,17 @@ Planned work — issue-tracked (details in [`CLAUDE.md`](./CLAUDE.md)
 - **Phase 5 — SwarmAgentic meta-layer remainder** ([#20]): configurator,
   velocity-rewrite loop, transferability (needs an LLM backend behind
   `src/llm/mod.rs`).
-- **Phase 7 — Persistence implementation**: [#31] sealing + revocation
-  registry (*blocked on the tauhokohoko KEK-granularity answer*), [#32]
-  decision/belief streams (the `TaskOutcome` durable home), [#33] federation
-  manifests + FAIR provenance.
+- **Phase 7 — Persistence implementation**, in this order: [#32] decision
+  streams (the `TaskOutcome` durable home) minus the belief leg → [#31]
+  sealing + revocation registry plus #32's belief leg → [#33] federation
+  manifests + FAIR provenance. #31 does not wait on the tauhokohoko
+  KEK-granularity answer: without a reply at its kickoff the granularity is
+  ruled in-house and recorded on #31 before any belief-sealing code.
+- **K7 lineage**: the `K7-3` review findings and the promotion of
+  registration-agnostic code into `src/harness/report.rs`; the `K7-3`
+  registration ([#100], paused before its run on seeds 540..570); EQ5b (c)
+  ([#103]); the multi-coalition harness scaffold and the tira-extension
+  re-pins and registrations ([#104]–[#111]).
 
 ## [0.43.0] — 2026-09-21
 
@@ -1003,3 +1010,7 @@ move a value (verified: zero measured values changed).
 [#31]: https://github.com/sustia-llc/koalisi/issues/31
 [#32]: https://github.com/sustia-llc/koalisi/issues/32
 [#33]: https://github.com/sustia-llc/koalisi/issues/33
+[#100]: https://github.com/sustia-llc/koalisi/issues/100
+[#103]: https://github.com/sustia-llc/koalisi/issues/103
+[#104]: https://github.com/sustia-llc/koalisi/issues/104
+[#111]: https://github.com/sustia-llc/koalisi/issues/111
