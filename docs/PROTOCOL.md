@@ -35,9 +35,10 @@ outputs and the re-pin drift check are [`runs/README.md`](runs/README.md).
    is never rewritten.
 9. **Withdrawal.** A registration whose official run has not happened is
    withdrawn by an owner decision on its issue, never deleted. The
-   pre-registration stays under `docs/` with a `Withdrawal` section appended:
-   the date and decision, what preceded it, the pre-run executions its report
-   would have listed, and where any code not on `main` is preserved. Its seed
+   pre-registration stays under `docs/` with a `Withdrawal` section appended
+   — the date and decision, what preceded it, the pre-run executions its
+   report would have listed, and where any code not on `main` is preserved —
+   and a one-line banner above its status line pointing at it. Its seed
    block is retired unconsumed, its row in [`README.md`](README.md) reads
    `WITHDRAWN (not run)`, and its number is not reused.
 

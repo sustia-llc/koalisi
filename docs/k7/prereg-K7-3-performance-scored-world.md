@@ -1,5 +1,7 @@
 # Pre-registration: K7-3 — the identity-keyed routed group on a performance-scored world
 
+**WITHDRAWN 2026-09-21 before any run — see [§Withdrawal](#withdrawal-2026-09-21-before-any-run).**
+
 **Status: REGISTERED.** Committed BEFORE implementation. Design-lock of record:
 [koalisi #100](https://github.com/sustia-llc/koalisi/issues/100) — the owner
 lock, part 1 (2026-09-18), part 2 and its correction comment (2026-09-19). Two
