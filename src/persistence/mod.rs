@@ -58,9 +58,9 @@ mod tee;
 mod wire;
 mod writer;
 
-#[cfg(feature = "durable")]
-pub(crate) use decision::forward_decision_trace;
 pub use decision::spawn_decision_store_forwarder;
+#[cfg(feature = "durable")]
+pub(crate) use decision::{forward_decision_trace, next_trace};
 pub use envelope::{
     EventRef, HashAlgorithm, KeyId, Payload, Record, RecordHash, SequenceNo, StoredRecord,
     StreamHead, StreamId,

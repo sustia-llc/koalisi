@@ -104,22 +104,24 @@ pub fn spawn_decision_store_forwarder(
     token: CancellationToken,
 ) -> JoinHandle<()> {
     tracker.spawn(async move {
-        loop {
-            tokio::select! {
-                biased;
-                () = token.cancelled() => {
-                    // Forward traces already buffered before the cancel.
-                    while let Ok(trace) = rx.try_recv() {
-                        forward_decision_trace(&trace, &writer_tx).await;
-                    }
-                    break;
-                }
-                maybe = rx.recv() => match maybe {
-                    Some(trace) => forward_decision_trace(&trace, &writer_tx).await,
-                    None => break, // trace tap dropped
-                },
-            }
+        while let Some(trace) = next_trace(&mut rx, &token).await {
+            forward_decision_trace(&trace, &writer_tx).await;
         }
         tracing::debug!("decision store forwarder stopped");
     })
+}
+
+/// The next trace a draining task handles: the next one received on `rx`, or
+/// `None` once `rx` is closed (the trace tap and all its clones dropped) and
+/// empty. After `token` is cancelled, only traces already buffered in `rx`
+/// are returned, then `None`.
+pub(crate) async fn next_trace(
+    rx: &mut mpsc::Receiver<DecisionTrace>,
+    token: &CancellationToken,
+) -> Option<DecisionTrace> {
+    tokio::select! {
+        biased;
+        () = token.cancelled() => rx.try_recv().ok(),
+        maybe = rx.recv() => maybe,
+    }
 }

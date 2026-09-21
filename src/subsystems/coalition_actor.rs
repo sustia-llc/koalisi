@@ -167,18 +167,24 @@ fn emit_decision(
 ) {
     let Some(tx) = tap else { return };
     let record = decision_record(coalition, agent, kind, decision);
-    match tx.try_send(record) {
+    try_emit(tx, record, kind, "decision tap", "decision record");
+}
+
+/// `try_send` `item` on `tx`; a full or closed channel drops it with a `warn`
+/// naming `tap` and `item`. Never blocks.
+fn try_emit<T>(tx: &mpsc::Sender<T>, item: T, kind: DecisionKind, tap: &str, what: &str) {
+    match tx.try_send(item) {
         Ok(()) => {}
         Err(mpsc::error::TrySendError::Full(_)) => {
             tracing::warn!(
                 kind = kind.as_str(),
-                "decision tap full — dropping decision record (decision unaffected)"
+                "{tap} full — dropping {what} (decision unaffected)"
             );
         }
         Err(mpsc::error::TrySendError::Closed(_)) => {
             tracing::warn!(
                 kind = kind.as_str(),
-                "decision tap closed — dropping decision record (decision unaffected)"
+                "{tap} closed — dropping {what} (decision unaffected)"
             );
         }
     }
@@ -203,21 +209,7 @@ fn emit_trace(
         event_log_len: position.event_log_len,
         timestamp: position.timestamp,
     };
-    match tx.try_send(trace) {
-        Ok(()) => {}
-        Err(mpsc::error::TrySendError::Full(_)) => {
-            tracing::warn!(
-                kind = kind.as_str(),
-                "decision trace tap full — dropping decision trace (decision unaffected)"
-            );
-        }
-        Err(mpsc::error::TrySendError::Closed(_)) => {
-            tracing::warn!(
-                kind = kind.as_str(),
-                "decision trace tap closed — dropping decision trace (decision unaffected)"
-            );
-        }
-    }
+    try_emit(tx, trace, kind, "decision trace tap", "decision trace");
 }
 
 /// Spawn a task that drains ONE decision tap and fans each record out to every

@@ -64,7 +64,7 @@ use tokio_util::task::TaskTracker;
 use surrealdb_live_message::subsystems::agents::{Agent, Coalition};
 
 #[cfg(feature = "persistence")]
-use crate::persistence::{Record, StreamId, forward_decision_trace};
+use crate::persistence::{Record, StreamId, forward_decision_trace, next_trace};
 use crate::subsystems::coalition_actor::DecisionRecord;
 #[cfg(feature = "persistence")]
 use crate::subsystems::coalition_actor::DecisionTrace;
@@ -241,21 +241,8 @@ pub fn spawn_decision_log_bus_tee(
     token: CancellationToken,
 ) -> JoinHandle<()> {
     tracker.spawn(async move {
-        loop {
-            tokio::select! {
-                biased;
-                () = token.cancelled() => {
-                    // Tee traces already buffered before the cancel.
-                    while let Ok(trace) = rx.try_recv() {
-                        tee_one(trace, &writer_tx, &producer, &log_sink).await;
-                    }
-                    break;
-                }
-                maybe = rx.recv() => match maybe {
-                    Some(trace) => tee_one(trace, &writer_tx, &producer, &log_sink).await,
-                    None => break, // trace tap dropped
-                },
-            }
+        while let Some(trace) = next_trace(&mut rx, &token).await {
+            tee_one(trace, &writer_tx, &producer, &log_sink).await;
         }
         tracing::debug!("decision log/bus tee stopped");
     })
