@@ -102,7 +102,8 @@ in the sibling `biome` project.
   `causality:causality-theory` stays apt as theory reference for the
   algebraic layer catgraph's enrichment sits on.
 - Rust implementation is dispatched to the built-in `general-purpose` agent
-  per `.claude/stack/agent-dispatch.md`; review is `/code-review low`.
+  per `.claude/stack/agent-dispatch.md`; review is `/code-review` at the
+  level the global CLAUDE.md sets.
 
 ## Current state — 2026-09-21 (v0.44.0)
 
