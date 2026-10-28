@@ -2988,6 +2988,7 @@ version = "0.44.0"
 dependencies = [
  "aif",
  "anyhow",
+ "catgraph",
  "catgraph-applied",
  "catgraph-magnitude",
  "catgraph-syntax",
