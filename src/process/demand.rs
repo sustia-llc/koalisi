@@ -83,7 +83,6 @@ impl Demand {
     }
 
     /// The distinct `(bit, role)` pairs, ascending — the **staffing** question.
-    #[must_use]
     pub fn distinct(&self) -> impl ExactSizeIterator<Item = Step> + '_ {
         self.counts.keys().copied()
     }
