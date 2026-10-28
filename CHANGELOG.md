@@ -18,6 +18,32 @@ Planned work — issue-tracked:
   and recorded on #31 before any belief-sealing code.
 - **K7 lineage**: EQ5b (c) ([#103]); the multi-coalition harness scaffold and
   the tira-extension re-pins and registrations ([#104]–[#111]).
+- **Runtime**: one rayon pool per process ([#115]).
+
+## [0.45.0] — 2026-10-28
+
+Re-pins catgraph to `v0.25.0`.
+
+### Changed
+- **catgraph `v0.23.0` → `v0.25.0`** for `catgraph-applied`,
+  `catgraph-magnitude` and `catgraph-syntax`. In the lock, only the four
+  catgraph package entries change.
+- **Breaking for `process` callers that implement `PropSignature`**:
+  upstream `PropSignature` and its `Color` require `catgraph::CanonicalEncode`.
+- `CLAUDE.md` is no longer in the repository. References in `Cargo.toml`,
+  `src/persistence/wire.rs`, `src/topology/temporal.rs` and `.claude/docs/`
+  no longer name it. The registered docs under `docs/` are unchanged.
+
+### Added
+- **`catgraph`** `v0.25.0` as an optional dependency, enabled by `process`.
+- **`CanonicalEncode` for `Role` and `Step`** (`process::signature`): `Role`
+  encodes as its index byte, `Step` as `bit` then `role` (two bytes). One
+  test pins the bytes. Over bits 0..4 × roles 0..3, a second test pins that
+  `==` and equal encodings agree.
+
+### Fixed
+- `Demand::distinct` drops a `#[must_use]` that clippy 0.1.99 flags as
+  redundant on an `impl ExactSizeIterator` return.
 
 ## [0.44.0] — 2026-09-21
 
@@ -1094,3 +1120,4 @@ move a value (verified: zero measured values changed).
 [#103]: https://github.com/sustia-llc/koalisi/issues/103
 [#104]: https://github.com/sustia-llc/koalisi/issues/104
 [#111]: https://github.com/sustia-llc/koalisi/issues/111
+[#115]: https://github.com/sustia-llc/koalisi/issues/115

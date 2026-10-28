@@ -187,24 +187,25 @@ cargo test --features persistence          # 131 tests (+ chained event store + 
 cargo test --features persistence,magnitude # 161 tests (incl. the live-vs-replayed parity gate)
 cargo test --features persistence,durable  # 133 tests (+ the log-then-bus decision tee; needs Docker)
 cargo test --features remote               # 113 tests (+ gateway event buffer + loopback round-trip)
-cargo test --features process              # 162 tests (+ process-structured workflows + the unstaffable-residual policy)
-cargo test --features decision,magnitude,process # 250 tests (the full A/B battery surface)
+cargo test --features process              # 164 tests (+ process-structured workflows + the unstaffable-residual policy)
+cargo test --features decision,magnitude,process # 252 tests (the full A/B battery surface)
 cargo test --features durable              # 108 tests (+ container-backed restart-durability test; needs Docker)
 cargo test --features harness              # 132 tests (+ the K7 harness: rng, instance generation, battery loop, lifecycle hook, decision trace, report helpers)
-cargo test --features harness,process      # 235 tests (+ the K7 workflow world and its identity gate against docs/runs/K4-archive.log; trace reconstruction and the engine-free reference policies; the performance-scored outcome)
-cargo test --features harness,decision,process # 330 tests (+ the group arm hosted on the harness, its identity gates against docs/runs/K4-archive.log and docs/runs/K7-1.log, the novelty fixture)
+cargo test --features harness,process      # 237 tests (+ the K7 workflow world and its identity gate against docs/runs/K4-archive.log; trace reconstruction and the engine-free reference policies; the performance-scored outcome)
+cargo test --features harness,decision,process # 332 tests (+ the group arm hosted on the harness, its identity gates against docs/runs/K4-archive.log and docs/runs/K7-1.log, the novelty fixture)
 cargo test --features metrics              # 107 tests (the default suite; the feature gates two optional deps and the metrics_scrape example)
 ```
 
 ## Dependencies
 
-- [catgraph-applied](https://github.com/sustia-llc/catgraph) (tag `v0.23.0`, kept in lockstep with catgraph-magnitude and catgraph-syntax — one repo, one checkout, all three move together) — CRUD hypergraph container backing the topology layer
+- [catgraph-applied](https://github.com/sustia-llc/catgraph) (tag `v0.25.0`, kept in lockstep with catgraph-magnitude, catgraph-syntax and catgraph — one repo, one checkout, all four move together) — CRUD hypergraph container backing the topology layer
 - tokio + tokio-util — async runtime + lifecycle primitives
 - rayon + tokio-rayon — CPU-bound graph operations bridge
 - [surrealdb-live-message](https://github.com/sustia-llc/surrealdb-live-message) (tag `v0.2.2`, **optional**, feature `durable`) — two-tier restart-durable message bus for the coalition decision log
 - [aif](https://github.com/sustia-llc/tira) (tag `aif-v0.14.0`, **optional**, feature `decision`) — active-inference engine for the AIF decision strategies (scalar, multimodal, persistent); `nalgebra` is only compiled when the feature is enabled
-- [catgraph-magnitude](https://github.com/sustia-llc/catgraph) (tag `v0.23.0`, **optional**, feature `magnitude`) — enriched-category coalition magnitude for the categorical decision strategy
-- [catgraph-syntax](https://github.com/sustia-llc/catgraph) (tag `v0.23.0`, **optional**, feature `process`) — colored-syntax layer over the free-prop term surface for process-structured tasks; depends on catgraph + catgraph-applied + thiserror only, so no DeepCausality crate is in the dependency graph under any feature
+- [catgraph-magnitude](https://github.com/sustia-llc/catgraph) (tag `v0.25.0`, **optional**, feature `magnitude`) — enriched-category coalition magnitude for the categorical decision strategy
+- [catgraph-syntax](https://github.com/sustia-llc/catgraph) (tag `v0.25.0`, **optional**, feature `process`) — colored-syntax layer over the free-prop term surface for process-structured tasks; depends on catgraph + catgraph-applied + thiserror only, so no DeepCausality crate is in the dependency graph under any feature
+- [catgraph](https://github.com/sustia-llc/catgraph) (tag `v0.25.0`, **optional**, feature `process`) — the `CanonicalEncode` trait that `PropSignature` requires. `Role` and `Step` implement it.
 - ciborium 0.2 + sha2 0.11 (**optional**, feature `persistence`) — CBOR frames and SHA-256 chaining for the append-only event store
 - libp2p 0.57 (**optional**, feature `remote`) — TCP+noise+yamux `request-response` transport for the remote coalition-event gateway
 - metrics 0.24 + metrics-exporter-prometheus 0.18 (`http-listener` only) (**optional**, feature `metrics`) — the metrics facade and the Prometheus scrape listener used by `examples/metrics_scrape.rs`
