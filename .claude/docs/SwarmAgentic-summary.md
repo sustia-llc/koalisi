@@ -6,9 +6,8 @@
 figures in `docs/2506.15672v1_images/`, PDF at `docs/2506.15672v1.pdf`)
 
 > *Updated 2026-07-15: file pointers refreshed to the new full-text conversion; ablation
-> numbers corrected against the paper's Table 5. The live, maintained copy of the
-> integration ideas below is CLAUDE.md's Phase 5 section (SwarmAgentic became Phase 5
-> when the phases were reordered; the ideas were originally ported from this digest).*
+> numbers corrected against the paper's Table 5. The integration ideas below are
+> tracked as Phase 5 in issue #20.*
 
 ## TL;DR
 

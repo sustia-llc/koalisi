@@ -204,7 +204,7 @@ weight type).
 - The wire schema is frozen and versioned (`schema_version` per record)
   independently of the in-memory enum — the [R5] argument.
 - Persisting raw `VertexIndex`/`HyperedgeIndex` values is legitimate: they
-  are stable and never reused (catgraph contract, CLAUDE.md gotcha 12) — the
+  are stable and never reused (the catgraph-applied hypergraph contract) — the
   in-memory event log already depends on this for replay. They are written
   as named `u64` fields, not opaque newtypes.
 - Note `Timestamp`/`SnapshotId` inner fields are `pub(crate)` and
@@ -608,8 +608,6 @@ as schema; the producer waits for #20.
   decision trace), §7.4 (Stroh crypto-deletion; I1 not adopted).
 - NEST `requirements/nest-overview.md` (FAIR outputs, mirrors, Schmidt rule).
 - Bui & Vigneaux 2025 (arXiv:2501.06662) §3.5 — coalition magnitude (the #18
-  quantity); catgraph #22/#23 (`coalition_value`), #31 (`CoalitionEvaluator`
-  — see CLAUDE.md gotcha 15 before touching), #33 (evaluator-cost evidence).
-- CLAUDE.md gotchas 12 (catgraph index stability — why raw indices persist),
-  13 (K3 seams), 14 (`durable` semantics), 15 (K6 evaluator contracts).
+  quantity); catgraph #22/#23 (`coalition_value`), #31 (`CoalitionEvaluator`),
+  #33 (evaluator-cost evidence).
 - RFC 8949 (CBOR) §4.2 (deterministic encoding).

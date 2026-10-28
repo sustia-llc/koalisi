@@ -7,8 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Planned work — issue-tracked (details in [`CLAUDE.md`](./CLAUDE.md)
-§"Next steps"):
+Planned work — issue-tracked:
 - **Phase 5 — SwarmAgentic meta-layer remainder** ([#20]): configurator,
   velocity-rewrite loop, transferability (needs an LLM backend behind
   `src/llm/mod.rs`).

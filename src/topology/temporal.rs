@@ -107,7 +107,7 @@ where
     /// Mirror `event` to the installed tap, if any.
     ///
     /// Best-effort [`try_send`](mpsc::Sender::try_send): a full or closed tap
-    /// logs and drops (the at-most-once tap contract, CLAUDE.md gotchas 14/17) —
+    /// logs and drops (the at-most-once tap contract) —
     /// it never blocks or fails the mutation. The `event.clone()` happens ONLY
     /// when a tap is installed; with no tap this is a single `Option` check.
     fn tap_event(&self, event: &TemporalEvent<V, HE>) {
