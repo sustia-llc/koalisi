@@ -2,13 +2,11 @@
 
 **Authors:** Yao Zhang, Chenyang Lin, Shijie Tang, Haokun Chen, Shijie Zhou, Yunpu Ma, Volker Tresp (LMU Munich / TU Munich / MCML)
 **Code:** github.com/SwarmAgentic
-**Full text on disk:** [`docs/2506.15672v1.md`](2506.15672v1.md) (markdown conversion;
-figures in `docs/2506.15672v1_images/`, PDF at `docs/2506.15672v1.pdf`)
+**Full text on disk:** [`.claude/docs/2506.15672v1.md`](2506.15672v1.md) (markdown conversion;
+figures in `.claude/docs/2506.15672v1_images/`, PDF at `.claude/docs/2506.15672v1.pdf`)
 
 > *Updated 2026-07-15: file pointers refreshed to the new full-text conversion; ablation
-> numbers corrected against the paper's Table 5. The live, maintained copy of the
-> integration ideas below is CLAUDE.md's Phase 5 section (SwarmAgentic became Phase 5
-> when the phases were reordered; the ideas were originally ported from this digest).*
+> numbers corrected against the paper's Table 5.*
 
 ## TL;DR
 

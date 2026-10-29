@@ -14,7 +14,7 @@
 //! versioned by [`WIRE_DECISION_SCHEMA_VERSION`].
 //!
 //! Persisting raw `VertexIndex`/`HyperedgeIndex` values is legitimate: catgraph
-//! indices are stable and never reused (CLAUDE.md gotcha 12), and the in-memory
+//! indices are stable and never reused, and the in-memory
 //! event log already depends on this for replay.
 
 use std::fmt::{Debug, Display};

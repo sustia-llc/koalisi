@@ -227,7 +227,7 @@
 //!    K6 evaluator cache is deliberately not reused: it keys on
 //!    `(required, member_masks)`, which cannot separate two agents that share a
 //!    capability mask but carry different roles — such a pair would hit an entry
-//!    built for a different coupling table (the gotcha-16 precedent, where
+//!    built for a different coupling table (as in `magnitude_history`, where
 //!    change-driven sampling likewise bypasses the evaluator). With no
 //!    incremental value there is also nothing for the knife-edge band to
 //!    reconcile: the band exists to make an incremental margin reproduce the
@@ -3436,7 +3436,7 @@ mod tests {
     }
 
     /// (b) f64 fresh-route anchor: `magnitude_of_masks_f64` must reproduce
-    /// `magnitude_of_masks` within 1e-9 relative on the K2 / gotcha fixtures —
+    /// `magnitude_of_masks` within 1e-9 relative on the K2 fixtures —
     /// including the dedup, irrelevant-agent-exclusion and clone-skeletalization
     /// shapes — and on the seeded instance pools.
     #[cfg(feature = "magnitude-fast")]
@@ -3470,7 +3470,7 @@ mod tests {
         assert_agrees(&[97, 85, 198], 0b1110_0100, "knife-edge fixture");
 
         // Dedup + irrelevant exclusion happen in `relevant_masks`, so drive the
-        // fixture through it and score whatever survives (gotcha 12 / point 4).
+        // fixture through it and score whatever survives.
         let a0 = TestAgent {
             id: 0,
             caps: 0b001,

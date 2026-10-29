@@ -34,6 +34,7 @@
 
 use std::borrow::Cow;
 
+use catgraph::CanonicalEncode;
 use catgraph_applied::prop::colored::ColoredExpr;
 use catgraph_applied::prop::{Free, PropExpr, PropSignature};
 use catgraph_magnitude::CatgraphError;
@@ -44,8 +45,8 @@ use catgraph_syntax::text::{ColorSyntax, GeneratorSyntax};
 ///
 /// A transparent index rather than a fieldless enum, so the role count `R` is a
 /// *world* parameter (the `EQ5a` battery draws `R = 3`) instead of a type-level
-/// constant. The derived bound stack is everything the colored surface asks for:
-/// `Clone + Copy + Eq + Hash + Debug` for
+/// constant. The bound stack is everything the colored surface asks for:
+/// `Clone + Eq + Hash + Debug + CanonicalEncode` for
 /// [`PropSignature::Color`], `+ Ord` for the spiders, `+ Copy` for the cospan
 /// functor.
 ///
@@ -96,6 +97,13 @@ impl ColorSyntax for Role {
     }
 }
 
+/// Encodes as the index byte (the `u8` encoding).
+impl CanonicalEncode for Role {
+    fn encode_canonical(&self, out: &mut Vec<u8>) {
+        self.0.encode_canonical(out);
+    }
+}
+
 /// One step of a workflow: "capability `bit`, performed by a worker of role
 /// `role`".
 ///
@@ -125,6 +133,14 @@ impl Step {
     #[must_use]
     pub fn capability_mask(self) -> Option<u32> {
         (u32::from(self.bit) < u32::BITS).then(|| 1u32 << self.bit)
+    }
+}
+
+/// Encodes as `bit` then `role`, each by its own encoding: two bytes.
+impl CanonicalEncode for Step {
+    fn encode_canonical(&self, out: &mut Vec<u8>) {
+        self.bit.encode_canonical(out);
+        self.role.encode_canonical(out);
     }
 }
 
@@ -279,5 +295,31 @@ mod tests {
         assert_eq!(Step::new(7, Role::new(0)).capability_mask(), Some(1 << 7));
         assert_eq!(Step::new(31, Role::new(0)).capability_mask(), Some(1 << 31));
         assert_eq!(Step::new(32, Role::new(0)).capability_mask(), None);
+    }
+
+    fn encoding<T: CanonicalEncode>(value: &T) -> Vec<u8> {
+        let mut out = Vec::new();
+        value.encode_canonical(&mut out);
+        out
+    }
+
+    #[test]
+    fn canonical_encoding_is_the_field_bytes_over_the_whole_domain() {
+        for role in 0..=u8::MAX {
+            let observed = encoding(&Role::new(role));
+            assert_eq!(
+                observed,
+                [role],
+                "Role::new({role}): observed {observed:?}, expected [{role}]"
+            );
+            for bit in 0..=u8::MAX {
+                let observed = encoding(&Step::new(bit, Role::new(role)));
+                assert_eq!(
+                    observed,
+                    [bit, role],
+                    "Step::new({bit}, Role::new({role})): observed {observed:?}, expected [{bit}, {role}]"
+                );
+            }
+        }
     }
 }

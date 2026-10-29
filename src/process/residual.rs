@@ -59,7 +59,7 @@
 //! the map does not cover cannot have its coverage decided, so the wrapper
 //! **forwards the inner policy's decision unchanged** rather than inventing one;
 //! that is the same condition the library declines on, and a systematically
-//! incomplete map freezes membership (gotcha 28).
+//! incomplete map freezes membership.
 
 use std::collections::HashMap;
 use std::sync::Arc;

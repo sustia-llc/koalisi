@@ -74,9 +74,9 @@
 //! [`record_group_action`](aif::GroupAgent::record_group_action) would advance
 //! nothing, so this arm never calls it and never calls
 //! `group_distribution_recording` either. The MMP same-timestep double-update
-//! hazard of koalisi **gotcha 32** is thereby *designed out* rather than gated —
-//! a single-use member cannot be read twice. That hazard still applies to any
-//! future arm that gives its members continuity.
+//! hazard of an uncommitted `GroupAgent` read is thereby *designed out* rather
+//! than gated — a single-use member cannot be read twice. That hazard still
+//! applies to any future arm that gives its members continuity.
 //!
 //! **4. A role with no demand does not vote** (Amendment A1.3). It leaves the
 //! roster for that task, so the realised `R` varies 3 → 2 → 1. Realised roster
@@ -117,14 +117,18 @@
 //! # Determinism
 //!
 //! [`group_distribution`](aif::GroupAgent::group_distribution) draws no
-//! randomness: members are [`POMDPAgent`](aif::POMDPAgent)s behind a deterministic
-//! wrapper and the sensory slot is a `CopyAgent`, which are the conditions gotcha
-//! 32 pins RNG-freedom on. Seeds are threaded for hygiene only; nothing draws from
-//! them.
+//! randomness here. Upstream `aif` states RNG-freedom for a `CopyAgent`
+//! sensory slot, [`POMDPAgent`](aif::POMDPAgent) members and a `VotingAgent`
+//! aggregator, and states that `RoutedAggregator`'s distribution twins are
+//! RNG-free. This arm's members are `RoleMember`s: `act` returns
+//! `Unsupported`, and `action_probabilities` calls `run_replay`, which calls
+//! only `POMDPAgent::record_action` and
+//! `POMDPAgent::action_probabilities_multi`. Seeds are threaded for hygiene
+//! only; nothing draws from them.
 //!
 //! *Correction (A5.10 L3-12):* it is **not** the only RNG-free path —
 //! `group_distribution_recording` is equally RNG-free. The reason this arm avoids
-//! that one is **D4a and gotcha 32**: it advances each member to its own argmax,
+//! that one is **D4a**: it advances each member to its own argmax,
 //! which is a per-member surrogate rather than the group's resolved action. Only
 //! [`Agent::act`](aif::Agent::act) samples, and only the exploratory
 //! [`DecisionRead::SeededSampling`] cell calls it.
@@ -356,8 +360,9 @@ pub enum GroupVote {
     /// margin at R ≤ 3 over 2 actions. Off-block smoke measured that premise
     /// **false on this world** — the CW mixture's margin median is 0.5, i.e. the
     /// mixture is itself a delta, because arm-E1's query posteriors saturate at
-    /// ±0.5 (gotcha 25) and the internals inherit it. This leg measures what CW
-    /// actually bought rather than conceding the point.
+    /// ±0.5 (`docs/ab-report-K4-battery-v2.md`) and the internals inherit it.
+    /// This leg measures what CW actually bought rather than conceding the
+    /// point.
     ///
     /// **Its read is not a margin** — and it is not `k/R` either
     /// (**Amendment A5.6**). `VotingAgent::vote_distribution`'s *first* branch,
@@ -437,7 +442,7 @@ pub struct GroupAifConfig {
     /// **The default here is the v5 E1 arm, not [`PersistentAifConfig::default`]** —
     /// that default is the FALSIFIED v4 configuration (`query_dynamics: true`), and
     /// `EQ5b` contests the group *shape* over the validated model, not a re-tuned
-    /// model (gotcha 24's relabelling discipline).
+    /// model.
     pub base: PersistentAifConfig,
 }
 
@@ -744,7 +749,7 @@ impl GroupAifCounters {
 /// mechanism `EQ5b` exists to carry into the workflow world. `GroupAgent<S, I, X>` is
 /// generic in `I`, so the member can carry its own observation vector instead. RNG
 /// freedom is preserved: this is a leaf wrapper over a `POMDPAgent`, not a nested
-/// group or a sampling sensory slot (gotcha 32).
+/// group or a sampling sensory slot.
 struct RoleMember {
     query: aif::POMDPAgent,
     /// Replay sequences from the world model, restricted to this role's bits.
@@ -1137,7 +1142,7 @@ impl Models {
 /// It is the wrong shape for a long-lived instance behind `CoalitionService`,
 /// which would accumulate one sample per decision for the process lifetime.
 /// A service use wants a bounded window instead, in the spirit of the remote
-/// gateway's `EventBuffer` (gotcha 29) — deliberately not built here, because a
+/// gateway's `EventBuffer` — deliberately not built here, because a
 /// cap would silently truncate a **registered** disclosure and change what the
 /// report measures. Construct one arm per seed and drop it, as the battery does.
 pub struct GroupAifPolicy {
@@ -1157,7 +1162,7 @@ impl GroupAifPolicy {
     ///
     /// `agent_roles` maps every pool worker's `agent_id` to its [`Role`]; a
     /// participant absent from it makes the decision a **decline-and-count**
-    /// rather than an invented answer (the gotcha-28 typed-arm contract).
+    /// rather than an invented answer.
     ///
     /// # Errors
     ///
@@ -1463,7 +1468,7 @@ impl GroupAifPolicy {
         };
 
         // Role resolution first: an unmapped participant is a decline, never a
-        // guess (gotcha 28). The candidate is resolved even on the leave path,
+        // guess. The candidate is resolved even on the leave path,
         // where it is also a coalition member, so a partial map cannot slip through.
         let Some((agent_role, members)) = self.resolve_participants(agent, coalition) else {
             shared.counters.declines_missing_role += 1;
@@ -1531,7 +1536,7 @@ impl GroupAifPolicy {
         // D2 registered `CertaintyWeighted` on the argument that only it carries a
         // continuous margin at this shape. Amendment A3.1 records that argument as
         // measured FALSE on this world — the mixture is itself a delta, because
-        // arm-E1's query posteriors saturate (gotcha 25) and the internals inherit
+        // arm-E1's query posteriors saturate and the internals inherit
         // it — and adds `GroupVote::Deterministic` as a non-gating reference leg.
         // D2 itself stands. The seeds are hygiene: neither mode's read draws.
         let roster = internals.len();
@@ -1670,7 +1675,7 @@ impl GroupAifPolicy {
     ///
     /// All-or-nothing on purpose: a partial map would let some internals see a
     /// candidate the others cannot, which is a silently different arm rather than a
-    /// degraded one (gotcha 28).
+    /// degraded one.
     fn resolve_participants(
         &self,
         agent: &dyn AgentCapabilities,
@@ -1952,7 +1957,7 @@ mod tests {
     }
 
     /// The default config is the **v5 E1** base, not the FALSIFIED v4 default
-    /// (gotcha 24's relabelling discipline), and the registered `grp-role` cell.
+    /// configuration, and the registered `grp-role` cell.
     #[test]
     fn default_config_is_the_registered_cell() {
         let c = GroupAifConfig::default();
@@ -2130,7 +2135,7 @@ mod tests {
     }
 
     /// A participant absent from the role map declines and counts — it never
-    /// invents a decision (gotcha 28's typed-arm contract).
+    /// invents a decision.
     #[test]
     fn missing_role_map_entry_declines_and_counts() {
         let a0 = TestAgent {

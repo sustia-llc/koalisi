@@ -721,9 +721,10 @@ dependencies = [
 
 [[package]]
 name = "catgraph"
-version = "0.23.0"
-source = "git+https://github.com/sustia-llc/catgraph?tag=v0.23.0#c1859e6db4f2f013c7daaad64ca16ef1fdf870c4"
+version = "0.25.0"
+source = "git+https://github.com/sustia-llc/catgraph?tag=v0.25.0#2859d93889645a641182fc9af145dda4e8b90420"
 dependencies = [
+ "blake3",
  "either",
  "itertools 0.15.0",
  "log",
@@ -735,8 +736,8 @@ dependencies = [
 
 [[package]]
 name = "catgraph-applied"
-version = "0.23.0"
-source = "git+https://github.com/sustia-llc/catgraph?tag=v0.23.0#c1859e6db4f2f013c7daaad64ca16ef1fdf870c4"
+version = "0.25.0"
+source = "git+https://github.com/sustia-llc/catgraph?tag=v0.25.0#2859d93889645a641182fc9af145dda4e8b90420"
 dependencies = [
  "catgraph",
  "either",
@@ -753,8 +754,8 @@ dependencies = [
 
 [[package]]
 name = "catgraph-magnitude"
-version = "0.23.0"
-source = "git+https://github.com/sustia-llc/catgraph?tag=v0.23.0#c1859e6db4f2f013c7daaad64ca16ef1fdf870c4"
+version = "0.25.0"
+source = "git+https://github.com/sustia-llc/catgraph?tag=v0.25.0#2859d93889645a641182fc9af145dda4e8b90420"
 dependencies = [
  "catgraph",
  "catgraph-applied",
@@ -764,8 +765,8 @@ dependencies = [
 
 [[package]]
 name = "catgraph-syntax"
-version = "0.23.0"
-source = "git+https://github.com/sustia-llc/catgraph?tag=v0.23.0#c1859e6db4f2f013c7daaad64ca16ef1fdf870c4"
+version = "0.25.0"
+source = "git+https://github.com/sustia-llc/catgraph?tag=v0.25.0#2859d93889645a641182fc9af145dda4e8b90420"
 dependencies = [
  "catgraph",
  "catgraph-applied",
@@ -2983,10 +2984,11 @@ dependencies = [
 
 [[package]]
 name = "koalisi"
-version = "0.44.0"
+version = "0.45.0"
 dependencies = [
  "aif",
  "anyhow",
+ "catgraph",
  "catgraph-applied",
  "catgraph-magnitude",
  "catgraph-syntax",

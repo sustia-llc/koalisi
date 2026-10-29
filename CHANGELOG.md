@@ -7,8 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Planned work — issue-tracked (details in [`CLAUDE.md`](./CLAUDE.md)
-§"Next steps"):
+Planned work — issue-tracked:
 - **Phase 5 — SwarmAgentic meta-layer remainder** ([#20]): configurator,
   velocity-rewrite loop, transferability (needs an LLM backend behind
   `src/llm/mod.rs`).
@@ -19,6 +18,91 @@ Planned work — issue-tracked (details in [`CLAUDE.md`](./CLAUDE.md)
   and recorded on #31 before any belief-sealing code.
 - **K7 lineage**: EQ5b (c) ([#103]); the multi-coalition harness scaffold and
   the tira-extension re-pins and registrations ([#104]–[#111]).
+
+## [0.45.0] — 2026-10-28
+
+Re-pins catgraph to `v0.25.0`.
+
+### Changed
+- **Breaking:** koalisi's public API names catgraph types, which now come
+  from catgraph `v0.25.0`. A downstream crate that also depends on catgraph
+  `v0.23.0` gets a second, incompatible copy of each. Affected items
+  include:
+  - the re-exports `topology::{HyperedgeIndex, VertexIndex}` and
+    `decision::RoleModulation`
+  - `topology::SharedGraph` (an `Arc<RwLock<catgraph_applied::Hypergraph>>`)
+  - the error variants `TemporalError::Hypergraph`, `ProcessError::Catgraph`
+    and `harness::WorkflowError::Catgraph`
+  - `process::{Workflow, WorkflowGen}`, and `process` functions that take
+    or return them or a catgraph error. Examples: `chain`, `rule_theory`,
+    `rule_labels`, `optimize_workflow` and `verify_optimization`.
+- **catgraph `v0.23.0` → `v0.25.0`** for `catgraph-applied`,
+  `catgraph-magnitude` and `catgraph-syntax`. catgraph `v0.25.0` depends on
+  `blake3` 1.8.7. `cargo tree --locked --no-default-features -e normal,build
+  -i blake3` reaches it through `catgraph-applied`, which is not optional,
+  so `blake3` now compiles in every feature set. `blake3`, `arrayvec`,
+  `constant_time_eq`, `cpufeatures` and `cc` were already lock entries. The
+  lock adds no package. On little-endian aarch64, `blake3`'s build script
+  compiles C, so a C compiler is required there unless `blake3`'s `pure` or
+  `no_neon` feature is enabled. If no C compiler is found on x86_64, it
+  falls back to Rust intrinsics.
+- `CLAUDE.md` is no longer in the repository. This search prints nothing:
+
+  ```sh
+  rg -n -i 'gotcha[ -]?[0-9]|CLAUDE\.md' src tests examples .claude/docs Cargo.toml README.md --glob '!strategy_comparison.rs'
+  ```
+
+  Three places are unchanged and still name them. They are the files under
+  `docs/` (the registered docs, the memos and `docs/runs/K4-archive.log`),
+  the frozen `examples/strategy_comparison.rs`, and the CHANGELOG sections
+  before `[0.45.0]`.
+- `Demand::distinct` drops a `#[must_use]` that clippy 0.1.99 flags as
+  redundant on an `impl ExactSizeIterator` return.
+
+### Added
+- **`catgraph`** `v0.25.0` as an optional dependency, enabled by `process`.
+- **`CanonicalEncode` for `Role` and `Step`** (`process::signature`): `Role`
+  encodes as its index byte, `Step` as `bit` then `role` (two bytes). A test
+  pins the exact bytes of all 256 `Role` and all 65,536 `Step` values, so
+  equal values encode equally and unequal values encode differently.
+
+### Gates
+- **Falsified in a copy**, each perturbation alone turns
+  `canonical_encoding_is_the_field_bytes_over_the_whole_domain` red:
+  `bit & 0x0F` ("Step::new(16, Role::new(0)): observed [0, 0], expected
+  [16, 0]"), the field order swapped ("Step::new(1, Role::new(0)): observed
+  [0, 1], expected [1, 0]"), and `Role` encoding `index + 1`
+  ("Role::new(0): observed [1], expected [0]").
+- Trees: `git diff -U0 94ffef4 -- src` shows that after `94ffef4` every
+  changed `src/` line outside the `signature.rs` test module is a comment.
+  The K4 binary, 10 test lanes and 15 clippy lanes ran at `94ffef4`. The
+  two Docker lanes ran at `a0eaa14`. The four `process` test lanes ran on
+  the final test module.
+- `cargo test` on all 16 lanes, `main` (`3ee66e1`) against the pinned tree,
+  each with its own target directory: the per-binary result lines are
+  identical except the four `process`-lane lib binaries, each +1 (the new
+  test). `process` 163, `decision,magnitude,process` 251, `harness,process`
+  236, `harness,decision,process` 331. Both container tests booted
+  SurrealDB.
+- Clean: `cargo clippy --all-targets -- -D warnings` on the 16 test lanes
+  and `--no-default-features`, and on `--all-features` after the review
+  fixes,
+  `RUSTDOCFLAGS='-D warnings' cargo doc --no-deps --all-features`,
+  `cargo fmt --check`, and `cargo +1.93.0 check --all-targets --locked` with
+  all features and with default features.
+- **K4 archive gate** (the pin reaches the decision path): a first serial
+  run under light editing load moved two verdict lines through the Path A
+  latency criterion (v1 `FALSIFIED (latency)` → `VALIDATED`, v2
+  `VALIDATED (B)` → `VALIDATED (A+B)`). `main` in the same session
+  reproduced the archived verdicts. A second pinned run on a quiet machine
+  (`pgrep -c 'cargo|rustc'` 0) reproduced all 33
+  `VERDICT|FALSIFIED|VALIDATED` lines byte for byte: `rg
+  'VERDICT|FALSIFIED|VALIDATED'` on both logs, then `diff`, prints nothing.
+  The latency column was stripped from both logs with `rg --passthru -N -r
+  '|' '\| *[0-9]+\.[0-9]+ *\|$'` and the results diffed. The 11 differing
+  lines are latency values: 3 `latency µs` table rows and 8 lines of
+  latency or wall-clock prose, which `docs/runs/README.md` names as the
+  standing exclusion. PASS.
 
 ## [0.44.0] — 2026-09-21
 

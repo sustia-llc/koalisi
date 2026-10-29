@@ -84,8 +84,8 @@ Pinned negatives (from the same payload):
 | `TemporalEvent<V,HE>` (`src/topology/events.rs`) | 13-variant event record (12 mutations + `SnapshotMarker`) appended by every `TemporalHypergraph` write and by `create_snapshot`; `Clone + Debug` only | serializable (no serde — deliberate, see §4) |
 | `EventLog` (`src/topology/event_log.rs`) | in-memory append-only `Vec` + BTreeMap time index + per-entity indices; never mutated, never evicted | durable (process-lifetime only) |
 | `TemporalQueries` / `TemporalAnalytics` (`queries.rs`, `analytics.rs`) | point-in-time folds and series over `events_ref()` — the read surface #18 extends | tied to any storage backend |
-| `DecisionRecord` tap (`src/subsystems/coalition_actor.rs`) | non-blocking `try_send` tap on every policy-gated join/leave decision; drop-with-warn | a durability guarantee (tap-side loss is possible; K3 gotcha 14) |
-| `durable` feature (`src/subsystems/durable.rs`, surrealdb-live-message v0.2.0) | two-tier restart-durable decision bus: CHANGEFEED append + LIVE wakeup + per-agent versionstamp cursor replay, at-least-once | an event store — CHANGEFEED retention is a bounded window; and it is SurrealDB-shaped, failing [R5] as a source of truth |
+| `DecisionRecord` tap (`src/subsystems/coalition_actor.rs`) | non-blocking `try_send` tap on every policy-gated join/leave decision; drop-with-warn | a durability guarantee (tap-side loss is possible) |
+| `durable` feature (`src/subsystems/durable.rs`, surrealdb-live-message) | two-tier restart-durable decision bus: CHANGEFEED append + LIVE wakeup + per-agent versionstamp cursor replay, at-least-once | an event store — CHANGEFEED retention is a bounded window; and it is SurrealDB-shaped, failing [R5] as a source of truth |
 | Dead: `PersistentHypergraph`/fjall (original plan) | — | revivable: the backend is gone (K1), and upstream catgraph deliberately has no persistence |
 
 The gap Phase 7 fills: nothing survives process exit except the bounded
@@ -204,7 +204,7 @@ weight type).
 - The wire schema is frozen and versioned (`schema_version` per record)
   independently of the in-memory enum — the [R5] argument.
 - Persisting raw `VertexIndex`/`HyperedgeIndex` values is legitimate: they
-  are stable and never reused (catgraph contract, CLAUDE.md gotcha 12) — the
+  are stable and never reused (the catgraph-applied hypergraph contract) — the
   in-memory event log already depends on this for replay. They are written
   as named `u64` fields, not opaque newtypes.
 - Note `Timestamp`/`SnapshotId` inner fields are `pub(crate)` and
@@ -339,10 +339,10 @@ Design points:
   and anchoring, not addressing.
 - **Sync trait + writer task.** The trait is synchronous; the hot path never
   touches it. A spawned writer task consumes an mpsc channel — the
-  `DecisionRecord` tap pattern (non-blocking `try_send`, drop-with-warn,
-  K3 gotcha 14 semantics), with the blocking `append` offloaded via
-  `spawn_blocking`. Delivery is **at-most-once from the tee onward**: a full
-  channel drops (producer side) and a failed `append` is logged and dropped
+  `DecisionRecord` tap pattern (non-blocking `try_send`, drop-with-warn),
+  with the blocking `append` offloaded via `spawn_blocking`. Delivery is
+  **at-most-once from the tee onward**: a full channel drops (producer
+  side) and a failed `append` is logged and dropped
   (single attempt, and the stream wedges until reopen). The K3 durable bus's
   at-least-once came from CHANGEFEED cursor replay, which has no P7.1 analogue —
   durable retry/replay is later-phase work. The graph-mutation/decision hot
@@ -608,8 +608,6 @@ as schema; the producer waits for #20.
   decision trace), §7.4 (Stroh crypto-deletion; I1 not adopted).
 - NEST `requirements/nest-overview.md` (FAIR outputs, mirrors, Schmidt rule).
 - Bui & Vigneaux 2025 (arXiv:2501.06662) §3.5 — coalition magnitude (the #18
-  quantity); catgraph #22/#23 (`coalition_value`), #31 (`CoalitionEvaluator`
-  — see CLAUDE.md gotcha 15 before touching), #33 (evaluator-cost evidence).
-- CLAUDE.md gotchas 12 (catgraph index stability — why raw indices persist),
-  13 (K3 seams), 14 (`durable` semantics), 15 (K6 evaluator contracts).
+  quantity); catgraph #22/#23 (`coalition_value`), #31 (`CoalitionEvaluator`),
+  #33 (evaluator-cost evidence).
 - RFC 8949 (CBOR) §4.2 (deterministic encoding).

@@ -24,7 +24,7 @@
 //! bits are masked off, see [`ReliabilityCoverage::new`]): an *interior* optimum
 //! that groups complementary specialists into minimal full-coverage teams. That
 //! matters — the built-in calculators are degenerate for structure search (see the
-//! [`search`] module docs and gotcha 21), so a coverage-shaped model is what gives
+//! [`search`] module docs), so a coverage-shaped model is what gives
 //! the swarm real work.
 //!
 //! Reliability then *rescales* that optimum: an unreliable required bit lowers the
