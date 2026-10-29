@@ -73,9 +73,8 @@ outputs and the re-pin drift check are [`runs/README.md`](runs/README.md).
 Every PR gets the reviewer pass before tag or merge — re-pins and docs-only
 slices included. Every finding is applied or owner-adjudicated on the issue,
 regardless of severity. Reviewer output is evidence, not verdict: each claim
-is checked against the diff. The loop has a cap: review → fix → one more
-review scoped to the fix → at most one more fix, which ships unreviewed and is
-labelled so in the PR body.
+is checked against the diff. The loop follows `stack/review-loop.md` in the
+notes repo: it ends when no finding refutes a claim on the PR's claim list.
 
 ## 5. Seeds
 
