@@ -18,7 +18,6 @@ Planned work — issue-tracked:
   and recorded on #31 before any belief-sealing code.
 - **K7 lineage**: EQ5b (c) ([#103]); the multi-coalition harness scaffold and
   the tira-extension re-pins and registrations ([#104]–[#111]).
-- **Runtime**: one rayon pool per process ([#115]).
 
 ## [0.45.0] — 2026-10-28
 
@@ -32,7 +31,6 @@ Re-pins catgraph to `v0.25.0`.
   - the re-exports `topology::{HyperedgeIndex, VertexIndex}` and
     `decision::RoleModulation`
   - `topology::SharedGraph` (an `Arc<RwLock<catgraph_applied::Hypergraph>>`)
-  - the `catgraph::CanonicalEncode` impls of `process::{Role, Step}`
   - the error variants `TemporalError::Hypergraph`, `ProcessError::Catgraph`
     and `harness::WorkflowError::Catgraph`
   - `process::{Workflow, WorkflowGen}`, and `process` functions that take
@@ -54,8 +52,10 @@ Re-pins catgraph to `v0.25.0`.
   rg -n -i 'gotcha[ -]?[0-9]|CLAUDE\.md' src tests examples .claude/docs Cargo.toml README.md --glob '!strategy_comparison.rs'
   ```
 
-  The registered docs under `docs/` and the frozen
-  `examples/strategy_comparison.rs` are unchanged and still name them.
+  Three places are unchanged and still name them. They are the files under
+  `docs/` (the registered docs, the memos and `docs/runs/K4-archive.log`),
+  the frozen `examples/strategy_comparison.rs`, and the CHANGELOG sections
+  before `[0.45.0]`.
 - `Demand::distinct` drops a `#[must_use]` that clippy 0.1.99 flags as
   redundant on an `impl ExactSizeIterator` return.
 
@@ -84,9 +84,9 @@ Re-pins catgraph to `v0.25.0`.
   test). `process` 163, `decision,magnitude,process` 251, `harness,process`
   236, `harness,decision,process` 331. Both container tests booted
   SurrealDB.
-- Clean: `cargo clippy --all-targets -- -D warnings` on 17 lanes (the 16
-  test lanes plus `--no-default-features`, then `--all-features` after the
-  review fixes),
+- Clean: `cargo clippy --all-targets -- -D warnings` on the 16 test lanes
+  and `--no-default-features`, and on `--all-features` after the review
+  fixes,
   `RUSTDOCFLAGS='-D warnings' cargo doc --no-deps --all-features`,
   `cargo fmt --check`, and `cargo +1.93.0 check --all-targets --locked` with
   all features and with default features.
@@ -1179,4 +1179,3 @@ move a value (verified: zero measured values changed).
 [#103]: https://github.com/sustia-llc/koalisi/issues/103
 [#104]: https://github.com/sustia-llc/koalisi/issues/104
 [#111]: https://github.com/sustia-llc/koalisi/issues/111
-[#115]: https://github.com/sustia-llc/koalisi/issues/115

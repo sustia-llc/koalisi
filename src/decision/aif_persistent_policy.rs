@@ -173,7 +173,7 @@ pub struct PersistentAifConfig {
     ///
     /// This is the EQ1 de-saturation lever — γ = 16 peaks the policy posterior hard
     /// enough that the join/leave scores saturate at ±0.5
-    /// (`docs/ab-report-K4-battery-v2.md`). The
+    /// (`docs/k4-arm-choice-memo.md`). The
     /// battery-v2 arm-config labels are `arm-E1g1` / `arm-E1g4` / `arm-E1g16`;
     /// arm-E1 itself stays `None`.
     pub query_gamma: Option<f64>,

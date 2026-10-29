@@ -198,7 +198,7 @@ cargo test --features metrics              # 107 tests (the default suite; the f
 
 ## Dependencies
 
-- [catgraph-applied](https://github.com/sustia-llc/catgraph) (tag `v0.25.0`, kept in lockstep with catgraph-magnitude, catgraph-syntax and catgraph — one repo, one checkout, all four move together) — CRUD hypergraph container backing the topology layer. Through catgraph it brings `blake3` (with a `cc` build step) into every feature set: `cargo tree --locked --no-default-features -e normal,build -i blake3` reaches it. On little-endian aarch64 that step needs a C compiler unless `blake3`'s `pure` or `no_neon` feature is on. If no C compiler is found on x86_64, it falls back to Rust intrinsics.
+- [catgraph-applied](https://github.com/sustia-llc/catgraph) (tag `v0.25.0`, kept in lockstep with catgraph-magnitude, catgraph-syntax and catgraph — one repo, one checkout, all four move together) — CRUD hypergraph container backing the topology layer. Through catgraph it brings `blake3` (with a `cc` build step) into every feature set: `cargo tree --locked --no-default-features -e normal,build -i blake3` reaches it. On little-endian aarch64 that step needs a C compiler unless `blake3`'s `pure` or `no_neon` feature is on. koalisi forwards neither, so a downstream crate turns one on with its own `blake3 = { version = "1", features = ["pure"] }` dependency, which Cargo unifies. If no C compiler is found on x86_64, it falls back to Rust intrinsics.
 - tokio + tokio-util — async runtime + lifecycle primitives
 - rayon + tokio-rayon — CPU-bound graph operations bridge
 - [surrealdb-live-message](https://github.com/sustia-llc/surrealdb-live-message) (tag `v0.2.2`, **optional**, feature `durable`) — two-tier restart-durable message bus for the coalition decision log
