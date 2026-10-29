@@ -187,18 +187,18 @@ cargo test --features persistence          # 131 tests (+ chained event store + 
 cargo test --features persistence,magnitude # 161 tests (incl. the live-vs-replayed parity gate)
 cargo test --features persistence,durable  # 133 tests (+ the log-then-bus decision tee; needs Docker)
 cargo test --features remote               # 113 tests (+ gateway event buffer + loopback round-trip)
-cargo test --features process              # 164 tests (+ process-structured workflows + the unstaffable-residual policy)
-cargo test --features decision,magnitude,process # 252 tests (the full A/B battery surface)
+cargo test --features process              # 163 tests (+ process-structured workflows + the unstaffable-residual policy)
+cargo test --features decision,magnitude,process # 251 tests (the full A/B battery surface)
 cargo test --features durable              # 108 tests (+ container-backed restart-durability test; needs Docker)
 cargo test --features harness              # 132 tests (+ the K7 harness: rng, instance generation, battery loop, lifecycle hook, decision trace, report helpers)
-cargo test --features harness,process      # 237 tests (+ the K7 workflow world and its identity gate against docs/runs/K4-archive.log; trace reconstruction and the engine-free reference policies; the performance-scored outcome)
-cargo test --features harness,decision,process # 332 tests (+ the group arm hosted on the harness, its identity gates against docs/runs/K4-archive.log and docs/runs/K7-1.log, the novelty fixture)
+cargo test --features harness,process      # 236 tests (+ the K7 workflow world and its identity gate against docs/runs/K4-archive.log; trace reconstruction and the engine-free reference policies; the performance-scored outcome)
+cargo test --features harness,decision,process # 331 tests (+ the group arm hosted on the harness, its identity gates against docs/runs/K4-archive.log and docs/runs/K7-1.log, the novelty fixture)
 cargo test --features metrics              # 107 tests (the default suite; the feature gates two optional deps and the metrics_scrape example)
 ```
 
 ## Dependencies
 
-- [catgraph-applied](https://github.com/sustia-llc/catgraph) (tag `v0.25.0`, kept in lockstep with catgraph-magnitude, catgraph-syntax and catgraph — one repo, one checkout, all four move together) — CRUD hypergraph container backing the topology layer
+- [catgraph-applied](https://github.com/sustia-llc/catgraph) (tag `v0.25.0`, kept in lockstep with catgraph-magnitude, catgraph-syntax and catgraph — one repo, one checkout, all four move together) — CRUD hypergraph container backing the topology layer. Through catgraph it brings `blake3` (with a `cc` build step) into every feature set: `cargo tree --locked --no-default-features -e normal,build -i blake3` reaches it. On little-endian aarch64 that step needs a C compiler unless `blake3`'s `pure` or `no_neon` feature is on. If no C compiler is found on x86_64, it falls back to Rust intrinsics.
 - tokio + tokio-util — async runtime + lifecycle primitives
 - rayon + tokio-rayon — CPU-bound graph operations bridge
 - [surrealdb-live-message](https://github.com/sustia-llc/surrealdb-live-message) (tag `v0.2.2`, **optional**, feature `durable`) — two-tier restart-durable message bus for the coalition decision log

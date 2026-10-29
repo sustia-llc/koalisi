@@ -46,7 +46,7 @@ use catgraph_syntax::text::{ColorSyntax, GeneratorSyntax};
 /// A transparent index rather than a fieldless enum, so the role count `R` is a
 /// *world* parameter (the `EQ5a` battery draws `R = 3`) instead of a type-level
 /// constant. The bound stack is everything the colored surface asks for:
-/// `Clone + Copy + Eq + Hash + Debug + CanonicalEncode` for
+/// `Clone + Eq + Hash + Debug + CanonicalEncode` for
 /// [`PropSignature::Color`], `+ Ord` for the spiders, `+ Copy` for the cospan
 /// functor.
 ///
@@ -304,36 +304,20 @@ mod tests {
     }
 
     #[test]
-    fn canonical_encoding_bytes() {
-        let role = encoding(&Role::new(2));
-        let expected_role: Vec<u8> = vec![2];
-        assert_eq!(
-            role, expected_role,
-            "Role::new(2): observed {role:?}, expected {expected_role:?}"
-        );
-
-        let step = encoding(&Step::new(3, Role::new(1)));
-        let expected_step: Vec<u8> = vec![3, 1];
-        assert_eq!(
-            step, expected_step,
-            "Step::new(3, Role::new(1)): observed {step:?}, expected {expected_step:?}"
-        );
-    }
-
-    #[test]
-    fn step_equality_iff_equal_encodings() {
-        let steps: Vec<Step> = (0u8..4)
-            .flat_map(|bit| (0u8..3).map(move |role| Step::new(bit, Role::new(role))))
-            .collect();
-        for a in &steps {
-            for b in &steps {
-                let equal = a == b;
-                let (ea, eb) = (encoding(a), encoding(b));
+    fn canonical_encoding_is_the_field_bytes_over_the_whole_domain() {
+        for role in 0..=u8::MAX {
+            let observed = encoding(&Role::new(role));
+            assert_eq!(
+                observed,
+                [role],
+                "Role::new({role}): observed {observed:?}, expected [{role}]"
+            );
+            for bit in 0..=u8::MAX {
+                let observed = encoding(&Step::new(bit, Role::new(role)));
                 assert_eq!(
-                    equal,
-                    ea == eb,
-                    "{a:?} == {b:?} is {equal}, but encodings {ea:?} vs {eb:?} compare {}",
-                    ea == eb
+                    observed,
+                    [bit, role],
+                    "Step::new({bit}, Role::new({role})): observed {observed:?}, expected [{bit}, {role}]"
                 );
             }
         }

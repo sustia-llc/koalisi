@@ -65,7 +65,7 @@ use tokio_util::task::TaskTracker;
 ///   [`AgentCapabilities::agent_id`](crate::algorithms::AgentCapabilities::agent_id).
 ///   Duplicates count **per occurrence** downstream (see the
 ///   [`FeedbackStore::record_outcome`](crate::algorithms::FeedbackStore::record_outcome)
-///   contract, gotcha 19): dedup before emitting if you want
+///   contract): dedup before emitting if you want
 ///   at-most-once-per-agent semantics.
 /// - `success` is whole-task success (the L2 signal — sufficient per #54
 ///   Step 2; see the [module docs](self)).
