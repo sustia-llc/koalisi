@@ -19,6 +19,58 @@ Planned work — issue-tracked:
 - **K7 lineage**: EQ5b (c) ([#103]); the multi-coalition harness scaffold and
   the tira-extension re-pins and registrations ([#104]–[#111]).
 
+## [0.46.0] — 2026-11-02
+
+Re-pins `aif` to `aif-v0.15.0`.
+
+### Changed
+- **Breaking:** with feature `decision`, koalisi's public API names `aif`
+  types, which now come from `aif-v0.15.0`. A downstream crate that also
+  depends on `aif-v0.14.0` gets a second, incompatible copy of each. Affected
+  items include:
+  - the re-exports `decision::{CoalitionHistory, CompatibilityBeliefs,
+    TrustBeliefs}`
+  - the `aif::AifError` return of `CapabilityModel::efe_for_coverage` and of
+    `PersistentAifArm::new`
+- **`aif-v0.14.0` → `aif-v0.15.0`.** `git diff 40694a5 -- Cargo.lock` changes
+  the `aif` entry and koalisi's own version. `cargo update -p aif` also moved
+  the `tempfile` edge from `getrandom` 0.4.3 to 0.3.4. That edit is reverted
+  by hand.
+- `aif-v0.15.0` adds `POMDPAgent::policy_efe` and `PolicyEfe`. koalisi does
+  not call them: `rg -n 'policy_efe|PolicyEfe|efe_step' src examples tests`
+  prints nothing.
+
+### Gates
+- `cargo test` on the four lanes that reach `aif`, `main` (`40694a5`) against
+  the pinned tree, each with its own target directory: the per-binary result
+  lines are identical. `decision` 163, `decision,magnitude` 192,
+  `decision,magnitude,process` 251, `harness,decision,process` 331.
+- The other lanes did not run. This search finds no `aif` package:
+
+  ```sh
+  cargo tree --locked --features magnitude,magnitude-fast,persistence,remote,process,harness,metrics,durable -i aif
+  ```
+
+- These gates are clean. The first two ran with
+  `--features harness,decision,magnitude,process`:
+
+  ```sh
+  cargo clippy --locked --all-targets -- -D warnings
+  cargo +1.93.0 check --all-targets --locked
+  RUSTDOCFLAGS='-D warnings' cargo doc --locked --no-deps --all-features
+  cargo fmt --all -- --check
+  ```
+- **K4 archive gate** (the pin reaches the decision path): one pinned run and
+  one `main` run, serial, with `pgrep -c 'cargo|rustc'` 0 before each. All 33
+  `VERDICT|FALSIFIED|VALIDATED` lines match `docs/runs/K4-archive.log` byte
+  for byte: `rg 'VERDICT|FALSIFIED|VALIDATED'` on both logs, then `diff`,
+  prints nothing. The latency column was stripped from each log with `rg
+  --passthru -N -r '|' '\| *[0-9]+\.[0-9]+ *\|$'`, and the results were
+  diffed. Against the archive and against `main`, the 11 differing lines are
+  latency values: 3 `latency µs` table rows and 8 lines of latency or
+  wall-clock prose, which `docs/runs/README.md` names as the standing
+  exclusion. PASS.
+
 ## [0.45.0] — 2026-10-28
 
 Re-pins catgraph to `v0.25.0`.
