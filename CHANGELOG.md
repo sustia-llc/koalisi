@@ -19,6 +19,71 @@ Planned work — issue-tracked:
 - **K7 lineage**: EQ5b (c) ([#103]); the multi-coalition harness scaffold and
   the tira-extension re-pins and registrations ([#104]–[#111]).
 
+## [0.46.0] — 2026-11-02
+
+Re-pins `aif` to `aif-v0.15.0`.
+
+### Changed
+- **Breaking:** with feature `decision`, koalisi's public API names `aif`
+  types, which now come from `aif-v0.15.0`. A downstream crate that also
+  depends on `aif-v0.14.0` gets a second, incompatible copy of each. Affected
+  items include:
+  - the re-exports `decision::{CoalitionHistory, CompatibilityBeliefs,
+    TrustBeliefs}`
+  - the `aif::AifError` return of `CapabilityModel::efe_for_coverage`,
+    `MultiModalModel::efe_for_coverage` and `PersistentAifArm::new`
+  - the error variant `GroupAifError::Aif`
+- **`aif-v0.14.0` → `aif-v0.15.0`.** `git diff 40694a5 v0.46.0 -- Cargo.lock`
+  changes the `aif` entry and koalisi's own version.
+- `aif` now declares `rust-version` 1.93.0 (it declared 1.89). This equals
+  koalisi's declaration, so `decision` has no floor below it.
+- `aif-v0.15.0` adds `POMDPAgent::policy_efe` and `PolicyEfe`. koalisi does
+  not call them: this search prints nothing.
+
+  ```sh
+  git grep -n -E 'policy_efe|PolicyEfe' v0.46.0 -- src examples tests
+  ```
+
+- The private `efe_step` in `aif` is now a wrapper over
+  `efe_step_components`, on the path that koalisi's agents reach. Upstream
+  pins its bits in `test_policy_efe_neg_g_golden_vs_base`.
+
+### Gates
+- The gates below ran on the pin commit `18bd983`. `cargo check --locked`
+  is also clean at `efa3f0e`, the version bump.
+  `git diff --stat 18bd983 v0.46.0 -- src examples tests config` prints
+  nothing.
+- `cargo test` on the four lanes that reach `aif`, `main` (`40694a5`) against
+  the pinned tree, each with its own target directory: the per-binary result
+  lines are identical. `decision` 163, `decision,magnitude` 192,
+  `decision,magnitude,process` 251, `harness,decision,process` 331.
+- The other lanes did not run. This search exits 101 with "package ID
+  specification `aif` did not match any packages":
+
+  ```sh
+  cargo tree --locked --features magnitude,magnitude-fast,persistence,remote,process,harness,metrics,durable -i aif
+  ```
+
+- These gates are clean:
+
+  ```sh
+  cargo clippy --locked --all-targets --features harness,decision,magnitude,process -- -D warnings
+  cargo +1.93.0 check --all-targets --locked --features harness,decision,magnitude,process
+  RUSTDOCFLAGS='-D warnings' cargo doc --locked --no-deps --all-features
+  cargo fmt --all -- --check
+  ```
+
+- **K4 archive gate** (the pin reaches the decision path): one pinned run and
+  one `main` run, serial, with `pgrep -c 'cargo|rustc'` 0 before each. All 33
+  `VERDICT|FALSIFIED|VALIDATED` lines match `docs/runs/K4-archive.log` byte
+  for byte. The drift check in `docs/runs/README.md` strips the trailing
+  float column of each table. After the strip, the same 11 lines differ
+  against the archive and against `main`: 3 `latency µs` table rows and 8
+  lines of latency or wall-clock prose. `docs/runs/README.md` names the prose
+  lines as the standing exclusion. It does not name the 3 rows (#120). The
+  unstripped diff against the archive has 65 changed lines. The other 54 sit
+  under `median µs/decision` and `declare wall s` headers. PASS.
+
 ## [0.45.0] — 2026-10-28
 
 Re-pins catgraph to `v0.25.0`.
