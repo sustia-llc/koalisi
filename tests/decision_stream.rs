@@ -207,6 +207,7 @@ async fn decision_records_carry_the_decision_time_topology_parent() {
         DecisionContext::default(),
         trace_tx,
         &tracker,
+        token.child_token(),
     );
 
     // Hand-derived; `pos` is (event-log length, clock) before the manager call:
@@ -363,6 +364,7 @@ async fn full_writer_channel_drops_no_decision() {
         DecisionContext::default(),
         trace_tx,
         &tracker,
+        token.child_token(),
     );
     for _ in 0..N {
         assert!(service.join(j1, c).await.unwrap().act);

@@ -17,8 +17,10 @@
 //! `tokio::sync::mpsc` command channel with `oneshot`-correlated replies. The
 //! file keeps its historical name (`coalition_actor.rs`); the type is
 //! [`CoalitionService`] with a [`CoalitionServiceHandle`]. The task runs on the
-//! caller's [`TaskTracker`] and exits when the last handle is dropped (its
-//! command channel closes).
+//! caller's [`TaskTracker`] and exits when the caller's [`CancellationToken`]
+//! is cancelled or the last handle is dropped (its command channel closes).
+//! A panic in the task is logged at error level and sets
+//! [`CoalitionServiceHandle::panicked`].
 //!
 //! ```ignore
 //! let service = CoalitionService::spawn(
@@ -26,11 +28,18 @@
 //!     Box::new(ThresholdPolicy::new(AdditiveCalculator, 0.0, 0.0)),
 //!     DecisionContext { required_capabilities: 0b111 },
 //!     runtime.task_tracker(),
+//!     runtime.cancellation_token().child_token(),
 //! );
 //! let decision = service.join(agent, coalition).await?;
 //! ```
 
+use std::any::Any;
+use std::panic::AssertUnwindSafe;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use anyhow::{Result, anyhow};
+use futures::FutureExt;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -339,9 +348,17 @@ enum CoalitionCommand {
 #[derive(Clone)]
 pub struct CoalitionServiceHandle {
     tx: mpsc::Sender<CoalitionCommand>,
+    panicked: Arc<AtomicBool>,
 }
 
 impl CoalitionServiceHandle {
+    /// Whether the service task has ended in a panic. `false` while the task
+    /// runs and after it stops on cancellation.
+    #[must_use]
+    pub fn panicked(&self) -> bool {
+        self.panicked.load(Ordering::SeqCst)
+    }
+
     /// Ask the service to consider `agent` joining `coalition`. Membership is
     /// mutated iff the policy returns `act == true`; the [`Decision`] is
     /// returned either way.
@@ -403,19 +420,24 @@ impl CoalitionService {
     /// Spawn the service task on `tracker`. It owns `manager`, consults
     /// `policy` (via its async offload) before mutating membership, and uses
     /// `ctx`'s `required_capabilities` for capability-aware policies. The task
-    /// ends when every [`CoalitionServiceHandle`] is dropped. Returns a
-    /// clone-able [`CoalitionServiceHandle`].
+    /// ends when `token` is cancelled or every [`CoalitionServiceHandle`] is
+    /// dropped; a command already taken from the channel completes first, and
+    /// commands still queued at cancellation get no reply. A panic in the task
+    /// is logged at error level with its message and sets
+    /// [`CoalitionServiceHandle::panicked`]. Returns a clone-able
+    /// [`CoalitionServiceHandle`].
     pub fn spawn<V, HE>(
         manager: CoalitionManager<V, HE>,
         policy: Box<dyn CoalitionDecisionPolicy>,
         ctx: DecisionContext,
         tracker: &TaskTracker,
+        token: CancellationToken,
     ) -> CoalitionServiceHandle
     where
         V: VertexTrait + Clone + AgentCapabilities + 'static,
         HE: HyperedgeTrait + Clone + 'static,
     {
-        Self::spawn_inner(manager, policy, ctx, None, None, tracker)
+        Self::spawn_inner(manager, policy, ctx, None, None, tracker, token)
     }
 
     /// Like [`spawn`](Self::spawn) but with a decision tap: every join or
@@ -434,12 +456,13 @@ impl CoalitionService {
         ctx: DecisionContext,
         tap: mpsc::Sender<DecisionRecord>,
         tracker: &TaskTracker,
+        token: CancellationToken,
     ) -> CoalitionServiceHandle
     where
         V: VertexTrait + Clone + AgentCapabilities + 'static,
         HE: HyperedgeTrait + Clone + 'static,
     {
-        Self::spawn_inner(manager, policy, ctx, Some(tap), None, tracker)
+        Self::spawn_inner(manager, policy, ctx, Some(tap), None, tracker, token)
     }
 
     /// Like [`spawn`](Self::spawn) but with a decision trace tap: every join or
@@ -460,12 +483,13 @@ impl CoalitionService {
         ctx: DecisionContext,
         tap: mpsc::Sender<DecisionTrace>,
         tracker: &TaskTracker,
+        token: CancellationToken,
     ) -> CoalitionServiceHandle
     where
         V: VertexTrait + Clone + AgentCapabilities + 'static,
         HE: HyperedgeTrait + Clone + 'static,
     {
-        Self::spawn_inner(manager, policy, ctx, None, Some(tap), tracker)
+        Self::spawn_inner(manager, policy, ctx, None, Some(tap), tracker, token)
     }
 
     fn spawn_inner<V, HE>(
@@ -475,6 +499,7 @@ impl CoalitionService {
         tap: Option<mpsc::Sender<DecisionRecord>>,
         trace_tap: Option<mpsc::Sender<DecisionTrace>>,
         tracker: &TaskTracker,
+        token: CancellationToken,
     ) -> CoalitionServiceHandle
     where
         V: VertexTrait + Clone + AgentCapabilities + 'static,
@@ -487,8 +512,31 @@ impl CoalitionService {
             decision_trace_tap = trace_tap.is_some(),
             "CoalitionService started"
         );
-        tracker.spawn(service_loop(rx, manager, policy, ctx, tap, trace_tap));
-        CoalitionServiceHandle { tx }
+        let panicked = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&panicked);
+        let service = service_loop(rx, manager, policy, ctx, tap, trace_tap, token);
+        tracker.spawn(async move {
+            if let Err(payload) = AssertUnwindSafe(service).catch_unwind().await {
+                flag.store(true, Ordering::SeqCst);
+                tracing::error!(
+                    panic = panic_message(payload.as_ref()),
+                    "CoalitionService panicked"
+                );
+            }
+        });
+        CoalitionServiceHandle { tx, panicked }
+    }
+}
+
+/// The text of a panic payload: the `&str` or `String` it carries, or a
+/// placeholder for any other payload type.
+fn panic_message(payload: &(dyn Any + Send)) -> &str {
+    if let Some(s) = payload.downcast_ref::<&'static str>() {
+        s
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.as_str()
+    } else {
+        "<non-string panic payload>"
     }
 }
 
@@ -499,11 +547,20 @@ async fn service_loop<V, HE>(
     ctx: DecisionContext,
     tap: Option<mpsc::Sender<DecisionRecord>>,
     trace_tap: Option<mpsc::Sender<DecisionTrace>>,
+    token: CancellationToken,
 ) where
     V: VertexTrait + Clone + AgentCapabilities + 'static,
     HE: HyperedgeTrait + Clone + 'static,
 {
-    while let Some(cmd) = rx.recv().await {
+    loop {
+        let cmd = tokio::select! {
+            biased;
+            () = token.cancelled() => break,
+            cmd = rx.recv() => match cmd {
+                Some(cmd) => cmd,
+                None => break,
+            },
+        };
         match cmd {
             CoalitionCommand::Join {
                 agent,
@@ -660,6 +717,7 @@ mod tests {
             DecisionContext::default(),
             tap_tx,
             &TaskTracker::new(),
+            CancellationToken::new(),
         );
 
         let decision = service.join(candidate, coalition).await.expect("decision");
@@ -696,6 +754,7 @@ mod tests {
             DecisionContext::default(),
             tap_tx,
             &TaskTracker::new(),
+            CancellationToken::new(),
         );
 
         // Candidate: 50 + 10·1 + 80 = 140 — the join marginal and the leave's
@@ -752,6 +811,7 @@ mod tests {
             DecisionContext::default(),
             tap_tx,
             &TaskTracker::new(),
+            CancellationToken::new(),
         );
 
         let decision = service.join(candidate, coalition).await.expect("decision");
@@ -790,6 +850,7 @@ mod tests {
             DecisionContext::default(),
             full_tx,
             &TaskTracker::new(),
+            CancellationToken::new(),
         );
         service.join(candidate, coalition).await.expect("join");
         service.leave(candidate, coalition).await.expect("leave");
@@ -814,6 +875,7 @@ mod tests {
             DecisionContext::default(),
             closed_tx,
             &TaskTracker::new(),
+            CancellationToken::new(),
         );
         service.join(candidate, coalition).await.expect("join");
         let label = format!("coalition-{}", usize::from(coalition));
@@ -826,6 +888,102 @@ mod tests {
                 ("agent_id", agent_id.as_str()),
                 ("kind", "join"),
             ],
+        );
+    }
+
+    /// With a handle still alive, `CoalitionRuntime::shutdown` returns within
+    /// 5 s of a service spawned on its tracker with a child of its token, and
+    /// the handle then reports the service gone.
+    #[tokio::test]
+    async fn runtime_shutdown_stops_a_service_whose_handle_lives() {
+        let (manager, candidate, coalition) = seed().await;
+        let runtime = crate::core::CoalitionRuntime::new(crate::core::executor::test_executor());
+        let service = CoalitionService::spawn(
+            manager,
+            Box::new(ThresholdPolicy::new(AdditiveCalculator, 0.0, 0.0)),
+            DecisionContext::default(),
+            runtime.task_tracker(),
+            runtime.cancellation_token().child_token(),
+        );
+        service.join(candidate, coalition).await.expect("join");
+
+        let stopped =
+            tokio::time::timeout(std::time::Duration::from_secs(5), runtime.shutdown()).await;
+        assert!(
+            stopped.is_ok(),
+            "expected shutdown to return within 5 s with a live handle, observed a timeout"
+        );
+        let after = service.members(coalition).await;
+        assert!(
+            after.is_err(),
+            "expected the stopped service to refuse commands, observed {after:?}"
+        );
+        assert!(!service.panicked(), "a cancelled service did not panic");
+    }
+
+    /// A policy whose join decision panics.
+    struct PanickingPolicy;
+
+    impl CoalitionDecisionPolicy for PanickingPolicy {
+        fn should_join(
+            &self,
+            _agent: &dyn AgentCapabilities,
+            _coalition: &[&dyn AgentCapabilities],
+            _ctx: &DecisionContext,
+        ) -> Decision {
+            panic!("policy exploded");
+        }
+
+        fn should_leave(
+            &self,
+            _agent: &dyn AgentCapabilities,
+            _coalition: &[&dyn AgentCapabilities],
+            _ctx: &DecisionContext,
+        ) -> Decision {
+            Decision {
+                act: false,
+                score: 0.0,
+            }
+        }
+    }
+
+    /// A panic in the service task is one error-level event carrying the panic
+    /// message, sets `panicked()`, and still lets the tracker drain.
+    #[tokio::test]
+    async fn service_panic_is_logged_at_error_and_flagged() {
+        let capture = Capture::default();
+        let _guard = capture.install();
+        let (manager, candidate, coalition) = seed().await;
+        let tracker = TaskTracker::new();
+        let service = CoalitionService::spawn(
+            manager,
+            Box::new(PanickingPolicy),
+            DecisionContext::default(),
+            &tracker,
+            CancellationToken::new(),
+        );
+        assert!(!service.panicked(), "no panic before the first command");
+
+        let join = service.join(candidate, coalition).await;
+        assert!(
+            join.is_err(),
+            "expected the panicked service to drop the reply, observed {join:?}"
+        );
+        tracker.close();
+        tracker.wait().await;
+
+        assert!(
+            service.panicked(),
+            "expected panicked() == true after the policy panic"
+        );
+        let events = capture.matching("CoalitionService panicked");
+        assert_eq!(events.len(), 1, "events {events:?}");
+        assert_eq!(events[0].level, tracing::Level::ERROR, "level");
+        assert_eq!(
+            events[0].fields.get("panic").map(String::as_str),
+            Some("policy exploded"),
+            "panic field; fields {:?}",
+            events[0].fields
         );
     }
 

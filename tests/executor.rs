@@ -1,16 +1,19 @@
 //! `core::Executor`: `run` resolves to the closure value on a thread named
-//! `koalisi-exec-*`, runs on a pool of the configured size, and resumes a
-//! closure panic on the awaiting task. A `TemporalHypergraph` runs its graph
-//! closures on the executor it was built with, and its clones and a
-//! `CoalitionManager::empty` graph hold that same `Arc`. With the executor's
-//! only worker occupied, `should_join_async` / `should_leave_async` of
-//! `AifDecisionPolicy` and `AifMmDecisionPolicy` (feature `decision`) and of
-//! `MagnitudePolicy`, untyped and typed (feature `magnitude`), stay pending,
-//! then resolve to the sync result once the worker is released; so does
-//! `TemporalAnalytics::magnitude_history` (feature `magnitude`), resolving to
-//! one point of magnitude 2.0. A `CoalitionService`
-//! is one task on the caller's `TaskTracker`, which drains once every handle
-//! is dropped.
+//! `koalisi-exec-*`; `with_num_threads(n)`, for `n` one more than the
+//! thread count `Executor::new` gives, runs closures on an `n`-thread pool;
+//! a closure panic resumes on the awaiting task. With a one-thread
+//! executor's only worker occupied, each of the 18 async
+//! `TemporalHypergraph` methods on a graph built with that executor stays
+//! pending, then resolves to its expected result once the worker is
+//! released. A graph's clones and a `CoalitionManager::empty` graph hold
+//! the caller's `Arc<Executor>`. Under the same occupied-worker check,
+//! `should_join_async` / `should_leave_async` of `AifDecisionPolicy` and
+//! `AifMmDecisionPolicy` (feature `decision`) and of `MagnitudePolicy`,
+//! untyped and typed (feature `magnitude`), resolve to the sync result; so
+//! does `TemporalAnalytics::magnitude_history` (feature `magnitude`),
+//! resolving to one point of magnitude 2.0. A `CoalitionService` is one
+//! task on the caller's `TaskTracker`, which drains once every handle is
+//! dropped.
 
 use std::sync::Arc;
 use std::sync::mpsc as std_mpsc;
@@ -23,6 +26,7 @@ use koalisi::decision::{DecisionContext, ThresholdPolicy};
 use koalisi::subsystems::coalition_actor::CoalitionService;
 use koalisi::topology::{CoalitionManager, TemporalHypergraph};
 use tokio_rayon::rayon;
+use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
 /// How long a future must stay pending while the executor is occupied.
@@ -38,7 +42,6 @@ fn on_exec_thread(name: Option<&str>) -> bool {
 
 /// Occupy the only worker of a one-thread `exec` until the returned sender
 /// sends or drops.
-#[cfg(any(feature = "decision", feature = "magnitude"))]
 async fn occupy(exec: &Arc<Executor>) -> std_mpsc::Sender<()> {
     let (release_tx, release_rx) = std_mpsc::channel::<()>();
     let (started_tx, started_rx) = tokio::sync::oneshot::channel();
@@ -56,7 +59,6 @@ async fn occupy(exec: &Arc<Executor>) -> std_mpsc::Sender<()> {
 
 /// Assert `fut` stays pending for [`PENDING_FOR`] while the executor is
 /// occupied, then release the executor and resolve `fut`.
-#[cfg(any(feature = "decision", feature = "magnitude"))]
 async fn pending_until_released<F>(
     label: &str,
     release: std_mpsc::Sender<()>,
@@ -89,11 +91,14 @@ async fn run_returns_value_on_exec_thread() -> Result<()> {
 
 #[tokio::test]
 async fn with_num_threads_sizes_the_pool() -> Result<()> {
-    let exec = Executor::with_num_threads(2)?;
-    let threads = exec.run(rayon::current_num_threads).await;
+    let default = Executor::new()?.run(rayon::current_num_threads).await;
+    let requested = default + 1;
+    let threads = Executor::with_num_threads(requested)?
+        .run(rayon::current_num_threads)
+        .await;
     assert_eq!(
-        threads, 2,
-        "expected the executor's 2-thread pool, observed {threads}"
+        threads, requested,
+        "expected with_num_threads({requested}) to give {requested} threads (the default is {default}), observed {threads}"
     );
     Ok(())
 }
@@ -105,25 +110,104 @@ async fn run_resumes_panic_on_awaiting_task() {
     exec.run(|| panic!("koalisi-exec job panicked")).await;
 }
 
-#[tokio::test]
-async fn graph_mutation_runs_on_the_graphs_executor() -> Result<()> {
-    let exec = Arc::new(Executor::with_num_threads(2)?);
-    let graph = TemporalHypergraph::<u32, u32>::new(Arc::clone(&exec));
-    let v = graph.add_vertex(1).await?;
-    let he = graph.add_hyperedge(vec![v], 7).await?;
+/// Occupy `exec`, assert `fut` stays pending, release, and resolve it.
+async fn gated<F>(exec: &Arc<Executor>, label: &str, fut: F) -> F::Output
+where
+    F: std::future::Future,
+    F::Output: std::fmt::Debug,
+{
+    let release = occupy(exec).await;
+    pending_until_released(label, release, Box::pin(fut)).await
+}
 
-    let (tx, rx) = std_mpsc::channel();
-    graph
-        .update_hyperedge_vertices_try(he, move |members| {
-            let _ = tx.send((thread_name(), rayon::current_num_threads()));
-            Ok(members)
-        })
-        .await?;
-    let (name, threads) = rx.recv()?;
-    assert!(
-        on_exec_thread(name.as_deref()) && threads == 2,
-        "expected the mutation on koalisi-exec-* in the graph's 2-thread pool, observed (thread name, pool size) = ({name:?}, {threads})"
+#[tokio::test]
+async fn every_graph_method_runs_on_the_graphs_executor() -> Result<()> {
+    let exec = Arc::new(Executor::with_num_threads(1)?);
+    let g = TemporalHypergraph::<u32, u32>::new(Arc::clone(&exec));
+
+    let v0 = gated(&exec, "add_vertex", g.add_vertex(10)).await?;
+    let v1 = g.add_vertex(11).await?;
+    let v2 = g.add_vertex(12).await?;
+    let v3 = g.add_vertex(13).await?;
+    gated(
+        &exec,
+        "update_vertex_weight",
+        g.update_vertex_weight(v3, 14),
+    )
+    .await?;
+    let w = gated(&exec, "get_vertex_weight", g.get_vertex_weight(v3)).await?;
+    assert_eq!(w, 14, "get_vertex_weight after the update");
+    gated(&exec, "remove_vertex", g.remove_vertex(v3)).await?;
+
+    let a = gated(&exec, "add_hyperedge", g.add_hyperedge(vec![v0, v1], 1)).await?;
+    let b = g.add_hyperedge(vec![v2], 2).await?;
+    let c = g.add_hyperedge(vec![v2], 3).await?;
+    gated(
+        &exec,
+        "update_hyperedge_weight",
+        g.update_hyperedge_weight(a, 5),
+    )
+    .await?;
+    let w = gated(&exec, "get_hyperedge_weight", g.get_hyperedge_weight(a)).await?;
+    assert_eq!(w, 5, "get_hyperedge_weight after the update");
+    gated(
+        &exec,
+        "update_hyperedge_vertices",
+        g.update_hyperedge_vertices(a, vec![v0, v1, v2]),
+    )
+    .await?;
+    let members = gated(&exec, "get_hyperedge_vertices", g.get_hyperedge_vertices(a)).await?;
+    assert_eq!(members, vec![v0, v1, v2], "members after the update");
+    gated(
+        &exec,
+        "update_hyperedge_vertices_try",
+        g.update_hyperedge_vertices_try(a, move |mut m| {
+            m.retain(|&v| v != v1);
+            Ok(m)
+        }),
+    )
+    .await?;
+    assert_eq!(
+        g.get_hyperedge_vertices(a).await?,
+        vec![v0, v2],
+        "members after the try-update drops v1"
     );
+    g.update_hyperedge_vertices(a, vec![v0, v1, v2]).await?;
+    let reversed = gated(&exec, "reverse_hyperedge", g.reverse_hyperedge(a)).await?;
+    assert_eq!(reversed, vec![v2, v1, v0], "reversed members");
+    let contracted = gated(
+        &exec,
+        "contract_hyperedge_vertices",
+        g.contract_hyperedge_vertices(a, vec![v1, v2], v1),
+    )
+    .await?;
+    assert_eq!(
+        contracted,
+        g.get_hyperedge_vertices(a).await?,
+        "contract_hyperedge_vertices returns the stored members"
+    );
+    gated(&exec, "join_hyperedges", g.join_hyperedges(vec![b, c])).await?;
+    assert_eq!(
+        g.get_hyperedge_vertices(b).await?,
+        vec![v2, v2],
+        "joined members"
+    );
+    gated(&exec, "remove_hyperedge", g.remove_hyperedge(b)).await?;
+    let vertices = gated(&exec, "count_vertices", g.count_vertices()).await;
+    let hyperedges = gated(&exec, "count_hyperedges", g.count_hyperedges()).await;
+    assert_eq!(
+        (vertices, hyperedges),
+        (3, 1),
+        "(vertices, hyperedges) before the clears"
+    );
+    gated(&exec, "clear_hyperedges", g.clear_hyperedges()).await?;
+    assert_eq!(
+        g.count_hyperedges().await,
+        0,
+        "hyperedges after clear_hyperedges"
+    );
+    gated(&exec, "clear", g.clear()).await?;
+    assert_eq!(g.count_vertices().await, 0, "vertices after clear");
     Ok(())
 }
 
@@ -155,6 +239,7 @@ async fn service_runs_on_the_callers_tracker() -> Result<()> {
         Box::new(ThresholdPolicy::new(AdditiveCalculator, 0.0, 0.0)),
         DecisionContext::default(),
         &tracker,
+        CancellationToken::new(),
     );
     let second = handle.clone();
     let tracked = tracker.len();

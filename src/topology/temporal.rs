@@ -178,6 +178,9 @@ where
     // =========================================================================
 
     /// Add a vertex and record the event.
+    ///
+    /// Not cancel-safe: a future dropped after the graph job is submitted can
+    /// leave the graph mutated with no event recorded.
     pub async fn add_vertex(&self, weight: V) -> TemporalResult<VertexIndex> {
         let timestamp = self.clock.tick();
         let weight_clone = weight;
@@ -201,6 +204,9 @@ where
     }
 
     /// Remove a vertex and record the event.
+    ///
+    /// Not cancel-safe: a future dropped after the graph job is submitted can
+    /// leave the graph mutated with no event recorded.
     pub async fn remove_vertex(&self, index: VertexIndex) -> TemporalResult<()> {
         let timestamp = self.clock.tick();
         let graph = self.graph.clone();
@@ -228,6 +234,9 @@ where
     }
 
     /// Update a vertex weight and record the event.
+    ///
+    /// Not cancel-safe: a future dropped after the graph job is submitted can
+    /// leave the graph mutated with no event recorded.
     pub async fn update_vertex_weight(
         &self,
         index: VertexIndex,
@@ -261,6 +270,9 @@ where
     }
 
     /// Add a hyperedge and record the event.
+    ///
+    /// Not cancel-safe: a future dropped after the graph job is submitted can
+    /// leave the graph mutated with no event recorded.
     pub async fn add_hyperedge(
         &self,
         vertices: Vec<VertexIndex>,
@@ -294,6 +306,9 @@ where
     }
 
     /// Remove a hyperedge and record the event.
+    ///
+    /// Not cancel-safe: a future dropped after the graph job is submitted can
+    /// leave the graph mutated with no event recorded.
     pub async fn remove_hyperedge(&self, index: HyperedgeIndex) -> TemporalResult<()> {
         let timestamp = self.clock.tick();
         let graph = self.graph.clone();
@@ -323,6 +338,9 @@ where
     }
 
     /// Update a hyperedge weight and record the event.
+    ///
+    /// Not cancel-safe: a future dropped after the graph job is submitted can
+    /// leave the graph mutated with no event recorded.
     pub async fn update_hyperedge_weight(
         &self,
         index: HyperedgeIndex,
@@ -356,6 +374,9 @@ where
     }
 
     /// Update a hyperedge's vertices and record the event.
+    ///
+    /// Not cancel-safe: a future dropped after the graph job is submitted can
+    /// leave the graph mutated with no event recorded.
     pub async fn update_hyperedge_vertices(
         &self,
         index: HyperedgeIndex,
@@ -394,6 +415,9 @@ where
     /// and the write of the new set, so two concurrent join/leave calls cannot
     /// race. The mutator may return `Err` to abort the update (e.g. a coalition
     /// leave that would leave the membership empty).
+    ///
+    /// Not cancel-safe: a future dropped after the graph job is submitted can
+    /// leave the graph mutated with no event recorded.
     pub async fn update_hyperedge_vertices_try<F>(
         &self,
         index: HyperedgeIndex,
@@ -431,6 +455,9 @@ where
     }
 
     /// Reverse a hyperedge and record the event.
+    ///
+    /// Not cancel-safe: a future dropped after the graph job is submitted can
+    /// leave the graph mutated with no event recorded.
     pub async fn reverse_hyperedge(
         &self,
         index: HyperedgeIndex,
@@ -466,6 +493,9 @@ where
     }
 
     /// Join hyperedges and record the event.
+    ///
+    /// Not cancel-safe: a future dropped after the graph job is submitted can
+    /// leave the graph mutated with no event recorded.
     pub async fn join_hyperedges(&self, indices: Vec<HyperedgeIndex>) -> TemporalResult<()> {
         if indices.len() < 2 {
             return Err(TemporalError::Hypergraph(HypergraphError::InvalidJoin));
@@ -501,6 +531,9 @@ where
     }
 
     /// Contract vertices in a hyperedge and record the event.
+    ///
+    /// Not cancel-safe: a future dropped after the graph job is submitted can
+    /// leave the graph mutated with no event recorded.
     pub async fn contract_hyperedge_vertices(
         &self,
         hyperedge_index: HyperedgeIndex,
@@ -541,6 +574,9 @@ where
     }
 
     /// Clear all hyperedges and record the event.
+    ///
+    /// Not cancel-safe: a future dropped after the graph job is submitted can
+    /// leave the graph mutated with no event recorded.
     pub async fn clear_hyperedges(&self) -> TemporalResult<()> {
         let timestamp = self.clock.tick();
         let graph = self.graph.clone();
@@ -565,6 +601,9 @@ where
     }
 
     /// Clear the entire graph and record the event.
+    ///
+    /// Not cancel-safe: a future dropped after the graph job is submitted can
+    /// leave the graph mutated with no event recorded.
     pub async fn clear(&self) -> TemporalResult<()> {
         let timestamp = self.clock.tick();
         let graph = self.graph.clone();

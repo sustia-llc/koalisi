@@ -232,6 +232,7 @@ async fn main() -> Result<()> {
             required_capabilities: required,
         },
         &tracker,
+        root.child_token(),
     );
 
     let before_members = service.members(coalition).await?;

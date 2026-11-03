@@ -143,6 +143,7 @@ async fn main() -> Result<()> {
         DecisionContext::default(),
         tap_tx,
         &tracker,
+        token.child_token(),
     );
     let _forwarder = spawn_decision_forwarder(
         &bus,

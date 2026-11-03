@@ -130,7 +130,7 @@ pub trait CoalitionDecisionPolicy: Send + Sync {
 
     /// Async, runtime-friendly variant of [`should_join`](Self::should_join).
     ///
-    /// The default impl runs the sync method inline, ignores `executor`, and
+    /// The default impl runs the sync method inline, ignores the executor, and
     /// returns a ready future — correct for cheap policies. Policies whose
     /// decision is CPU-heavy (e.g. the AIF expected-free-energy bridge) override
     /// this to run the work on `executor` so the async runtime is not blocked.
@@ -144,9 +144,8 @@ pub trait CoalitionDecisionPolicy: Send + Sync {
         agent: &'a dyn AgentCapabilities,
         coalition: &'a [&'a dyn AgentCapabilities],
         ctx: &'a DecisionContext,
-        executor: &'a Executor,
+        _executor: &'a Executor,
     ) -> Pin<Box<dyn Future<Output = Decision> + Send + 'a>> {
-        let _ = executor;
         // Compute the decision in the synchronous prologue and move only the
         // owned (Copy) `Decision` into the future. The `&dyn` borrows are
         // `Send` (`AgentCapabilities: Send + Sync`) but not `'static`, so an
@@ -158,7 +157,7 @@ pub trait CoalitionDecisionPolicy: Send + Sync {
 
     /// Async, runtime-friendly variant of [`should_leave`](Self::should_leave).
     ///
-    /// The default impl runs the sync method inline, ignores `executor`, and
+    /// The default impl runs the sync method inline, ignores the executor, and
     /// returns a ready future — correct for cheap policies. Policies whose
     /// decision is CPU-heavy override this to run the work on `executor`.
     /// Dyn-compatible: returns a boxed future rather than using `async fn` in
@@ -171,9 +170,8 @@ pub trait CoalitionDecisionPolicy: Send + Sync {
         agent: &'a dyn AgentCapabilities,
         coalition: &'a [&'a dyn AgentCapabilities],
         ctx: &'a DecisionContext,
-        executor: &'a Executor,
+        _executor: &'a Executor,
     ) -> Pin<Box<dyn Future<Output = Decision> + Send + 'a>> {
-        let _ = executor;
         // See `should_join_async`: compute synchronously, move only the owned
         // `Decision` into the future to keep it `Send`.
         let decision = self.should_leave(agent, coalition, ctx);

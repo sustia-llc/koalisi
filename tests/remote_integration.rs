@@ -134,6 +134,7 @@ async fn remote_gateway_publishes_coalition_decisions() {
             },
             tap_tx,
             &tracker,
+            root.child_token(),
         );
 
         // ---------- Tee: tap → (one leg) → gateway ----------

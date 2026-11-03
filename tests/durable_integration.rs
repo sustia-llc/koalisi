@@ -153,6 +153,7 @@ async fn durable_decisions_survive_restart_through_the_seam() {
         DecisionContext::default(),
         tap_tx,
         &tracker,
+        token.child_token(),
     );
     let forwarder = spawn_decision_forwarder(
         &bus1,

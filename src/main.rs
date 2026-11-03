@@ -31,10 +31,8 @@ const SEED_MEMBERS: usize = 2;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let executor = Arc::new(Executor::new()?);
     setup_logging();
-
-    let runtime = CoalitionRuntime::new(Arc::clone(&executor));
+    let runtime = CoalitionRuntime::new(Arc::new(Executor::new()?));
 
     // A set of agents, each covering a distinct capability bit.
     let agents: Vec<CapabilityAgent> = (0..AGENT_COUNT)
@@ -44,7 +42,8 @@ async fn main() -> Result<()> {
     // Add every agent to the manager (the candidate vertices must exist before
     // the manager is moved into the service), then form a seed coalition over
     // the first `SEED_MEMBERS`.
-    let manager: CoalitionManager<CapabilityAgent, Team> = CoalitionManager::empty(executor);
+    let manager: CoalitionManager<CapabilityAgent, Team> =
+        CoalitionManager::empty(Arc::clone(runtime.executor()));
     let mut vertices = Vec::with_capacity(agents.len());
     for a in &agents {
         vertices.push(manager.add_agent(*a).await?);
@@ -63,6 +62,7 @@ async fn main() -> Result<()> {
             required_capabilities: required,
         },
         runtime.task_tracker(),
+        runtime.cancellation_token().child_token(),
     );
 
     tracing::info!(
@@ -85,11 +85,12 @@ async fn main() -> Result<()> {
     tokio::signal::ctrl_c().await?;
     tracing::info!("ctrl-c received, shutting down");
 
-    // Drop the daemon's own handle; the loop's clone releases when `shutdown`
-    // cancels the root token, after which the service task exits on its
-    // now-closed command channel. `shutdown` drains both tracked tasks.
-    drop(service);
+    // `shutdown` cancels the root token, which stops the join loop and the
+    // service, and drains both tracked tasks.
     runtime.shutdown().await;
+    if service.panicked() {
+        anyhow::bail!("coalition service panicked");
+    }
     tracing::info!("shutdown clean");
     Ok(())
 }

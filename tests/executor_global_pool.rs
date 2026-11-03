@@ -1,11 +1,12 @@
-//! Every async path of the topology, decision and analytics layers, run on an
-//! `Executor`, leaves rayon's global pool unbuilt: after the 18 async
-//! `TemporalHypergraph` methods, `try_join_coalition` / `try_leave_coalition`
-//! and direct `should_join_async` / `should_leave_async` calls for
-//! `AifDecisionPolicy`, `AifMmDecisionPolicy` and `MagnitudePolicy` (untyped
-//! and typed), and `TemporalAnalytics::magnitude_history`,
-//! `ThreadPoolBuilder::build_global` returns `Ok`. One test per binary: the
-//! global pool is process state.
+//! Under features `decision,magnitude`, after these calls run on an
+//! `Executor`, `ThreadPoolBuilder::build_global` returns `Ok`: the 18 async
+//! `TemporalHypergraph` methods on a `u32` graph; `should_join_async` /
+//! `should_leave_async` and `CoalitionManager::try_join_coalition` /
+//! `try_leave_coalition` for `AifDecisionPolicy`, `AifMmDecisionPolicy` and
+//! `MagnitudePolicy` (untyped and typed), each on one join and one leave of a
+//! three-agent fixture; and `TemporalAnalytics::magnitude_history` on one
+//! two-member hyperedge. One test per binary: the global pool is process
+//! state.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -101,15 +102,17 @@ async fn policy_paths(
         policy.should_join(&a0, &coalition, &ctx),
         "{label}: manager join vs sync join"
     );
-    if join.act {
-        let leave = manager.try_leave_coalition(m0, he, policy, &ctx).await?;
-        let seated: Vec<&dyn AgentCapabilities> = vec![&a1, &a2, &a0];
-        assert_eq!(
-            leave,
-            policy.should_leave(&a0, &seated, &ctx),
-            "{label}: manager leave vs sync leave"
-        );
-    }
+    assert!(
+        join.act,
+        "{label}: expected the candidate covering the missing bit to join, so the manager leave path runs; observed {join:?}"
+    );
+    let leave = manager.try_leave_coalition(m0, he, policy, &ctx).await?;
+    let seated: Vec<&dyn AgentCapabilities> = vec![&a1, &a2, &a0];
+    assert_eq!(
+        leave,
+        policy.should_leave(&a0, &seated, &ctx),
+        "{label}: manager leave vs sync leave"
+    );
     Ok(())
 }
 

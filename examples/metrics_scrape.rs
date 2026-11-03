@@ -443,6 +443,7 @@ async fn main() -> Result<()> {
         },
         tap_tx,
         &tracker,
+        token.child_token(),
     );
 
     for candidate in &strong {

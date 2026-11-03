@@ -34,9 +34,10 @@ impl CoalitionRuntime {
         &self.cancellation_token
     }
 
-    /// Three-step shutdown: cancel the root token, close the tracker,
-    /// then drain all tracked tasks. Callers are responsible for stopping
-    /// their own actors after this returns.
+    /// Three-step shutdown: cancel the root token, close the tracker, then
+    /// wait until every task spawned on the tracker has finished. A tracked
+    /// task that neither watches this runtime's token (or a child of it) nor
+    /// finishes on its own keeps this future pending.
     pub async fn shutdown(self) {
         self.cancellation_token.cancel();
         self.task_tracker.close();

@@ -16,6 +16,7 @@ use koalisi::core::Executor;
 use koalisi::decision::DecisionContext;
 use koalisi::subsystems::coalition_actor::CoalitionService;
 use koalisi::topology::CoalitionManager;
+use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
 // ---------------------------------------------------------------------------
@@ -125,6 +126,7 @@ async fn threshold_policy_applies_join_through_actor() {
         Box::new(ThresholdPolicy::new(AdditiveCalculator, 0.0, 0.0)),
         DecisionContext::default(),
         &TaskTracker::new(),
+        CancellationToken::new(),
     );
 
     let decision = service.join(candidate, coalition).await.expect("decision");
@@ -152,6 +154,7 @@ async fn threshold_policy_declines_join_through_actor() {
         Box::new(ThresholdPolicy::new(AdditiveCalculator, 1.0e9, 0.0)),
         DecisionContext::default(),
         &TaskTracker::new(),
+        CancellationToken::new(),
     );
 
     let decision = service.join(candidate, coalition).await.expect("decision");
@@ -183,6 +186,7 @@ async fn threshold_policy_forces_leave_through_actor() {
         Box::new(ThresholdPolicy::new(AdditiveCalculator, 0.0, 1.0e9)),
         DecisionContext::default(),
         &TaskTracker::new(),
+        CancellationToken::new(),
     );
 
     let decision = service.leave(seed, coalition).await.expect("decision");
@@ -258,6 +262,7 @@ async fn aif_policy_join_non_degenerate_through_actor() {
             Box::new(AifDecisionPolicy::default()),
             ctx,
             &TaskTracker::new(),
+            CancellationToken::new(),
         );
         let decision = service.join(candidate, coalition).await.expect("decision");
         assert!(decision.act, "covering a new required bit lowers G ⇒ join");
@@ -278,6 +283,7 @@ async fn aif_policy_join_non_degenerate_through_actor() {
             Box::new(AifDecisionPolicy::default()),
             ctx,
             &TaskTracker::new(),
+            CancellationToken::new(),
         );
         let decision = service.join(redundant, coalition).await.expect("decision");
         assert!(!decision.act, "redundant coverage ⇒ decline");
@@ -327,7 +333,13 @@ async fn belief_aware_join_through_actor() {
         CoalitionHistory::new(),
     );
 
-    let service = CoalitionService::spawn(manager, Box::new(policy), ctx, &TaskTracker::new());
+    let service = CoalitionService::spawn(
+        manager,
+        Box::new(policy),
+        ctx,
+        &TaskTracker::new(),
+        CancellationToken::new(),
+    );
 
     let decision = service.join(redundant, coalition).await.expect("decision");
     assert!(

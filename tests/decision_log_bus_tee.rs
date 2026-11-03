@@ -246,6 +246,7 @@ async fn every_trace_reaches_the_decisions_stream_and_the_bus() {
         DecisionContext::default(),
         trace_tx,
         &pipe_tracker,
+        token.child_token(),
     );
 
     // Hand-derived (record, Topology parent seq):
