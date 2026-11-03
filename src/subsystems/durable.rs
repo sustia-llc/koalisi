@@ -12,10 +12,12 @@
 //! Built on `surrealdb-live-message`'s [`Coalition<T>`]: a `message` edge table
 //! with a `CHANGEFEED` is the durable log (tier 1); a `LIVE SELECT` is a
 //! low-latency wake-up (tier 2) that triggers a `SHOW CHANGES … SINCE <cursor>`
-//! catch-up — the sole delivery path. Each consumer persists a per-agent
-//! versionstamp cursor, giving at-least-once delivery that survives a
-//! disconnect/restart (a decision published while a consumer is down is replayed
-//! on restart — the property plain at-most-once `LIVE` lacks).
+//! catch-up, which is the only delivery path. Each agent persists a cursor (a
+//! versionstamp and a change index), so a decision published while the
+//! consumer is down is delivered after it restarts. Delivery is at-least-once
+//! from the log to the upstream delivery bus ([`Coalition::inbox`]). A
+//! delivery already on that bus is lost if the process exits before a
+//! receiver reads it.
 //!
 //! ## Membership is recorded IN the stream, not as dynamic agents
 //!
@@ -147,7 +149,9 @@ impl DurableDecisionBus {
         self.coalition.agent(name).await
     }
 
-    /// Three-step shutdown (cancel → close → drain) of the bus's agents.
+    /// Cancel the bus's agents and wait until their listen loops and the
+    /// retention sweep end ([`Coalition::shutdown`]). Dropping the bus also
+    /// cancels them, but does not wait.
     ///
     /// Durable state (messages, cursors, agent records) persists — a later
     /// [`DurableDecisionBus::new`] over the same names resumes and replays.
