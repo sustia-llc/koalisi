@@ -26,13 +26,17 @@ Planned work — issue-tracked:
   field, with the `[swarm]` section of `config/default.toml`. `Settings` holds
   `environment` and `logger`. A `[swarm]` or `[coalition]` section, or a
   `SWARM__*` or `COALITION__*` environment variable, now loads without an
-  error and has no effect. At `v0.47.0`, this search prints only the
-  definitions in `src/core/config.rs` and the keys in `config/default.toml`:
+  error and has no effect. At `v0.47.0`, this search prints three groups of
+  lines: the definitions in `src/core/config.rs`, the keys and one comment
+  in `config/default.toml`, and `src/ingest/monitor.rs`, where
+  `history_capacity` is a `SampleMonitor` field and parameter:
 
   ```sh
-  git grep -n -E 'CoalitionSettings|threshold_bps|delivery_strategy|SETTINGS\.coalition' v0.47.0 -- src tests examples config
+  git grep -n -E 'CoalitionSettings|threshold_bps|history_capacity|delivery_strategy' v0.47.0 -- src tests examples config
   ```
 
+  The crate builds at `a2d5ee8` without the field, so no remaining code
+  reads it.
 - The file-level `#![cfg(...)]` in `tests/k7_2_novelty.rs`,
   `tests/durable_integration.rs`, `tests/decision_log_bus_tee.rs` and
   `tests/remote_integration.rs`. The `required-features` of each `[[test]]`
@@ -43,8 +47,7 @@ Planned work — issue-tracked:
   `rust-analyzer`.
 
 ### Changed
-- The README architecture box says "broadcast ingest bus". A
-  `SampleMonitor` publishes on a `tokio::sync::broadcast` sender.
+- The README architecture box says "broadcast ingest bus".
 
 ### Gates
 - At `a2d5ee8`, these lanes pass:
@@ -52,15 +55,23 @@ Planned work — issue-tracked:
   - `decision,magnitude,process` 252, `harness,decision,process` 332
   - `metrics` 108, `remote` 114, `durable` 109, `persistence,durable` 135
 
-  The two Docker lanes ran against the container, and neither container
-  test prints `SKIP`. Clippy with `-D warnings` is clean on those lanes and
-  `--no-default-features`.
-- At `a2d5ee8`, every reader of `Settings` starts. The `koalisi` binary
-  starts the runtime with and without `RUN_MODE=test`. The
-  `durable_decisions` and `remote_coalition_consumer` examples stop cleanly.
+  The two Docker lanes ran with `-- --nocapture` against the container, and
+  neither container test prints `SKIP`. Clippy with `-D warnings` is clean
+  on those lanes and `--no-default-features`.
+- `setup_logging` is the only reader of `Settings`. Its callers are
+  `src/main.rs`, `examples/durable_decisions.rs`,
+  `examples/remote_coalition_consumer.rs` and the two container tests:
+
+  ```sh
+  git grep -n 'setup_logging()' v0.48.0 -- src examples tests
+  ```
+
+  At `a2d5ee8`, the `koalisi` binary starts the runtime with and without
+  `RUN_MODE=test`, and the two examples stop cleanly.
   With the old `CoalitionSettings` restored and no `[swarm]` section, the
   binary panics with `missing configuration field "coalition"`.
-- These are clean at `a2d5ee8`:
+- These are clean at `a2d5ee8`. The 1.95.0 checks cover the declaration on
+  the three named feature sets only:
 
   ```sh
   RUSTDOCFLAGS='-D warnings' cargo doc --locked --no-deps --all-features
