@@ -32,8 +32,14 @@ Re-pins `surrealdb-live-message` to `v0.7.0` (feature `durable`).
   1.93 or 1.94 build of every other feature set.
 - **Breaking:** `spawn_decision_forwarder` and `spawn_decision_log_bus_tee`
   are now `async`, take `&DurableDecisionBus` as their first parameter, and
-  return `Result<JoinHandle<()>, DurableError>`. If `log_sink` names no agent
-  of the bus, they return `DurableError::UnknownLogSink` and spawn nothing.
+  return `Result<JoinHandle<()>, DurableError>`. If `producer` is not an
+  agent of the bus, they return `DurableError::UnknownProducer`. If
+  `log_sink` names no agent of the bus, they return
+  `DurableError::UnknownLogSink`. In both cases they spawn nothing.
+- `thiserror` 2 is a direct dependency, for `DurableError`. The lock already
+  held `thiserror` 2.0.21, so no package version moves.
+- A full or closed sink of `spawn_decision_tee` logs the dropped record's
+  coalition and agent id at warn.
 - A dropped decision record is logged with its coalition, agent id and kind,
   at a level that follows the cause:
   - error: a failed `Agent::send` in the two spawn functions (with the
@@ -60,11 +66,16 @@ Re-pins `surrealdb-live-message` to `v0.7.0` (feature `durable`).
   a delivery that is already on that bus, that delivery is lost.
   `DurableDecisionBus::shutdown` documents the upstream wait and its 2 s
   bounds, and that a drop of the bus cancels without waiting.
-- koalisi matches no upstream `Error` variant. This search prints nothing:
+- koalisi code matches no upstream `Error` variant. This search prints
+  nothing, because the pattern excludes koalisi's own `DurableError::`:
 
   ```sh
-  git grep -n 'Error::' v0.47.0 -- src/subsystems/durable.rs tests/durable_integration.rs tests/decision_log_bus_tee.rs examples/durable_decisions.rs
+  git grep -n -E '(^|[^A-Za-z0-9_])Error::' v0.47.0 -- src/subsystems/durable.rs tests/durable_integration.rs tests/decision_log_bus_tee.rs examples/durable_decisions.rs
   ```
+
+  One test in `tests/durable_integration.rs` asserts the `Display` text of
+  upstream `Error::UnknownRecipient`: `"recipient agent 'fail_sink' does not
+  exist"`. A change to that upstream message fails the test.
 
 - koalisi defines no SurrealDB table, so upstream's `message` table is the
   one table with a changefeed. This search prints nothing:
@@ -82,14 +93,18 @@ Re-pins `surrealdb-live-message` to `v0.7.0` (feature `durable`).
   replays both decisions and stops cleanly.
 - `cargo clippy --locked --all-targets -- -D warnings` is clean at `a678550`
   on the 14 non-Docker lanes and `--no-default-features`.
-- `093afb3` changes `src/subsystems/coalition_actor.rs`, which compiles in
-  every feature set, and adds unit tests. At `093afb3`, 13 lanes pass, and
-  each differs from `a678550` only in the library binary: +1 test, or +2 in
-  the three `persistence` lanes. `durable` 109 and `persistence,durable` 135
-  ran against the Docker container, and neither container test prints
-  `SKIP`. The three `harness` lanes did not run at `093afb3` (owner,
-  2026-11-03).
-- These are clean at `093afb3`:
+- `093afb3` and `267f705` change `src/subsystems/coalition_actor.rs`, which
+  compiles in every feature set, and add unit tests. At `267f705`, these 13
+  lanes pass:
+  - default 108, `decision` 164, `magnitude` 137, `decision,magnitude` 193
+  - `magnitude-fast` 145, `persistence` 133, `persistence,magnitude` 163
+  - `remote` 114, `process` 164, `decision,magnitude,process` 252, `metrics` 108
+  - `durable` 109, `persistence,durable` 135
+
+  The two Docker lanes ran
+  against the container, and neither container test prints `SKIP`. The three
+  `harness` lanes did not run after `a678550` (owner, 2026-11-03).
+- These are clean at `267f705`:
 
   ```sh
   cargo clippy --locked --all-targets -- -D warnings   # 11 non-harness, non-Docker lanes, --no-default-features, durable, persistence,durable
@@ -100,7 +115,7 @@ Re-pins `surrealdb-live-message` to `v0.7.0` (feature `durable`).
   cargo fmt --all -- --check
   ```
 
-- `cargo run --features durable --example durable_decisions` at `093afb3`
+- `cargo run --features durable --example durable_decisions` at `267f705`
   replays both decisions and stops cleanly.
 
 - The K4 archive gate did not run (owner, 2026-11-03).
