@@ -823,10 +823,14 @@ mod tests {
     // -----------------------------------------------------------------------
 
     fn record(agent_id: usize) -> DecisionRecord {
+        record_of_kind(agent_id, DecisionKind::Join)
+    }
+
+    fn record_of_kind(agent_id: usize, kind: DecisionKind) -> DecisionRecord {
         DecisionRecord {
             coalition: "coalition-0".to_string(),
             agent_id,
-            kind: DecisionKind::Join,
+            kind,
             act: true,
             score: 1.5,
         }
@@ -881,8 +885,9 @@ mod tests {
 
         let handle = spawn_decision_tee(tap_rx, vec![full_tx, closed_tx, ok_tx], &tracker, token);
 
-        for id in 1..=3 {
-            tap_tx.send(record(id)).await.expect("send");
+        let kinds = [DecisionKind::Join, DecisionKind::Leave, DecisionKind::Join];
+        for (id, kind) in (1..=3).zip(kinds) {
+            tap_tx.send(record_of_kind(id, kind)).await.expect("send");
         }
         drop(tap_tx);
         handle.await.expect("tee joins despite full + closed sinks");
@@ -893,26 +898,38 @@ mod tests {
             assert_eq!(ok_rx.recv().await.expect("healthy record").agent_id, id);
         }
 
-        // The full sink took record 1, so records 2 and 3 drop there; the
-        // closed sink drops all three.
-        for (needle, sink, agent_ids) in [
-            ("decision tee sink full", "0", ["2", "3"].as_slice()),
-            ("decision tee sink closed", "1", ["1", "2", "3"].as_slice()),
+        // The full sink took record 1, so records 2 (a leave) and 3 drop
+        // there; the closed sink drops all three.
+        for (needle, sink, dropped) in [
+            (
+                "decision tee sink full",
+                "0",
+                [("2", "leave"), ("3", "join")].as_slice(),
+            ),
+            (
+                "decision tee sink closed",
+                "1",
+                [("1", "join"), ("2", "leave"), ("3", "join")].as_slice(),
+            ),
         ] {
             let events = capture.matching(needle);
-            let seen: Vec<Option<&str>> = events
+            let seen: Vec<(Option<&str>, Option<&str>)> = events
                 .iter()
-                .map(|e| e.fields.get("agent_id").map(String::as_str))
+                .map(|e| {
+                    (
+                        e.fields.get("agent_id").map(String::as_str),
+                        e.fields.get("kind").map(String::as_str),
+                    )
+                })
                 .collect();
-            let want: Vec<Option<&str>> = agent_ids.iter().copied().map(Some).collect();
-            assert_eq!(seen, want, "{needle}: agent ids; events {events:?}");
+            let want: Vec<(Option<&str>, Option<&str>)> = dropped
+                .iter()
+                .map(|&(id, kind)| (Some(id), Some(kind)))
+                .collect();
+            assert_eq!(seen, want, "{needle}: (agent id, kind); events {events:?}");
             for e in &events {
                 assert_eq!(e.level, tracing::Level::WARN, "{needle}: level {}", e.level);
-                for (field, want) in [
-                    ("sink", sink),
-                    ("coalition", "coalition-0"),
-                    ("kind", "join"),
-                ] {
+                for (field, want) in [("sink", sink), ("coalition", "coalition-0")] {
                     assert_eq!(
                         e.fields.get(field).map(String::as_str),
                         Some(want),

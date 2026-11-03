@@ -245,7 +245,7 @@ async fn check_agents(
 ///
 /// Nothing is spawned on either error:
 /// - [`DurableError::UnknownProducer`] when `producer`'s name names no agent
-///   of `bus`;
+///   of `bus`, or the bus agent of that name has another record id;
 /// - [`DurableError::UnknownLogSink`] when `producer` is an agent of `bus` and
 ///   `log_sink` names no agent of `bus`.
 pub async fn spawn_decision_forwarder(
@@ -327,7 +327,7 @@ async fn tee_one(
 ///
 /// Nothing is spawned on either error:
 /// - [`DurableError::UnknownProducer`] when `producer`'s name names no agent
-///   of `bus`;
+///   of `bus`, or the bus agent of that name has another record id;
 /// - [`DurableError::UnknownLogSink`] when `producer` is an agent of `bus` and
 ///   `log_sink` names no agent of `bus`.
 #[cfg(feature = "persistence")]

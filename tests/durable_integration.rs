@@ -18,10 +18,12 @@
 //!    plain at-most-once `LIVE` lacks.
 //! 5. A log sink that is not an agent of the bus is refused with
 //!    `DurableError::UnknownLogSink`, and a producer that is not an agent of
-//!    the bus with `DurableError::UnknownProducer`; neither spawns a task.
-//! 6. On a separate bus, the sink's `agent` record is deleted after the sink
-//!    check, so the forwarder's send fails; that failure is logged once at
-//!    error level with the decision's fields.
+//!    the bus, or a bus agent renamed to another bus agent's name, with
+//!    `DurableError::UnknownProducer`; none spawns a task.
+//! 6. On a separate bus, two forwarded sends fail: a join whose `RELATE`
+//!    fails a field assertion, then a leave whose sink `agent` record is
+//!    deleted after the sink check. Each failure is logged once at error
+//!    level with the decision's fields and the error's source chain.
 //!
 //! The hot path never touches the DB; only the *decisions* are forwarded.
 
@@ -216,6 +218,10 @@ async fn durable_decisions_survive_restart_through_the_seam() {
     //     and nothing is spawned. ---
     let recorder2 = bus2.agent(RECORDER).await.expect("recorder agent");
     let outsider = Agent::new(OUTSIDER).await.expect("outsider agent");
+    // The bus's decision_log agent renamed to recorder: a bus agent has the
+    // name, but its record id is agent:decision_log, not agent:recorder.
+    let mut impostor = bus2.agent(DECISION_LOG).await.expect("decision_log agent");
+    impostor.name = RECORDER.to_string();
     for (producer, log_sink, want) in [
         (
             recorder2,
@@ -229,6 +235,13 @@ async fn durable_decisions_survive_restart_through_the_seam() {
             DECISION_LOG,
             DurableError::UnknownProducer {
                 producer: OUTSIDER.to_string(),
+            },
+        ),
+        (
+            impostor,
+            DECISION_LOG,
+            DurableError::UnknownProducer {
+                producer: RECORDER.to_string(),
             },
         ),
     ] {
@@ -265,11 +278,46 @@ async fn durable_decisions_survive_restart_through_the_seam() {
 
 const FAIL_PRODUCER: &str = "fail_producer";
 const FAIL_SINK: &str = "fail_sink";
+const FAILED_SEND_MESSAGE: &str =
+    "durable decision forward failed; the decision may be missing from the log";
+/// Makes every `RELATE` into `message` fail its field assertion.
+const FAIL_CREATED: &str = "DEFINE FIELD OVERWRITE created ON message TYPE datetime ASSERT false;";
+/// The `created` field as upstream `define_schema` defines it.
+const RESTORE_CREATED: &str = "DEFINE FIELD OVERWRITE created ON message TYPE datetime;";
 
-/// The forwarder logs a failed `Agent::send` once, at error level, with the
-/// decision's fields. The send fails because the sink's `agent` record is
-/// deleted after the sink check passed (upstream `Agent::send` then returns
-/// `UnknownRecipient`).
+/// Run one SurrealQL statement on the upstream connection.
+async fn run_query(query: &str) {
+    SurrealDBWrapper::connection()
+        .await
+        .query(query)
+        .await
+        .and_then(|r| r.check())
+        .unwrap_or_else(|e| panic!("query {query:?} failed: {e}"));
+}
+
+/// Wait until `capture` holds `n` events with message `FAILED_SEND_MESSAGE`.
+async fn wait_for_failed_sends(capture: &Capture, n: usize) {
+    timeout(RECV_TIMEOUT, async {
+        while capture.matching(FAILED_SEND_MESSAGE).len() < n {
+            sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| {
+        panic!(
+            "timed out waiting for {n} failed-send log(s); saw {:?}",
+            capture.matching(FAILED_SEND_MESSAGE)
+        )
+    });
+}
+
+/// The forwarder logs each failed `Agent::send` once, at error level, with the
+/// decision's fields and the error's source chain. The first send (a join)
+/// fails in the `RELATE`, because the `created` field of `message` is
+/// redefined with `ASSERT false` (upstream `Agent::send` returns `Error::Send`,
+/// whose source is the database error). The second send (a leave) fails
+/// because the sink's `agent` record is deleted after the sink check passed
+/// (upstream `Agent::send` returns `UnknownRecipient`, which has no source).
 async fn failed_send_logs_at_error(tracker: &TaskTracker, token: &CancellationToken) {
     let bus = DurableDecisionBus::new(vec![FAIL_PRODUCER.to_string(), FAIL_SINK.to_string()])
         .await
@@ -287,16 +335,23 @@ async fn failed_send_logs_at_error(tracker: &TaskTracker, token: &CancellationTo
     .await
     .expect("fail_sink is an agent of the bus");
 
-    let delete = format!("DELETE agent:{FAIL_SINK}");
-    SurrealDBWrapper::connection()
-        .await
-        .query(&delete)
-        .await
-        .and_then(|r| r.check())
-        .expect("delete the sink's agent record");
-
     let capture = Capture::default();
     let guard = capture.install();
+
+    run_query(FAIL_CREATED).await;
+    tx.send(DecisionRecord {
+        coalition: "coalition-7".to_string(),
+        agent_id: 10,
+        kind: DecisionKind::Join,
+        act: true,
+        score: 1.0,
+    })
+    .await
+    .expect("queue the join");
+    wait_for_failed_sends(&capture, 1).await;
+    run_query(RESTORE_CREATED).await;
+
+    run_query(&format!("DELETE agent:{FAIL_SINK}")).await;
     tx.send(DecisionRecord {
         coalition: "coalition-7".to_string(),
         agent_id: 11,
@@ -305,33 +360,55 @@ async fn failed_send_logs_at_error(tracker: &TaskTracker, token: &CancellationTo
         score: 0.0,
     })
     .await
-    .expect("queue one decision");
+    .expect("queue the leave");
     drop(tx);
     forwarder.await.expect("forwarder join");
     drop(guard);
 
-    let events = capture.matching("durable decision forward failed");
-    assert_eq!(events.len(), 1, "one failed-send log; events {events:?}");
-    let e = &events[0];
-    assert_eq!(e.level, Level::ERROR, "level was {}", e.level);
-    for (field, want) in [
-        ("coalition", "coalition-7"),
-        ("agent_id", "11"),
-        ("kind", "leave"),
-        ("to", FAIL_SINK),
-        ("err", "recipient agent 'fail_sink' does not exist"),
-    ] {
-        assert_eq!(
-            e.fields.get(field).map(String::as_str),
-            Some(want),
-            "field {field}; fields {:?}",
-            e.fields
-        );
-    }
+    let events = capture.matching("durable decision forward");
+    let messages: Vec<Option<&str>> = events
+        .iter()
+        .map(|e| e.fields.get("message").map(String::as_str))
+        .collect();
     assert_eq!(
-        e.fields.get("message").map(String::as_str),
-        Some("durable decision forward failed; the decision may be missing from the log"),
-        "message"
+        messages,
+        vec![Some(FAILED_SEND_MESSAGE); 2],
+        "two failed-send logs; events {events:?}"
+    );
+
+    let sourced_prefix = format!("failed to send message to '{FAIL_SINK}': ");
+    for (e, agent_id, kind) in [(&events[0], "10", "join"), (&events[1], "11", "leave")] {
+        assert_eq!(e.level, Level::ERROR, "{kind}: level was {}", e.level);
+        for (field, want) in [
+            ("coalition", "coalition-7"),
+            ("agent_id", agent_id),
+            ("kind", kind),
+            ("to", FAIL_SINK),
+        ] {
+            assert_eq!(
+                e.fields.get(field).map(String::as_str),
+                Some(want),
+                "{kind}: field {field}; fields {:?}",
+                e.fields
+            );
+        }
+    }
+
+    // The join's error has a source: `err` is the top-level message, ": ",
+    // then the database error.
+    let join_err = events[0].fields.get("err").map_or("", String::as_str);
+    let source = join_err.strip_prefix(&sourced_prefix);
+    assert!(
+        source.is_some_and(|s| s.starts_with("Found ")
+            && s.contains("for field `created`")
+            && s.ends_with("but field must conform to: false")),
+        "join: err must be {sourced_prefix:?} followed by the assertion error; err {join_err:?}"
+    );
+    assert_eq!(
+        events[1].fields.get("err").map(String::as_str),
+        Some("recipient agent 'fail_sink' does not exist"),
+        "leave: err; fields {:?}",
+        events[1].fields
     );
 
     bus.shutdown().await;

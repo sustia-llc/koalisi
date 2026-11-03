@@ -6,7 +6,8 @@
 //! upstream's `sdb::sdb_task`, and prints a `SKIP` line and passes if Docker is
 //! unavailable. A log sink that is not an agent of the bus is refused with
 //! `DurableError::UnknownLogSink`, and a producer that is not an agent of the
-//! bus with `DurableError::UnknownProducer`; neither spawns a task.
+//! bus, or a bus agent renamed to another bus agent's name, with
+//! `DurableError::UnknownProducer`; none spawns a task.
 //!
 //! Fixture arithmetic (`ThresholdPolicy(AdditiveCalculator, 0, 0)`): an agent
 //! with trust `t` and `p` capability bits contributes `50 + 10·p + t`, so the
@@ -148,6 +149,10 @@ async fn every_trace_reaches_the_decisions_stream_and_the_bus() {
     // A producer or a log sink that is not an agent of the bus is refused, and
     // nothing is spawned.
     let outsider = Agent::new(OUTSIDER).await.expect("outsider agent");
+    // The bus's tee_log agent renamed to tee_producer: a bus agent has the
+    // name, but its record id is agent:tee_log, not agent:tee_producer.
+    let mut impostor = bus.agent(LOG_SINK).await.expect("tee_log agent");
+    impostor.name = PRODUCER.to_string();
     for (producer, log_sink, want) in [
         (
             producer.clone(),
@@ -161,6 +166,13 @@ async fn every_trace_reaches_the_decisions_stream_and_the_bus() {
             LOG_SINK,
             DurableError::UnknownProducer {
                 producer: OUTSIDER.to_string(),
+            },
+        ),
+        (
+            impostor,
+            LOG_SINK,
+            DurableError::UnknownProducer {
+                producer: PRODUCER.to_string(),
             },
         ),
     ] {

@@ -41,10 +41,14 @@ Re-pins `surrealdb-live-message` to `v0.7.0` (feature `durable`).
   version moves.
 - A full or closed sink of `spawn_decision_tee` logs the dropped record's
   coalition and agent id at warn.
+- `examples/durable_decisions.rs` returns an error unless it receives
+  exactly the two expected decisions, addressed to the log sink. It printed
+  "stopped cleanly" and exited 0 on a timeout before.
 - A dropped decision record is logged with its coalition, agent id and kind,
   at a level that follows the cause:
   - error: a failed `Agent::send` in the two spawn functions (with the
-    upstream error chain), and an encode failure in `forward_decision_trace`.
+    upstream error chain), and an encode failure in `send_decision_record`,
+    which `forward_decision_trace` calls.
     The send failure was logged at warn with the error's `Display` text only.
   - warn: a full or closed decision tap, and a closed writer channel in
     `forward_decision_trace`.
