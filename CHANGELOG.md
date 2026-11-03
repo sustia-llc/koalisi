@@ -33,11 +33,11 @@ One caller-owned rayon pool for koalisi's CPU work (#115).
 - `TemporalHypergraph::executor` and `CoalitionRuntime::executor` return
   the shared `Arc<Executor>`.
 - `CoalitionServiceHandle::panicked` and `CoalitionServiceHandle::closed`. A
-  panic in a service command is logged at error level with its message, and
-  `panicked()` reads `true` before that command's caller sees its error.
-  `closed()` resolves after the service stops.
-- The `koalisi` binary exits with an error as soon as its service stops
-  before ctrl-c. On ctrl-c it logs `shutdown clean`.
+  panic in a service command is logged at error level with its message.
+  After a join command panics, `panicked()` reads `true` before the caller
+  sees its error. `closed()` resolves after the service stops.
+- If its service stops before ctrl-c, the `koalisi` binary exits with an
+  error. On ctrl-c it logs `shutdown clean`.
 
 ### Changed
 - **Breaking:** these take the executor:
