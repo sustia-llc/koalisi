@@ -36,8 +36,9 @@ Re-pins `surrealdb-live-message` to `v0.7.0` (feature `durable`).
   agent of the bus, they return `DurableError::UnknownProducer`. If
   `log_sink` names no agent of the bus, they return
   `DurableError::UnknownLogSink`. In both cases they spawn nothing.
-- `thiserror` 2 is a direct dependency, for `DurableError`. The lock already
-  held `thiserror` 2.0.21, so no package version moves.
+- `thiserror` 2 is an optional dependency that `durable` turns on, for
+  `DurableError`. The lock already held `thiserror` 2.0.21, so no package
+  version moves.
 - A full or closed sink of `spawn_decision_tee` logs the dropped record's
   coalition and agent id at warn.
 - A dropped decision record is logged with its coalition, agent id and kind,
@@ -93,9 +94,10 @@ Re-pins `surrealdb-live-message` to `v0.7.0` (feature `durable`).
   replays both decisions and stops cleanly.
 - `cargo clippy --locked --all-targets -- -D warnings` is clean at `a678550`
   on the 14 non-Docker lanes and `--no-default-features`.
-- `093afb3` and `267f705` change `src/subsystems/coalition_actor.rs`, which
-  compiles in every feature set, and add unit tests. At `267f705`, these 13
-  lanes pass:
+- `093afb3` changes `src/subsystems/coalition_actor.rs`, which compiles in
+  every feature set, and adds unit tests. Later commits change the tests but
+  add none in that file. At `267f705`, these 13 lanes pass
+  (`k118/fix3/head3-test-*.log` in the review record):
   - default 108, `decision` 164, `magnitude` 137, `decision,magnitude` 193
   - `magnitude-fast` 145, `persistence` 133, `persistence,magnitude` 163
   - `remote` 114, `process` 164, `decision,magnitude,process` 252, `metrics` 108

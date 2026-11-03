@@ -33,7 +33,8 @@ tokio-util = { version = "0.7", features = ["rt"] }
 futures = "0.3"
 
 anyhow = "1.0"
-thiserror = "2"
+# `DurableError` derives `thiserror::Error`; only compiled under `durable`.
+thiserror = { version = "2", optional = true }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 config = { version = "0.15", default-features = false, features = ["toml"] }
@@ -127,7 +128,7 @@ magnitude = ["dep:catgraph-magnitude"]
 # no decision; turning it on selects the `mag-eq3` arm, not a faster `mag`.
 magnitude-fast = ["magnitude", "catgraph-magnitude/f64-fast"]
 # Durable coalition decision-event bus on surrealdb-live-message (off by default).
-durable = ["dep:surrealdb-live-message", "dep:surrealdb-types"]
+durable = ["dep:surrealdb-live-message", "dep:surrealdb-types", "dep:thiserror"]
 # Phase 7 persistence core: portable hash-chained event log (off by default).
 persistence = ["dep:ciborium", "dep:sha2"]
 # Domain-neutral remote coalition-event gateway over libp2p `request-response`

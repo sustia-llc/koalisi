@@ -1,8 +1,7 @@
 //! Error type for the process layer.
 //!
 //! Hand-rolled `Display` + [`std::error::Error`] + `From<CatgraphError>`, in the
-//! same style as `topology::errors` and `persistence::errors` — no `thiserror`,
-//! no `anyhow`. (Plain code spans rather than intra-doc links: `topology::errors`
+//! same style as `topology::errors` and `persistence::errors`. (Plain code spans rather than intra-doc links: `topology::errors`
 //! is private and `persistence::errors` only exists under its own feature, so a
 //! link would break this module's own rustdoc build.)
 

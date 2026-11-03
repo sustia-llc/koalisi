@@ -28,9 +28,9 @@
 //!   no retry; an error from it is logged at error level, and the decision
 //!   may be missing from the log.
 //! - From the log to the upstream delivery bus ([`Coalition::inbox`]),
-//!   delivery is at-least-once for a message still in the log, i.e. sent
-//!   within `sdb.message_retention_secs`. Upstream logs a record whose payload does not
-//!   decode as [`DecisionEvent`] at error level, and skips it.
+//!   delivery is at-least-once for a message that the retention sweep has
+//!   not deleted. Upstream logs a record whose payload does not decode as
+//!   [`DecisionEvent`] at error level, and skips it.
 //! - If the process exits before a receiver reads a delivery that is already
 //!   on the bus, that delivery is lost.
 //!
@@ -186,8 +186,9 @@ impl DurableDecisionBus {
 /// Errors from spawning a durable decision task.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DurableError {
-    /// The producer's name (`Agent::name`) names no agent of the
-    /// [`DurableDecisionBus`].
+    /// The producer is not an agent of the [`DurableDecisionBus`]: no bus
+    /// agent has its name, or the bus agent of that name has another record
+    /// id (`Agent::id`).
     #[error("producer '{producer}' is not an agent of the durable decision bus")]
     UnknownProducer {
         /// The name of the agent that was passed as the producer.
@@ -201,14 +202,18 @@ pub enum DurableError {
     },
 }
 
-/// `Ok` iff `producer`'s name and `log_sink` each name an agent of `bus`;
-/// the producer is checked first.
+/// `Ok` iff `producer` is the agent of `bus` with its name and record id, and
+/// `log_sink` names an agent of `bus`. The producer is checked first.
 async fn check_agents(
     bus: &DurableDecisionBus,
     producer: &Agent,
     log_sink: &str,
 ) -> Result<(), DurableError> {
-    if bus.agent(&producer.name).await.is_none() {
+    let same_agent = bus
+        .agent(&producer.name)
+        .await
+        .is_some_and(|a| a.id == producer.id);
+    if !same_agent {
         return Err(DurableError::UnknownProducer {
             producer: producer.name.clone(),
         });

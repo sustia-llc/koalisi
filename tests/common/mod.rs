@@ -5,5 +5,10 @@
 //! regular module, NOT as an integration test binary of its own.
 
 pub mod algorithms;
-pub mod log_capture;
 pub mod topology;
+
+#[allow(dead_code)]
+#[path = "../../src/test_support.rs"]
+mod test_support;
+#[allow(unused_imports)]
+pub(crate) use test_support::log_capture;
