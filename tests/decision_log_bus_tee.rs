@@ -14,8 +14,6 @@
 //! join is taken, the member's leave is declined, and the non-member's leave
 //! returns `act == false`, `score == 0.0` without consulting the policy.
 
-#![cfg(all(feature = "persistence", feature = "durable"))]
-
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

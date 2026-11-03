@@ -27,8 +27,6 @@
 //!
 //! The hot path never touches the DB; only the *decisions* are forwarded.
 
-#![cfg(feature = "durable")]
-
 mod common;
 
 use std::collections::HashMap;

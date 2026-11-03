@@ -19,6 +19,71 @@ Planned work — issue-tracked:
 - **K7 lineage**: EQ5b (c) ([#103]); the multi-coalition harness scaffold and
   the tira-extension re-pins and registrations ([#104]–[#111]).
 
+## [0.48.0] — 2026-11-03
+
+### Removed
+- **Breaking:** `core::config::CoalitionSettings` and the `Settings::coalition`
+  field, with the `[swarm]` section of `config/default.toml`. `Settings` holds
+  `environment` and `logger`. A `[swarm]` or `[coalition]` section, or a
+  `SWARM__*` or `COALITION__*` environment variable, now loads without an
+  error and has no effect. At `v0.47.0`, this search prints three groups of
+  lines: the definitions in `src/core/config.rs`, the keys and one comment
+  in `config/default.toml`, and `src/ingest/monitor.rs`, where
+  `history_capacity` is a `SampleMonitor` field and parameter:
+
+  ```sh
+  git grep -n -E 'CoalitionSettings|threshold_bps|history_capacity|delivery_strategy' v0.47.0 -- src tests examples config
+  ```
+
+  The crate builds at `a2d5ee8` without the field, so no remaining code
+  reads it.
+- The file-level `#![cfg(...)]` in `tests/k7_2_novelty.rs`,
+  `tests/durable_integration.rs`, `tests/decision_log_bus_tee.rs` and
+  `tests/remote_integration.rs`. The `required-features` of each `[[test]]`
+  entry in `Cargo.toml` gate them.
+
+### Added
+- `rust-toolchain.toml` pins Rust 1.99.1 with `rustfmt`, `clippy` and
+  `rust-analyzer`.
+
+### Changed
+- The README architecture box says "broadcast ingest bus".
+
+### Gates
+- At `a2d5ee8`, these lanes pass:
+  - default 108, `decision` 164, `persistence` 133, `process` 164
+  - `decision,magnitude,process` 252, `harness,decision,process` 332
+  - `metrics` 108, `remote` 114, `durable` 109, `persistence,durable` 135
+
+  The two Docker lanes ran with `-- --nocapture` against the container, and
+  neither container test prints `SKIP`. Clippy with `-D warnings` is clean
+  on those lanes and `--no-default-features`.
+- `setup_logging` is the only reader of `Settings`. Its callers are
+  `src/main.rs`, `examples/durable_decisions.rs`,
+  `examples/remote_coalition_consumer.rs` and the two container tests:
+
+  ```sh
+  git grep -n 'setup_logging()' v0.48.0 -- src examples tests
+  ```
+
+  At `a2d5ee8`, the `koalisi` binary starts the runtime with and without
+  `RUN_MODE=test`, and the two examples stop cleanly.
+  With the old `CoalitionSettings` restored and no `[swarm]` section, the
+  binary panics with `missing configuration field "coalition"`.
+- These are clean at `a2d5ee8`. The 1.95.0 checks cover the declaration on
+  the three named feature sets only:
+
+  ```sh
+  RUSTDOCFLAGS='-D warnings' cargo doc --locked --no-deps --all-features
+  cargo fmt --all -- --check
+  cargo +1.95.0 check --all-targets --locked
+  cargo +1.95.0 check --all-targets --locked --features persistence,durable
+  cargo +1.95.0 check --all-targets --locked --features decision,magnitude-fast,persistence,remote,process,harness,metrics
+  ```
+
+- The K4 archive gate and the other `harness` lanes did not run (owner,
+  2026-11-03).
+
 ## [0.47.0] — 2026-11-03
 
 Re-pins `surrealdb-live-message` to `v0.7.0` (feature `durable`).

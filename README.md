@@ -11,7 +11,7 @@ from temporal hypergraph topology to coalition formation algorithms to
 ```
 ┌─────────────────────────────────────────────────┐
 │  Runtime Layer (tokio tasks)                     │
-│  broadcast buses, mpsc/oneshot handles,          │
+│  broadcast ingest bus, mpsc/oneshot handles,     │
 │  TaskTracker + CancellationToken three-step      │
 │  shutdown, task-restart supervision,             │
 │  CoalitionService seam, optional durable log     │
