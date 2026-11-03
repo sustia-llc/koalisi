@@ -119,7 +119,7 @@ async fn durable_decisions_survive_restart_through_the_seam() {
     bus1.shutdown().await; // decision_log offline; cursor persisted at start
 
     // --- koalisi service with a decision tap + forwarder (recorder → decision_log). ---
-    let manager = CoalitionManager::<Worker, ()>::empty();
+    let manager = CoalitionManager::<Worker, ()>::empty(common::executor());
     let seed = manager
         .add_agent(Worker {
             id: 2,
@@ -152,6 +152,7 @@ async fn durable_decisions_survive_restart_through_the_seam() {
         Box::new(ThresholdPolicy::new(AdditiveCalculator, 0.0, 0.0)),
         DecisionContext::default(),
         tap_tx,
+        &tracker,
     );
     let forwarder = spawn_decision_forwarder(
         &bus1,

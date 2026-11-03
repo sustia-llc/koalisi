@@ -16,15 +16,16 @@
 //! `CoalitionManager` + policy + [`DecisionContext`], driven by a
 //! `tokio::sync::mpsc` command channel with `oneshot`-correlated replies. The
 //! file keeps its historical name (`coalition_actor.rs`); the type is
-//! [`CoalitionService`] with a [`CoalitionServiceHandle`]. The task is
-//! self-managed: it exits when the last handle is dropped (its command channel
-//! closes), mirroring the old actor's self-managed lifecycle.
+//! [`CoalitionService`] with a [`CoalitionServiceHandle`]. The task runs on the
+//! caller's [`TaskTracker`] and exits when the last handle is dropped (its
+//! command channel closes).
 //!
 //! ```ignore
 //! let service = CoalitionService::spawn(
 //!     manager,                                  // CoalitionManager<Agent, Team>
 //!     Box::new(ThresholdPolicy::new(AdditiveCalculator, 0.0, 0.0)),
 //!     DecisionContext { required_capabilities: 0b111 },
+//!     runtime.task_tracker(),
 //! );
 //! let decision = service.join(agent, coalition).await?;
 //! ```
@@ -399,20 +400,22 @@ impl CoalitionServiceHandle {
 pub struct CoalitionService;
 
 impl CoalitionService {
-    /// Spawn the service task. It owns `manager`, consults `policy` (via its
-    /// async offload) before mutating membership, and uses `ctx`'s
-    /// `required_capabilities` for capability-aware policies. Returns a
+    /// Spawn the service task on `tracker`. It owns `manager`, consults
+    /// `policy` (via its async offload) before mutating membership, and uses
+    /// `ctx`'s `required_capabilities` for capability-aware policies. The task
+    /// ends when every [`CoalitionServiceHandle`] is dropped. Returns a
     /// clone-able [`CoalitionServiceHandle`].
     pub fn spawn<V, HE>(
         manager: CoalitionManager<V, HE>,
         policy: Box<dyn CoalitionDecisionPolicy>,
         ctx: DecisionContext,
+        tracker: &TaskTracker,
     ) -> CoalitionServiceHandle
     where
         V: VertexTrait + Clone + AgentCapabilities + 'static,
         HE: HyperedgeTrait + Clone + 'static,
     {
-        Self::spawn_inner(manager, policy, ctx, None, None)
+        Self::spawn_inner(manager, policy, ctx, None, None, tracker)
     }
 
     /// Like [`spawn`](Self::spawn) but with a decision tap: every join or
@@ -430,12 +433,13 @@ impl CoalitionService {
         policy: Box<dyn CoalitionDecisionPolicy>,
         ctx: DecisionContext,
         tap: mpsc::Sender<DecisionRecord>,
+        tracker: &TaskTracker,
     ) -> CoalitionServiceHandle
     where
         V: VertexTrait + Clone + AgentCapabilities + 'static,
         HE: HyperedgeTrait + Clone + 'static,
     {
-        Self::spawn_inner(manager, policy, ctx, Some(tap), None)
+        Self::spawn_inner(manager, policy, ctx, Some(tap), None, tracker)
     }
 
     /// Like [`spawn`](Self::spawn) but with a decision trace tap: every join or
@@ -455,12 +459,13 @@ impl CoalitionService {
         policy: Box<dyn CoalitionDecisionPolicy>,
         ctx: DecisionContext,
         tap: mpsc::Sender<DecisionTrace>,
+        tracker: &TaskTracker,
     ) -> CoalitionServiceHandle
     where
         V: VertexTrait + Clone + AgentCapabilities + 'static,
         HE: HyperedgeTrait + Clone + 'static,
     {
-        Self::spawn_inner(manager, policy, ctx, None, Some(tap))
+        Self::spawn_inner(manager, policy, ctx, None, Some(tap), tracker)
     }
 
     fn spawn_inner<V, HE>(
@@ -469,6 +474,7 @@ impl CoalitionService {
         ctx: DecisionContext,
         tap: Option<mpsc::Sender<DecisionRecord>>,
         trace_tap: Option<mpsc::Sender<DecisionTrace>>,
+        tracker: &TaskTracker,
     ) -> CoalitionServiceHandle
     where
         V: VertexTrait + Clone + AgentCapabilities + 'static,
@@ -481,7 +487,7 @@ impl CoalitionService {
             decision_trace_tap = trace_tap.is_some(),
             "CoalitionService started"
         );
-        tokio::spawn(service_loop(rx, manager, policy, ctx, tap, trace_tap));
+        tracker.spawn(service_loop(rx, manager, policy, ctx, tap, trace_tap));
         CoalitionServiceHandle { tx }
     }
 }
@@ -620,7 +626,7 @@ mod tests {
         VertexIndex,    // candidate (caps 0b001)
         HyperedgeIndex, // coalition
     ) {
-        let manager = CoalitionManager::<Worker, ()>::empty();
+        let manager = CoalitionManager::<Worker, ()>::empty(crate::core::executor::test_executor());
         let m = manager
             .add_agent(Worker {
                 id: 2,
@@ -653,6 +659,7 @@ mod tests {
             Box::new(ThresholdPolicy::new(AdditiveCalculator, 0.0, 0.0)),
             DecisionContext::default(),
             tap_tx,
+            &TaskTracker::new(),
         );
 
         let decision = service.join(candidate, coalition).await.expect("decision");
@@ -688,6 +695,7 @@ mod tests {
             Box::new(ThresholdPolicy::new(AdditiveCalculator, 0.0, 0.0)),
             DecisionContext::default(),
             tap_tx,
+            &TaskTracker::new(),
         );
 
         // Candidate: 50 + 10·1 + 80 = 140 — the join marginal and the leave's
@@ -743,6 +751,7 @@ mod tests {
             Box::new(ThresholdPolicy::new(AdditiveCalculator, 0.0, 0.0)),
             DecisionContext::default(),
             tap_tx,
+            &TaskTracker::new(),
         );
 
         let decision = service.join(candidate, coalition).await.expect("decision");
@@ -780,6 +789,7 @@ mod tests {
             Box::new(ThresholdPolicy::new(AdditiveCalculator, 0.0, 0.0)),
             DecisionContext::default(),
             full_tx,
+            &TaskTracker::new(),
         );
         service.join(candidate, coalition).await.expect("join");
         service.leave(candidate, coalition).await.expect("leave");
@@ -803,6 +813,7 @@ mod tests {
             Box::new(ThresholdPolicy::new(AdditiveCalculator, 0.0, 0.0)),
             DecisionContext::default(),
             closed_tx,
+            &TaskTracker::new(),
         );
         service.join(candidate, coalition).await.expect("join");
         let label = format!("coalition-{}", usize::from(coalition));

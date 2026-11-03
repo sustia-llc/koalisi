@@ -33,8 +33,8 @@ tokio-util = { version = "0.7", features = ["rt"] }
 futures = "0.3"
 
 anyhow = "1.0"
-# `DurableError` derives `thiserror::Error`; only compiled under `durable`.
-thiserror = { version = "2", optional = true }
+# `ExecutorError` and, under `durable`, `DurableError` derive `thiserror::Error`.
+thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 config = { version = "0.15", default-features = false, features = ["toml"] }
@@ -43,9 +43,10 @@ serde = { version = "1.0", features = ["derive"] }
 # Topology backend: catgraph's CRUD hypergraph container. Tag kept in lockstep
 # with `catgraph-magnitude`, `catgraph-syntax` and `catgraph` — all four move
 # together (one repo, one checkout; a tag split duplicates the catgraph compile
-# units).
-catgraph-applied = { git = "https://github.com/sustia-llc/catgraph", tag = "v0.25.0" }
-rayon = "1.12"
+# units). `default-features = false` leaves catgraph's `parallel` feature (and
+# its rayon dependency) off.
+catgraph-applied = { git = "https://github.com/sustia-llc/catgraph", tag = "v0.25.0", default-features = false }
+# `core::Executor`'s pool; rayon comes through the `tokio_rayon::rayon` re-export.
 tokio-rayon = "2.1"
 
 # Optional: Active Inference decision strategy (expected free energy), the
@@ -70,8 +71,8 @@ catgraph-syntax = { git = "https://github.com/sustia-llc/catgraph", tag = "v0.25
 # Optional: the catgraph core crate, for the `CanonicalEncode` trait that
 # `PropSignature` and its `Color` require; `src/process/signature.rs` implements
 # it for `Role` and `Step` (feature `process`). Tag in lockstep with the other
-# three catgraph deps.
-catgraph = { git = "https://github.com/sustia-llc/catgraph", tag = "v0.25.0", optional = true }
+# three catgraph deps. `default-features = false` as on `catgraph-applied`.
+catgraph = { git = "https://github.com/sustia-llc/catgraph", tag = "v0.25.0", default-features = false, optional = true }
 
 # Optional: durable coalition decision messaging over SurrealDB, feature
 # `durable`; its delivery guarantees are in the `subsystems::durable` module
@@ -128,7 +129,7 @@ magnitude = ["dep:catgraph-magnitude"]
 # no decision; turning it on selects the `mag-eq3` arm, not a faster `mag`.
 magnitude-fast = ["magnitude", "catgraph-magnitude/f64-fast"]
 # Durable coalition decision-event bus on surrealdb-live-message (off by default).
-durable = ["dep:surrealdb-live-message", "dep:surrealdb-types", "dep:thiserror"]
+durable = ["dep:surrealdb-live-message", "dep:surrealdb-types"]
 # Phase 7 persistence core: portable hash-chained event log (off by default).
 persistence = ["dep:ciborium", "dep:sha2"]
 # Domain-neutral remote coalition-event gateway over libp2p `request-response`
@@ -191,6 +192,10 @@ required-features = ["harness", "decision", "process"]
 [[test]]
 name = "magnitude_trajectory"
 required-features = ["magnitude"]
+
+[[test]]
+name = "executor_global_pool"
+required-features = ["decision", "magnitude"]
 
 [[test]]
 name = "durable_integration"

@@ -28,6 +28,7 @@ use tokio::sync::{RwLock, mpsc};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
+use koalisi::core::Executor;
 use koalisi::persistence::{
     EventStore, FileEventStore, FileStoreConfig, Payload, PersistenceError, Record, SequenceNo,
     StreamId, replay_into_event_log, spawn_store_writer, spawn_topology_forwarder,
@@ -98,7 +99,8 @@ async fn run_scenario(tmp: &TempDir) -> ScenarioOut {
     let (tap_tx, tap_rx) = mpsc::channel::<TemporalEvent<W, C>>(1024);
     spawn_topology_forwarder::<W, C, W, C>(tap_rx, writer_tx, &tracker, token.child_token());
 
-    let graph = TemporalHypergraph::<W, C>::new().with_event_tap(tap_tx);
+    let graph = TemporalHypergraph::<W, C>::new(Arc::new(Executor::with_num_threads(2).unwrap()))
+        .with_event_tap(tap_tx);
 
     // Drive every mutation kind. Indices are deterministic: vertices 0..=4,
     // hyperedges 0..=1.

@@ -22,6 +22,7 @@ use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
 use koalisi::algorithms::{AdditiveCalculator, AgentCapabilities};
+use koalisi::core::Executor;
 use koalisi::decision::{DecisionContext, ThresholdPolicy};
 use koalisi::persistence::{
     EventRef, EventStore, FileEventStore, FileStoreConfig, Payload, Record, SequenceNo,
@@ -173,7 +174,10 @@ async fn decision_records_carry_the_decision_time_topology_parent() {
 
     // Tap installed on an empty log: event-log index i ↔ Topology seq i.
     let manager = CoalitionManager::new(
-        TemporalHypergraph::<Worker, Coalition>::new().with_event_tap(topo_tx),
+        TemporalHypergraph::<Worker, Coalition>::new(Arc::new(
+            Executor::with_num_threads(2).unwrap(),
+        ))
+        .with_event_tap(topo_tx),
     );
     // Setup: events 0..=4 at timestamps 0..=4 ⇒ log length 5, clock 5.
     let s = manager
@@ -202,6 +206,7 @@ async fn decision_records_carry_the_decision_time_topology_parent() {
         policy(),
         DecisionContext::default(),
         trace_tx,
+        &tracker,
     );
 
     // Hand-derived; `pos` is (event-log length, clock) before the manager call:
@@ -337,7 +342,9 @@ async fn full_writer_channel_drops_no_decision() {
     let mut forwarder =
         spawn_decision_store_forwarder(trace_rx, writer_tx, &tracker, token.child_token());
 
-    let manager = CoalitionManager::<Worker, Coalition>::empty();
+    let manager = CoalitionManager::<Worker, Coalition>::empty(Arc::new(
+        Executor::with_num_threads(2).unwrap(),
+    ));
     let s = manager
         .add_agent(Worker { id: 0, caps: 0b001 })
         .await
@@ -355,6 +362,7 @@ async fn full_writer_channel_drops_no_decision() {
         policy(),
         DecisionContext::default(),
         trace_tx,
+        &tracker,
     );
     for _ in 0..N {
         assert!(service.join(j1, c).await.unwrap().act);

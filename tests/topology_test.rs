@@ -15,7 +15,7 @@ use koalisi::topology::{
 
 #[tokio::test]
 async fn event_recording() {
-    let graph = TemporalHypergraph::<Agent, Coalition>::new();
+    let graph = TemporalHypergraph::<Agent, Coalition>::new(common::executor());
 
     let a1 = graph.add_vertex(Agent::new("a1", 5)).await.unwrap();
     let a2 = graph.add_vertex(Agent::new("a2", 3)).await.unwrap();
@@ -45,7 +45,7 @@ async fn event_recording() {
 
 #[tokio::test]
 async fn point_in_time_queries() {
-    let graph = TemporalHypergraph::<Agent, Coalition>::new();
+    let graph = TemporalHypergraph::<Agent, Coalition>::new(common::executor());
 
     let a1 = graph.add_vertex(Agent::new("a1", 5)).await.unwrap();
     let _a2 = graph.add_vertex(Agent::new("a2", 3)).await.unwrap();
@@ -71,7 +71,7 @@ async fn point_in_time_queries() {
 
 #[tokio::test]
 async fn vertex_history() {
-    let graph = TemporalHypergraph::<Agent, Coalition>::new();
+    let graph = TemporalHypergraph::<Agent, Coalition>::new(common::executor());
 
     let a1 = graph.add_vertex(Agent::new("a1", 5)).await.unwrap();
     graph
@@ -92,7 +92,7 @@ async fn vertex_history() {
 
 #[tokio::test]
 async fn snapshot_creation() {
-    let graph = TemporalHypergraph::<Agent, Coalition>::new();
+    let graph = TemporalHypergraph::<Agent, Coalition>::new(common::executor());
 
     let _a1 = graph.add_vertex(Agent::new("a1", 5)).await.unwrap();
     let _a2 = graph.add_vertex(Agent::new("a2", 3)).await.unwrap();
@@ -117,7 +117,7 @@ async fn snapshot_creation() {
 
 #[tokio::test]
 async fn vertex_weight_at() {
-    let graph = TemporalHypergraph::<Agent, Coalition>::new();
+    let graph = TemporalHypergraph::<Agent, Coalition>::new(common::executor());
 
     let a1 = graph.add_vertex(Agent::new("a1", 5)).await.unwrap();
     graph
@@ -138,7 +138,7 @@ async fn vertex_weight_at() {
 
 #[tokio::test]
 async fn event_stats() {
-    let graph = TemporalHypergraph::<Agent, Coalition>::new();
+    let graph = TemporalHypergraph::<Agent, Coalition>::new(common::executor());
 
     let a1 = graph.add_vertex(Agent::new("a1", 5)).await.unwrap();
     let a2 = graph.add_vertex(Agent::new("a2", 3)).await.unwrap();
@@ -158,7 +158,7 @@ async fn event_stats() {
 
 #[tokio::test]
 async fn form_and_dissolve_coalition() {
-    let manager = CoalitionManager::<Agent, Coalition>::empty();
+    let manager = CoalitionManager::<Agent, Coalition>::empty(common::executor());
 
     let a1 = manager.add_agent(Agent::new("a1", 5)).await.unwrap();
     let a2 = manager.add_agent(Agent::new("a2", 3)).await.unwrap();
@@ -180,7 +180,7 @@ async fn form_and_dissolve_coalition() {
 
 #[tokio::test]
 async fn agent_joins_leaves_coalition() {
-    let manager = CoalitionManager::<Agent, Coalition>::empty();
+    let manager = CoalitionManager::<Agent, Coalition>::empty(common::executor());
 
     let a1 = manager.add_agent(Agent::new("a1", 5)).await.unwrap();
     let a2 = manager.add_agent(Agent::new("a2", 3)).await.unwrap();
@@ -210,7 +210,7 @@ async fn agent_joins_leaves_coalition() {
 /// making the documented idempotency actually hold.
 #[tokio::test]
 async fn rejoin_existing_member_is_idempotent() {
-    let manager = CoalitionManager::<Agent, Coalition>::empty();
+    let manager = CoalitionManager::<Agent, Coalition>::empty(common::executor());
 
     let a1 = manager.add_agent(Agent::new("a1", 5)).await.unwrap();
     let a2 = manager.add_agent(Agent::new("a2", 3)).await.unwrap();
@@ -236,7 +236,7 @@ async fn rejoin_existing_member_is_idempotent() {
 
 #[tokio::test]
 async fn merge_coalitions() {
-    let manager = CoalitionManager::<Agent, Coalition>::empty();
+    let manager = CoalitionManager::<Agent, Coalition>::empty(common::executor());
 
     let a1 = manager.add_agent(Agent::new("a1", 5)).await.unwrap();
     let a2 = manager.add_agent(Agent::new("a2", 3)).await.unwrap();
@@ -264,7 +264,7 @@ async fn merge_coalitions() {
 
 #[tokio::test]
 async fn analytics_delta() {
-    let graph = TemporalHypergraph::<Agent, Coalition>::new();
+    let graph = TemporalHypergraph::<Agent, Coalition>::new(common::executor());
 
     // T=0: a1 added, T=1: a2 added
     let _a1 = graph.add_vertex(Agent::new("a1", 5)).await.unwrap();
@@ -279,7 +279,7 @@ async fn analytics_delta() {
 
 #[tokio::test]
 async fn analytics_event_count() {
-    let graph = TemporalHypergraph::<Agent, Coalition>::new();
+    let graph = TemporalHypergraph::<Agent, Coalition>::new(common::executor());
 
     let a1 = graph.add_vertex(Agent::new("a1", 5)).await.unwrap();
     let a2 = graph.add_vertex(Agent::new("a2", 3)).await.unwrap();

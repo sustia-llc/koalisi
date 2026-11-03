@@ -49,6 +49,7 @@
 //! [`MemberOutcome`] per final member.
 
 use crate::algorithms::{AgentCapabilities, ValueCalculator};
+use crate::core::Executor;
 use std::future::Future;
 use std::pin::Pin;
 
@@ -129,11 +130,12 @@ pub trait CoalitionDecisionPolicy: Send + Sync {
 
     /// Async, runtime-friendly variant of [`should_join`](Self::should_join).
     ///
-    /// The default impl runs the sync method inline and returns a ready future —
-    /// correct for cheap policies. Policies whose decision is CPU-heavy (e.g.
-    /// the AIF expected-free-energy bridge) override this to offload the work to a
-    /// thread pool so the async runtime is not blocked. Dyn-compatible: returns a
-    /// boxed future rather than using `async fn` in trait position.
+    /// The default impl runs the sync method inline, ignores `executor`, and
+    /// returns a ready future — correct for cheap policies. Policies whose
+    /// decision is CPU-heavy (e.g. the AIF expected-free-energy bridge) override
+    /// this to run the work on `executor` so the async runtime is not blocked.
+    /// Dyn-compatible: returns a boxed future rather than using `async fn` in
+    /// trait position.
     ///
     /// `coalition` excludes `agent` (same convention as
     /// [`should_join`](Self::should_join)).
@@ -142,7 +144,9 @@ pub trait CoalitionDecisionPolicy: Send + Sync {
         agent: &'a dyn AgentCapabilities,
         coalition: &'a [&'a dyn AgentCapabilities],
         ctx: &'a DecisionContext,
+        executor: &'a Executor,
     ) -> Pin<Box<dyn Future<Output = Decision> + Send + 'a>> {
+        let _ = executor;
         // Compute the decision in the synchronous prologue and move only the
         // owned (Copy) `Decision` into the future. The `&dyn` borrows are
         // `Send` (`AgentCapabilities: Send + Sync`) but not `'static`, so an
@@ -154,10 +158,11 @@ pub trait CoalitionDecisionPolicy: Send + Sync {
 
     /// Async, runtime-friendly variant of [`should_leave`](Self::should_leave).
     ///
-    /// The default impl runs the sync method inline and returns a ready future —
-    /// correct for cheap policies. Policies whose decision is CPU-heavy override
-    /// this to offload the work to a thread pool. Dyn-compatible: returns a boxed
-    /// future rather than using `async fn` in trait position.
+    /// The default impl runs the sync method inline, ignores `executor`, and
+    /// returns a ready future — correct for cheap policies. Policies whose
+    /// decision is CPU-heavy override this to run the work on `executor`.
+    /// Dyn-compatible: returns a boxed future rather than using `async fn` in
+    /// trait position.
     ///
     /// `coalition` includes `agent` (same convention as
     /// [`should_leave`](Self::should_leave)).
@@ -166,7 +171,9 @@ pub trait CoalitionDecisionPolicy: Send + Sync {
         agent: &'a dyn AgentCapabilities,
         coalition: &'a [&'a dyn AgentCapabilities],
         ctx: &'a DecisionContext,
+        executor: &'a Executor,
     ) -> Pin<Box<dyn Future<Output = Decision> + Send + 'a>> {
+        let _ = executor;
         // See `should_join_async`: compute synchronously, move only the owned
         // `Decision` into the future to keep it `Send`.
         let decision = self.should_leave(agent, coalition, ctx);
@@ -456,12 +463,13 @@ mod tests {
 
         let coalition: [&dyn AgentCapabilities; 1] = [&a1];
         let sync_join = policy.should_join(&a0, &coalition, &ctx);
-        let async_join = policy.should_join_async(&a0, &coalition, &ctx).await;
+        let exec = crate::core::executor::test_executor();
+        let async_join = policy.should_join_async(&a0, &coalition, &ctx, &exec).await;
         assert_eq!(sync_join, async_join, "default should_join_async == sync");
 
         let full: [&dyn AgentCapabilities; 2] = [&a0, &a1];
         let sync_leave = policy.should_leave(&a0, &full, &ctx);
-        let async_leave = policy.should_leave_async(&a0, &full, &ctx).await;
+        let async_leave = policy.should_leave_async(&a0, &full, &ctx, &exec).await;
         assert_eq!(
             sync_leave, async_leave,
             "default should_leave_async == sync"

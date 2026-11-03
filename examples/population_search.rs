@@ -17,12 +17,15 @@
 //! cargo run --example population_search
 //! ```
 
+use std::sync::Arc;
+
 use anyhow::Result;
 
 use koalisi::algorithms::{
     AgentCapabilities, CapabilityAgent, PopulationConfig, ValueCalculator, record_trajectory,
     search,
 };
+use koalisi::core::Executor;
 use koalisi::topology::{CoalitionManager, Timestamp};
 
 /// Rewards a block for covering `required` capabilities cheaply: a full-coverage
@@ -55,6 +58,7 @@ impl ValueCalculator for TaskCoverage {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let executor = Arc::new(Executor::new()?);
     tracing_subscriber::fmt().with_target(false).try_init().ok();
 
     // Four pure specialists plus two 2-capability generalists over a 4-bit task.
@@ -107,7 +111,7 @@ async fn main() -> Result<()> {
 
     // --- Execute the discovered structure on the runtime ---
     println!("\n=== Executing best structure on the runtime ===\n");
-    let manager: CoalitionManager<CapabilityAgent, u32> = CoalitionManager::empty();
+    let manager: CoalitionManager<CapabilityAgent, u32> = CoalitionManager::empty(executor);
     record_trajectory(&manager, &agents, &outcome.lineage).await?;
     println!(
         "recorded {} agents and {} lineage epochs into the temporal hypergraph",

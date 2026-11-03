@@ -9,7 +9,6 @@ mod coalitions;
 mod errors;
 mod event_log;
 mod events;
-mod executor;
 mod queries;
 mod temporal;
 mod timestamp;
@@ -21,7 +20,6 @@ pub use coalitions::CoalitionManager;
 pub use errors::{TemporalError, TemporalResult};
 pub use event_log::EventLog;
 pub use events::{EventStats, SnapshotId, TemporalEvent};
-pub use executor::HypergraphExecutor;
 pub use queries::TemporalQueries;
 pub use temporal::{SharedGraph, Snapshot, TemporalHypergraph};
 pub use timestamp::{Clock, TimeRange, Timestamp};
@@ -39,7 +37,7 @@ pub use catgraph_applied::{HyperedgeIndex, VertexIndex};
 /// already part of the old bound (inherited from the dependency) and is now
 /// stated explicitly here because the new container does not supply it, while
 /// koalisi still needs it — the tokio-rayon offload
-/// (`HypergraphExecutor::run_job`) moves weights between threads and the
+/// ([`Executor::run`](crate::core::Executor::run)) moves weights between threads and the
 /// `CoalitionService` task requires `V`/`HE: Send + Sync`. Blanket-implemented for
 /// every qualifying type; test/example payloads that derive extra traits keep
 /// them harmlessly.

@@ -8,6 +8,7 @@
 //! for ctrl-c, then runs the runtime's three-step shutdown (cancel the root
 //! token, close the tracker, drain tracked tasks).
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -15,8 +16,8 @@ use tokio::time::interval;
 use tokio_util::sync::CancellationToken;
 
 use koalisi::algorithms::{AdditiveCalculator, CapabilityAgent};
-use koalisi::core::CoalitionRuntime;
 use koalisi::core::config::setup_logging;
+use koalisi::core::{CoalitionRuntime, Executor};
 use koalisi::decision::{DecisionContext, ThresholdPolicy};
 use koalisi::subsystems::coalition_actor::{CoalitionService, CoalitionServiceHandle};
 use koalisi::topology::{CoalitionManager, HyperedgeIndex, VertexIndex};
@@ -30,9 +31,10 @@ const SEED_MEMBERS: usize = 2;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let executor = Arc::new(Executor::new()?);
     setup_logging();
 
-    let runtime = CoalitionRuntime::new();
+    let runtime = CoalitionRuntime::new(Arc::clone(&executor));
 
     // A set of agents, each covering a distinct capability bit.
     let agents: Vec<CapabilityAgent> = (0..AGENT_COUNT)
@@ -42,7 +44,7 @@ async fn main() -> Result<()> {
     // Add every agent to the manager (the candidate vertices must exist before
     // the manager is moved into the service), then form a seed coalition over
     // the first `SEED_MEMBERS`.
-    let manager: CoalitionManager<CapabilityAgent, Team> = CoalitionManager::empty();
+    let manager: CoalitionManager<CapabilityAgent, Team> = CoalitionManager::empty(executor);
     let mut vertices = Vec::with_capacity(agents.len());
     for a in &agents {
         vertices.push(manager.add_agent(*a).await?);
@@ -60,6 +62,7 @@ async fn main() -> Result<()> {
         DecisionContext {
             required_capabilities: required,
         },
+        runtime.task_tracker(),
     );
 
     tracing::info!(
@@ -83,8 +86,8 @@ async fn main() -> Result<()> {
     tracing::info!("ctrl-c received, shutting down");
 
     // Drop the daemon's own handle; the loop's clone releases when `shutdown`
-    // cancels the root token (draining the loop task), after which the service
-    // task exits on its now-closed command channel.
+    // cancels the root token, after which the service task exits on its
+    // now-closed command channel. `shutdown` drains both tracked tasks.
     drop(service);
     runtime.shutdown().await;
     tracing::info!("shutdown clean");

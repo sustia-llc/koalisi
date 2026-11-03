@@ -77,8 +77,8 @@
 //! CPU-heavy part, so [`should_join_async`](MagnitudePolicy::should_join_async)
 //! and [`should_leave_async`](MagnitudePolicy::should_leave_async) snapshot the
 //! capability masks to owned `Vec<u32>` in a sync prologue (the `&dyn` borrows
-//! are not `'static`) and run the whole closure on the rayon pool via
-//! [`tokio_rayon::spawn`], leaving the tokio worker unblocked.
+//! are not `'static`) and run the whole closure on the caller's
+//! [`Executor`], leaving the tokio worker unblocked.
 //!
 //! Upstream errors ([`CatgraphError`]) are treated as **policy-level outcomes**,
 //! never panics: a value calculation logs and returns [`f64::NEG_INFINITY`]; a
@@ -277,6 +277,7 @@ use catgraph_magnitude::{Coalition, HomMap, LawvereMetricSpace, UnitInterval, Ze
 pub use catgraph_magnitude::{RoleId, RoleModulation};
 
 use crate::algorithms::{AgentCapabilities, ValueCalculator};
+use crate::core::Executor;
 
 use super::{CoalitionDecisionPolicy, Decision, DecisionContext};
 
@@ -1909,9 +1910,9 @@ impl CoalitionDecisionPolicy for MagnitudePolicy {
     ///
     /// Snapshots the deduped capability masks to owned `Vec<u32>` in the sync
     /// prologue (the `&dyn` borrows are not `'static`), then offloads the entire
-    /// `O(m³)` magnitude computation to the rayon pool via [`tokio_rayon::spawn`]
-    /// so the tokio worker thread is not blocked. Produces the same [`Decision`]
-    /// as the sync [`should_join`](Self::should_join).
+    /// `O(m³)` magnitude computation to `executor` so the tokio worker thread
+    /// is not blocked. Produces the same [`Decision`] as the sync
+    /// [`should_join`](Self::should_join).
     ///
     /// `coalition` excludes `agent` (same convention as the sync method).
     fn should_join_async<'a>(
@@ -1919,6 +1920,7 @@ impl CoalitionDecisionPolicy for MagnitudePolicy {
         agent: &'a dyn AgentCapabilities,
         coalition: &'a [&'a dyn AgentCapabilities],
         ctx: &'a DecisionContext,
+        executor: &'a Executor,
     ) -> Pin<Box<dyn Future<Output = Decision> + Send + 'a>> {
         let required = ctx.required_capabilities;
         let join_margin = self.join_margin;
@@ -1931,10 +1933,11 @@ impl CoalitionDecisionPolicy for MagnitudePolicy {
                 let Some((with, without)) = sides else {
                     return TYPED_DECLINE;
                 };
-                tokio_rayon::spawn(move || {
-                    Self::typed_join_dispatch(&cfg, required, &with, &without, join_margin)
-                })
-                .await
+                executor
+                    .run(move || {
+                        Self::typed_join_dispatch(&cfg, required, &with, &without, join_margin)
+                    })
+                    .await
             });
         }
         let (masks_with, masks_without) = Self::join_masks(agent, coalition, required);
@@ -1943,27 +1946,28 @@ impl CoalitionDecisionPolicy for MagnitudePolicy {
         let cache = Arc::clone(&self.cache);
 
         Box::pin(async move {
-            tokio_rayon::spawn(move || {
-                Self::join_dispatch(
-                    &cache,
-                    required,
-                    &masks_with,
-                    &masks_without,
-                    candidate_caps,
-                    join_margin,
-                    route,
-                )
-            })
-            .await
+            executor
+                .run(move || {
+                    Self::join_dispatch(
+                        &cache,
+                        required,
+                        &masks_with,
+                        &masks_without,
+                        candidate_caps,
+                        join_margin,
+                        route,
+                    )
+                })
+                .await
         })
     }
 
     /// Async, runtime-friendly override of [`should_leave`](Self::should_leave).
     ///
     /// Snapshots the deduped capability masks to owned `Vec<u32>` in the sync
-    /// prologue, then offloads the entire `O(m³)` magnitude computation to the
-    /// rayon pool via [`tokio_rayon::spawn`]. Produces the same [`Decision`] as
-    /// the sync [`should_leave`](Self::should_leave).
+    /// prologue, then offloads the entire `O(m³)` magnitude computation to
+    /// `executor`. Produces the same [`Decision`] as the sync
+    /// [`should_leave`](Self::should_leave).
     ///
     /// `coalition` includes `agent` (same convention as the sync method).
     fn should_leave_async<'a>(
@@ -1971,6 +1975,7 @@ impl CoalitionDecisionPolicy for MagnitudePolicy {
         agent: &'a dyn AgentCapabilities,
         coalition: &'a [&'a dyn AgentCapabilities],
         ctx: &'a DecisionContext,
+        executor: &'a Executor,
     ) -> Pin<Box<dyn Future<Output = Decision> + Send + 'a>> {
         let required = ctx.required_capabilities;
         // Typed arm: same prologue-snapshot / offload shape as the join path.
@@ -1980,10 +1985,9 @@ impl CoalitionDecisionPolicy for MagnitudePolicy {
                 let Some((side_in, side_out)) = sides else {
                     return TYPED_DECLINE;
                 };
-                tokio_rayon::spawn(move || {
-                    Self::typed_leave_dispatch(&cfg, required, &side_in, &side_out)
-                })
-                .await
+                executor
+                    .run(move || Self::typed_leave_dispatch(&cfg, required, &side_in, &side_out))
+                    .await
             });
         }
         let (masks_in, masks_out) = Self::leave_masks(agent, coalition, required);
@@ -1993,22 +1997,23 @@ impl CoalitionDecisionPolicy for MagnitudePolicy {
         let cache = Arc::clone(&self.cache);
 
         Box::pin(async move {
-            tokio_rayon::spawn(move || match variant {
-                LeaveVariant::Fresh => {
-                    let mag_in = route.magnitude_or_zero(&masks_in, required);
-                    let mag_out = route.magnitude_or_zero(&masks_out, required);
-                    Self::leave_decision_from_values(mag_in, mag_out)
-                }
-                LeaveVariant::Evaluator => Self::leave_dispatch_evaluator(
-                    &cache,
-                    required,
-                    &masks_in,
-                    &masks_out,
-                    leaver_caps,
-                    route,
-                ),
-            })
-            .await
+            executor
+                .run(move || match variant {
+                    LeaveVariant::Fresh => {
+                        let mag_in = route.magnitude_or_zero(&masks_in, required);
+                        let mag_out = route.magnitude_or_zero(&masks_out, required);
+                        Self::leave_decision_from_values(mag_in, mag_out)
+                    }
+                    LeaveVariant::Evaluator => Self::leave_dispatch_evaluator(
+                        &cache,
+                        required,
+                        &masks_in,
+                        &masks_out,
+                        leaver_caps,
+                        route,
+                    ),
+                })
+                .await
         })
     }
 }
@@ -2457,14 +2462,15 @@ mod tests {
         // Join: candidate a0 into {a1, a2}.
         let coalition: [&dyn AgentCapabilities; 2] = [&a1, &a2];
         let sync_join = policy.should_join(&a0, &coalition, &ctx);
-        let async_join = policy.should_join_async(&a0, &coalition, &ctx).await;
+        let exec = crate::core::executor::test_executor();
+        let async_join = policy.should_join_async(&a0, &coalition, &ctx, &exec).await;
         assert_eq!(sync_join, async_join, "async join must equal sync");
         assert!(async_join.act && async_join.score > 0.0);
 
         // Leave: unique contributor stays; redundant clone leaves.
         let full: [&dyn AgentCapabilities; 3] = [&a0, &a1, &a2];
         let sync_stay = policy.should_leave(&a0, &full, &ctx);
-        let async_stay = policy.should_leave_async(&a0, &full, &ctx).await;
+        let async_stay = policy.should_leave_async(&a0, &full, &ctx, &exec).await;
         assert_eq!(sync_stay, async_stay, "async leave (stay) must equal sync");
         assert!(!async_stay.act);
 
@@ -2476,7 +2482,7 @@ mod tests {
         let with_clone: [&dyn AgentCapabilities; 4] = [&a0, &a1, &a2, &redundant];
         let sync_leave = policy.should_leave(&redundant, &with_clone, &ctx);
         let async_leave = policy
-            .should_leave_async(&redundant, &with_clone, &ctx)
+            .should_leave_async(&redundant, &with_clone, &ctx, &exec)
             .await;
         assert_eq!(
             sync_leave, async_leave,
@@ -2510,7 +2516,8 @@ mod tests {
         let coalition: [&dyn AgentCapabilities; 2] = [&a1, &a2];
 
         // The dynamic-dispatch async call must produce the non-degenerate join.
-        let d = p.should_join_async(&a0, &coalition, &ctx).await;
+        let exec = crate::core::executor::test_executor();
+        let d = p.should_join_async(&a0, &coalition, &ctx, &exec).await;
         assert!(
             d.act,
             "trait-object async join should fire (score={})",
@@ -2520,7 +2527,7 @@ mod tests {
 
         // And the leave override is reachable too: a0 provides unique coverage.
         let full: [&dyn AgentCapabilities; 3] = [&a0, &a1, &a2];
-        let stay = p.should_leave_async(&a0, &full, &ctx).await;
+        let stay = p.should_leave_async(&a0, &full, &ctx, &exec).await;
         assert!(
             !stay.act,
             "trait-object async leave: unique contributor stays"
@@ -4194,13 +4201,18 @@ mod tests {
 
         let coalition: [&dyn AgentCapabilities; 1] = [&member];
         let sync_join = policy.should_join(&clone, &coalition, &ctx);
-        let async_join = policy.should_join_async(&clone, &coalition, &ctx).await;
+        let exec = crate::core::executor::test_executor();
+        let async_join = policy
+            .should_join_async(&clone, &coalition, &ctx, &exec)
+            .await;
         assert_eq!(sync_join, async_join, "typed async join must equal sync");
         assert!(async_join.act);
 
         let seated: [&dyn AgentCapabilities; 2] = [&member, &clone];
         let sync_leave = policy.should_leave(&clone, &seated, &ctx);
-        let async_leave = policy.should_leave_async(&clone, &seated, &ctx).await;
+        let async_leave = policy
+            .should_leave_async(&clone, &seated, &ctx, &exec)
+            .await;
         assert_eq!(sync_leave, async_leave, "typed async leave must equal sync");
         assert!(!async_leave.act);
 
@@ -4210,12 +4222,16 @@ mod tests {
             caps: 0b010,
             trust: 50,
         };
-        let d = policy.should_join_async(&orphan, &coalition, &ctx).await;
+        let d = policy
+            .should_join_async(&orphan, &coalition, &ctx, &exec)
+            .await;
         assert!(!d.act && d.score.abs() < EPS);
 
         // Reachable behind the trait object.
         let boxed: Box<dyn CoalitionDecisionPolicy> = Box::new(policy);
-        let d = boxed.should_join_async(&clone, &coalition, &ctx).await;
+        let d = boxed
+            .should_join_async(&clone, &coalition, &ctx, &exec)
+            .await;
         assert!(d.act, "trait-object typed async join should fire");
     }
 }

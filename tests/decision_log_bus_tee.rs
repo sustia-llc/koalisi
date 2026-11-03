@@ -24,6 +24,7 @@ use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
 use koalisi::algorithms::{AdditiveCalculator, AgentCapabilities};
+use koalisi::core::Executor;
 use koalisi::core::config::setup_logging;
 use koalisi::decision::{DecisionContext, ThresholdPolicy};
 use koalisi::persistence::{
@@ -211,7 +212,8 @@ async fn every_trace_reaches_the_decisions_stream_and_the_bus() {
     .expect("tee_log is an agent of the bus");
 
     // Setup: 4 events (3 agents + the coalition) ⇒ log length 4, clock 4.
-    let manager = CoalitionManager::<Worker, ()>::empty();
+    let manager =
+        CoalitionManager::<Worker, ()>::empty(Arc::new(Executor::with_num_threads(2).unwrap()));
     let s = manager
         .add_agent(Worker {
             id: 0,
@@ -243,6 +245,7 @@ async fn every_trace_reaches_the_decisions_stream_and_the_bus() {
         Box::new(ThresholdPolicy::new(AdditiveCalculator, 0.0, 0.0)),
         DecisionContext::default(),
         trace_tx,
+        &pipe_tracker,
     );
 
     // Hand-derived (record, Topology parent seq):

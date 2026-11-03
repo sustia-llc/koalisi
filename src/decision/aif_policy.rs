@@ -21,6 +21,7 @@ use std::future::Future;
 use std::pin::Pin;
 
 use crate::algorithms::{AgentCapabilities, ValueCalculator};
+use crate::core::Executor;
 
 use super::{CoalitionDecisionPolicy, Decision, DecisionContext};
 
@@ -398,11 +399,10 @@ impl CoalitionDecisionPolicy for AifDecisionPolicy {
     ///
     /// Reduces the borrowed agents (capability masks + agent ids) and beliefs to
     /// two owned competence `f64` in the sync prologue, then runs the CPU-bound
-    /// expected-free-energy compute on the rayon pool via [`tokio_rayon::spawn`],
-    /// so the tokio worker thread is not blocked. The belief lookups are cheap
-    /// `HashMap` reads done in the prologue; only the EFE math is offloaded.
-    /// Produces the same [`Decision`] as the sync
-    /// [`should_join`](Self::should_join).
+    /// expected-free-energy compute on `executor`, so the tokio worker thread
+    /// is not blocked. The belief lookups are cheap `HashMap` reads done in the
+    /// prologue; only the EFE math is offloaded. Produces the same
+    /// [`Decision`] as the sync [`should_join`](Self::should_join).
     ///
     /// `coalition` excludes `agent` (same convention as the sync method).
     fn should_join_async<'a>(
@@ -410,6 +410,7 @@ impl CoalitionDecisionPolicy for AifDecisionPolicy {
         agent: &'a dyn AgentCapabilities,
         coalition: &'a [&'a dyn AgentCapabilities],
         ctx: &'a DecisionContext,
+        executor: &'a Executor,
     ) -> Pin<Box<dyn Future<Output = Decision> + Send + 'a>> {
         // Snapshot to owned values in the sync prologue: the &dyn borrows are not
         // 'static and must not cross into the spawned closure or the future.
@@ -418,15 +419,16 @@ impl CoalitionDecisionPolicy for AifDecisionPolicy {
         let join_margin = self.join_margin;
 
         Box::pin(async move {
-            tokio_rayon::spawn(move || {
-                Self::join_decision_from_competences(
-                    comp_alone,
-                    comp_coalition,
-                    params,
-                    join_margin,
-                )
-            })
-            .await
+            executor
+                .run(move || {
+                    Self::join_decision_from_competences(
+                        comp_alone,
+                        comp_coalition,
+                        params,
+                        join_margin,
+                    )
+                })
+                .await
         })
     }
 
@@ -435,9 +437,8 @@ impl CoalitionDecisionPolicy for AifDecisionPolicy {
     ///
     /// Reduces the borrowed agents and beliefs to two owned competence `f64` in
     /// the sync prologue, then runs the CPU-bound expected-free-energy compute on
-    /// the rayon pool via [`tokio_rayon::spawn`], so the tokio worker thread is
-    /// not blocked. Produces the same [`Decision`] as the sync
-    /// [`should_leave`](Self::should_leave).
+    /// `executor`, so the tokio worker thread is not blocked. Produces the same
+    /// [`Decision`] as the sync [`should_leave`](Self::should_leave).
     ///
     /// `coalition` includes `agent` (same convention as the sync method).
     fn should_leave_async<'a>(
@@ -445,15 +446,15 @@ impl CoalitionDecisionPolicy for AifDecisionPolicy {
         agent: &'a dyn AgentCapabilities,
         coalition: &'a [&'a dyn AgentCapabilities],
         ctx: &'a DecisionContext,
+        executor: &'a Executor,
     ) -> Pin<Box<dyn Future<Output = Decision> + Send + 'a>> {
         let (comp_in, comp_out) = self.leave_competences(agent, coalition, ctx);
         let params = self.params;
 
         Box::pin(async move {
-            tokio_rayon::spawn(move || {
-                Self::leave_decision_from_competences(comp_in, comp_out, params)
-            })
-            .await
+            executor
+                .run(move || Self::leave_decision_from_competences(comp_in, comp_out, params))
+                .await
         })
     }
 }
@@ -698,7 +699,8 @@ mod tests {
         // `should_join_async` is now the trait override; this still resolves on
         // the concrete type.
         let sync = policy.should_join(&a0, &coalition, &ctx);
-        let asyncd = policy.should_join_async(&a0, &coalition, &ctx).await;
+        let exec = crate::core::executor::test_executor();
+        let asyncd = policy.should_join_async(&a0, &coalition, &ctx, &exec).await;
 
         assert_eq!(sync.act, asyncd.act, "act must match sync");
         assert!(
@@ -736,7 +738,8 @@ mod tests {
         // Unique-coverage stay case: a0 is the only provider of bit 0 ⇒ stay.
         let full: [&dyn AgentCapabilities; 3] = [&a0, &a1, &a2];
         let sync_stay = policy.should_leave(&a0, &full, &ctx);
-        let async_stay = policy.should_leave_async(&a0, &full, &ctx).await;
+        let exec = crate::core::executor::test_executor();
+        let async_stay = policy.should_leave_async(&a0, &full, &ctx, &exec).await;
         assert_eq!(sync_stay.act, async_stay.act, "stay: act must match sync");
         assert!(
             (sync_stay.score - async_stay.score).abs() < 1e-12,
@@ -755,7 +758,7 @@ mod tests {
         let with_clone: [&dyn AgentCapabilities; 4] = [&a0, &a1, &a2, &redundant];
         let sync_leave = policy.should_leave(&redundant, &with_clone, &ctx);
         let async_leave = policy
-            .should_leave_async(&redundant, &with_clone, &ctx)
+            .should_leave_async(&redundant, &with_clone, &ctx, &exec)
             .await;
         assert_eq!(
             sync_leave.act, async_leave.act,
@@ -798,7 +801,8 @@ mod tests {
 
         // The dynamic-dispatch async call must produce the non-degenerate join
         // decision (coverage 1/3 → 3/3), proving the override is reached.
-        let d = p.should_join_async(&a0, &coalition, &ctx).await;
+        let exec = crate::core::executor::test_executor();
+        let d = p.should_join_async(&a0, &coalition, &ctx, &exec).await;
         assert!(
             d.act,
             "trait-object async join should fire (score={})",
@@ -808,7 +812,7 @@ mod tests {
 
         // And the leave override is reachable too: a0 provides unique coverage.
         let full: [&dyn AgentCapabilities; 3] = [&a0, &a1, &a2];
-        let stay = p.should_leave_async(&a0, &full, &ctx).await;
+        let stay = p.should_leave_async(&a0, &full, &ctx, &exec).await;
         assert!(
             !stay.act,
             "trait-object async leave: unique-coverage agent stays"
@@ -1182,7 +1186,8 @@ mod tests {
         let coalition: [&dyn AgentCapabilities; 1] = [&a1];
 
         let sync = policy.should_join(&a0, &coalition, &ctx);
-        let r#async = policy.should_join_async(&a0, &coalition, &ctx).await;
+        let exec = crate::core::executor::test_executor();
+        let r#async = policy.should_join_async(&a0, &coalition, &ctx, &exec).await;
         assert_eq!(sync, r#async, "belief-aware async join == sync");
     }
 }

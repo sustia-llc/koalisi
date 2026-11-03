@@ -9,11 +9,14 @@
 //! clone does not).
 
 use std::fmt::{Display, Formatter};
+use std::sync::Arc;
 
 use koalisi::algorithms::AgentCapabilities;
+use koalisi::core::Executor;
 use koalisi::decision::DecisionContext;
 use koalisi::subsystems::coalition_actor::CoalitionService;
 use koalisi::topology::CoalitionManager;
+use tokio_util::task::TaskTracker;
 
 // ---------------------------------------------------------------------------
 // Fixture types: a vertex that is both a valid graph weight and an agent, and
@@ -79,7 +82,8 @@ async fn manager_with_seed_coalition() -> (
     koalisi::topology::VertexIndex, // seed member (caps 0b010)
     koalisi::topology::HyperedgeIndex,
 ) {
-    let manager = CoalitionManager::<Worker, Team>::empty();
+    let manager =
+        CoalitionManager::<Worker, Team>::empty(Arc::new(Executor::with_num_threads(2).unwrap()));
     let seed = manager
         .add_agent(Worker::new(2, 0b010, 90))
         .await
@@ -120,6 +124,7 @@ async fn threshold_policy_applies_join_through_actor() {
         manager,
         Box::new(ThresholdPolicy::new(AdditiveCalculator, 0.0, 0.0)),
         DecisionContext::default(),
+        &TaskTracker::new(),
     );
 
     let decision = service.join(candidate, coalition).await.expect("decision");
@@ -146,6 +151,7 @@ async fn threshold_policy_declines_join_through_actor() {
         manager,
         Box::new(ThresholdPolicy::new(AdditiveCalculator, 1.0e9, 0.0)),
         DecisionContext::default(),
+        &TaskTracker::new(),
     );
 
     let decision = service.join(candidate, coalition).await.expect("decision");
@@ -176,6 +182,7 @@ async fn threshold_policy_forces_leave_through_actor() {
         manager,
         Box::new(ThresholdPolicy::new(AdditiveCalculator, 0.0, 1.0e9)),
         DecisionContext::default(),
+        &TaskTracker::new(),
     );
 
     let decision = service.leave(seed, coalition).await.expect("decision");
@@ -246,7 +253,12 @@ async fn aif_policy_join_non_degenerate_through_actor() {
             .add_agent(Worker::new(1, 0b001, 80))
             .await
             .expect("add candidate");
-        let service = CoalitionService::spawn(manager, Box::new(AifDecisionPolicy::default()), ctx);
+        let service = CoalitionService::spawn(
+            manager,
+            Box::new(AifDecisionPolicy::default()),
+            ctx,
+            &TaskTracker::new(),
+        );
         let decision = service.join(candidate, coalition).await.expect("decision");
         assert!(decision.act, "covering a new required bit lowers G ⇒ join");
         let members = service.members(coalition).await.expect("members");
@@ -261,7 +273,12 @@ async fn aif_policy_join_non_degenerate_through_actor() {
             .add_agent(Worker::new(9, 0b010, 80))
             .await
             .expect("add redundant");
-        let service = CoalitionService::spawn(manager, Box::new(AifDecisionPolicy::default()), ctx);
+        let service = CoalitionService::spawn(
+            manager,
+            Box::new(AifDecisionPolicy::default()),
+            ctx,
+            &TaskTracker::new(),
+        );
         let decision = service.join(redundant, coalition).await.expect("decision");
         assert!(!decision.act, "redundant coverage ⇒ decline");
         let members = service.members(coalition).await.expect("members");
@@ -310,7 +327,7 @@ async fn belief_aware_join_through_actor() {
         CoalitionHistory::new(),
     );
 
-    let service = CoalitionService::spawn(manager, Box::new(policy), ctx);
+    let service = CoalitionService::spawn(manager, Box::new(policy), ctx, &TaskTracker::new());
 
     let decision = service.join(redundant, coalition).await.expect("decision");
     assert!(

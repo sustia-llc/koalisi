@@ -22,6 +22,7 @@
 //! Every wait is bounded; the test cannot hang.
 
 use std::fmt::{Display, Formatter};
+use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::time::timeout;
@@ -29,6 +30,7 @@ use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
 use koalisi::algorithms::{AdditiveCalculator, AgentCapabilities};
+use koalisi::core::Executor;
 use koalisi::decision::{DecisionContext, ThresholdPolicy};
 use koalisi::subsystems::coalition_actor::{CoalitionService, spawn_decision_tee};
 use koalisi::subsystems::remote::{
@@ -94,7 +96,9 @@ async fn remote_gateway_publishes_coalition_decisions() {
         let root = CancellationToken::new();
 
         // ---------- Producer: manager + service with a decision tap ----------
-        let manager = CoalitionManager::<Worker, ()>::empty();
+        let manager = CoalitionManager::<Worker, ()>::empty(Arc::new(
+            Executor::with_num_threads(2).expect("two-thread pool builds"),
+        ));
         let seed = manager
             .add_agent(Worker {
                 id: 2,
@@ -129,6 +133,7 @@ async fn remote_gateway_publishes_coalition_decisions() {
                 required_capabilities: 0b111,
             },
             tap_tx,
+            &tracker,
         );
 
         // ---------- Tee: tap → (one leg) → gateway ----------

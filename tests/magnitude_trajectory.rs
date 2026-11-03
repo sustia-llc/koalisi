@@ -52,7 +52,7 @@ fn assert_mags(points: &[koalisi::topology::MagnitudePoint], expected: &[f64]) {
 // (a) Joins raise magnitude, a leave lowers it; counts and timestamps track.
 #[tokio::test]
 async fn trajectory_rises_on_joins_and_drops_on_leave() {
-    let g = TemporalHypergraph::<Worker, Coalition>::new();
+    let g = TemporalHypergraph::<Worker, Coalition>::new(common::executor());
     let v0 = g.add_vertex(Worker { id: 0, caps: 0b001 }).await.unwrap();
     let v1 = g.add_vertex(Worker { id: 1, caps: 0b010 }).await.unwrap();
     let v2 = g.add_vertex(Worker { id: 2, caps: 0b100 }).await.unwrap();
@@ -62,8 +62,14 @@ async fn trajectory_rises_on_joins_and_drops_on_leave() {
         .unwrap();
     g.update_hyperedge_vertices(he, vec![v1, v2]).await.unwrap();
 
-    let points =
-        TemporalAnalytics::magnitude_history(g.events_ref(), he, 0b111, &TimeRange::all()).await;
+    let points = TemporalAnalytics::magnitude_history(
+        g.events_ref(),
+        he,
+        0b111,
+        &TimeRange::all(),
+        g.executor(),
+    )
+    .await;
 
     assert_mags(&points, &[2.0, 3.0, 2.0]);
     let counts: Vec<usize> = points.iter().map(|p| p.member_count).collect();
@@ -79,7 +85,7 @@ async fn trajectory_rises_on_joins_and_drops_on_leave() {
 // (b) A redundant clone joining is a flat point: count rises, magnitude does not.
 #[tokio::test]
 async fn redundant_clone_join_is_flat_skeletalization() {
-    let g = TemporalHypergraph::<Worker, Coalition>::new();
+    let g = TemporalHypergraph::<Worker, Coalition>::new(common::executor());
     let v0 = g.add_vertex(Worker { id: 0, caps: 0b001 }).await.unwrap();
     let v1 = g.add_vertex(Worker { id: 1, caps: 0b010 }).await.unwrap();
     let v2 = g.add_vertex(Worker { id: 2, caps: 0b001 }).await.unwrap(); // clone of v0's caps
@@ -88,8 +94,14 @@ async fn redundant_clone_join_is_flat_skeletalization() {
         .await
         .unwrap();
 
-    let points =
-        TemporalAnalytics::magnitude_history(g.events_ref(), he, 0b111, &TimeRange::all()).await;
+    let points = TemporalAnalytics::magnitude_history(
+        g.events_ref(),
+        he,
+        0b111,
+        &TimeRange::all(),
+        g.executor(),
+    )
+    .await;
 
     assert_mags(&points, &[2.0, 2.0]);
     assert_eq!(points[0].member_count, 2);
@@ -99,7 +111,7 @@ async fn redundant_clone_join_is_flat_skeletalization() {
 // (c) A member's weight update is a sample point; a non-member's is not.
 #[tokio::test]
 async fn member_weight_update_is_a_sample_point() {
-    let g = TemporalHypergraph::<Worker, Coalition>::new();
+    let g = TemporalHypergraph::<Worker, Coalition>::new(common::executor());
     let v0 = g.add_vertex(Worker { id: 0, caps: 0b001 }).await.unwrap();
     let v1 = g.add_vertex(Worker { id: 1, caps: 0b001 }).await.unwrap();
     let vx = g.add_vertex(Worker { id: 2, caps: 0b100 }).await.unwrap(); // never a member
@@ -113,8 +125,14 @@ async fn member_weight_update_is_a_sample_point() {
         .await
         .unwrap();
 
-    let points =
-        TemporalAnalytics::magnitude_history(g.events_ref(), he, 0b011, &TimeRange::all()).await;
+    let points = TemporalAnalytics::magnitude_history(
+        g.events_ref(),
+        he,
+        0b011,
+        &TimeRange::all(),
+        g.executor(),
+    )
+    .await;
 
     // Clones {0b001, 0b001} ⇒ 1.0; after v0 → 0b010, disjoint {0b010, 0b001} ⇒ 2.0.
     assert_mags(&points, &[1.0, 2.0]);
@@ -123,7 +141,7 @@ async fn member_weight_update_is_a_sample_point() {
 // (d) A task-irrelevant bystander is excluded (not collapsed); required == 0 zeros out.
 #[tokio::test]
 async fn irrelevant_bystander_and_zero_required() {
-    let g = TemporalHypergraph::<Worker, Coalition>::new();
+    let g = TemporalHypergraph::<Worker, Coalition>::new(common::executor());
     let v0 = g.add_vertex(Worker { id: 0, caps: 0b001 }).await.unwrap();
     let v1 = g.add_vertex(Worker { id: 1, caps: 0b010 }).await.unwrap();
     let v2 = g.add_vertex(Worker { id: 2, caps: 0b100 }).await.unwrap(); // bystander under 0b011
@@ -133,13 +151,26 @@ async fn irrelevant_bystander_and_zero_required() {
         .unwrap();
 
     // required 0b011: bystander 0b100 excluded ⇒ {0b001, 0b010} disjoint ⇒ 2.0, count 3.
-    let points =
-        TemporalAnalytics::magnitude_history(g.events_ref(), he, 0b011, &TimeRange::all()).await;
+    let points = TemporalAnalytics::magnitude_history(
+        g.events_ref(),
+        he,
+        0b011,
+        &TimeRange::all(),
+        g.executor(),
+    )
+    .await;
     assert_mags(&points, &[2.0]);
     assert_eq!(points[0].member_count, 3);
 
     // required 0: every agent irrelevant ⇒ every point 0.0.
-    let zero = TemporalAnalytics::magnitude_history(g.events_ref(), he, 0, &TimeRange::all()).await;
+    let zero = TemporalAnalytics::magnitude_history(
+        g.events_ref(),
+        he,
+        0,
+        &TimeRange::all(),
+        g.executor(),
+    )
+    .await;
     assert!(!zero.is_empty());
     assert!(zero.iter().all(|p| p.magnitude.abs() < EPS));
 }
@@ -148,7 +179,7 @@ async fn irrelevant_bystander_and_zero_required() {
 //     terminal point; empty cases (unknown hyperedge, pre-formation window).
 #[tokio::test]
 async fn window_baseline_and_dissolution() {
-    let g = TemporalHypergraph::<Worker, Coalition>::new();
+    let g = TemporalHypergraph::<Worker, Coalition>::new(common::executor());
     let v0 = g.add_vertex(Worker { id: 0, caps: 0b001 }).await.unwrap(); // ts 0
     let v1 = g.add_vertex(Worker { id: 1, caps: 0b010 }).await.unwrap(); // ts 1
     let he = g.add_hyperedge(vec![v0, v1], coalition()).await.unwrap(); // ts 2, Mag 2.0
@@ -161,6 +192,7 @@ async fn window_baseline_and_dissolution() {
         he,
         0b111,
         &TimeRange::from(Timestamp::new(3)),
+        g.executor(),
     )
     .await;
     assert_eq!(points.len(), 2);
@@ -180,6 +212,7 @@ async fn window_baseline_and_dissolution() {
         HyperedgeIndex(999),
         0b111,
         &TimeRange::all(),
+        g.executor(),
     )
     .await;
     assert!(unknown.is_empty());
@@ -190,6 +223,7 @@ async fn window_baseline_and_dissolution() {
         he,
         0b111,
         &TimeRange::between(Timestamp::new(0), Timestamp::new(1)),
+        g.executor(),
     )
     .await;
     assert!(before.is_empty());
@@ -198,13 +232,19 @@ async fn window_baseline_and_dissolution() {
 // (f) A subsumed member counts as one effective agent.
 #[tokio::test]
 async fn subsumption_pair_counts_one() {
-    let g = TemporalHypergraph::<Worker, Coalition>::new();
+    let g = TemporalHypergraph::<Worker, Coalition>::new(common::executor());
     let v0 = g.add_vertex(Worker { id: 0, caps: 0b001 }).await.unwrap();
     let v1 = g.add_vertex(Worker { id: 1, caps: 0b011 }).await.unwrap(); // subsumes v0
     let he = g.add_hyperedge(vec![v0, v1], coalition()).await.unwrap();
 
-    let points =
-        TemporalAnalytics::magnitude_history(g.events_ref(), he, 0b111, &TimeRange::all()).await;
+    let points = TemporalAnalytics::magnitude_history(
+        g.events_ref(),
+        he,
+        0b111,
+        &TimeRange::all(),
+        g.executor(),
+    )
+    .await;
 
     // A(0→1)=1.0, A(1→0)=0.5 ⇒ w=(0,1) ⇒ Mag = 1.0.
     assert_mags(&points, &[1.0]);

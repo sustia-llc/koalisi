@@ -34,6 +34,7 @@ use std::pin::Pin;
 use nalgebra::DMatrix;
 
 use crate::algorithms::{AgentCapabilities, ValueCalculator};
+use crate::core::Executor;
 
 use super::{BridgeParams, CoalitionDecisionPolicy, Decision, DecisionContext};
 
@@ -289,41 +290,44 @@ impl CoalitionDecisionPolicy for AifMmDecisionPolicy {
     }
 
     /// Async override: snapshot the coverage masks in the sync prologue, then run
-    /// the CPU-bound multi-modality EFE compute on the rayon pool via
-    /// [`tokio_rayon::spawn`] so the tokio worker is not blocked. Produces the same
-    /// [`Decision`] as [`should_join`](Self::should_join). `coalition` excludes
-    /// `agent`.
+    /// the CPU-bound multi-modality EFE compute on `executor` so the tokio
+    /// worker is not blocked. Produces the same [`Decision`] as
+    /// [`should_join`](Self::should_join). `coalition` excludes `agent`.
     fn should_join_async<'a>(
         &'a self,
         agent: &'a dyn AgentCapabilities,
         coalition: &'a [&'a dyn AgentCapabilities],
         ctx: &'a DecisionContext,
+        executor: &'a Executor,
     ) -> Pin<Box<dyn Future<Output = Decision> + Send + 'a>> {
         let (alone, coalition_mask) = Self::join_masks(agent, coalition);
         let required = ctx.required_capabilities;
         let params = self.params;
         let join_margin = self.join_margin;
         Box::pin(async move {
-            tokio_rayon::spawn(move || {
-                Self::join_decision(required, alone, coalition_mask, params, join_margin)
-            })
-            .await
+            executor
+                .run(move || {
+                    Self::join_decision(required, alone, coalition_mask, params, join_margin)
+                })
+                .await
         })
     }
 
-    /// Async override of [`should_leave`](Self::should_leave). `coalition` includes
-    /// `agent`.
+    /// Async override of [`should_leave`](Self::should_leave), run on
+    /// `executor`. `coalition` includes `agent`.
     fn should_leave_async<'a>(
         &'a self,
         agent: &'a dyn AgentCapabilities,
         coalition: &'a [&'a dyn AgentCapabilities],
         ctx: &'a DecisionContext,
+        executor: &'a Executor,
     ) -> Pin<Box<dyn Future<Output = Decision> + Send + 'a>> {
         let (in_mask, out_mask) = Self::leave_masks(agent, coalition);
         let required = ctx.required_capabilities;
         let params = self.params;
         Box::pin(async move {
-            tokio_rayon::spawn(move || Self::leave_decision(required, in_mask, out_mask, params))
+            executor
+                .run(move || Self::leave_decision(required, in_mask, out_mask, params))
                 .await
         })
     }
@@ -704,13 +708,14 @@ mod tests {
         let coalition: [&dyn AgentCapabilities; 2] = [&a1, &a2];
 
         let sync = policy.should_join(&a0, &coalition, &ctx);
-        let asyncd = policy.should_join_async(&a0, &coalition, &ctx).await;
+        let exec = crate::core::executor::test_executor();
+        let asyncd = policy.should_join_async(&a0, &coalition, &ctx, &exec).await;
         assert_eq!(sync.act, asyncd.act);
         assert!((sync.score - asyncd.score).abs() < 1e-12);
 
         let full: [&dyn AgentCapabilities; 3] = [&a0, &a1, &a2];
         let sync_leave = policy.should_leave(&a0, &full, &ctx);
-        let async_leave = policy.should_leave_async(&a0, &full, &ctx).await;
+        let async_leave = policy.should_leave_async(&a0, &full, &ctx, &exec).await;
         assert_eq!(sync_leave.act, async_leave.act);
         assert!((sync_leave.score - async_leave.score).abs() < 1e-12);
     }

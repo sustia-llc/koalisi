@@ -12,6 +12,7 @@
 //!    `CoalitionDecisionPolicy` trait (the #8 acceptance line).
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::sync::broadcast;
@@ -20,6 +21,7 @@ use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
 use koalisi::algorithms::{AdditiveCalculator, AgentCapabilities, CapabilityAgent};
+use koalisi::core::Executor;
 use koalisi::decision::{CoalitionDecisionPolicy, DecisionContext, ThresholdPolicy};
 use koalisi::ingest::{
     MultiResolutionSource, NumericSample, Pacing, SampleUpdate, SensorEvent, SensorEventSource,
@@ -234,7 +236,9 @@ async fn coalition_layer_runs_on_synthetic_sensor_agents() {
             .collect();
 
         // ---- topology: form a coalition of the sensor agents ----
-        let manager: CoalitionManager<CapabilityAgent, SensorCoalition> = CoalitionManager::empty();
+        let executor = Arc::new(Executor::with_num_threads(2).expect("two-thread pool builds"));
+        let manager: CoalitionManager<CapabilityAgent, SensorCoalition> =
+            CoalitionManager::empty(Arc::clone(&executor));
         let mut vertices = Vec::new();
         for a in &agents {
             vertices.push(manager.add_agent(*a).await.expect("add agent"));
@@ -259,7 +263,9 @@ async fn coalition_layer_runs_on_synthetic_sensor_agents() {
         let candidate = CapabilityAgent::new(3, 1u32 << 3, 50);
         let current: Vec<&dyn AgentCapabilities> =
             agents.iter().map(|a| a as &dyn AgentCapabilities).collect();
-        let decision = policy.should_join_async(&candidate, &current, &ctx).await;
+        let decision = policy
+            .should_join_async(&candidate, &current, &ctx, &executor)
+            .await;
         assert!(
             decision.act,
             "a sensor adding a new capability should join (marginal value {} > 0)",

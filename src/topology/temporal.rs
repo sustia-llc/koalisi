@@ -3,9 +3,9 @@
 use super::errors::{TemporalError, TemporalResult};
 use super::event_log::EventLog;
 use super::events::{SnapshotId, TemporalEvent};
-use super::executor::EXEC;
 use super::timestamp::{Clock, TimeRange, Timestamp};
 use super::{HyperedgeTrait, VertexTrait};
+use crate::core::Executor;
 use catgraph_applied::{HyperedgeIndex, Hypergraph, HypergraphError, VertexIndex};
 
 pub type SharedGraph<V, HE> = std::sync::Arc<std::sync::RwLock<Hypergraph<V, HE>>>;
@@ -56,6 +56,8 @@ where
     /// SHARES the tap (the `Option<Sender>` is cloned), consistent with sharing
     /// the `events` Arc.
     event_tap: Option<mpsc::Sender<TemporalEvent<V, HE>>>,
+    /// The pool every graph operation runs on. `Clone` shares it.
+    executor: Arc<Executor>,
 }
 
 impl<V, HE> TemporalHypergraph<V, HE>
@@ -63,20 +65,15 @@ where
     V: VertexTrait + Clone + 'static,
     HE: HyperedgeTrait + Clone + 'static,
 {
-    /// Create a new temporal hypergraph.
-    pub fn new() -> Self {
-        Self {
-            graph: Arc::new(StdRwLock::new(Hypergraph::new())),
-            events: Arc::new(RwLock::new(EventLog::new())),
-            snapshots: Arc::new(RwLock::new(BTreeMap::new())),
-            clock: Clock::new(),
-            snapshot_counter: AtomicU64::new(0),
-            event_tap: None,
-        }
+    /// Create a new temporal hypergraph whose graph operations run on
+    /// `executor`.
+    pub fn new(executor: Arc<Executor>) -> Self {
+        Self::wrap(Arc::new(StdRwLock::new(Hypergraph::new())), executor)
     }
 
-    /// Create a temporal hypergraph wrapping an existing graph.
-    pub fn wrap(graph: SharedGraph<V, HE>) -> Self {
+    /// Create a temporal hypergraph wrapping an existing graph, whose graph
+    /// operations run on `executor`.
+    pub fn wrap(graph: SharedGraph<V, HE>, executor: Arc<Executor>) -> Self {
         Self {
             graph,
             events: Arc::new(RwLock::new(EventLog::new())),
@@ -84,7 +81,13 @@ where
             clock: Clock::new(),
             snapshot_counter: AtomicU64::new(0),
             event_tap: None,
+            executor,
         }
+    }
+
+    /// The executor this hypergraph's graph operations run on.
+    pub fn executor(&self) -> &Arc<Executor> {
+        &self.executor
     }
 
     /// Install an event tap (Phase 7 / P7.2, sustia-llc/koalisi#30).
@@ -182,8 +185,9 @@ where
 
         // K1: `add_vertex` is infallible on the catgraph backend (returns the
         // fresh `VertexIndex`, not a `Result`).
-        let index = EXEC
-            .run_job(move || graph.write().unwrap().add_vertex(weight_clone))
+        let index = self
+            .executor
+            .run(move || graph.write().unwrap().add_vertex(weight_clone))
             .await;
 
         self.record_event(TemporalEvent::VertexAdded {
@@ -202,8 +206,9 @@ where
         let graph = self.graph.clone();
 
         // Get weight and remove atomically in single write lock
-        let weight = EXEC
-            .run_job(move || {
+        let weight = self
+            .executor
+            .run(move || {
                 let mut g = graph.write().unwrap();
                 let weight = g.get_vertex_weight(index)?;
                 g.remove_vertex(index)?;
@@ -233,8 +238,9 @@ where
         let new_weight_clone = new_weight;
 
         // Get old weight and update atomically in single write lock
-        let old_weight = EXEC
-            .run_job(move || {
+        let old_weight = self
+            .executor
+            .run(move || {
                 let mut g = graph.write().unwrap();
                 let old_weight = g.get_vertex_weight(index)?;
                 g.update_vertex_weight(index, new_weight_clone)?;
@@ -265,8 +271,9 @@ where
         let vertices_clone = vertices.clone();
         let graph = self.graph.clone();
 
-        let index = EXEC
-            .run_job(move || {
+        let index = self
+            .executor
+            .run(move || {
                 graph
                     .write()
                     .unwrap()
@@ -292,8 +299,9 @@ where
         let graph = self.graph.clone();
 
         // Get info and remove atomically in single write lock
-        let (vertices, weight) = EXEC
-            .run_job(move || {
+        let (vertices, weight) = self
+            .executor
+            .run(move || {
                 let mut g = graph.write().unwrap();
                 let vertices = g.get_hyperedge_vertices(index)?;
                 let weight = g.get_hyperedge_weight(index)?;
@@ -325,8 +333,9 @@ where
         let new_weight_clone = new_weight;
 
         // Get old weight and update atomically in single write lock
-        let old_weight = EXEC
-            .run_job(move || {
+        let old_weight = self
+            .executor
+            .run(move || {
                 let mut g = graph.write().unwrap();
                 let old_weight = g.get_hyperedge_weight(index)?;
                 g.update_hyperedge_weight(index, new_weight_clone)?;
@@ -357,8 +366,9 @@ where
         let new_vertices_clone = new_vertices.clone();
 
         // Get old vertices and update atomically in single write lock
-        let old_vertices = EXEC
-            .run_job(move || {
+        let old_vertices = self
+            .executor
+            .run(move || {
                 let mut g = graph.write().unwrap();
                 let old_vertices = g.get_hyperedge_vertices(index)?;
                 g.update_hyperedge_vertices(index, new_vertices_clone)?;
@@ -395,8 +405,9 @@ where
         let timestamp = self.clock.tick();
         let graph = self.graph.clone();
 
-        let (old_vertices, new_vertices) = EXEC
-            .run_job(move || {
+        let (old_vertices, new_vertices) = self
+            .executor
+            .run(move || {
                 let mut g = graph.write().unwrap();
                 let old_vertices = g
                     .get_hyperedge_vertices(index)
@@ -428,8 +439,9 @@ where
         let graph = self.graph.clone();
 
         // Get old vertices, reverse, get new vertices atomically in single write lock
-        let (old_vertices, new_vertices) = EXEC
-            .run_job(move || {
+        let (old_vertices, new_vertices) = self
+            .executor
+            .run(move || {
                 let mut g = graph.write().unwrap();
                 let old_vertices = g.get_hyperedge_vertices(index)?;
                 g.reverse_hyperedge(index)?;
@@ -466,8 +478,9 @@ where
         let indices_clone = indices.clone();
 
         // Join and get new vertices atomically in single write lock
-        let new_vertices = EXEC
-            .run_job(move || {
+        let new_vertices = self
+            .executor
+            .run(move || {
                 let mut g = graph.write().unwrap();
                 g.join_hyperedges(&indices_clone)?;
                 let new_vertices = g.get_hyperedge_vertices(target_index)?;
@@ -499,8 +512,9 @@ where
         let vertices_clone = vertices.clone();
 
         // Get old vertices, contract, all atomically in single write lock
-        let (old_vertices, new_vertices) = EXEC
-            .run_job(move || {
+        let (old_vertices, new_vertices) = self
+            .executor
+            .run(move || {
                 let mut g = graph.write().unwrap();
                 let old_vertices = g.get_hyperedge_vertices(hyperedge_index)?;
                 let new_vertices =
@@ -534,8 +548,9 @@ where
         // Get count and clear atomically in single write lock.
         // K1: `clear_hyperedges` is infallible on the catgraph backend (returns
         // `()`, not `Result`), so the closure yields the count directly.
-        let count = EXEC
-            .run_job(move || {
+        let count = self
+            .executor
+            .run(move || {
                 let mut g = graph.write().unwrap();
                 let count = g.count_hyperedges();
                 g.clear_hyperedges();
@@ -555,8 +570,9 @@ where
         let graph = self.graph.clone();
 
         // Get counts and clear atomically in single write lock
-        let (vertex_count, hyperedge_count) = EXEC
-            .run_job(move || {
+        let (vertex_count, hyperedge_count) = self
+            .executor
+            .run(move || {
                 let mut g = graph.write().unwrap();
                 let vertex_count = g.count_vertices();
                 let hyperedge_count = g.count_hyperedges();
@@ -582,7 +598,8 @@ where
     /// Get the vertex weight.
     pub async fn get_vertex_weight(&self, index: VertexIndex) -> TemporalResult<V> {
         let graph = self.graph.clone();
-        EXEC.run_job(move || graph.read().unwrap().get_vertex_weight(index))
+        self.executor
+            .run(move || graph.read().unwrap().get_vertex_weight(index))
             .await
             .map_err(TemporalError::from)
     }
@@ -590,7 +607,8 @@ where
     /// Get the hyperedge weight.
     pub async fn get_hyperedge_weight(&self, index: HyperedgeIndex) -> TemporalResult<HE> {
         let graph = self.graph.clone();
-        EXEC.run_job(move || graph.read().unwrap().get_hyperedge_weight(index))
+        self.executor
+            .run(move || graph.read().unwrap().get_hyperedge_weight(index))
             .await
             .map_err(TemporalError::from)
     }
@@ -601,7 +619,8 @@ where
         index: HyperedgeIndex,
     ) -> TemporalResult<Vec<VertexIndex>> {
         let graph = self.graph.clone();
-        EXEC.run_job(move || graph.read().unwrap().get_hyperedge_vertices(index))
+        self.executor
+            .run(move || graph.read().unwrap().get_hyperedge_vertices(index))
             .await
             .map_err(TemporalError::from)
     }
@@ -609,14 +628,16 @@ where
     /// Count vertices.
     pub async fn count_vertices(&self) -> usize {
         let graph = self.graph.clone();
-        EXEC.run_job(move || graph.read().unwrap().count_vertices())
+        self.executor
+            .run(move || graph.read().unwrap().count_vertices())
             .await
     }
 
     /// Count hyperedges.
     pub async fn count_hyperedges(&self) -> usize {
         let graph = self.graph.clone();
-        EXEC.run_job(move || graph.read().unwrap().count_hyperedges())
+        self.executor
+            .run(move || graph.read().unwrap().count_hyperedges())
             .await
     }
 
@@ -733,16 +754,6 @@ where
     }
 }
 
-impl<V, HE> Default for TemporalHypergraph<V, HE>
-where
-    V: VertexTrait + Clone + 'static,
-    HE: HyperedgeTrait + Clone + 'static,
-{
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl<V, HE> Clone for TemporalHypergraph<V, HE>
 where
     V: VertexTrait + Clone + 'static,
@@ -758,6 +769,7 @@ where
             // Share the tap (clone the Option<Sender>), consistent with sharing
             // the events Arc above.
             event_tap: self.event_tap.clone(),
+            executor: Arc::clone(&self.executor),
         }
     }
 }

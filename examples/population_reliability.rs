@@ -17,12 +17,15 @@
 //! cargo run --features decision --example population_reliability
 //! ```
 
+use std::sync::Arc;
+
 use anyhow::Result;
 
 use koalisi::algorithms::{
     AgentCapabilities, CapabilityAgent, PopulationConfig, ValueCalculator, record_trajectory,
     search,
 };
+use koalisi::core::Executor;
 use koalisi::decision::{PersistentAifArm, PersistentAifConfig, ReliabilityCoverage};
 use koalisi::topology::{CoalitionManager, Timestamp};
 
@@ -43,6 +46,7 @@ fn per_bit_success(task: usize) -> [bool; 8] {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let executor = Arc::new(Executor::new()?);
     tracing_subscriber::fmt().with_target(false).try_init().ok();
 
     println!("=== Reliability-weighted population search (issue #57) ===\n");
@@ -115,7 +119,7 @@ async fn main() -> Result<()> {
     );
 
     // --- 3. Execute the discovered structure on the runtime ---
-    let manager: CoalitionManager<CapabilityAgent, u32> = CoalitionManager::empty();
+    let manager: CoalitionManager<CapabilityAgent, u32> = CoalitionManager::empty(executor);
     record_trajectory(&manager, &agents, &outcome.lineage).await?;
 
     let hidxs: Vec<_> = {
