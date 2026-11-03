@@ -2,11 +2,13 @@
 //! (issue #42, P5.2). Default features only.
 
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 use koalisi::algorithms::population::record_trajectory;
 use koalisi::algorithms::{
     CapabilityAgent, PopulationConfig, SynergisticCalculator, ValueCalculator, search,
 };
+use koalisi::core::Executor;
 use koalisi::topology::{CoalitionManager, Timestamp};
 
 /// A modest, capability-diverse agent pool.
@@ -131,7 +133,8 @@ async fn replay_reproduces_best_structure() {
     );
 
     // `u32` is a valid HyperedgeTrait (Copy + Eq + Debug + Send + Sync) and Default.
-    let manager: CoalitionManager<CapabilityAgent, u32> = CoalitionManager::empty();
+    let manager: CoalitionManager<CapabilityAgent, u32> =
+        CoalitionManager::empty(Arc::new(Executor::with_num_threads(2).unwrap()));
     record_trajectory(&manager, &agents, &outcome.lineage)
         .await
         .expect("recording the lineage into a fresh manager cannot fail");

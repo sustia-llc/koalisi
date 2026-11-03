@@ -20,6 +20,7 @@ use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
 use koalisi::algorithms::AgentCapabilities;
+use koalisi::core::Executor;
 use koalisi::persistence::{
     EventStore, FileEventStore, FileStoreConfig, Record, SequenceNo, StreamId,
     replay_into_event_log, spawn_store_writer, spawn_topology_forwarder,
@@ -101,7 +102,9 @@ async fn magnitude_history_parity_live_vs_replayed() {
         token.child_token(),
     );
 
-    let graph = TemporalHypergraph::<Worker, Coalition>::new().with_event_tap(tap_tx);
+    let executor = Arc::new(Executor::with_num_threads(2).unwrap());
+    let graph =
+        TemporalHypergraph::<Worker, Coalition>::new(Arc::clone(&executor)).with_event_tap(tap_tx);
 
     // Seeded scenario: joins raise magnitude, a leave lowers it, a member weight
     // update shifts the relevant-mask multiset.
@@ -155,9 +158,16 @@ async fn magnitude_history_parity_live_vs_replayed() {
     let replayed_ref = Arc::new(RwLock::new(replayed));
 
     let live_points =
-        TemporalAnalytics::magnitude_history(&live_ref, he, 0b111, &TimeRange::all()).await;
-    let replay_points =
-        TemporalAnalytics::magnitude_history(&replayed_ref, he, 0b111, &TimeRange::all()).await;
+        TemporalAnalytics::magnitude_history(&live_ref, he, 0b111, &TimeRange::all(), &executor)
+            .await;
+    let replay_points = TemporalAnalytics::magnitude_history(
+        &replayed_ref,
+        he,
+        0b111,
+        &TimeRange::all(),
+        &executor,
+    )
+    .await;
 
     assert!(!live_points.is_empty(), "scenario must yield points");
     assert_eq!(

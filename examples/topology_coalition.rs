@@ -5,10 +5,12 @@
 //! cargo run --example topology_coalition
 //! ```
 
+use koalisi::core::Executor;
 use koalisi::topology::{
     CoalitionManager, TemporalAnalytics, TemporalQueries, TimeRange, Timestamp,
 };
 use std::fmt::{Display, Formatter};
+use std::sync::Arc;
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 struct Agent {
@@ -54,7 +56,7 @@ impl From<Coalition> for usize {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let manager = CoalitionManager::<Agent, Coalition>::empty();
+    let manager = CoalitionManager::<Agent, Coalition>::empty(Arc::new(Executor::new()?));
 
     // --- Phase 1: build the team ---
     println!("=== Phase 1: Adding agents ===");

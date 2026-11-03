@@ -46,8 +46,10 @@ from temporal hypergraph topology to coalition formation algorithms to
 ## Quick start
 
 ```rust
+use koalisi::core::Executor;
 use koalisi::topology::{CoalitionManager, TemporalQueries, Timestamp};
 use std::fmt::{Display, Formatter};
+use std::sync::Arc;
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 struct Agent(&'static str);
@@ -64,7 +66,8 @@ impl From<Team> for usize { fn from(t: Team) -> usize { t.1 } }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let mgr = CoalitionManager::<Agent, Team>::empty();
+    let executor = Arc::new(Executor::new()?);
+    let mgr = CoalitionManager::<Agent, Team>::empty(executor);
 
     let a = mgr.add_agent(Agent("alice")).await?;
     let b = mgr.add_agent(Agent("bob")).await?;
@@ -200,7 +203,7 @@ cargo test --features metrics              # 107 tests (the default suite; the f
 
 - [catgraph-applied](https://github.com/sustia-llc/catgraph) (tag `v0.25.0`, kept in lockstep with catgraph-magnitude, catgraph-syntax and catgraph — one repo, one checkout, all four move together) — CRUD hypergraph container backing the topology layer. Through catgraph it brings `blake3` (with a `cc` build step) into every feature set: `cargo tree --locked --no-default-features -e normal,build -i blake3` reaches it. On little-endian aarch64 that step needs a C compiler unless `blake3`'s `pure` or `no_neon` feature is on. koalisi forwards neither, so a downstream crate turns one on with its own `blake3 = { version = "1", features = ["pure"] }` dependency, which Cargo unifies. If no C compiler is found on x86_64, it falls back to Rust intrinsics.
 - tokio + tokio-util — async runtime + lifecycle primitives
-- rayon + tokio-rayon — CPU-bound graph operations bridge
+- tokio-rayon — the bridge to the one caller-owned `core::Executor` pool that runs graph operations and decision offloads
 - [surrealdb-live-message](https://github.com/sustia-llc/surrealdb-live-message) (tag `v0.7.0`, **optional**, feature `durable`) — two-tier restart-durable message bus for the coalition decision log. Through surrealdb 3.3.5 it needs Rust 1.95.0, the declared `rust-version`
 - [aif](https://github.com/sustia-llc/tira) (tag `aif-v0.15.0`, **optional**, feature `decision`) — active-inference engine for the AIF decision strategies (scalar, multimodal, persistent); `nalgebra` is only compiled when the feature is enabled
 - [catgraph-magnitude](https://github.com/sustia-llc/catgraph) (tag `v0.25.0`, **optional**, feature `magnitude`) — enriched-category coalition magnitude for the categorical decision strategy

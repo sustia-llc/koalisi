@@ -28,6 +28,7 @@ use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
 use koalisi::algorithms::{AdditiveCalculator, CapabilityAgent, FeedbackStore};
+use koalisi::core::Executor;
 use koalisi::decision::{DecisionContext, ThresholdPolicy};
 use koalisi::ingest::{
     MultiResolutionSource, NumericSample, Pacing, SampleUpdate, SensorEvent, SensorEventSource,
@@ -48,6 +49,7 @@ struct SensorCoalition(u32);
 #[allow(clippy::too_many_lines, clippy::cast_precision_loss)]
 #[tokio::main]
 async fn main() -> Result<()> {
+    let executor = Arc::new(Executor::new()?);
     tracing_subscriber::fmt().with_target(false).try_init().ok();
 
     let tracker = TaskTracker::new();
@@ -196,7 +198,8 @@ async fn main() -> Result<()> {
     // =====================================================================
     let sensors = ["salinity", "turbidity"];
 
-    let manager: CoalitionManager<CapabilityAgent, SensorCoalition> = CoalitionManager::empty();
+    let manager: CoalitionManager<CapabilityAgent, SensorCoalition> =
+        CoalitionManager::empty(executor);
 
     // One agent per ingested sensor. Topology `VertexIndex` and domain
     // `agent_id` are DISTINCT id spaces (they coincide here only because the
@@ -228,6 +231,8 @@ async fn main() -> Result<()> {
         DecisionContext {
             required_capabilities: required,
         },
+        &tracker,
+        root.child_token(),
     );
 
     let before_members = service.members(coalition).await?;

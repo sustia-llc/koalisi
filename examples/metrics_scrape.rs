@@ -40,6 +40,7 @@ use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
 use koalisi::algorithms::{AdditiveCalculator, CapabilityAgent};
+use koalisi::core::Executor;
 use koalisi::decision::{DecisionContext, ThresholdPolicy};
 use koalisi::subsystems::coalition_actor::{CoalitionService, DecisionRecord, spawn_decision_tee};
 use koalisi::subsystems::outcome::{
@@ -366,6 +367,7 @@ fn check_family(
 #[tokio::main]
 #[allow(clippy::too_many_lines)] // one linear script: wire, drive, drain, scrape, assert
 async fn main() -> Result<()> {
+    let executor = Arc::new(Executor::new()?);
     let tracker = TaskTracker::new();
     let token = CancellationToken::new();
 
@@ -380,7 +382,7 @@ async fn main() -> Result<()> {
     // =====================================================================
     let (topo_tx, topo_rx) = mpsc::channel(CHANNEL_CAPACITY);
     let topology = tracker.spawn(consume_topology(topo_rx));
-    let graph = TemporalHypergraph::<CapabilityAgent, u32>::new().with_event_tap(topo_tx);
+    let graph = TemporalHypergraph::<CapabilityAgent, u32>::new(executor).with_event_tap(topo_tx);
     let manager = CoalitionManager::new(graph);
 
     // Seed (marginal 80), three strong candidates (140 each), one weak
@@ -440,6 +442,8 @@ async fn main() -> Result<()> {
             required_capabilities: 0b1111,
         },
         tap_tx,
+        &tracker,
+        token.child_token(),
     );
 
     for candidate in &strong {

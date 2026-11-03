@@ -20,6 +20,7 @@
 //! ```
 
 use std::fmt::{Display, Formatter};
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -28,6 +29,7 @@ use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
 use koalisi::algorithms::{AdditiveCalculator, AgentCapabilities};
+use koalisi::core::Executor;
 use koalisi::core::config::setup_logging;
 use koalisi::decision::{DecisionContext, ThresholdPolicy};
 use koalisi::subsystems::coalition_actor::{CoalitionService, spawn_decision_tee};
@@ -64,6 +66,7 @@ impl AgentCapabilities for Worker {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let executor = Arc::new(Executor::new()?);
     setup_logging();
 
     let tracker = TaskTracker::new();
@@ -72,7 +75,7 @@ async fn main() -> Result<()> {
     // =====================================================================
     // 1. Coalition + policy-gated service with a decision tap.
     // =====================================================================
-    let manager = CoalitionManager::<Worker, ()>::empty();
+    let manager = CoalitionManager::<Worker, ()>::empty(executor);
     let seed = manager
         .add_agent(Worker {
             id: 0,
@@ -112,6 +115,8 @@ async fn main() -> Result<()> {
             required_capabilities: 0b0111,
         },
         tap_tx,
+        &tracker,
+        root.child_token(),
     );
 
     // =====================================================================

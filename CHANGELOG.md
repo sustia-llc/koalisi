@@ -19,6 +19,91 @@ Planned work — issue-tracked:
 - **K7 lineage**: EQ5b (c) ([#103]); the multi-coalition harness scaffold and
   the tira-extension re-pins and registrations ([#104]–[#111]).
 
+## [0.49.0] — 2026-11-03
+
+One caller-owned rayon pool for koalisi's CPU work (#115).
+
+### Added
+- `core::Executor`, a rayon pool with threads named `koalisi-exec-<i>`.
+  `Executor::new` and `Executor::with_num_threads` return
+  `Result<Self, ExecutorError>`. `ExecutorError::Build` carries the
+  requested thread count and rayon's `ThreadPoolBuildError`.
+  `Executor::run` runs a closure on the pool and resolves to its value, and
+  a panic in the closure resumes on the awaiting task.
+- `TemporalHypergraph::executor` and `CoalitionRuntime::executor` return
+  the shared `Arc<Executor>`.
+- `CoalitionServiceHandle::panicked` and `CoalitionServiceHandle::closed`. A
+  panic in a service command is logged at error level with its message.
+  After a join command panics, `panicked()` reads `true` before the caller
+  sees its error. `closed()` resolves after the service stops.
+- If its service stops before ctrl-c, the `koalisi` binary exits with an
+  error. On ctrl-c it logs `shutdown clean`.
+
+### Changed
+- **Breaking:** these take the executor:
+  - `TemporalHypergraph::new(executor)`, `TemporalHypergraph::wrap(graph, executor)`
+  - `CoalitionManager::empty(executor)`, `CoalitionRuntime::new(executor)`
+  - `CoalitionDecisionPolicy::should_join_async` and `should_leave_async`
+    (last parameter `executor: &Executor`)
+  - `TemporalAnalytics::magnitude_history` (last parameter `executor: &Executor`)
+- **Breaking:** `CoalitionService::spawn`, `spawn_with_tap` and
+  `spawn_with_trace_tap` take a `&TaskTracker` and a `CancellationToken` as
+  their last two parameters. The service task runs on the tracker and stops
+  when the token is cancelled or the last handle drops. On cancellation, a
+  command already queued gets the error `coalition service stopped:
+  cancelled`.
+- The 18 graph operations, the async methods of `AifDecisionPolicy`,
+  `AifMmDecisionPolicy` and `MagnitudePolicy`, and `magnitude_history` run
+  on the caller's executor. They ran on a private static pool and on rayon's
+  global pool before.
+- `catgraph-applied` and `catgraph` are dependencies with
+  `default-features = false`, so their `parallel` feature is off. The lock
+  loses `rayon-cond`, and no package version moves.
+- `thiserror` 2 is a normal dependency (for `ExecutorError`), not an
+  optional one under `durable`.
+
+### Removed
+- **Breaking:** `topology::HypergraphExecutor`, the static `EXEC`, and
+  `impl Default` for `TemporalHypergraph`, `CoalitionManager` and
+  `CoalitionRuntime`.
+- The direct `rayon` dependency. `src/core/executor.rs` imports rayon
+  through `tokio_rayon::rayon`.
+
+### Gates
+- These lanes pass on the `ae7c9f9` tree before a whitespace-only `cargo fmt`
+  pass. At `ae7c9f9` itself, default 119 passes again:
+  - default 119, `decision` 177, `magnitude` 150, `decision,magnitude` 209
+  - `magnitude-fast` 158, `persistence` 144, `persistence,magnitude` 176
+  - `remote` 125, `process` 177, `decision,magnitude,process` 268
+  - `metrics` 119, `durable` 120, `persistence,durable` 146
+
+  Each count is the `v0.48.0` count plus the new tests compiled into that
+  lane. The two Docker lanes ran with `-- --nocapture`, and neither
+  container test prints `SKIP`.
+- `cargo clippy --locked --all-targets -- -D warnings` is clean on those 13
+  lanes, `--no-default-features`, `harness`, `harness,process` and
+  `harness,decision,process`. The frozen `strategy_comparison.rs` and
+  `examples/k7/*.rs` are unchanged and compile.
+- `tests/executor_global_pool.rs` runs under features `decision,magnitude`.
+  It runs these paths on an executor: the 18 async graph methods, the async
+  and manager join and leave of the three policies, and `magnitude_history`.
+  Then `rayon::ThreadPoolBuilder::new().build_global()` returns `Ok`.
+- At `ae7c9f9`, the `koalisi` binary starts, and on SIGINT it logs
+  "shutdown clean". Seven examples exit 0. Clippy on `persistence,durable`
+  re-ran clean at `ae7c9f9`.
+- These are clean at `ae7c9f9`:
+
+  ```sh
+  RUSTDOCFLAGS='-D warnings' cargo doc --locked --no-deps --all-features
+  cargo fmt --all -- --check
+  cargo +1.95.0 check --all-targets --locked
+  cargo +1.95.0 check --all-targets --locked --features persistence,durable
+  cargo +1.95.0 check --all-targets --locked --features decision,magnitude-fast,persistence,remote,process,harness,metrics
+  ```
+
+- The K4 archive gate and the `harness` test lanes did not run (owner,
+  2026-11-03).
+
 ## [0.48.0] — 2026-11-03
 
 ### Removed

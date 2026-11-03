@@ -713,7 +713,6 @@ dependencies = [
  "itertools 0.15.0",
  "log",
  "permutations",
- "rayon",
  "thiserror 2.0.21",
  "union-find",
 ]
@@ -729,8 +728,6 @@ dependencies = [
  "num",
  "permutations",
  "rand_core 0.10.1",
- "rayon",
- "rayon-cond",
  "rust_decimal",
  "thiserror 2.0.21",
  "union-find",
@@ -2983,7 +2980,7 @@ dependencies = [
 
 [[package]]
 name = "koalisi"
-version = "0.48.0"
+version = "0.49.0"
 dependencies = [
  "aif",
  "anyhow",
@@ -2998,7 +2995,6 @@ dependencies = [
  "metrics",
  "metrics-exporter-prometheus",
  "nalgebra",
- "rayon",
  "serde",
  "sha2 0.11.0",
  "surrealdb-types",
@@ -4881,17 +4877,6 @@ checksum = "fb39b166781f92d482534ef4b4b1b2568f42613b53e5b6c160e24cfbfa30926d"
 dependencies = [
  "either",
  "rayon-core",
-]
-
-[[package]]
-name = "rayon-cond"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2964d0cf57a3e7a06e8183d14a8b527195c706b7983549cd5462d5aa3747438f"
-dependencies = [
- "either",
- "itertools 0.14.0",
- "rayon",
 ]
 
 [[package]]

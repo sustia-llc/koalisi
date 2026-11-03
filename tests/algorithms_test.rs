@@ -170,7 +170,7 @@ fn feedback_marginal_decomposition() {
 async fn feedback_seeding_from_event_log() {
     use koalisi::topology::CoalitionManager;
 
-    let manager = CoalitionManager::<CapabilityAgent, &'static str>::empty();
+    let manager = CoalitionManager::<CapabilityAgent, &'static str>::empty(common::executor());
     let agent = manager
         .add_agent(CapabilityAgent::new(7, 0b0001, 50))
         .await

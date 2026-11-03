@@ -21,6 +21,7 @@
 //! Requires a running Docker daemon (the library boots a SurrealDB container).
 
 use std::fmt::{Display, Formatter};
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use tokio::time::{Duration, sleep, timeout};
@@ -28,6 +29,7 @@ use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
 use koalisi::algorithms::{AdditiveCalculator, AgentCapabilities};
+use koalisi::core::Executor;
 use koalisi::core::config::setup_logging;
 use koalisi::decision::{DecisionContext, ThresholdPolicy};
 use koalisi::subsystems::coalition_actor::CoalitionService;
@@ -69,6 +71,7 @@ impl AgentCapabilities for Worker {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let executor = Arc::new(Executor::new()?);
     setup_logging();
 
     let token = CancellationToken::new();
@@ -103,7 +106,7 @@ async fn main() -> Result<()> {
     let inbox = bus.coalition().inbox();
 
     // 3) koalisi coalition service with a decision tap + forwarder.
-    let manager = CoalitionManager::<Worker, ()>::empty();
+    let manager = CoalitionManager::<Worker, ()>::empty(executor);
     let seed = manager
         .add_agent(Worker {
             id: 2,
@@ -139,6 +142,8 @@ async fn main() -> Result<()> {
         Box::new(ThresholdPolicy::new(AdditiveCalculator, 0.0, 0.0)),
         DecisionContext::default(),
         tap_tx,
+        &tracker,
+        token.child_token(),
     );
     let _forwarder = spawn_decision_forwarder(
         &bus,

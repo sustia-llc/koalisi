@@ -14,6 +14,8 @@ use tokio::sync::RwLock;
 #[cfg(feature = "magnitude")]
 use crate::algorithms::AgentCapabilities;
 #[cfg(feature = "magnitude")]
+use crate::core::Executor;
+#[cfg(feature = "magnitude")]
 use crate::decision::{magnitude_or_zero, relevant_masks};
 
 /// Represents changes between two timestamps.
@@ -321,44 +323,45 @@ impl TemporalAnalytics {
     /// - An upstream magnitude error at a point is logged and recorded as
     ///   `f64::NEG_INFINITY` (never a panic), mirroring the decision arm.
     /// - Sampling runs under one read guard; the guard is released before the
-    ///   `O(m³)` magnitude evaluations, which run in a single
-    ///   [`tokio_rayon::spawn`] offload.
+    ///   `O(m³)` magnitude evaluations, which run as one job on `executor`.
     #[cfg(feature = "magnitude")]
     pub async fn magnitude_history<V, HE>(
         events: &Arc<RwLock<EventLog<V, HE>>>,
         hyperedge: HyperedgeIndex,
         required_capabilities: u32,
         range: &TimeRange,
+        executor: &Executor,
     ) -> Vec<MagnitudePoint>
     where
         V: Clone + std::fmt::Debug + AgentCapabilities + 'static,
         HE: Clone + std::fmt::Debug + 'static,
     {
         // Sample under one read guard (released when this returns), then evaluate
-        // every point's O(m³) magnitude fresh at t = 1 in a single rayon offload
+        // every point's O(m³) magnitude fresh at t = 1 in a single executor job
         // (CoalitionEvaluator deliberately not used — see fn docs).
         let samples =
             collect_magnitude_samples(events, hyperedge, required_capabilities, range).await;
-        tokio_rayon::spawn(move || {
-            samples
-                .into_iter()
-                .map(|(timestamp, masks, member_count)| {
-                    let magnitude = match magnitude_or_zero(&masks, required_capabilities) {
-                        Ok(m) => m,
-                        Err(e) => {
-                            tracing::warn!(error = %e, "magnitude trajectory point computation failed");
-                            f64::NEG_INFINITY
+        executor
+            .run(move || {
+                samples
+                    .into_iter()
+                    .map(|(timestamp, masks, member_count)| {
+                        let magnitude = match magnitude_or_zero(&masks, required_capabilities) {
+                            Ok(m) => m,
+                            Err(e) => {
+                                tracing::warn!(error = %e, "magnitude trajectory point computation failed");
+                                f64::NEG_INFINITY
+                            }
+                        };
+                        MagnitudePoint {
+                            timestamp,
+                            magnitude,
+                            member_count,
                         }
-                    };
-                    MagnitudePoint {
-                        timestamp,
-                        magnitude,
-                        member_count,
-                    }
-                })
-                .collect()
-        })
-        .await
+                    })
+                    .collect()
+            })
+            .await
     }
 
     /// Resolve a time range against the actual event log, defaulting unbounded

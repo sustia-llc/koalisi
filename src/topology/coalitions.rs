@@ -10,9 +10,11 @@ use super::temporal::TemporalHypergraph;
 use super::timestamp::{TimeRange, Timestamp};
 use super::{HyperedgeTrait, VertexTrait};
 use crate::algorithms::{AgentCapabilities, FeedbackStore};
+use crate::core::Executor;
 use crate::decision::{CoalitionDecisionPolicy, Decision, DecisionContext};
 use catgraph_applied::{HyperedgeIndex, VertexIndex};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Manages coalitions (hyperedges) of agents (vertices) in a temporal hypergraph.
 ///
@@ -22,9 +24,12 @@ use std::collections::HashMap;
 /// # Example
 ///
 /// ```ignore
+/// use std::sync::Arc;
+/// use koalisi::core::Executor;
 /// use koalisi::topology::{CoalitionManager, TemporalHypergraph};
 ///
-/// let manager = CoalitionManager::new(TemporalHypergraph::new());
+/// let executor = Arc::new(Executor::new()?);
+/// let manager = CoalitionManager::new(TemporalHypergraph::new(executor));
 ///
 /// // Add agents
 /// let agent1 = manager.add_agent(Agent::new("a1", 5)).await?;
@@ -58,10 +63,11 @@ where
         Self { graph }
     }
 
-    /// Create a coalition manager with a new empty graph.
-    pub fn empty() -> Self {
+    /// Create a coalition manager with a new empty graph whose graph
+    /// operations run on `executor`.
+    pub fn empty(executor: Arc<Executor>) -> Self {
         Self {
-            graph: TemporalHypergraph::new(),
+            graph: TemporalHypergraph::new(executor),
         }
     }
 
@@ -483,7 +489,9 @@ where
             .map(|w| w as &dyn AgentCapabilities)
             .collect();
 
-        let decision = policy.should_join_async(&agent_weight, &views, ctx).await;
+        let decision = policy
+            .should_join_async(&agent_weight, &views, ctx, self.graph.executor())
+            .await;
 
         if decision.act {
             self.join_coalition(agent, coalition).await?;
@@ -529,21 +537,13 @@ where
         };
         let agent_view = views[pos];
 
-        let decision = policy.should_leave_async(agent_view, &views, ctx).await;
+        let decision = policy
+            .should_leave_async(agent_view, &views, ctx, self.graph.executor())
+            .await;
 
         if decision.act {
             self.leave_coalition(agent, coalition).await?;
         }
         Ok(decision)
-    }
-}
-
-impl<V, HE> Default for CoalitionManager<V, HE>
-where
-    V: VertexTrait + Clone + 'static,
-    HE: HyperedgeTrait + Clone + 'static,
-{
-    fn default() -> Self {
-        Self::empty()
     }
 }

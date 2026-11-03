@@ -12,8 +12,8 @@
 //! a single `SplitMix64` stream (no `rand` dependency, fully reproducible from
 //! [`PopulationConfig::seed`]).
 //!
-//! The [`search`] core is **pure and synchronous** (CPU-bound; offload it via
-//! `tokio_rayon` from an async caller if you need to). Recording the improving
+//! The [`search`] core is **pure and synchronous** (CPU-bound; an async caller
+//! can run it through [`Executor::run`](crate::core::Executor::run)). Recording the improving
 //! global-best lineage into a [`CoalitionManager`] is a **separate async** step,
 //! [`record_trajectory`], so the search stays decoupled from the topology layer
 //! and each improving epoch becomes a queryable point in the temporal hypergraph.

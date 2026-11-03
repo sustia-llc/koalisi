@@ -12,3 +12,11 @@ pub mod topology;
 mod test_support;
 #[allow(unused_imports)]
 pub(crate) use test_support::log_capture;
+
+/// A two-thread [`koalisi::core::Executor`] behind an `Arc`.
+#[allow(dead_code)]
+pub fn executor() -> std::sync::Arc<koalisi::core::Executor> {
+    std::sync::Arc::new(
+        koalisi::core::Executor::with_num_threads(2).expect("two-thread pool builds"),
+    )
+}
