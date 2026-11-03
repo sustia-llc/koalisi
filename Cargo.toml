@@ -74,12 +74,12 @@ catgraph = { git = "https://github.com/sustia-llc/catgraph", tag = "v0.25.0", op
 # CHANGEFEED log + LIVE wake-up + cursor catch-up; at-least-once,
 # restart-durable), feature `durable`. Upstream's package name is
 # `surrealdb_live_message`; the hyphenated key is remapped via `package`.
-surrealdb-live-message = { git = "https://github.com/sustia-llc/surrealdb-live-message", tag = "v0.2.2", package = "surrealdb_live_message", optional = true }
+surrealdb-live-message = { git = "https://github.com/sustia-llc/surrealdb-live-message", tag = "v0.7.0", package = "surrealdb_live_message", optional = true }
 # `#[derive(SurrealValue)]` on the durable `DecisionEvent` emits absolute
 # `::surrealdb_types` paths, so the trait crate is a direct dep; the version
 # unifies with the one `surrealdb-live-message` pulls. Pure-value types crate,
 # no DB engine; only compiled under `durable`.
-surrealdb-types = { version = "3.2.4", optional = true }
+surrealdb-types = { version = "3.3.5", optional = true }
 
 # Optional: Phase 7 persistence core (feature `persistence`). CBOR frames via
 # ciborium + SHA-256 chaining via sha2. Feature-off builds pull neither.
