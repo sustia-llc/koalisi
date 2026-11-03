@@ -2,7 +2,9 @@
 //! consumer inbox prints the replayed decision log. (feature `durable`)
 //!
 //! End-to-end story:
-//! 1. Boot a local SurrealDB container (via `surrealdb-live-message`'s sdb task).
+//! 1. Boot a local SurrealDB container (via `surrealdb-live-message`'s sdb
+//!    task) under an `SdbGuard` (`tests/common/sdb.rs`), which stops the
+//!    container on every return, an early one included.
 //! 2. Stand up a `DurableDecisionBus` with a `producer` + a `decision_log` sink.
 //! 3. Run a koalisi `CoalitionService` with a decision *tap*; a forwarder drains
 //!    the tap and publishes each decision durably as the `producer`.
@@ -36,7 +38,11 @@ use koalisi::subsystems::coalition_actor::CoalitionService;
 use koalisi::subsystems::durable::{DecisionEvent, DurableDecisionBus, spawn_decision_forwarder};
 use koalisi::topology::CoalitionManager;
 
-use surrealdb_live_message::subsystems::sdb::{self, SurrealDBWrapper};
+use surrealdb_live_message::subsystems::sdb::SurrealDBWrapper;
+
+#[path = "../tests/common/sdb.rs"]
+mod sdb_guard;
+use sdb_guard::SdbGuard;
 
 const PRODUCER: &str = "producer";
 const DECISION_LOG: &str = "decision_log";
@@ -77,21 +83,17 @@ async fn main() -> Result<()> {
     let token = CancellationToken::new();
     let tracker = TaskTracker::new();
 
-    // 1) Boot SurrealDB under a child token.
-    let sdb_token = token.child_token();
-    let mut sdb_handle = tracker.spawn(async move { sdb::sdb_task(sdb_token).await });
+    // 1) Boot SurrealDB under a child token. Dropping `sdb` on any return
+    //    from here stops the container.
+    let mut sdb = SdbGuard::spawn(token.child_token()).context("sdb runtime")?;
     tokio::select! {
         r = SurrealDBWrapper::wait_until_ready() => {
             r.context("SurrealDB ready signal failed")?;
         }
-        r = &mut sdb_handle => {
-            token.cancel();
+        r = sdb.ended() => {
             anyhow::bail!("sdb_task exited during startup: {r:?}");
         }
-        _ = sleep(STARTUP_TIMEOUT) => {
-            token.cancel();
-            tracker.close();
-            tracker.wait().await;
+        () = sleep(STARTUP_TIMEOUT) => {
             anyhow::bail!("SurrealDB not ready within {STARTUP_TIMEOUT:?}");
         }
     }
@@ -101,8 +103,6 @@ async fn main() -> Result<()> {
     let bus = DurableDecisionBus::new(vec![PRODUCER.to_string(), DECISION_LOG.to_string()])
         .await
         .context("durable decision bus")?;
-    // Cancels the sdb token on every exit from here, an early return included.
-    let _sdb_guard = token.clone().drop_guard();
     let producer = bus.agent(PRODUCER).await.context("producer agent")?;
     // Grab the consumer inbox BEFORE any decision so nothing is missed.
     let inbox = bus.coalition().inbox();
@@ -217,12 +217,14 @@ async fn main() -> Result<()> {
     .await;
 
     // Shutdown on every outcome: drop the service (its tap closes → forwarder
-    // drains + exits), then the bus, then the sdb token; drain everything.
+    // drains + exits), then the bus, then the token; drain everything, then
+    // stop the container.
     drop(service);
     bus.shutdown().await;
     token.cancel();
     tracker.close();
     tracker.wait().await;
+    sdb.stop().await.map_err(anyhow::Error::msg)?;
 
     let mut received = outcome?;
     if let Ok(extra) = inbox.try_recv() {
