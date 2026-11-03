@@ -122,8 +122,14 @@ Re-pins `surrealdb-live-message` to `v0.7.0` (feature `durable`).
   cargo fmt --all -- --check
   ```
 
-- `cargo run --features durable --example durable_decisions` at `dcee39e`
-  replays both decisions and stops cleanly.
+- `f43443d` changes tests, the example and two doc comments, and no other
+  code. On that tree without the doc-comment edit, `default` 108,
+  `persistence` 133, `durable` 109 and `persistence,durable` 135 pass, and
+  clippy is clean on those four lanes. At `f43443d`, clippy on
+  `persistence,durable`, `cargo doc` and `cargo fmt --check` are clean.
+- On the same tree, `cargo run --features durable --example
+  durable_decisions` exits 0 and prints both replayed decisions. If a
+  decision is missing or goes to another agent, it now exits with an error.
 
 - The K4 archive gate did not run (owner, 2026-11-03).
 
