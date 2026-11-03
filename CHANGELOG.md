@@ -96,8 +96,9 @@ Re-pins `surrealdb-live-message` to `v0.7.0` (feature `durable`).
   on the 14 non-Docker lanes and `--no-default-features`.
 - `093afb3` changes `src/subsystems/coalition_actor.rs`, which compiles in
   every feature set, and adds unit tests. Later commits change the tests but
-  add none in that file. At `267f705`, these 13 lanes pass
-  (`k118/fix3/head3-test-*.log` in the review record):
+  add none in that file. At `dcee39e`, these 13 lanes pass
+  (`k118/lanes4/head4-test-*.log` and `k118/head4-test-*.log` in the review
+  record):
   - default 108, `decision` 164, `magnitude` 137, `decision,magnitude` 193
   - `magnitude-fast` 145, `persistence` 133, `persistence,magnitude` 163
   - `remote` 114, `process` 164, `decision,magnitude,process` 252, `metrics` 108
@@ -106,7 +107,7 @@ Re-pins `surrealdb-live-message` to `v0.7.0` (feature `durable`).
   The two Docker lanes ran
   against the container, and neither container test prints `SKIP`. The three
   `harness` lanes did not run after `a678550` (owner, 2026-11-03).
-- These are clean at `267f705`:
+- These are clean at `dcee39e`:
 
   ```sh
   cargo clippy --locked --all-targets -- -D warnings   # 11 non-harness, non-Docker lanes, --no-default-features, durable, persistence,durable
@@ -117,7 +118,7 @@ Re-pins `surrealdb-live-message` to `v0.7.0` (feature `durable`).
   cargo fmt --all -- --check
   ```
 
-- `cargo run --features durable --example durable_decisions` at `267f705`
+- `cargo run --features durable --example durable_decisions` at `dcee39e`
   replays both decisions and stops cleanly.
 
 - The K4 archive gate did not run (owner, 2026-11-03).
