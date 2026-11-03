@@ -19,6 +19,60 @@ Planned work — issue-tracked:
 - **K7 lineage**: EQ5b (c) ([#103]); the multi-coalition harness scaffold and
   the tira-extension re-pins and registrations ([#104]–[#111]).
 
+## [0.48.0] — 2026-11-03
+
+### Removed
+- **Breaking:** `core::config::CoalitionSettings` and the `Settings::coalition`
+  field, with the `[swarm]` section of `config/default.toml`. `Settings` holds
+  `environment` and `logger`. A `[swarm]` or `[coalition]` section, or a
+  `SWARM__*` or `COALITION__*` environment variable, now loads without an
+  error and has no effect. At `v0.47.0`, this search prints only the
+  definitions in `src/core/config.rs` and the keys in `config/default.toml`:
+
+  ```sh
+  git grep -n -E 'CoalitionSettings|threshold_bps|delivery_strategy|SETTINGS\.coalition' v0.47.0 -- src tests examples config
+  ```
+
+- The file-level `#![cfg(...)]` in `tests/k7_2_novelty.rs`,
+  `tests/durable_integration.rs`, `tests/decision_log_bus_tee.rs` and
+  `tests/remote_integration.rs`. The `required-features` of each `[[test]]`
+  entry in `Cargo.toml` gate them.
+
+### Added
+- `rust-toolchain.toml` pins Rust 1.99.1 with `rustfmt`, `clippy` and
+  `rust-analyzer`.
+
+### Changed
+- The README architecture box says "broadcast ingest bus". A
+  `SampleMonitor` publishes on a `tokio::sync::broadcast` sender.
+
+### Gates
+- At `a2d5ee8`, these lanes pass:
+  - default 108, `decision` 164, `persistence` 133, `process` 164
+  - `decision,magnitude,process` 252, `harness,decision,process` 332
+  - `metrics` 108, `remote` 114, `durable` 109, `persistence,durable` 135
+
+  The two Docker lanes ran against the container, and neither container
+  test prints `SKIP`. Clippy with `-D warnings` is clean on those lanes and
+  `--no-default-features`.
+- At `a2d5ee8`, every reader of `Settings` starts. The `koalisi` binary
+  starts the runtime with and without `RUN_MODE=test`. The
+  `durable_decisions` and `remote_coalition_consumer` examples stop cleanly.
+  With the old `CoalitionSettings` restored and no `[swarm]` section, the
+  binary panics with `missing configuration field "coalition"`.
+- These are clean at `a2d5ee8`:
+
+  ```sh
+  RUSTDOCFLAGS='-D warnings' cargo doc --locked --no-deps --all-features
+  cargo fmt --all -- --check
+  cargo +1.95.0 check --all-targets --locked
+  cargo +1.95.0 check --all-targets --locked --features persistence,durable
+  cargo +1.95.0 check --all-targets --locked --features decision,magnitude-fast,persistence,remote,process,harness,metrics
+  ```
+
+- The K4 archive gate and the other `harness` lanes did not run (owner,
+  2026-11-03).
+
 ## [0.47.0] — 2026-11-03
 
 Re-pins `surrealdb-live-message` to `v0.7.0` (feature `durable`).
