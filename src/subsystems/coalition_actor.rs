@@ -557,7 +557,7 @@ impl CoalitionService {
             "CoalitionService started"
         );
         let panicked = Arc::new(AtomicBool::new(false));
-        tracker.spawn(service_loop(
+        let task = service_loop(
             rx,
             manager,
             policy,
@@ -566,7 +566,10 @@ impl CoalitionService {
             trace_tap,
             token,
             Arc::clone(&panicked),
-        ));
+        );
+        #[cfg(test)]
+        let task = faults::inherit(task);
+        tracker.spawn(task);
         CoalitionServiceHandle { tx, panicked }
     }
 }
@@ -591,8 +594,69 @@ where
             let message = panic_message(payload.as_ref()).to_owned();
             panicked.store(true, Ordering::SeqCst);
             tracing::error!(panic = message.as_str(), "CoalitionService panicked");
+            #[cfg(test)]
+            faults::between_flag_and_reply().await;
             let _ = reply.send(Err(ServiceError::Panicked { message }));
             false
+        }
+    }
+}
+
+/// Test-only fault injection for the service task. A test sets [`Faults`]
+/// with [`FAULTS`]`.scope(..)` around [`CoalitionService::spawn`]; the
+/// spawned task inherits them. A task with no faults in scope runs unchanged.
+#[cfg(test)]
+mod faults {
+    use std::future::Future;
+    use std::sync::Arc;
+
+    use tokio::sync::Notify;
+
+    /// The faults one service task runs with.
+    #[derive(Clone, Default)]
+    pub(super) struct Faults {
+        /// Pause the panic path of `serve` after `panicked` is stored and
+        /// before the reply is sent.
+        pub(super) pause_before_reply: Option<Arc<Pause>>,
+        /// Panic with `"members exploded"` at the start of every members
+        /// command's work.
+        pub(super) members_panics: bool,
+    }
+
+    /// A two-way rendezvous: the service task notifies `reached`, then waits
+    /// for `release`.
+    #[derive(Default)]
+    pub(super) struct Pause {
+        pub(super) reached: Notify,
+        pub(super) release: Notify,
+    }
+
+    tokio::task_local! {
+        pub(super) static FAULTS: Faults;
+    }
+
+    /// Run `task` with the faults in scope on the calling task, or none.
+    pub(super) fn inherit<F: Future>(task: F) -> impl Future<Output = F::Output> {
+        let faults = FAULTS.try_with(Faults::clone).unwrap_or_default();
+        FAULTS.scope(faults, task)
+    }
+
+    /// The pause between storing `panicked` and sending the reply.
+    pub(super) async fn between_flag_and_reply() {
+        let pause = FAULTS
+            .try_with(|f| f.pause_before_reply.clone())
+            .ok()
+            .flatten();
+        if let Some(pause) = pause {
+            pause.reached.notify_one();
+            pause.release.notified().await;
+        }
+    }
+
+    /// The members fault.
+    pub(super) fn members() {
+        if FAULTS.try_with(|f| f.members_panics).unwrap_or(false) {
+            panic!("members exploded");
         }
     }
 }
@@ -722,6 +786,8 @@ async fn service_loop<V, HE>(
             }
             CoalitionCommand::Members { coalition, reply } => {
                 let work = async {
+                    #[cfg(test)]
+                    faults::members();
                     manager
                         .coalition_members(coalition)
                         .await
@@ -1200,6 +1266,103 @@ mod tests {
         assert!(
             panicked,
             "expected panicked() == true when the leave's Panicked error returned, observed false"
+        );
+        tracker.close();
+        tracker.wait().await;
+    }
+
+    /// On the panic path, `serve` stores `panicked` before it sends the
+    /// reply: with the service paused between the two steps, `panicked()`
+    /// reads `true` and the caller has no reply yet; after the release the
+    /// caller receives `Panicked` with the panic message.
+    #[tokio::test]
+    async fn panic_flag_is_stored_before_the_reply_is_sent() {
+        let (manager, candidate, coalition) = seed().await;
+        let tracker = TaskTracker::new();
+        let pause = Arc::new(faults::Pause::default());
+        let service = faults::FAULTS
+            .scope(
+                faults::Faults {
+                    pause_before_reply: Some(Arc::clone(&pause)),
+                    members_panics: false,
+                },
+                async {
+                    CoalitionService::spawn(
+                        manager,
+                        Box::new(PanickingPolicy {
+                            drop_delay: std::time::Duration::ZERO,
+                        }),
+                        DecisionContext::default(),
+                        &tracker,
+                        CancellationToken::new(),
+                    )
+                },
+            )
+            .await;
+
+        let caller = {
+            let service = service.clone();
+            tokio::spawn(async move { service.join(candidate, coalition).await })
+        };
+        pause.reached.notified().await;
+        let panicked = service.panicked();
+        let replied = caller.is_finished();
+        assert!(
+            panicked,
+            "expected panicked() == true between the flag store and the reply, observed false"
+        );
+        assert!(
+            !replied,
+            "expected no reply between the flag store and the reply, observed the caller finished"
+        );
+
+        pause.release.notify_one();
+        let join = caller.await.expect("caller task");
+        assert!(
+            matches!(&join, Err(ServiceError::Panicked { message }) if message == "policy exploded"),
+            "join: expected Panicked {{ message: \"policy exploded\" }}, observed {join:?}"
+        );
+        tracker.close();
+        tracker.wait().await;
+    }
+
+    /// A members command whose work panics replies `Panicked` with the panic
+    /// message, and its caller reads `panicked() == true` as soon as that
+    /// error returns.
+    #[tokio::test]
+    async fn members_panic_replies_panicked_and_sets_the_flag() {
+        let (manager, _candidate, coalition) = seed().await;
+        let tracker = TaskTracker::new();
+        let service = faults::FAULTS
+            .scope(
+                faults::Faults {
+                    pause_before_reply: None,
+                    members_panics: true,
+                },
+                async {
+                    CoalitionService::spawn(
+                        manager,
+                        Box::new(ActPolicy {
+                            leave_panics: false,
+                        }),
+                        DecisionContext::default(),
+                        &tracker,
+                        CancellationToken::new(),
+                    )
+                },
+            )
+            .await;
+        assert!(!service.panicked(), "no panic before the members command");
+
+        let members = service.members(coalition).await;
+        let panicked = service.panicked();
+        assert!(
+            matches!(&members, Err(ServiceError::Panicked { message }) if message == "members exploded"),
+            "members: expected Panicked {{ message: \"members exploded\" }}, observed {members:?}"
+        );
+        assert!(
+            panicked,
+            "expected panicked() == true when the members' Panicked error returned, observed false"
         );
         tracker.close();
         tracker.wait().await;
