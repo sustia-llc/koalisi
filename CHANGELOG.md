@@ -32,9 +32,12 @@ One caller-owned rayon pool for koalisi's CPU work (#115).
   a panic in the closure resumes on the awaiting task.
 - `TemporalHypergraph::executor` and `CoalitionRuntime::executor` return
   the shared `Arc<Executor>`.
-- `CoalitionServiceHandle::panicked`. A panic in the service task is logged
-  at error level with its message, and the `koalisi` binary then exits with
-  an error instead of logging `shutdown clean`.
+- `CoalitionServiceHandle::panicked` and `CoalitionServiceHandle::closed`. A
+  panic in a service command is logged at error level with its message, and
+  `panicked()` reads `true` before that command's caller sees its error.
+  `closed()` resolves after the service stops.
+- The `koalisi` binary exits with an error as soon as its service stops
+  before ctrl-c. On ctrl-c it logs `shutdown clean`.
 
 ### Changed
 - **Breaking:** these take the executor:
@@ -46,7 +49,9 @@ One caller-owned rayon pool for koalisi's CPU work (#115).
 - **Breaking:** `CoalitionService::spawn`, `spawn_with_tap` and
   `spawn_with_trace_tap` take a `&TaskTracker` and a `CancellationToken` as
   their last two parameters. The service task runs on the tracker and stops
-  when the token is cancelled or the last handle drops.
+  when the token is cancelled or the last handle drops. On cancellation, a
+  command already queued gets the error `coalition service stopped:
+  cancelled`.
 - The 18 graph operations, the async methods of `AifDecisionPolicy`,
   `AifMmDecisionPolicy` and `MagnitudePolicy`, and `magnitude_history` run
   on the caller's executor. They ran on a private static pool and on rayon's
@@ -65,11 +70,12 @@ One caller-owned rayon pool for koalisi's CPU work (#115).
   through `tokio_rayon::rayon`.
 
 ### Gates
-- At `0d60ee2`, these lanes pass:
-  - default 116, `decision` 174, `magnitude` 147, `decision,magnitude` 206
-  - `magnitude-fast` 155, `persistence` 141, `persistence,magnitude` 173
-  - `remote` 122, `process` 174, `decision,magnitude,process` 265
-  - `metrics` 116, `durable` 117, `persistence,durable` 143
+- These lanes pass on the `ae7c9f9` tree before a whitespace-only `cargo fmt`
+  pass. At `ae7c9f9` itself, default 119 passes again:
+  - default 119, `decision` 177, `magnitude` 150, `decision,magnitude` 209
+  - `magnitude-fast` 158, `persistence` 144, `persistence,magnitude` 176
+  - `remote` 125, `process` 177, `decision,magnitude,process` 268
+  - `metrics` 119, `durable` 120, `persistence,durable` 146
 
   Each count is the `v0.48.0` count plus the new tests compiled into that
   lane. The two Docker lanes ran with `-- --nocapture`, and neither
@@ -82,9 +88,10 @@ One caller-owned rayon pool for koalisi's CPU work (#115).
   It runs these paths on an executor: the 18 async graph methods, the async
   and manager join and leave of the three policies, and `magnitude_history`.
   Then `rayon::ThreadPoolBuilder::new().build_global()` returns `Ok`.
-- At `0d60ee2`, the `koalisi` binary starts, and on SIGINT it logs
-  "shutdown clean". Seven examples exit 0.
-- These are clean at `0d60ee2`:
+- At `ae7c9f9`, the `koalisi` binary starts, and on SIGINT it logs
+  "shutdown clean". Seven examples exit 0. Clippy on `persistence,durable`
+  re-ran clean at `ae7c9f9`.
+- These are clean at `ae7c9f9`:
 
   ```sh
   RUSTDOCFLAGS='-D warnings' cargo doc --locked --no-deps --all-features
