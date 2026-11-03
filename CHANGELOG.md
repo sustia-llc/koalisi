@@ -19,6 +19,57 @@ Planned work — issue-tracked:
 - **K7 lineage**: EQ5b (c) ([#103]); the multi-coalition harness scaffold and
   the tira-extension re-pins and registrations ([#104]–[#111]).
 
+## [0.50.0] — 2026-11-03
+
+The review follow-ups of v0.45.0 to v0.49.0 (#116, #121, #122, #124, #126,
+#128).
+
+### Added
+- `subsystems::coalition_actor::ServiceError`, with the variants `Gone`,
+  `ReplyDropped`, `Cancelled`, `Panicked { message }` and
+  `Topology(TemporalError)`.
+- `TemporalError::LockPoisoned`. After a panic under the graph's write lock,
+  every graph operation returns it.
+- `core::config::LoggingError::AlreadyInstalled`, and the constants
+  `DEFAULT_RUN_MODE` and `ENV_PREFIX`.
+- `subsystems::durable::DurableBusError`, which wraps the upstream
+  `surrealdb_live_message` error, and `DurableDecisionBus::new_with_parent`.
+  If the parent token is cancelled, the bus agents stop.
+- Feature `blake3-pure`. It turns on `blake3`'s `pure` feature, so the
+  build compiles no C or assembly for `blake3`.
+- If `p(control 1)` is not finite, `PersistentAifArm` logs a warning with
+  `p1` and declines.
+
+### Changed
+- **Breaking:** `CoalitionServiceHandle::join`, `leave` and `members` return
+  `Result<_, ServiceError>` in place of `anyhow::Result`.
+- **Breaking:** `TemporalHypergraph::count_vertices`, `count_hyperedges`,
+  `CoalitionManager::count_agents` and `count_coalitions` return
+  `TemporalResult<usize>`.
+- **Breaking:** `DurableDecisionBus::new` returns
+  `Result<Self, DurableBusError>` in place of `anyhow::Result`.
+- **Breaking:** `Settings` reads only environment variables with the
+  prefix `KOALISI_` and skips empty ones. The override of `logger.level` is
+  `KOALISI_LOGGER__LEVEL`. `RUN_MODE` keeps its name.
+- **Breaking:** `Logger::level` is a `LevelFilter`. `Settings::new` returns
+  a `ConfigError` for an unknown or empty level, and accepts `off`.
+- **Breaking:** `Settings::new` returns an error for a non-Unicode
+  `RUN_MODE`, and for a `RUN_MODE` with no `config/<mode>` file.
+- **Breaking:** `setup_logging` returns `Result<(), LoggingError>`. Every
+  call returns the outcome of the first call.
+- A graph mutation and its event-log record run in one spawned task. If the
+  caller drops the future, both still land. A graph mutation must run
+  inside a tokio runtime.
+- If its token is cancelled, `spawn_decision_forwarder` forwards the records
+  already buffered, then stops.
+- The `koalisi` binary reads the join loop's outcome at shutdown, logs a
+  `members` error, and tells a stopped service apart from a topology error.
+- The `SETTINGS` panic message names the working directory and `RUN_MODE`.
+- `Step::encode_canonical` destructures `Step`.
+- If the Docker socket does not answer `GET /_ping`, the two container tests
+  skip. Every other boot failure fails the test. A test that panics
+  after the boot leaves no `koalisi_sdb_container` running.
+
 ## [0.49.0] — 2026-11-03
 
 One caller-owned rayon pool for koalisi's CPU work (#115).
