@@ -4,7 +4,8 @@
 //!
 //! Container-backed like `tests/durable_integration.rs`: boots SurrealDB via
 //! upstream's `sdb::sdb_task`, and prints a `SKIP` line and passes if Docker is
-//! unavailable.
+//! unavailable. A log sink that is not an agent of the bus is refused with
+//! `DurableError::UnknownLogSink`.
 //!
 //! Fixture arithmetic (`ThresholdPolicy(AdditiveCalculator, 0, 0)`): an agent
 //! with trust `t` and `p` capability bits contributes `50 + 10·p + t`, so the
@@ -32,7 +33,9 @@ use koalisi::persistence::{
 use koalisi::subsystems::coalition_actor::{
     CoalitionService, DecisionKind, DecisionRecord, DecisionTrace,
 };
-use koalisi::subsystems::durable::{DecisionEvent, DurableDecisionBus, spawn_decision_log_bus_tee};
+use koalisi::subsystems::durable::{
+    DecisionEvent, DurableDecisionBus, DurableError, spawn_decision_log_bus_tee,
+};
 use koalisi::topology::CoalitionManager;
 
 use surrealdb_live_message::subsystems::sdb::{self, SurrealDBWrapper};
@@ -139,15 +142,39 @@ async fn every_trace_reaches_the_decisions_stream_and_the_bus() {
         &pipe_tracker,
         token.child_token(),
     );
+    // A log sink that is not an agent of the bus is refused.
+    let (_unused_tx, unused_rx) = mpsc::channel::<DecisionTrace>(1);
+    let refused = spawn_decision_log_bus_tee(
+        &bus,
+        unused_rx,
+        writer_tx.clone(),
+        producer.clone(),
+        "no_such_sink".to_string(),
+        &pipe_tracker,
+        token.child_token(),
+    )
+    .await;
+    assert_eq!(
+        refused.as_ref().err(),
+        Some(&DurableError::UnknownLogSink {
+            log_sink: "no_such_sink".to_string()
+        }),
+        "an unknown log sink must be refused; got Ok: {}",
+        refused.is_ok()
+    );
+
     let (trace_tx, trace_rx) = mpsc::channel::<DecisionTrace>(16);
     spawn_decision_log_bus_tee(
+        &bus,
         trace_rx,
         writer_tx,
         producer,
         LOG_SINK.to_string(),
         &pipe_tracker,
         token.child_token(),
-    );
+    )
+    .await
+    .expect("tee_log is an agent of the bus");
 
     // Setup: 4 events (3 agents + the coalition) ⇒ log length 4, clock 4.
     let manager = CoalitionManager::<Worker, ()>::empty();

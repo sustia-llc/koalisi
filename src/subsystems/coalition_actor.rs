@@ -167,27 +167,42 @@ fn emit_decision(
 ) {
     let Some(tx) = tap else { return };
     let record = decision_record(coalition, agent, kind, decision);
-    try_emit(tx, record, kind, "decision tap", "decision record");
+    try_emit(tx, record, "decision tap", "decision record");
+}
+
+/// An item a decision tap carries: it holds one [`DecisionRecord`].
+trait TapItem {
+    fn record(&self) -> &DecisionRecord;
+}
+
+impl TapItem for DecisionRecord {
+    fn record(&self) -> &DecisionRecord {
+        self
+    }
+}
+
+impl TapItem for DecisionTrace {
+    fn record(&self) -> &DecisionRecord {
+        &self.record
+    }
 }
 
 /// `try_send` `item` on `tx`; a full or closed channel drops it with a `warn`
-/// naming `tap` and `item`. Never blocks.
-fn try_emit<T>(tx: &mpsc::Sender<T>, item: T, kind: DecisionKind, tap: &str, what: &str) {
-    match tx.try_send(item) {
-        Ok(()) => {}
-        Err(mpsc::error::TrySendError::Full(_)) => {
-            tracing::warn!(
-                kind = kind.as_str(),
-                "{tap} full — dropping {what} (decision unaffected)"
-            );
-        }
-        Err(mpsc::error::TrySendError::Closed(_)) => {
-            tracing::warn!(
-                kind = kind.as_str(),
-                "{tap} closed — dropping {what} (decision unaffected)"
-            );
-        }
-    }
+/// naming `tap` and `what`, with the record's coalition, agent id and kind as
+/// fields. Never blocks.
+fn try_emit<T: TapItem>(tx: &mpsc::Sender<T>, item: T, tap: &str, what: &str) {
+    let (state, item) = match tx.try_send(item) {
+        Ok(()) => return,
+        Err(mpsc::error::TrySendError::Full(item)) => ("full", item),
+        Err(mpsc::error::TrySendError::Closed(item)) => ("closed", item),
+    };
+    let r = item.record();
+    tracing::warn!(
+        coalition = %r.coalition,
+        agent_id = r.agent_id,
+        kind = r.kind.as_str(),
+        "{tap} {state} — dropping {what} (decision unaffected)"
+    );
 }
 
 /// Emit a [`DecisionTrace`] on the trace tap, with the same non-blocking
@@ -209,7 +224,7 @@ fn emit_trace(
         event_log_len: position.event_log_len,
         timestamp: position.timestamp,
     };
-    try_emit(tx, trace, kind, "decision trace tap", "decision trace");
+    try_emit(tx, trace, "decision trace tap", "decision trace");
 }
 
 /// Spawn a task that drains ONE decision tap and fans each record out to every
@@ -545,6 +560,72 @@ async fn service_loop<V, HE>(
     tracing::debug!("CoalitionService stopped");
 }
 
+/// A `tracing` layer that records every event's level and fields, for tests
+/// that pin a log site.
+#[cfg(test)]
+pub(crate) mod log_capture {
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
+
+    use tracing::field::{Field, Visit};
+    use tracing::{Event, Level, Subscriber};
+    use tracing_subscriber::layer::{Context, Layer, SubscriberExt};
+
+    /// One captured event: its level and its fields by name (`message`
+    /// included), each rendered as text.
+    #[derive(Debug, Clone)]
+    pub(crate) struct CapturedEvent {
+        pub(crate) level: Level,
+        pub(crate) fields: HashMap<&'static str, String>,
+    }
+
+    /// The shared event list; clones record into the same list.
+    #[derive(Clone, Default)]
+    pub(crate) struct Capture(Arc<Mutex<Vec<CapturedEvent>>>);
+
+    impl Capture {
+        /// Make this capture the current thread's subscriber until the guard
+        /// drops.
+        pub(crate) fn install(&self) -> tracing::subscriber::DefaultGuard {
+            tracing::subscriber::set_default(tracing_subscriber::registry().with(self.clone()))
+        }
+
+        /// The captured events whose `message` contains `needle`.
+        pub(crate) fn matching(&self, needle: &str) -> Vec<CapturedEvent> {
+            self.0
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|e| e.fields.get("message").is_some_and(|m| m.contains(needle)))
+                .cloned()
+                .collect()
+        }
+    }
+
+    struct Fields<'a>(&'a mut HashMap<&'static str, String>);
+
+    impl Visit for Fields<'_> {
+        fn record_str(&mut self, field: &Field, value: &str) {
+            self.0.insert(field.name(), value.to_string());
+        }
+
+        fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+            self.0.insert(field.name(), format!("{value:?}"));
+        }
+    }
+
+    impl<S: Subscriber> Layer<S> for Capture {
+        fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
+            let mut fields = HashMap::new();
+            event.record(&mut Fields(&mut fields));
+            self.0.lock().unwrap().push(CapturedEvent {
+                level: *event.metadata().level(),
+                fields,
+            });
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -718,6 +799,55 @@ mod tests {
             kind: DecisionKind::Join,
             act: true,
             score: 1.5,
+        }
+    }
+
+    /// A full record tap and a closed trace tap each drop their item with one
+    /// warn-level log carrying the record's coalition, agent id and kind.
+    #[test]
+    fn tap_drops_log_at_warn_with_the_record_fields() {
+        use super::log_capture::Capture;
+
+        let capture = Capture::default();
+        let _guard = capture.install();
+
+        let (full_tx, _full_rx) = mpsc::channel(1);
+        full_tx.try_send(record(7)).expect("fill the tap");
+        try_emit(&full_tx, record(8), "decision tap", "decision record");
+
+        let (closed_tx, closed_rx) = mpsc::channel(1);
+        drop(closed_rx);
+        let trace = DecisionTrace {
+            record: record(9),
+            event_log_len: 0,
+            timestamp: 0,
+        };
+        try_emit(&closed_tx, trace, "decision trace tap", "decision trace");
+
+        for (needle, agent_id) in [
+            ("decision tap full", "8"),
+            ("decision trace tap closed", "9"),
+        ] {
+            let events = capture.matching(needle);
+            assert_eq!(events.len(), 1, "{needle}: events {events:?}");
+            let e = &events[0];
+            assert_eq!(
+                e.level,
+                tracing::Level::WARN,
+                "{needle}: level was {}",
+                e.level
+            );
+            for (field, want) in [
+                ("coalition", "coalition-0"),
+                ("agent_id", agent_id),
+                ("kind", "join"),
+            ] {
+                assert_eq!(
+                    e.fields.get(field).map(String::as_str),
+                    Some(want),
+                    "{needle}: field {field}"
+                );
+            }
         }
     }
 

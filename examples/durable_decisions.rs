@@ -139,12 +139,15 @@ async fn main() -> Result<()> {
         tap_tx,
     );
     let _forwarder = spawn_decision_forwarder(
+        &bus,
         producer,
         DECISION_LOG.to_string(),
         tap_rx,
         &tracker,
         token.child_token(),
-    );
+    )
+    .await
+    .context("decision forwarder")?;
 
     // 4) Drive policy-gated joins; each consulted decision is tapped + forwarded.
     let d1 = service.join(c1, coalition).await.context("join c1")?;

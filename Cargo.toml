@@ -71,10 +71,10 @@ catgraph-syntax = { git = "https://github.com/sustia-llc/catgraph", tag = "v0.25
 # three catgraph deps.
 catgraph = { git = "https://github.com/sustia-llc/catgraph", tag = "v0.25.0", optional = true }
 
-# Optional: durable coalition decision messaging (two-tier SurrealDB bus:
-# CHANGEFEED log + LIVE wake-up + cursor catch-up; at-least-once from the
-# log to the delivery bus, restart-durable), feature `durable`. Upstream's package name is
-# `surrealdb_live_message`; the hyphenated key is remapped via `package`.
+# Optional: durable coalition decision messaging over SurrealDB, feature
+# `durable`; its delivery guarantees are in the `subsystems::durable` module
+# docs. Upstream's package name is `surrealdb_live_message`; the hyphenated
+# key is remapped via `package`.
 surrealdb-live-message = { git = "https://github.com/sustia-llc/surrealdb-live-message", tag = "v0.7.0", package = "surrealdb_live_message", optional = true }
 # `#[derive(SurrealValue)]` on the durable `DecisionEvent` emits absolute
 # `::surrealdb_types` paths, so the trait crate is a direct dep; the version

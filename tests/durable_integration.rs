@@ -16,22 +16,32 @@
 //! 4. Round 2: recreate the bus. `decision_log` resumes from its persisted
 //!    cursor and the `SHOW CHANGES` catch-up replays BOTH events — the property
 //!    plain at-most-once `LIVE` lacks.
+//! 5. A log sink that is not an agent of the bus is refused with
+//!    `DurableError::UnknownLogSink`.
+//! 6. On a separate bus, the sink's `agent` record is deleted after the sink
+//!    check, so the forwarder's send fails; that failure is logged once at
+//!    error level with the decision's fields.
 //!
 //! The hot path never touches the DB; only the *decisions* are forwarded.
 
 #![cfg(feature = "durable")]
 
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
+use tokio::sync::mpsc;
 use tokio::time::{Duration, sleep, timeout};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
+use tracing::field::{Field, Visit};
+use tracing::{Event, Level, Subscriber};
+use tracing_subscriber::layer::{Context, Layer, SubscriberExt};
 
 use koalisi::algorithms::{AdditiveCalculator, AgentCapabilities};
 use koalisi::core::config::setup_logging;
 use koalisi::decision::{DecisionContext, ThresholdPolicy};
-use koalisi::subsystems::coalition_actor::CoalitionService;
-use koalisi::subsystems::durable::{DurableDecisionBus, spawn_decision_forwarder};
+use koalisi::subsystems::coalition_actor::{CoalitionService, DecisionKind, DecisionRecord};
+use koalisi::subsystems::durable::{DurableDecisionBus, DurableError, spawn_decision_forwarder};
 use koalisi::topology::CoalitionManager;
 
 use surrealdb_live_message::subsystems::sdb::{self, SurrealDBWrapper};
@@ -141,12 +151,15 @@ async fn durable_decisions_survive_restart_through_the_seam() {
         tap_tx,
     );
     let forwarder = spawn_decision_forwarder(
+        &bus1,
         recorder,
         DECISION_LOG.to_string(),
         tap_rx,
         &tracker,
         token.child_token(),
-    );
+    )
+    .await
+    .expect("decision_log is an agent of the bus");
 
     // --- Drive two joins while decision_log is DOWN. Each `join().await`
     //     returns only after the tap emit, so both records are queued. ---
@@ -196,8 +209,155 @@ async fn durable_decisions_survive_restart_through_the_seam() {
         "c2's join decision must be durably replayed"
     );
 
+    // --- A log sink that is not an agent of the bus is refused. ---
+    let recorder2 = bus2.agent(RECORDER).await.expect("recorder agent");
+    let (_unused_tx, unused_rx) = mpsc::channel(1);
+    let refused = spawn_decision_forwarder(
+        &bus2,
+        recorder2,
+        "no_such_sink".to_string(),
+        unused_rx,
+        &tracker,
+        token.child_token(),
+    )
+    .await;
+    assert_eq!(
+        refused.as_ref().err(),
+        Some(&DurableError::UnknownLogSink {
+            log_sink: "no_such_sink".to_string()
+        }),
+        "an unknown log sink must be refused; got Ok: {}",
+        refused.is_ok()
+    );
+
     bus2.shutdown().await;
+
+    failed_send_logs_at_error(&tracker, &token).await;
+
     token.cancel();
     tracker.close();
     tracker.wait().await;
+}
+
+const FAIL_PRODUCER: &str = "fail_producer";
+const FAIL_SINK: &str = "fail_sink";
+
+/// The forwarder logs a failed `Agent::send` once, at error level, with the
+/// decision's fields. The send fails because the sink's `agent` record is
+/// deleted after the sink check passed (upstream `Agent::send` then returns
+/// `UnknownRecipient`).
+async fn failed_send_logs_at_error(tracker: &TaskTracker, token: &CancellationToken) {
+    let bus = DurableDecisionBus::new(vec![FAIL_PRODUCER.to_string(), FAIL_SINK.to_string()])
+        .await
+        .expect("failure bus");
+    let producer = bus.agent(FAIL_PRODUCER).await.expect("producer agent");
+    let (tx, rx) = mpsc::channel(4);
+    let forwarder = spawn_decision_forwarder(
+        &bus,
+        producer,
+        FAIL_SINK.to_string(),
+        rx,
+        tracker,
+        token.child_token(),
+    )
+    .await
+    .expect("fail_sink is an agent of the bus");
+
+    let delete = format!("DELETE agent:{FAIL_SINK}");
+    SurrealDBWrapper::connection()
+        .await
+        .query(&delete)
+        .await
+        .and_then(|r| r.check())
+        .expect("delete the sink's agent record");
+
+    let capture = Capture::default();
+    let guard = capture.install();
+    tx.send(DecisionRecord {
+        coalition: "coalition-7".to_string(),
+        agent_id: 11,
+        kind: DecisionKind::Leave,
+        act: false,
+        score: 0.0,
+    })
+    .await
+    .expect("queue one decision");
+    drop(tx);
+    forwarder.await.expect("forwarder join");
+    drop(guard);
+
+    let events = capture.matching("durable decision forward failed");
+    assert_eq!(events.len(), 1, "one failed-send log; events {events:?}");
+    let e = &events[0];
+    assert_eq!(e.level, Level::ERROR, "level was {}", e.level);
+    for (field, want) in [
+        ("coalition", "coalition-7"),
+        ("agent_id", "11"),
+        ("kind", "leave"),
+        ("to", FAIL_SINK),
+        ("err", "recipient agent 'fail_sink' does not exist"),
+    ] {
+        assert_eq!(
+            e.fields.get(field).map(String::as_str),
+            Some(want),
+            "field {field}; fields {:?}",
+            e.fields
+        );
+    }
+    assert_eq!(
+        e.fields.get("message").map(String::as_str),
+        Some("durable decision forward failed; the decision may be missing from the log"),
+        "message"
+    );
+
+    bus.shutdown().await;
+}
+
+/// A `tracing` layer that records every event's level and fields.
+#[derive(Clone, Default)]
+struct Capture(Arc<Mutex<Vec<CapturedEvent>>>);
+
+#[derive(Debug, Clone)]
+struct CapturedEvent {
+    level: Level,
+    fields: HashMap<&'static str, String>,
+}
+
+impl Capture {
+    fn install(&self) -> tracing::subscriber::DefaultGuard {
+        tracing::subscriber::set_default(tracing_subscriber::registry().with(self.clone()))
+    }
+
+    fn matching(&self, needle: &str) -> Vec<CapturedEvent> {
+        self.0
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|e| e.fields.get("message").is_some_and(|m| m.contains(needle)))
+            .cloned()
+            .collect()
+    }
+}
+
+struct Fields<'a>(&'a mut HashMap<&'static str, String>);
+
+impl Visit for Fields<'_> {
+    fn record_str(&mut self, field: &Field, value: &str) {
+        self.0.insert(field.name(), value.to_string());
+    }
+
+    fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+        self.0.insert(field.name(), format!("{value:?}"));
+    }
+}
+
+impl<S: Subscriber> Layer<S> for Capture {
+    fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
+        let mut fields = HashMap::new();
+        event.record(&mut Fields(&mut fields));
+        self.0.lock().unwrap().push(CapturedEvent {
+            level: *event.metadata().level(),
+            fields,
+        });
+    }
 }
