@@ -75,17 +75,24 @@ Re-pins `surrealdb-live-message` to `v0.7.0` (feature `durable`).
 - `cargo run --features durable --example durable_decisions` at `a678550`
   replays both decisions and stops cleanly.
 - `cargo clippy --locked --all-targets -- -D warnings` is clean at `a678550`
-  on the 14 non-Docker lanes and `--no-default-features`, and at `9a8f831`
-  on `persistence,durable`.
-- These are clean at `9a8f831`:
+  on the 14 non-Docker lanes and `--no-default-features`.
+- `1495779` changes `src/subsystems/durable.rs`, which compiles only under
+  `durable`. At `1495779`, `durable` 108 and `persistence,durable` 133 pass
+  with identical per-binary lines, and neither container test prints `SKIP`.
+  These are also clean at `1495779`:
 
   ```sh
+  cargo clippy --locked --all-targets --features durable -- -D warnings
+  cargo clippy --locked --all-targets --features persistence,durable -- -D warnings
   cargo +1.95.0 check --all-targets --locked --features durable
   cargo +1.95.0 check --all-targets --locked --features persistence,durable
-  cargo +1.95.0 check --all-targets --locked --features decision,magnitude-fast,persistence,remote,process,harness,metrics
   RUSTDOCFLAGS='-D warnings' cargo doc --locked --no-deps --all-features
   cargo fmt --all -- --check
   ```
+
+- `cargo +1.95.0 check --all-targets --locked --features
+  decision,magnitude-fast,persistence,remote,process,harness,metrics` is clean
+  at `9a8f831`.
 
 - The K4 archive gate did not run (owner, 2026-11-03).
 
