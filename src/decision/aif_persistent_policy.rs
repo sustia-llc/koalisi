@@ -1855,6 +1855,38 @@ mod tests {
         );
     }
 
+    /// Under the registered config, after one task on which all three
+    /// required bits `0b0111` failed, `should_leave` for a member covering
+    /// `0b0111` beside a member covering `0b0001` reads an interior
+    /// `p(control 1)` in `[0.05, 0.45]` and keeps the member.
+    #[test]
+    fn leave_read_is_interior_and_keeps_the_covering_member() {
+        let arm = PersistentAifArm::new(11, PersistentAifConfig::default()).unwrap();
+        arm.observe_outcome(0b0111, &[false; N_BITS]);
+        let ctx = DecisionContext {
+            required_capabilities: 0b0111,
+        };
+        let member = TestAgent {
+            id: 0,
+            caps: 0b0111,
+            trust: 50,
+        };
+        let other = TestAgent {
+            id: 1,
+            caps: 0b0001,
+            trust: 50,
+        };
+        let coalition: [&dyn AgentCapabilities; 2] = [&member, &other];
+
+        let d = arm.should_leave(&member, &coalition, &ctx);
+        let p1 = d.score + 0.5;
+        assert!(
+            (0.05..=0.45).contains(&p1) && !d.act,
+            "expected p(control 1) in [0.05, 0.45] and act = false, got p1 = {p1}, act = {}",
+            d.act
+        );
+    }
+
     /// Object-safety: the arm is usable behind the decision trait object.
     #[test]
     fn object_safe() {
