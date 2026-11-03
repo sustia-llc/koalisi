@@ -13,11 +13,19 @@
 //! with a `CHANGEFEED` is the durable log (tier 1); a `LIVE SELECT` is a
 //! low-latency wake-up (tier 2) that triggers a `SHOW CHANGES … SINCE <cursor>`
 //! catch-up, which is the only delivery path. Each agent persists a cursor (a
-//! versionstamp and a change index), so a decision published while the
-//! consumer is down is delivered after it restarts. Delivery is at-least-once
-//! from the log to the upstream delivery bus ([`Coalition::inbox`]). A
-//! delivery already on that bus is lost if the process exits before a
-//! receiver reads it.
+//! versionstamp and a change index). A decision published while the consumer
+//! is down is delivered after it restarts, if the restart comes within
+//! `sdb.message_retention_secs` (86400 s in `config/default.toml`). Upstream
+//! deletes older messages.
+//!
+//! Delivery guarantees, per hop:
+//! - From the decision tap to the log, delivery is at-most-once. A full tap
+//!   or a failed [`Agent::send`] drops the record.
+//! - From the log to the upstream delivery bus ([`Coalition::inbox`]),
+//!   delivery is at-least-once. Upstream logs a record whose payload does not
+//!   decode as [`DecisionEvent`] at error level, and skips it.
+//! - If the process exits before a receiver reads a delivery that is already
+//!   on the bus, that delivery is lost.
 //!
 //! ## Membership is recorded IN the stream, not as dynamic agents
 //!
@@ -63,6 +71,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
+use surrealdb_live_message::error::chain;
 use surrealdb_live_message::subsystems::agents::{Agent, Coalition};
 
 #[cfg(feature = "persistence")]
@@ -153,8 +162,15 @@ impl DurableDecisionBus {
     /// retention sweep end ([`Coalition::shutdown`]). Dropping the bus also
     /// cancels them, but does not wait.
     ///
-    /// Durable state (messages, cursors, agent records) persists — a later
-    /// [`DurableDecisionBus::new`] over the same names resumes and replays.
+    /// After the cancel, each listen loop makes at most one cursor save and
+    /// waits up to 2 s for it, then waits up to 2 s for its live-query `KILL`.
+    /// A subscribe in flight at the cancel is finished by a task that this does
+    /// not wait for, so its `KILL` can run after this returns.
+    ///
+    /// Agent records and cursors persist. A later [`DurableDecisionBus::new`]
+    /// over the same names delivers the messages after each persisted cursor
+    /// that are still within `sdb.message_retention_secs`. Deliveries on the bus
+    /// that no receiver read are lost.
     pub async fn shutdown(&self) {
         self.coalition.shutdown().await;
     }
@@ -166,8 +182,9 @@ impl DurableDecisionBus {
 /// `producer` is one of the bus's agents; `log_sink` is the name of the bus
 /// agent whose inbox is the durable decision stream. Each [`DecisionRecord`]
 /// pulled from `rx` is converted to a [`DecisionEvent`] and sent via
-/// [`Agent::send`]. A send failure is logged and skipped — the forwarder never
-/// dies on a transient DB error.
+/// [`Agent::send`]. A send failure is logged at error level with the decision's
+/// coalition, agent id and kind, and that decision is dropped. The forwarder
+/// keeps running.
 ///
 /// The task ends when either `token` cancels or `rx` closes (the core service —
 /// and thus its tap `Sender` — has been dropped; buffered records are drained
@@ -187,10 +204,7 @@ pub fn spawn_decision_forwarder(
                 _ = token.cancelled() => break,
                 maybe = rx.recv() => match maybe {
                     Some(record) => {
-                        let event = DecisionEvent::from(record);
-                        if let Err(e) = producer.send(&log_sink, event).await {
-                            tracing::warn!("durable decision forward failed: {e}");
-                        }
+                        send_event(&producer, &log_sink, DecisionEvent::from(record)).await;
                     }
                     None => break, // core tap dropped; nothing more to forward
                 },
@@ -198,6 +212,25 @@ pub fn spawn_decision_forwarder(
         }
         tracing::debug!("decision forwarder stopped");
     })
+}
+
+/// Send `event` from `producer` to `log_sink`. A failure is logged at error
+/// level with the event's coalition, agent id and kind, and the event is
+/// dropped.
+async fn send_event(producer: &Agent, log_sink: &str, event: DecisionEvent) {
+    let coalition = event.coalition.clone();
+    let agent_id = event.agent_id;
+    let kind = event.kind.clone();
+    if let Err(e) = producer.send(log_sink, event).await {
+        tracing::error!(
+            coalition = %coalition,
+            agent_id,
+            kind = %kind,
+            to = %log_sink,
+            err = %chain(&e),
+            "durable decision forward failed; decision dropped"
+        );
+    }
 }
 
 /// Log one trace to the `Decisions` stream, then publish its record to the bus.
@@ -209,12 +242,7 @@ async fn tee_one(
     log_sink: &str,
 ) {
     forward_decision_trace(&trace, writer_tx).await;
-    if let Err(e) = producer
-        .send(log_sink, DecisionEvent::from(trace.record))
-        .await
-    {
-        tracing::warn!("durable decision forward failed: {e}");
-    }
+    send_event(producer, log_sink, DecisionEvent::from(trace.record)).await;
 }
 
 /// Spawn a task that drains a decision trace tap
@@ -228,7 +256,8 @@ async fn tee_one(
 /// does (same record, same `send().await` wait for capacity, same
 /// drop-with-warn on an encode failure or a closed writer channel); then
 /// `producer` [`Agent::send`]s the trace's [`DecisionEvent`] to `log_sink`. A
-/// bus send failure is logged and skipped.
+/// bus send failure is logged at error level with the decision's coalition,
+/// agent id and kind, and that decision is dropped from the bus.
 ///
 /// Ends when either `token` is cancelled or `rx` closes. On cancellation it
 /// first tees whatever is already buffered in `rx`, then stops. Spawned on

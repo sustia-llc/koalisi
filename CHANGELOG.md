@@ -19,7 +19,7 @@ Planned work — issue-tracked:
 - **K7 lineage**: EQ5b (c) ([#103]); the multi-coalition harness scaffold and
   the tira-extension re-pins and registrations ([#104]–[#111]).
 
-## [0.47.0] - 2026-11-03
+## [0.47.0] — 2026-11-03
 
 Re-pins `surrealdb-live-message` to `v0.7.0` (feature `durable`).
 
@@ -28,6 +28,15 @@ Re-pins `surrealdb-live-message` to `v0.7.0` (feature `durable`).
   `durable`, `surrealdb-common` 3.3.5 calls `std::hint::cold_path`, which is
   stable since Rust 1.95.0. `cargo +1.93.0 check --all-targets --locked
   --features durable` at `a678550` fails with `E0658` on that call.
+  `rust-version` applies to the whole package, so Cargo also refuses a
+  1.93 or 1.94 build of every other feature set.
+- A failed `Agent::send` in `spawn_decision_forwarder` and
+  `spawn_decision_log_bus_tee` is now logged at error level, with the
+  decision's coalition, agent id and kind and the upstream error chain. It was
+  logged at warn with the error's `Display` text only. Since
+  `surrealdb-live-message` `v0.6.0`, a failed `RELATE` statement returns
+  `Error::Send` on this path, where it returned `Ok(())` before. The decision
+  is dropped in both versions.
 - **`surrealdb-live-message` `v0.2.2` → `v0.7.0`**, and `surrealdb-types`
   3.2.4 → 3.3.5, so the two versions unify. The `[sdb]` `tag` in
   `config/default.toml` is `v3.3.5`.
@@ -38,11 +47,13 @@ Re-pins `surrealdb-live-message` to `v0.7.0` (feature `durable`).
 - `Coalition::inbox()` returns `async_channel::Receiver` in place of
   `kanal::AsyncReceiver`. The three callers in `tests/` and `examples/` use
   only `recv().await` and compile unchanged.
-- The `durable` module docs state the delivery bound: at-least-once from the
-  log to the upstream delivery bus. If the process exits before a receiver
-  reads a delivery that is already on that bus, that delivery is lost.
-  `DurableDecisionBus::shutdown` documents the upstream wait, and that a drop
-  of the bus cancels without waiting.
+- The `durable` module docs state the delivery guarantee of each hop. From
+  the decision tap to the log, delivery is at-most-once. From the log to the
+  upstream delivery bus, it is at-least-once, within
+  `sdb.message_retention_secs`. If the process exits before a receiver reads
+  a delivery that is already on that bus, that delivery is lost.
+  `DurableDecisionBus::shutdown` documents the upstream wait and its 2 s
+  bounds, and that a drop of the bus cancels without waiting.
 - koalisi matches no upstream `Error` variant. This search prints nothing:
 
   ```sh
