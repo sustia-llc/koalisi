@@ -17,7 +17,8 @@
 //!    cursor and the `SHOW CHANGES` catch-up replays BOTH events — the property
 //!    plain at-most-once `LIVE` lacks.
 //! 5. A log sink that is not an agent of the bus is refused with
-//!    `DurableError::UnknownLogSink`.
+//!    `DurableError::UnknownLogSink`, and a producer that is not an agent of
+//!    the bus with `DurableError::UnknownProducer`; neither spawns a task.
 //! 6. On a separate bus, the sink's `agent` record is deleted after the sink
 //!    check, so the forwarder's send fails; that failure is logged once at
 //!    error level with the decision's fields.
@@ -26,17 +27,17 @@
 
 #![cfg(feature = "durable")]
 
+mod common;
+
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
 
 use tokio::sync::mpsc;
 use tokio::time::{Duration, sleep, timeout};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
-use tracing::field::{Field, Visit};
-use tracing::{Event, Level, Subscriber};
-use tracing_subscriber::layer::{Context, Layer, SubscriberExt};
+use tracing::Level;
 
+use common::log_capture::Capture;
 use koalisi::algorithms::{AdditiveCalculator, AgentCapabilities};
 use koalisi::core::config::setup_logging;
 use koalisi::decision::{DecisionContext, ThresholdPolicy};
@@ -44,10 +45,12 @@ use koalisi::subsystems::coalition_actor::{CoalitionService, DecisionKind, Decis
 use koalisi::subsystems::durable::{DurableDecisionBus, DurableError, spawn_decision_forwarder};
 use koalisi::topology::CoalitionManager;
 
+use surrealdb_live_message::subsystems::agents::Agent;
 use surrealdb_live_message::subsystems::sdb::{self, SurrealDBWrapper};
 
 const RECORDER: &str = "recorder";
 const DECISION_LOG: &str = "decision_log";
+const OUTSIDER: &str = "outsider";
 const BOOT_TIMEOUT: Duration = Duration::from_secs(180);
 const RECV_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -209,26 +212,47 @@ async fn durable_decisions_survive_restart_through_the_seam() {
         "c2's join decision must be durably replayed"
     );
 
-    // --- A log sink that is not an agent of the bus is refused. ---
+    // --- A producer or a log sink that is not an agent of the bus is refused,
+    //     and nothing is spawned. ---
     let recorder2 = bus2.agent(RECORDER).await.expect("recorder agent");
-    let (_unused_tx, unused_rx) = mpsc::channel(1);
-    let refused = spawn_decision_forwarder(
-        &bus2,
-        recorder2,
-        "no_such_sink".to_string(),
-        unused_rx,
-        &tracker,
-        token.child_token(),
-    )
-    .await;
-    assert_eq!(
-        refused.as_ref().err(),
-        Some(&DurableError::UnknownLogSink {
-            log_sink: "no_such_sink".to_string()
-        }),
-        "an unknown log sink must be refused; got Ok: {}",
-        refused.is_ok()
-    );
+    let outsider = Agent::new(OUTSIDER).await.expect("outsider agent");
+    for (producer, log_sink, want) in [
+        (
+            recorder2,
+            "no_such_sink",
+            DurableError::UnknownLogSink {
+                log_sink: "no_such_sink".to_string(),
+            },
+        ),
+        (
+            outsider,
+            DECISION_LOG,
+            DurableError::UnknownProducer {
+                producer: OUTSIDER.to_string(),
+            },
+        ),
+    ] {
+        let refuse_tracker = TaskTracker::new();
+        let (_unused_tx, unused_rx) = mpsc::channel(1);
+        let refused = spawn_decision_forwarder(
+            &bus2,
+            producer,
+            log_sink.to_string(),
+            unused_rx,
+            &refuse_tracker,
+            token.child_token(),
+        )
+        .await;
+        let spawned = refuse_tracker.len();
+        assert_eq!(
+            refused.as_ref().err(),
+            Some(&want),
+            "{want}: must be refused; got Ok: {}",
+            refused.is_ok()
+        );
+        assert_eq!(spawned, 0, "{want}: a refused spawn left {spawned} task(s)");
+        refuse_tracker.close();
+    }
 
     bus2.shutdown().await;
 
@@ -311,53 +335,4 @@ async fn failed_send_logs_at_error(tracker: &TaskTracker, token: &CancellationTo
     );
 
     bus.shutdown().await;
-}
-
-/// A `tracing` layer that records every event's level and fields.
-#[derive(Clone, Default)]
-struct Capture(Arc<Mutex<Vec<CapturedEvent>>>);
-
-#[derive(Debug, Clone)]
-struct CapturedEvent {
-    level: Level,
-    fields: HashMap<&'static str, String>,
-}
-
-impl Capture {
-    fn install(&self) -> tracing::subscriber::DefaultGuard {
-        tracing::subscriber::set_default(tracing_subscriber::registry().with(self.clone()))
-    }
-
-    fn matching(&self, needle: &str) -> Vec<CapturedEvent> {
-        self.0
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|e| e.fields.get("message").is_some_and(|m| m.contains(needle)))
-            .cloned()
-            .collect()
-    }
-}
-
-struct Fields<'a>(&'a mut HashMap<&'static str, String>);
-
-impl Visit for Fields<'_> {
-    fn record_str(&mut self, field: &Field, value: &str) {
-        self.0.insert(field.name(), value.to_string());
-    }
-
-    fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
-        self.0.insert(field.name(), format!("{value:?}"));
-    }
-}
-
-impl<S: Subscriber> Layer<S> for Capture {
-    fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
-        let mut fields = HashMap::new();
-        event.record(&mut Fields(&mut fields));
-        self.0.lock().unwrap().push(CapturedEvent {
-            level: *event.metadata().level(),
-            fields,
-        });
-    }
 }

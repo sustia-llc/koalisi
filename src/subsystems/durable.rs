@@ -28,7 +28,8 @@
 //!   no retry; an error from it is logged at error level, and the decision
 //!   may be missing from the log.
 //! - From the log to the upstream delivery bus ([`Coalition::inbox`]),
-//!   delivery is at-least-once. Upstream logs a record whose payload does not
+//!   delivery is at-least-once for a message still in the log, i.e. sent
+//!   within `sdb.message_retention_secs`. Upstream logs a record whose payload does not
 //!   decode as [`DecisionEvent`] at error level, and skips it.
 //! - If the process exits before a receiver reads a delivery that is already
 //!   on the bus, that delivery is lost.
@@ -183,40 +184,41 @@ impl DurableDecisionBus {
 }
 
 /// Errors from spawning a durable decision task.
-///
-/// Hand-rolled `Display` + [`std::error::Error`], in the same style as
-/// `persistence::errors`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DurableError {
+    /// The producer's name (`Agent::name`) names no agent of the
+    /// [`DurableDecisionBus`].
+    #[error("producer '{producer}' is not an agent of the durable decision bus")]
+    UnknownProducer {
+        /// The name of the agent that was passed as the producer.
+        producer: String,
+    },
     /// `log_sink` names no agent of the [`DurableDecisionBus`].
+    #[error("log sink '{log_sink}' is not an agent of the durable decision bus")]
     UnknownLogSink {
         /// The name that was passed as the log sink.
         log_sink: String,
     },
 }
 
-impl std::fmt::Display for DurableError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::UnknownLogSink { log_sink } => write!(
-                f,
-                "log sink '{log_sink}' is not an agent of the durable decision bus"
-            ),
-        }
+/// `Ok` iff `producer`'s name and `log_sink` each name an agent of `bus`;
+/// the producer is checked first.
+async fn check_agents(
+    bus: &DurableDecisionBus,
+    producer: &Agent,
+    log_sink: &str,
+) -> Result<(), DurableError> {
+    if bus.agent(&producer.name).await.is_none() {
+        return Err(DurableError::UnknownProducer {
+            producer: producer.name.clone(),
+        });
     }
-}
-
-impl std::error::Error for DurableError {}
-
-/// `Ok` iff `log_sink` names an agent of `bus`.
-async fn check_log_sink(bus: &DurableDecisionBus, log_sink: &str) -> Result<(), DurableError> {
-    if bus.agent(log_sink).await.is_some() {
-        Ok(())
-    } else {
-        Err(DurableError::UnknownLogSink {
+    if bus.agent(log_sink).await.is_none() {
+        return Err(DurableError::UnknownLogSink {
             log_sink: log_sink.to_string(),
-        })
+        });
     }
+    Ok(())
 }
 
 /// Spawn a task that drains the core decision tap and publishes each record to
@@ -236,8 +238,11 @@ async fn check_log_sink(bus: &DurableDecisionBus, log_sink: &str) -> Result<(), 
 ///
 /// # Errors
 ///
-/// [`DurableError::UnknownLogSink`] when `log_sink` names no agent of `bus`;
-/// nothing is spawned.
+/// Nothing is spawned on either error:
+/// - [`DurableError::UnknownProducer`] when `producer`'s name names no agent
+///   of `bus`;
+/// - [`DurableError::UnknownLogSink`] when `producer` is an agent of `bus` and
+///   `log_sink` names no agent of `bus`.
 pub async fn spawn_decision_forwarder(
     bus: &DurableDecisionBus,
     producer: Agent,
@@ -246,7 +251,7 @@ pub async fn spawn_decision_forwarder(
     tracker: &TaskTracker,
     token: CancellationToken,
 ) -> Result<JoinHandle<()>, DurableError> {
-    check_log_sink(bus, &log_sink).await?;
+    check_agents(bus, &producer, &log_sink).await?;
     Ok(tracker.spawn(async move {
         loop {
             tokio::select! {
@@ -315,8 +320,11 @@ async fn tee_one(
 ///
 /// # Errors
 ///
-/// [`DurableError::UnknownLogSink`] when `log_sink` names no agent of `bus`;
-/// nothing is spawned.
+/// Nothing is spawned on either error:
+/// - [`DurableError::UnknownProducer`] when `producer`'s name names no agent
+///   of `bus`;
+/// - [`DurableError::UnknownLogSink`] when `producer` is an agent of `bus` and
+///   `log_sink` names no agent of `bus`.
 #[cfg(feature = "persistence")]
 pub async fn spawn_decision_log_bus_tee(
     bus: &DurableDecisionBus,
@@ -327,7 +335,7 @@ pub async fn spawn_decision_log_bus_tee(
     tracker: &TaskTracker,
     token: CancellationToken,
 ) -> Result<JoinHandle<()>, DurableError> {
-    check_log_sink(bus, &log_sink).await?;
+    check_agents(bus, &producer, &log_sink).await?;
     Ok(tracker.spawn(async move {
         while let Some(trace) = next_trace(&mut rx, &token).await {
             tee_one(trace, &writer_tx, &producer, &log_sink).await;

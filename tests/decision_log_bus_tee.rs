@@ -5,7 +5,8 @@
 //! Container-backed like `tests/durable_integration.rs`: boots SurrealDB via
 //! upstream's `sdb::sdb_task`, and prints a `SKIP` line and passes if Docker is
 //! unavailable. A log sink that is not an agent of the bus is refused with
-//! `DurableError::UnknownLogSink`.
+//! `DurableError::UnknownLogSink`, and a producer that is not an agent of the
+//! bus with `DurableError::UnknownProducer`; neither spawns a task.
 //!
 //! Fixture arithmetic (`ThresholdPolicy(AdditiveCalculator, 0, 0)`): an agent
 //! with trust `t` and `p` capability bits contributes `50 + 10·p + t`, so the
@@ -38,10 +39,12 @@ use koalisi::subsystems::durable::{
 };
 use koalisi::topology::CoalitionManager;
 
+use surrealdb_live_message::subsystems::agents::Agent;
 use surrealdb_live_message::subsystems::sdb::{self, SurrealDBWrapper};
 
 const PRODUCER: &str = "tee_producer";
 const LOG_SINK: &str = "tee_log";
+const OUTSIDER: &str = "tee_outsider";
 const BOOT_TIMEOUT: Duration = Duration::from_secs(180);
 const RECV_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -142,26 +145,47 @@ async fn every_trace_reaches_the_decisions_stream_and_the_bus() {
         &pipe_tracker,
         token.child_token(),
     );
-    // A log sink that is not an agent of the bus is refused.
-    let (_unused_tx, unused_rx) = mpsc::channel::<DecisionTrace>(1);
-    let refused = spawn_decision_log_bus_tee(
-        &bus,
-        unused_rx,
-        writer_tx.clone(),
-        producer.clone(),
-        "no_such_sink".to_string(),
-        &pipe_tracker,
-        token.child_token(),
-    )
-    .await;
-    assert_eq!(
-        refused.as_ref().err(),
-        Some(&DurableError::UnknownLogSink {
-            log_sink: "no_such_sink".to_string()
-        }),
-        "an unknown log sink must be refused; got Ok: {}",
-        refused.is_ok()
-    );
+    // A producer or a log sink that is not an agent of the bus is refused, and
+    // nothing is spawned.
+    let outsider = Agent::new(OUTSIDER).await.expect("outsider agent");
+    for (producer, log_sink, want) in [
+        (
+            producer.clone(),
+            "no_such_sink",
+            DurableError::UnknownLogSink {
+                log_sink: "no_such_sink".to_string(),
+            },
+        ),
+        (
+            outsider,
+            LOG_SINK,
+            DurableError::UnknownProducer {
+                producer: OUTSIDER.to_string(),
+            },
+        ),
+    ] {
+        let refuse_tracker = TaskTracker::new();
+        let (_unused_tx, unused_rx) = mpsc::channel::<DecisionTrace>(1);
+        let refused = spawn_decision_log_bus_tee(
+            &bus,
+            unused_rx,
+            writer_tx.clone(),
+            producer,
+            log_sink.to_string(),
+            &refuse_tracker,
+            token.child_token(),
+        )
+        .await;
+        let spawned = refuse_tracker.len();
+        assert_eq!(
+            refused.as_ref().err(),
+            Some(&want),
+            "{want}: must be refused; got Ok: {}",
+            refused.is_ok()
+        );
+        assert_eq!(spawned, 0, "{want}: a refused spawn left {spawned} task(s)");
+        refuse_tracker.close();
+    }
 
     let (trace_tx, trace_rx) = mpsc::channel::<DecisionTrace>(16);
     spawn_decision_log_bus_tee(

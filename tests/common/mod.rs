@@ -5,4 +5,5 @@
 //! regular module, NOT as an integration test binary of its own.
 
 pub mod algorithms;
+pub mod log_capture;
 pub mod topology;

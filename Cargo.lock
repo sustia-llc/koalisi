@@ -3003,6 +3003,7 @@ dependencies = [
  "sha2 0.11.0",
  "surrealdb-types",
  "surrealdb_live_message",
+ "thiserror 2.0.21",
  "tokio",
  "tokio-rayon",
  "tokio-stream",

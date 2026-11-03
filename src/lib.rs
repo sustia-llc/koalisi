@@ -43,6 +43,8 @@ pub mod llm;
 pub mod persistence;
 #[cfg(feature = "process")]
 pub mod process;
+#[cfg(test)]
+pub(crate) mod test_support;
 pub mod topology;
 
 pub mod subsystems {
