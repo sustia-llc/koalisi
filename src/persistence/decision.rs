@@ -44,21 +44,49 @@ fn decision_store_record(trace: &DecisionTrace) -> Result<Record, PersistenceErr
 /// Build `trace`'s `Decisions` stream record and send it on `writer_tx`,
 /// waiting for capacity.
 ///
-/// An encode failure or a closed writer channel is logged and the trace
-/// dropped.
+/// The trace is dropped on an encode failure, logged at error level, and on a
+/// closed writer channel, logged at warn level; both logs carry the decision's
+/// coalition, agent id and kind.
 pub(crate) async fn forward_decision_trace(
     trace: &DecisionTrace,
     writer_tx: &mpsc::Sender<(StreamId, Record)>,
 ) {
-    let record = match decision_store_record(trace) {
+    send_decision_record(trace, decision_store_record(trace), writer_tx).await;
+}
+
+/// Send `record`, built from `trace`, on `writer_tx` as a `Decisions` stream
+/// record, waiting for capacity.
+///
+/// An `Err` record is logged at error level and nothing is sent; a closed
+/// writer channel is logged at warn level. Both logs carry the decision's
+/// coalition, agent id and kind.
+async fn send_decision_record(
+    trace: &DecisionTrace,
+    record: Result<Record, PersistenceError>,
+    writer_tx: &mpsc::Sender<(StreamId, Record)>,
+) {
+    let r = &trace.record;
+    let record = match record {
         Ok(record) => record,
         Err(e) => {
-            tracing::warn!("decision forwarder: {e}; dropping trace");
+            tracing::error!(
+                coalition = %r.coalition,
+                agent_id = r.agent_id,
+                kind = r.kind.as_str(),
+                err = %e,
+                "decision forwarder: record encode failed; dropping trace"
+            );
             return;
         }
     };
     if let Err(e) = writer_tx.send((StreamId::Decisions, record)).await {
-        tracing::warn!("decision forwarder: writer channel closed, dropping record: {e}");
+        tracing::warn!(
+            coalition = %r.coalition,
+            agent_id = r.agent_id,
+            kind = r.kind.as_str(),
+            err = %e,
+            "decision forwarder: writer channel closed; dropping record"
+        );
     }
 }
 
@@ -84,9 +112,10 @@ pub(crate) async fn forward_decision_trace(
 ///
 /// The trace tap is lossy (`try_send`, drop-with-warn). This task forwards
 /// with `writer_tx.send().await`, so it waits for writer-channel capacity
-/// instead of dropping. An encode failure or a closed writer channel is warned
-/// and the trace dropped, and the store writer makes a single `append` attempt
-/// per record, so delivery from the tap onward is at-most-once.
+/// instead of dropping. An encode failure drops the trace with an error-level
+/// log, a closed writer channel drops it with a warn-level log, and the store
+/// writer makes a single `append` attempt per record, so delivery from the tap
+/// onward is at-most-once.
 ///
 /// ## Shutdown
 ///
@@ -123,5 +152,67 @@ pub(crate) async fn next_trace(
         biased;
         () = token.cancelled() => rx.try_recv().ok(),
         maybe = rx.recv() => maybe,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::subsystems::coalition_actor::{DecisionKind, DecisionRecord};
+    use crate::test_support::log_capture::Capture;
+
+    fn trace() -> DecisionTrace {
+        DecisionTrace {
+            record: DecisionRecord {
+                coalition: "coalition-3".to_string(),
+                agent_id: 5,
+                kind: DecisionKind::Leave,
+                act: false,
+                score: 0.0,
+            },
+            event_log_len: 2,
+            timestamp: 2,
+        }
+    }
+
+    /// A closed writer channel drops the trace with one warn-level log
+    /// carrying the decision's fields. An encode failure logs at error level.
+    #[tokio::test]
+    async fn dropped_traces_log_at_the_level_of_their_cause() {
+        let capture = Capture::default();
+        let _guard = capture.install();
+
+        let (closed_tx, closed_rx) = mpsc::channel(1);
+        drop(closed_rx);
+        forward_decision_trace(&trace(), &closed_tx).await;
+
+        let (open_tx, _open_rx) = mpsc::channel(1);
+        send_decision_record(
+            &trace(),
+            Err(PersistenceError::Encode("injected".to_string())),
+            &open_tx,
+        )
+        .await;
+
+        for (needle, level) in [
+            ("writer channel closed", tracing::Level::WARN),
+            ("record encode failed", tracing::Level::ERROR),
+        ] {
+            let events = capture.matching(needle);
+            assert_eq!(events.len(), 1, "{needle}: events {events:?}");
+            let e = &events[0];
+            assert_eq!(e.level, level, "{needle}: level was {}", e.level);
+            for (field, want) in [
+                ("coalition", "coalition-3"),
+                ("agent_id", "5"),
+                ("kind", "leave"),
+            ] {
+                assert_eq!(
+                    e.fields.get(field).map(String::as_str),
+                    Some(want),
+                    "{needle}: field {field}"
+                );
+            }
+        }
     }
 }

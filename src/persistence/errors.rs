@@ -1,8 +1,7 @@
 //! Error type for the persistence layer.
 //!
 //! Hand-rolled `Display` + [`std::error::Error`] + `From<std::io::Error>`, in
-//! the same style as [`topology::errors`](crate::topology::errors) — no
-//! `thiserror`, no `anyhow`.
+//! the same style as [`topology::errors`](crate::topology::errors).
 
 use super::envelope::{KeyId, SequenceNo, StreamId};
 

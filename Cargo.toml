@@ -1,12 +1,12 @@
 [package]
 name = "koalisi"
-version = "0.46.0"
+version = "0.47.0"
 edition = "2024"
-# Declared floor 1.93.0 — owner decision C-D1 (2026-09-14): KEEP; do not lower
-# in passing. Edition 2024 means resolver 3, so this value also bounds
+# Declared floor 1.95.0 (owner, 2026-11-03; it replaces C-D1's 1.93.0). Do not
+# lower in passing. Edition 2024 means resolver 3, so this value also bounds
 # dependency resolution (`cargo update` selects versions compatible with it).
 # The gate (owner, 2026-09-17) verifies the declaration itself:
-# `cargo +1.93.0 check --all-targets --locked --features <set>` on the feature
+# `cargo +1.95.0 check --all-targets --locked --features <set>` on the feature
 # sets a PR's dependency or source change reaches. Never
 # `--ignore-rust-version`: it also suppresses the dependency checks.
 # Historical record, last measured at v0.37.0 (2026-09-17) and no longer
@@ -17,9 +17,10 @@ edition = "2024"
 #         (nalgebra 0.35 / safe_arch 1.2 / wide 1.7 declare 1.89, as does
 #         aif 0.14 under `decision`)
 #   1.92  + `durable` (1.91 fails to compile `diskann`)
-# Since aif 0.15, `aif` declares 1.93.0, so `decision` has no floor below the
-# declaration.
-rust-version = "1.93.0"
+# Since aif 0.15, `aif` declares 1.93.0, so `decision` has no floor below
+# 1.93.0. Since surrealdb 3.3.5, `durable` needs 1.95.0: `surrealdb-common`
+# calls `std::hint::cold_path`, which is stable since 1.95.0.
+rust-version = "1.95.0"
 description = "Reference implementation of agentic coalitions in Rust — tokio::sync task seams, temporal hypergraph topology, coalition algorithms, and optional Active Inference decision-making"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/sustia-llc/koalisi"
@@ -32,6 +33,8 @@ tokio-util = { version = "0.7", features = ["rt"] }
 futures = "0.3"
 
 anyhow = "1.0"
+# `DurableError` derives `thiserror::Error`; only compiled under `durable`.
+thiserror = { version = "2", optional = true }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 config = { version = "0.15", default-features = false, features = ["toml"] }
@@ -70,16 +73,16 @@ catgraph-syntax = { git = "https://github.com/sustia-llc/catgraph", tag = "v0.25
 # three catgraph deps.
 catgraph = { git = "https://github.com/sustia-llc/catgraph", tag = "v0.25.0", optional = true }
 
-# Optional: durable coalition decision messaging (two-tier SurrealDB bus:
-# CHANGEFEED log + LIVE wake-up + cursor catch-up; at-least-once,
-# restart-durable), feature `durable`. Upstream's package name is
-# `surrealdb_live_message`; the hyphenated key is remapped via `package`.
-surrealdb-live-message = { git = "https://github.com/sustia-llc/surrealdb-live-message", tag = "v0.2.2", package = "surrealdb_live_message", optional = true }
+# Optional: durable coalition decision messaging over SurrealDB, feature
+# `durable`; its delivery guarantees are in the `subsystems::durable` module
+# docs. Upstream's package name is `surrealdb_live_message`; the hyphenated
+# key is remapped via `package`.
+surrealdb-live-message = { git = "https://github.com/sustia-llc/surrealdb-live-message", tag = "v0.7.0", package = "surrealdb_live_message", optional = true }
 # `#[derive(SurrealValue)]` on the durable `DecisionEvent` emits absolute
 # `::surrealdb_types` paths, so the trait crate is a direct dep; the version
 # unifies with the one `surrealdb-live-message` pulls. Pure-value types crate,
 # no DB engine; only compiled under `durable`.
-surrealdb-types = { version = "3.2.4", optional = true }
+surrealdb-types = { version = "3.3.5", optional = true }
 
 # Optional: Phase 7 persistence core (feature `persistence`). CBOR frames via
 # ciborium + SHA-256 chaining via sha2. Feature-off builds pull neither.
@@ -125,7 +128,7 @@ magnitude = ["dep:catgraph-magnitude"]
 # no decision; turning it on selects the `mag-eq3` arm, not a faster `mag`.
 magnitude-fast = ["magnitude", "catgraph-magnitude/f64-fast"]
 # Durable coalition decision-event bus on surrealdb-live-message (off by default).
-durable = ["dep:surrealdb-live-message", "dep:surrealdb-types"]
+durable = ["dep:surrealdb-live-message", "dep:surrealdb-types", "dep:thiserror"]
 # Phase 7 persistence core: portable hash-chained event log (off by default).
 persistence = ["dep:ciborium", "dep:sha2"]
 # Domain-neutral remote coalition-event gateway over libp2p `request-response`

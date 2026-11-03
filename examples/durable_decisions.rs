@@ -6,8 +6,10 @@
 //! 2. Stand up a `DurableDecisionBus` with a `producer` + a `decision_log` sink.
 //! 3. Run a koalisi `CoalitionService` with a decision *tap*; a forwarder drains
 //!    the tap and publishes each decision durably as the `producer`.
-//! 4. Drive a few policy-gated joins through the service; read the decision
-//!    events back off the `decision_log` inbox and print them.
+//! 4. Drive two policy-gated joins through the service; read the decision
+//!    events back off the `decision_log` inbox and print them. The example
+//!    returns an error unless the inbox delivers exactly those two decisions,
+//!    each addressed to `decision_log`.
 //!
 //! The hot path (the service's `tokio::sync` seam) never touches the DB — only
 //! the *decisions* are forwarded to the durable tier.
@@ -29,7 +31,7 @@ use koalisi::algorithms::{AdditiveCalculator, AgentCapabilities};
 use koalisi::core::config::setup_logging;
 use koalisi::decision::{DecisionContext, ThresholdPolicy};
 use koalisi::subsystems::coalition_actor::CoalitionService;
-use koalisi::subsystems::durable::{DurableDecisionBus, spawn_decision_forwarder};
+use koalisi::subsystems::durable::{DecisionEvent, DurableDecisionBus, spawn_decision_forwarder};
 use koalisi::topology::CoalitionManager;
 
 use surrealdb_live_message::subsystems::sdb::{self, SurrealDBWrapper};
@@ -139,12 +141,15 @@ async fn main() -> Result<()> {
         tap_tx,
     );
     let _forwarder = spawn_decision_forwarder(
+        &bus,
         producer,
         DECISION_LOG.to_string(),
         tap_rx,
         &tracker,
         token.child_token(),
-    );
+    )
+    .await
+    .context("decision forwarder")?;
 
     // 4) Drive policy-gated joins; each consulted decision is tapped + forwarded.
     let d1 = service.join(c1, coalition).await.context("join c1")?;
@@ -155,34 +160,76 @@ async fn main() -> Result<()> {
     );
 
     // Read the durable decision events back off the log inbox.
+    let label = format!("coalition-{}", usize::from(coalition));
+    let mut expected = vec![
+        DecisionEvent {
+            coalition: label.clone(),
+            agent_id: usize::from(c1) as u64,
+            kind: "join".to_string(),
+            act: d1.act,
+            score: d1.score,
+        },
+        DecisionEvent {
+            coalition: label,
+            agent_id: usize::from(c2) as u64,
+            kind: "join".to_string(),
+            act: d2.act,
+            score: d2.score,
+        },
+    ];
     println!("--- replayed decision log (durable tier) ---");
-    for _ in 0..2 {
-        match timeout(RECV_TIMEOUT, inbox.recv()).await {
-            Ok(Ok(d)) => {
-                let e = &d.message.payload;
-                println!(
-                    "  [{}] {} agent_id={} act={} score={:.4}",
-                    d.recipient, e.kind, e.agent_id, e.act, e.score
+    let outcome: Result<Vec<DecisionEvent>> = async {
+        let mut received = Vec::with_capacity(expected.len());
+        for i in 0..expected.len() {
+            let d = timeout(RECV_TIMEOUT, inbox.recv())
+                .await
+                .with_context(|| {
+                    format!(
+                        "timed out waiting for durable decision event {} of {}",
+                        i + 1,
+                        expected.len()
+                    )
+                })?
+                .context("inbox bus closed before every decision event arrived")?;
+            let e = d.message.payload;
+            println!(
+                "  [{}] {} agent_id={} act={} score={:.4}",
+                d.recipient, e.kind, e.agent_id, e.act, e.score
+            );
+            if d.recipient != DECISION_LOG {
+                anyhow::bail!(
+                    "decision event for agent_id={} addressed to '{}', not '{DECISION_LOG}'",
+                    e.agent_id,
+                    d.recipient
                 );
             }
-            Ok(Err(_)) => {
-                println!("  bus closed before all events arrived");
-                break;
-            }
-            Err(_) => {
-                println!("  timed out waiting for a durable decision event");
-                break;
-            }
+            received.push(e);
         }
+        Ok(received)
     }
+    .await;
 
-    // Shutdown: drop the service (its tap closes → forwarder drains + exits),
-    // then the bus, then the sdb token; drain everything.
+    // Shutdown on every outcome: drop the service (its tap closes → forwarder
+    // drains + exits), then the bus, then the sdb token; drain everything.
     drop(service);
     bus.shutdown().await;
     token.cancel();
     tracker.close();
     tracker.wait().await;
-    println!("stopped cleanly");
+
+    let mut received = outcome?;
+    if let Ok(extra) = inbox.try_recv() {
+        anyhow::bail!(
+            "unexpected extra decision event to '{}': {:?}",
+            extra.recipient,
+            extra.message.payload
+        );
+    }
+    expected.sort_by_key(|e| e.agent_id);
+    received.sort_by_key(|e| e.agent_id);
+    if received != expected {
+        anyhow::bail!("decision events {received:?}, expected {expected:?}");
+    }
+    println!("received the 2 expected decisions; stopped cleanly");
     Ok(())
 }

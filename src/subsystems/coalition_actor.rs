@@ -167,27 +167,42 @@ fn emit_decision(
 ) {
     let Some(tx) = tap else { return };
     let record = decision_record(coalition, agent, kind, decision);
-    try_emit(tx, record, kind, "decision tap", "decision record");
+    try_emit(tx, record, "decision tap", "decision record");
+}
+
+/// An item a decision tap carries: it holds one [`DecisionRecord`].
+trait TapItem {
+    fn record(&self) -> &DecisionRecord;
+}
+
+impl TapItem for DecisionRecord {
+    fn record(&self) -> &DecisionRecord {
+        self
+    }
+}
+
+impl TapItem for DecisionTrace {
+    fn record(&self) -> &DecisionRecord {
+        &self.record
+    }
 }
 
 /// `try_send` `item` on `tx`; a full or closed channel drops it with a `warn`
-/// naming `tap` and `item`. Never blocks.
-fn try_emit<T>(tx: &mpsc::Sender<T>, item: T, kind: DecisionKind, tap: &str, what: &str) {
-    match tx.try_send(item) {
-        Ok(()) => {}
-        Err(mpsc::error::TrySendError::Full(_)) => {
-            tracing::warn!(
-                kind = kind.as_str(),
-                "{tap} full — dropping {what} (decision unaffected)"
-            );
-        }
-        Err(mpsc::error::TrySendError::Closed(_)) => {
-            tracing::warn!(
-                kind = kind.as_str(),
-                "{tap} closed — dropping {what} (decision unaffected)"
-            );
-        }
-    }
+/// naming `tap` and `what`, with the record's coalition, agent id and kind as
+/// fields. Never blocks.
+fn try_emit<T: TapItem>(tx: &mpsc::Sender<T>, item: T, tap: &str, what: &str) {
+    let (state, item) = match tx.try_send(item) {
+        Ok(()) => return,
+        Err(mpsc::error::TrySendError::Full(item)) => ("full", item),
+        Err(mpsc::error::TrySendError::Closed(item)) => ("closed", item),
+    };
+    let r = item.record();
+    tracing::warn!(
+        coalition = %r.coalition,
+        agent_id = r.agent_id,
+        kind = r.kind.as_str(),
+        "{tap} {state} — dropping {what} (decision unaffected)"
+    );
 }
 
 /// Emit a [`DecisionTrace`] on the trace tap, with the same non-blocking
@@ -209,7 +224,7 @@ fn emit_trace(
         event_log_len: position.event_log_len,
         timestamp: position.timestamp,
     };
-    try_emit(tx, trace, kind, "decision trace tap", "decision trace");
+    try_emit(tx, trace, "decision trace tap", "decision trace");
 }
 
 /// Spawn a task that drains ONE decision tap and fans each record out to every
@@ -226,7 +241,8 @@ fn emit_trace(
 /// The tap itself is already best-effort (see `emit_decision` — `try_send`,
 /// drop-with-warn). This tee adds a second such hop: each sink receives a clone
 /// via non-blocking [`try_send`](mpsc::Sender::try_send), and a full or closed
-/// sink drops that record with a `warn`. A slow sink therefore thins its OWN
+/// sink drops that record with a `warn` carrying the sink's index in `sinks`
+/// and the record's coalition, agent id and kind. A slow sink therefore thins its OWN
 /// stream and never blocks the loop, the other sinks, or the decision path.
 /// Sinks are independent: a closed sink is tolerated for the lifetime of the
 /// tee (it simply never receives). Size each sink channel for the producer's
@@ -267,6 +283,8 @@ pub fn spawn_decision_tee(
                                 Err(mpsc::error::TrySendError::Full(_)) => {
                                     tracing::warn!(
                                         sink = i,
+                                        coalition = %record.coalition,
+                                        agent_id = record.agent_id,
                                         kind = record.kind.as_str(),
                                         "decision tee sink full — dropping record (other sinks unaffected)"
                                     );
@@ -274,6 +292,8 @@ pub fn spawn_decision_tee(
                                 Err(mpsc::error::TrySendError::Closed(_)) => {
                                     tracing::warn!(
                                         sink = i,
+                                        coalition = %record.coalition,
+                                        agent_id = record.agent_id,
                                         kind = record.kind.as_str(),
                                         "decision tee sink closed — dropping record (other sinks unaffected)"
                                     );
@@ -550,6 +570,29 @@ mod tests {
     use super::*;
     use crate::algorithms::AdditiveCalculator;
     use crate::decision::ThresholdPolicy;
+    use crate::test_support::log_capture::{Capture, CapturedEvent};
+
+    /// Assert `capture` holds exactly one warn-level event whose message
+    /// contains `needle`, with the given coalition, agent id and kind fields.
+    fn assert_one_warn(capture: &Capture, needle: &str, fields: [(&str, &str); 3]) {
+        let events: Vec<CapturedEvent> = capture.matching(needle);
+        assert_eq!(events.len(), 1, "{needle}: events {events:?}");
+        let e = &events[0];
+        assert_eq!(
+            e.level,
+            tracing::Level::WARN,
+            "{needle}: level was {}",
+            e.level
+        );
+        for (field, want) in fields {
+            assert_eq!(
+                e.fields.get(field).map(String::as_str),
+                Some(want),
+                "{needle}: field {field}; fields {:?}",
+                e.fields
+            );
+        }
+    }
 
     /// A vertex weight that is both a valid graph weight and an agent.
     #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -684,9 +727,12 @@ mod tests {
     }
 
     /// A closed tap must NOT stall or fail decisions: the record is dropped with
-    /// a warn, and membership is mutated exactly as without a tap.
+    /// one warn carrying its coalition, agent id and kind, and membership is
+    /// mutated exactly as without a tap.
     #[tokio::test]
     async fn closed_tap_does_not_affect_decision() {
+        let capture = Capture::default();
+        let _guard = capture.install();
         let (manager, candidate, coalition) = seed().await;
 
         let (tap_tx, tap_rx) = mpsc::channel(1);
@@ -705,6 +751,71 @@ mod tests {
         let members = service.members(coalition).await.expect("members");
         assert_eq!(members.len(), 2, "join applied despite closed tap");
         assert!(members.contains(&candidate));
+
+        let label = format!("coalition-{}", usize::from(coalition));
+        let agent_id = usize::from(candidate).to_string();
+        assert_one_warn(
+            &capture,
+            "decision tap closed",
+            [
+                ("coalition", label.as_str()),
+                ("agent_id", agent_id.as_str()),
+                ("kind", "join"),
+            ],
+        );
+    }
+
+    /// Through a service: a full record tap drops the leave that follows a
+    /// buffered join, and a closed trace tap drops the join; each drop is one
+    /// warn carrying the decision's coalition, agent id and kind.
+    #[tokio::test]
+    async fn tap_drops_log_at_warn_with_the_record_fields() {
+        let capture = Capture::default();
+        let _guard = capture.install();
+
+        let (manager, candidate, coalition) = seed().await;
+        let (full_tx, _full_rx) = mpsc::channel(1);
+        let service = CoalitionService::spawn_with_tap(
+            manager,
+            Box::new(ThresholdPolicy::new(AdditiveCalculator, 0.0, 0.0)),
+            DecisionContext::default(),
+            full_tx,
+        );
+        service.join(candidate, coalition).await.expect("join");
+        service.leave(candidate, coalition).await.expect("leave");
+        let label = format!("coalition-{}", usize::from(coalition));
+        let agent_id = usize::from(candidate).to_string();
+        assert_one_warn(
+            &capture,
+            "decision tap full",
+            [
+                ("coalition", label.as_str()),
+                ("agent_id", agent_id.as_str()),
+                ("kind", "leave"),
+            ],
+        );
+
+        let (manager, candidate, coalition) = seed().await;
+        let (closed_tx, closed_rx) = mpsc::channel(1);
+        drop(closed_rx);
+        let service = CoalitionService::spawn_with_trace_tap(
+            manager,
+            Box::new(ThresholdPolicy::new(AdditiveCalculator, 0.0, 0.0)),
+            DecisionContext::default(),
+            closed_tx,
+        );
+        service.join(candidate, coalition).await.expect("join");
+        let label = format!("coalition-{}", usize::from(coalition));
+        let agent_id = usize::from(candidate).to_string();
+        assert_one_warn(
+            &capture,
+            "decision trace tap closed",
+            [
+                ("coalition", label.as_str()),
+                ("agent_id", agent_id.as_str()),
+                ("kind", "join"),
+            ],
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -712,10 +823,14 @@ mod tests {
     // -----------------------------------------------------------------------
 
     fn record(agent_id: usize) -> DecisionRecord {
+        record_of_kind(agent_id, DecisionKind::Join)
+    }
+
+    fn record_of_kind(agent_id: usize, kind: DecisionKind) -> DecisionRecord {
         DecisionRecord {
             coalition: "coalition-0".to_string(),
             agent_id,
-            kind: DecisionKind::Join,
+            kind,
             act: true,
             score: 1.5,
         }
@@ -751,9 +866,13 @@ mod tests {
     }
 
     /// A FULL sink drops its own records without stalling the loop or starving
-    /// the other sink; a CLOSED sink is tolerated for the tee's lifetime.
+    /// the other sink; a CLOSED sink is tolerated for the tee's lifetime. Each
+    /// drop is one warn carrying the sink and the record's coalition, agent id
+    /// and kind.
     #[tokio::test]
     async fn tee_tolerates_full_and_closed_sinks() {
+        let capture = Capture::default();
+        let _guard = capture.install();
         let tracker = TaskTracker::new();
         let token = CancellationToken::new();
         let (tap_tx, tap_rx) = mpsc::channel(16);
@@ -766,8 +885,9 @@ mod tests {
 
         let handle = spawn_decision_tee(tap_rx, vec![full_tx, closed_tx, ok_tx], &tracker, token);
 
-        for id in 1..=3 {
-            tap_tx.send(record(id)).await.expect("send");
+        let kinds = [DecisionKind::Join, DecisionKind::Leave, DecisionKind::Join];
+        for (id, kind) in (1..=3).zip(kinds) {
+            tap_tx.send(record_of_kind(id, kind)).await.expect("send");
         }
         drop(tap_tx);
         handle.await.expect("tee joins despite full + closed sinks");
@@ -776,6 +896,48 @@ mod tests {
         // cost it anything.
         for id in 1..=3 {
             assert_eq!(ok_rx.recv().await.expect("healthy record").agent_id, id);
+        }
+
+        // The full sink took record 1, so records 2 (a leave) and 3 drop
+        // there; the closed sink drops all three.
+        for (needle, sink, dropped) in [
+            (
+                "decision tee sink full",
+                "0",
+                [("2", "leave"), ("3", "join")].as_slice(),
+            ),
+            (
+                "decision tee sink closed",
+                "1",
+                [("1", "join"), ("2", "leave"), ("3", "join")].as_slice(),
+            ),
+        ] {
+            let events = capture.matching(needle);
+            let seen: Vec<(Option<&str>, Option<&str>)> = events
+                .iter()
+                .map(|e| {
+                    (
+                        e.fields.get("agent_id").map(String::as_str),
+                        e.fields.get("kind").map(String::as_str),
+                    )
+                })
+                .collect();
+            let want: Vec<(Option<&str>, Option<&str>)> = dropped
+                .iter()
+                .map(|&(id, kind)| (Some(id), Some(kind)))
+                .collect();
+            assert_eq!(seen, want, "{needle}: (agent id, kind); events {events:?}");
+            for e in &events {
+                assert_eq!(e.level, tracing::Level::WARN, "{needle}: level {}", e.level);
+                for (field, want) in [("sink", sink), ("coalition", "coalition-0")] {
+                    assert_eq!(
+                        e.fields.get(field).map(String::as_str),
+                        Some(want),
+                        "{needle}: field {field}; fields {:?}",
+                        e.fields
+                    );
+                }
+            }
         }
 
         tracker.close();

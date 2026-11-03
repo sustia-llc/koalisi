@@ -4,7 +4,10 @@
 //!
 //! Container-backed like `tests/durable_integration.rs`: boots SurrealDB via
 //! upstream's `sdb::sdb_task`, and prints a `SKIP` line and passes if Docker is
-//! unavailable.
+//! unavailable. A log sink that is not an agent of the bus is refused with
+//! `DurableError::UnknownLogSink`, and a producer that is not an agent of the
+//! bus, or a bus agent renamed to another bus agent's name, with
+//! `DurableError::UnknownProducer`; none spawns a task.
 //!
 //! Fixture arithmetic (`ThresholdPolicy(AdditiveCalculator, 0, 0)`): an agent
 //! with trust `t` and `p` capability bits contributes `50 + 10·p + t`, so the
@@ -32,13 +35,17 @@ use koalisi::persistence::{
 use koalisi::subsystems::coalition_actor::{
     CoalitionService, DecisionKind, DecisionRecord, DecisionTrace,
 };
-use koalisi::subsystems::durable::{DecisionEvent, DurableDecisionBus, spawn_decision_log_bus_tee};
+use koalisi::subsystems::durable::{
+    DecisionEvent, DurableDecisionBus, DurableError, spawn_decision_log_bus_tee,
+};
 use koalisi::topology::CoalitionManager;
 
+use surrealdb_live_message::subsystems::agents::Agent;
 use surrealdb_live_message::subsystems::sdb::{self, SurrealDBWrapper};
 
 const PRODUCER: &str = "tee_producer";
 const LOG_SINK: &str = "tee_log";
+const OUTSIDER: &str = "tee_outsider";
 const BOOT_TIMEOUT: Duration = Duration::from_secs(180);
 const RECV_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -139,15 +146,71 @@ async fn every_trace_reaches_the_decisions_stream_and_the_bus() {
         &pipe_tracker,
         token.child_token(),
     );
+    // A producer or a log sink that is not an agent of the bus is refused, and
+    // nothing is spawned.
+    let outsider = Agent::new(OUTSIDER).await.expect("outsider agent");
+    // The bus's tee_log agent renamed to tee_producer: a bus agent has the
+    // name, but its record id is agent:tee_log, not agent:tee_producer.
+    let mut impostor = bus.agent(LOG_SINK).await.expect("tee_log agent");
+    impostor.name = PRODUCER.to_string();
+    for (producer, log_sink, want) in [
+        (
+            producer.clone(),
+            "no_such_sink",
+            DurableError::UnknownLogSink {
+                log_sink: "no_such_sink".to_string(),
+            },
+        ),
+        (
+            outsider,
+            LOG_SINK,
+            DurableError::UnknownProducer {
+                producer: OUTSIDER.to_string(),
+            },
+        ),
+        (
+            impostor,
+            LOG_SINK,
+            DurableError::UnknownProducer {
+                producer: PRODUCER.to_string(),
+            },
+        ),
+    ] {
+        let refuse_tracker = TaskTracker::new();
+        let (_unused_tx, unused_rx) = mpsc::channel::<DecisionTrace>(1);
+        let refused = spawn_decision_log_bus_tee(
+            &bus,
+            unused_rx,
+            writer_tx.clone(),
+            producer,
+            log_sink.to_string(),
+            &refuse_tracker,
+            token.child_token(),
+        )
+        .await;
+        let spawned = refuse_tracker.len();
+        assert_eq!(
+            refused.as_ref().err(),
+            Some(&want),
+            "{want}: must be refused; got Ok: {}",
+            refused.is_ok()
+        );
+        assert_eq!(spawned, 0, "{want}: a refused spawn left {spawned} task(s)");
+        refuse_tracker.close();
+    }
+
     let (trace_tx, trace_rx) = mpsc::channel::<DecisionTrace>(16);
     spawn_decision_log_bus_tee(
+        &bus,
         trace_rx,
         writer_tx,
         producer,
         LOG_SINK.to_string(),
         &pipe_tracker,
         token.child_token(),
-    );
+    )
+    .await
+    .expect("tee_log is an agent of the bus");
 
     // Setup: 4 events (3 agents + the coalition) ⇒ log length 4, clock 4.
     let manager = CoalitionManager::<Worker, ()>::empty();

@@ -479,8 +479,7 @@ impl Default for GroupAifConfig {
 /// What can go wrong preparing a task for the group arm.
 ///
 /// Hand-rolled `Display`/[`Error`](std::error::Error), in the same style as
-/// `process::errors` and `topology::errors` — koalisi carries no `thiserror`
-/// dependency.
+/// `process::errors` and `topology::errors`.
 #[derive(Debug)]
 pub enum GroupAifError {
     /// A demand step names a role outside the configured `0..n_roles`.
