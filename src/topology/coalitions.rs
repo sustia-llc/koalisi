@@ -16,35 +16,9 @@ use catgraph_applied::{HyperedgeIndex, VertexIndex};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-/// Manages coalitions (hyperedges) of agents (vertices) in a temporal hypergraph.
-///
-/// This provides domain-specific operations for coalition formation scenarios,
-/// building on top of the generic TemporalHypergraph API.
-///
-/// # Example
-///
-/// ```ignore
-/// use std::sync::Arc;
-/// use koalisi::core::Executor;
-/// use koalisi::topology::{CoalitionManager, TemporalHypergraph};
-///
-/// let executor = Arc::new(Executor::new()?);
-/// let manager = CoalitionManager::new(TemporalHypergraph::new(executor));
-///
-/// // Add agents
-/// let agent1 = manager.add_agent(Agent::new("a1", 5)).await?;
-/// let agent2 = manager.add_agent(Agent::new("a2", 3)).await?;
-///
-/// // Form a coalition
-/// let coalition = manager.form_coalition(
-///     vec![agent1, agent2],
-///     Coalition::new("alpha", 10, 100),
-/// ).await?;
-///
-/// // Agent joins later
-/// let agent3 = manager.add_agent(Agent::new("a3", 4)).await?;
-/// manager.join_coalition(agent3, coalition).await?;
-/// ```
+/// Manages coalitions (hyperedges) of agents (vertices) in a temporal
+/// hypergraph, providing coalition-formation operations on top of the
+/// generic [`TemporalHypergraph`] API.
 pub struct CoalitionManager<V, HE>
 where
     V: VertexTrait + Clone + 'static,
@@ -369,12 +343,12 @@ where
     // =========================================================================
 
     /// Count current agents.
-    pub async fn count_agents(&self) -> usize {
+    pub async fn count_agents(&self) -> TemporalResult<usize> {
         self.graph.count_vertices().await
     }
 
     /// Count current coalitions.
-    pub async fn count_coalitions(&self) -> usize {
+    pub async fn count_coalitions(&self) -> TemporalResult<usize> {
         self.graph.count_hyperedges().await
     }
 
@@ -545,5 +519,119 @@ where
             self.leave_coalition(agent, coalition).await?;
         }
         Ok(decision)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::algorithms::CapabilityAgent;
+    use std::future::Future;
+    use std::pin::Pin;
+    use std::sync::Mutex;
+
+    /// A policy that records the address of every executor its async join
+    /// and leave receive, and declines both.
+    #[derive(Default)]
+    struct ExecutorRecorder {
+        seen: Mutex<Vec<(&'static str, usize)>>,
+    }
+
+    impl ExecutorRecorder {
+        fn record(&self, op: &'static str, executor: &Executor) {
+            self.seen
+                .lock()
+                .expect("recorder lock")
+                .push((op, std::ptr::from_ref(executor) as usize));
+        }
+    }
+
+    impl CoalitionDecisionPolicy for ExecutorRecorder {
+        fn should_join(
+            &self,
+            _agent: &dyn AgentCapabilities,
+            _coalition: &[&dyn AgentCapabilities],
+            _ctx: &DecisionContext,
+        ) -> Decision {
+            Decision {
+                act: false,
+                score: 0.0,
+            }
+        }
+
+        fn should_leave(
+            &self,
+            _agent: &dyn AgentCapabilities,
+            _coalition: &[&dyn AgentCapabilities],
+            _ctx: &DecisionContext,
+        ) -> Decision {
+            Decision {
+                act: false,
+                score: 0.0,
+            }
+        }
+
+        fn should_join_async<'a>(
+            &'a self,
+            _agent: &'a dyn AgentCapabilities,
+            _coalition: &'a [&'a dyn AgentCapabilities],
+            _ctx: &'a DecisionContext,
+            executor: &'a Executor,
+        ) -> Pin<Box<dyn Future<Output = Decision> + Send + 'a>> {
+            self.record("join", executor);
+            Box::pin(std::future::ready(Decision {
+                act: false,
+                score: 0.0,
+            }))
+        }
+
+        fn should_leave_async<'a>(
+            &'a self,
+            _agent: &'a dyn AgentCapabilities,
+            _coalition: &'a [&'a dyn AgentCapabilities],
+            _ctx: &'a DecisionContext,
+            executor: &'a Executor,
+        ) -> Pin<Box<dyn Future<Output = Decision> + Send + 'a>> {
+            self.record("leave", executor);
+            Box::pin(std::future::ready(Decision {
+                act: false,
+                score: 0.0,
+            }))
+        }
+    }
+
+    /// `try_join_coalition` and `try_leave_coalition` hand the policy the
+    /// executor the manager's graph holds, compared by address.
+    #[tokio::test]
+    async fn policy_receives_the_graphs_executor() {
+        let manager =
+            CoalitionManager::<CapabilityAgent, u32>::empty(crate::core::executor::test_executor());
+        let member = manager
+            .add_agent(CapabilityAgent::new(0, 0b01, 50))
+            .await
+            .expect("add member");
+        let candidate = manager
+            .add_agent(CapabilityAgent::new(1, 0b10, 50))
+            .await
+            .expect("add candidate");
+        let coalition = manager.form_coalition(vec![member], 1).await.expect("form");
+        let policy = ExecutorRecorder::default();
+        let ctx = DecisionContext::default();
+        manager
+            .try_join_coalition(candidate, coalition, &policy, &ctx)
+            .await
+            .expect("join");
+        manager
+            .try_leave_coalition(member, coalition, &policy, &ctx)
+            .await
+            .expect("leave");
+
+        let graph_executor = Arc::as_ptr(manager.graph().executor()) as usize;
+        let seen = policy.seen.lock().expect("recorder lock").clone();
+        assert_eq!(
+            seen,
+            vec![("join", graph_executor), ("leave", graph_executor)],
+            "expected join and leave to receive the graph's executor at {graph_executor}, observed {seen:?}"
+        );
     }
 }
