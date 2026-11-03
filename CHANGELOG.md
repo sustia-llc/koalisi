@@ -30,13 +30,19 @@ Re-pins `surrealdb-live-message` to `v0.7.0` (feature `durable`).
   --features durable` at `a678550` fails with `E0658` on that call.
   `rust-version` applies to the whole package, so Cargo also refuses a
   1.93 or 1.94 build of every other feature set.
-- A failed `Agent::send` in `spawn_decision_forwarder` and
-  `spawn_decision_log_bus_tee` is now logged at error level, with the
-  decision's coalition, agent id and kind and the upstream error chain. It was
-  logged at warn with the error's `Display` text only. Since
-  `surrealdb-live-message` `v0.6.0`, a failed `RELATE` statement returns
-  `Error::Send` on this path, where it returned `Ok(())` before. The decision
-  is dropped in both versions.
+- **Breaking:** `spawn_decision_forwarder` and `spawn_decision_log_bus_tee`
+  are now `async`, take `&DurableDecisionBus` as their first parameter, and
+  return `Result<JoinHandle<()>, DurableError>`. If `log_sink` names no agent
+  of the bus, they return `DurableError::UnknownLogSink` and spawn nothing.
+- A dropped decision record is logged with its coalition, agent id and kind,
+  at a level that follows the cause:
+  - error: a failed `Agent::send` in the two spawn functions (with the
+    upstream error chain), and an encode failure in `forward_decision_trace`.
+    The send failure was logged at warn with the error's `Display` text only.
+  - warn: a full or closed decision tap, and a closed writer channel in
+    `forward_decision_trace`.
+- Since `surrealdb-live-message` `v0.6.0`, a failed `RELATE` statement
+  returns `Error::Send` on the send path, where it returned `Ok(())` before.
 - **`surrealdb-live-message` `v0.2.2` → `v0.7.0`**, and `surrealdb-types`
   3.2.4 → 3.3.5, so the two versions unify. The `[sdb]` `tag` in
   `config/default.toml` is `v3.3.5`.
@@ -76,23 +82,26 @@ Re-pins `surrealdb-live-message` to `v0.7.0` (feature `durable`).
   replays both decisions and stops cleanly.
 - `cargo clippy --locked --all-targets -- -D warnings` is clean at `a678550`
   on the 14 non-Docker lanes and `--no-default-features`.
-- `1495779` changes `src/subsystems/durable.rs`, which compiles only under
-  `durable`. At `1495779`, `durable` 108 and `persistence,durable` 133 pass
-  with identical per-binary lines, and neither container test prints `SKIP`.
-  These are also clean at `1495779`:
+- `093afb3` changes `src/subsystems/coalition_actor.rs`, which compiles in
+  every feature set, and adds unit tests. At `093afb3`, 13 lanes pass, and
+  each differs from `a678550` only in the library binary: +1 test, or +2 in
+  the three `persistence` lanes. `durable` 109 and `persistence,durable` 135
+  ran against the Docker container, and neither container test prints
+  `SKIP`. The three `harness` lanes did not run at `093afb3` (owner,
+  2026-11-03).
+- These are clean at `093afb3`:
 
   ```sh
-  cargo clippy --locked --all-targets --features durable -- -D warnings
-  cargo clippy --locked --all-targets --features persistence,durable -- -D warnings
+  cargo clippy --locked --all-targets -- -D warnings   # 11 non-harness, non-Docker lanes, --no-default-features, durable, persistence,durable
   cargo +1.95.0 check --all-targets --locked --features durable
   cargo +1.95.0 check --all-targets --locked --features persistence,durable
+  cargo +1.95.0 check --all-targets --locked --features decision,magnitude-fast,persistence,remote,process,harness,metrics
   RUSTDOCFLAGS='-D warnings' cargo doc --locked --no-deps --all-features
   cargo fmt --all -- --check
   ```
 
-- `cargo +1.95.0 check --all-targets --locked --features
-  decision,magnitude-fast,persistence,remote,process,harness,metrics` is clean
-  at `9a8f831`.
+- `cargo run --features durable --example durable_decisions` at `093afb3`
+  replays both decisions and stops cleanly.
 
 - The K4 archive gate did not run (owner, 2026-11-03).
 
