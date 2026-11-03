@@ -2984,6 +2984,7 @@ version = "0.49.0"
 dependencies = [
  "aif",
  "anyhow",
+ "blake3",
  "catgraph",
  "catgraph-applied",
  "catgraph-magnitude",

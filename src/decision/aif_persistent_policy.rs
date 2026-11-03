@@ -521,17 +521,30 @@ impl PersistentAifArm {
 
         // p(control 1) — switch to config1 (join / leave).
         let p1 = dist.get(1).copied().unwrap_or(f64::NAN);
-        if !p1.is_finite() {
-            return Decision {
-                act: false,
-                score: 0.0,
-            };
-        }
-        let act = if leave { p1 >= 0.5 } else { p1 > 0.5 };
-        Decision {
-            act,
-            score: p1 - 0.5,
-        }
+        decision_from_p1(p1, leave)
+    }
+}
+
+/// The decision for a read `p1 = p(control 1)`, for any `f64`. A finite `p1`
+/// acts iff `p1 > 0.5` (join) or `p1 ≥ 0.5` (`leave`), with score `p1 − 0.5`.
+/// A non-finite `p1` logs a warning carrying `p1` and declines with score
+/// `0.0`.
+fn decision_from_p1(p1: f64, leave: bool) -> Decision {
+    if !p1.is_finite() {
+        tracing::warn!(
+            p1,
+            leave,
+            "persistent query returned a non-finite p(control 1), declining"
+        );
+        return Decision {
+            act: false,
+            score: 0.0,
+        };
+    }
+    let act = if leave { p1 >= 0.5 } else { p1 > 0.5 };
+    Decision {
+        act,
+        score: p1 - 0.5,
     }
 }
 
@@ -1692,6 +1705,154 @@ mod tests {
         )
         .unwrap();
         assert_eq!(arm.state_snapshot().beliefs.len(), MIN_N_BITS);
+    }
+
+    /// The events a [`WarnCapture`] layer recorded: one entry per WARN event,
+    /// holding its fields as `name=value` strings.
+    type CapturedWarns = Arc<Mutex<Vec<Vec<String>>>>;
+
+    /// A `tracing` layer that records every WARN event's fields.
+    struct WarnCapture(CapturedWarns);
+
+    /// Collects an event's fields as `name=value` strings.
+    struct FieldStrings<'a>(&'a mut Vec<String>);
+
+    impl tracing::field::Visit for FieldStrings<'_> {
+        fn record_f64(&mut self, field: &tracing::field::Field, value: f64) {
+            self.0.push(format!("{}={value}", field.name()));
+        }
+
+        fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+            self.0.push(format!("{}={value:?}", field.name()));
+        }
+    }
+
+    impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for WarnCapture {
+        fn on_event(
+            &self,
+            event: &tracing::Event<'_>,
+            _ctx: tracing_subscriber::layer::Context<'_, S>,
+        ) {
+            if *event.metadata().level() == tracing::Level::WARN {
+                let mut fields = Vec::new();
+                event.record(&mut FieldStrings(&mut fields));
+                self.0.lock().unwrap().push(fields);
+            }
+        }
+    }
+
+    /// Every non-finite `p(control 1)`, on both the join and the leave rule,
+    /// declines with score `0.0` and emits exactly one WARN event whose `p1`
+    /// field carries the value read; a finite read emits none.
+    #[test]
+    fn non_finite_p1_warns_with_p1_then_declines() {
+        use tracing_subscriber::layer::SubscriberExt;
+
+        for p1 in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for leave in [false, true] {
+                let warns: CapturedWarns = Arc::default();
+                let subscriber =
+                    tracing_subscriber::registry().with(WarnCapture(Arc::clone(&warns)));
+                let d =
+                    tracing::subscriber::with_default(subscriber, || decision_from_p1(p1, leave));
+                assert!(
+                    !d.act && d.score == 0.0,
+                    "p1 = {p1}, leave = {leave}: expected a decline with score 0.0, got {d:?}"
+                );
+                let warns = warns.lock().unwrap();
+                let expected = format!("p1={p1}");
+                assert!(
+                    warns.len() == 1 && warns[0].contains(&expected),
+                    "p1 = {p1}, leave = {leave}: expected one WARN event carrying {expected}, \
+                     captured {warns:?}"
+                );
+            }
+        }
+
+        let warns: CapturedWarns = Arc::default();
+        let subscriber = tracing_subscriber::registry().with(WarnCapture(Arc::clone(&warns)));
+        let d = tracing::subscriber::with_default(subscriber, || decision_from_p1(0.75, false));
+        assert!(d.act && d.score == 0.25, "finite p1 = 0.75: got {d:?}");
+        let warns = warns.lock().unwrap();
+        assert!(
+            warns.is_empty(),
+            "finite p1 must not warn, captured {warns:?}"
+        );
+    }
+
+    /// Under the registered config (`use_param_info_gain` on), the arm's query
+    /// after its replay read has a stochastic predictive state (every bit
+    /// factor's transition entries and belief lie strictly inside `(0, 1)`),
+    /// a live epistemic term and a live A-novelty term, and every policy's
+    /// `neg_g` equals the sum of its pragmatic, epistemic, A-novelty and
+    /// B-novelty components.
+    #[test]
+    fn query_neg_g_carries_epistemic_and_novelty_terms() {
+        let arm = PersistentAifArm::new(11, PersistentAifConfig::default()).unwrap();
+        arm.observe_outcome(
+            0b0111,
+            &[true, false, true, false, false, false, false, false],
+        );
+        arm.observe_outcome(
+            0b0111,
+            &[true, true, false, false, false, false, false, false],
+        );
+        let required = 0b0111u32;
+        let r = required.count_ones() as usize;
+        let (mut query, replay) = {
+            let inner = arm.inner.lock().unwrap();
+            build_query(&inner, &arm.config, 99, required, 0b0001, 0b0111, None).unwrap()
+        };
+
+        let interior = |v: f64| v > 1e-3 && v < 1.0 - 1e-3;
+        for f in 0..r {
+            let b = &query.transition_model()[f][0];
+            assert!(
+                b.iter().all(|&v| interior(v)),
+                "bit factor {f}: transition entries must lie inside (0, 1), got {b}"
+            );
+            let belief = &query.state_beliefs()[f];
+            assert!(
+                belief.iter().all(|&v| interior(v)),
+                "bit factor {f}: belief must lie inside (0, 1), got {belief}"
+            );
+        }
+
+        let dist = run_replay(&mut query, &replay, r).unwrap();
+        let p1 = dist[1];
+        assert!(
+            p1.is_finite(),
+            "the read p(control 1) must be finite, got {p1}"
+        );
+
+        let policies = query.policy_efe();
+        let mut max_epistemic = f64::NEG_INFINITY;
+        let mut max_a_novelty = f64::NEG_INFINITY;
+        for p in &policies {
+            let sum = p.pragmatic + p.epistemic + p.a_novelty + p.b_novelty;
+            assert!(
+                (p.neg_g - sum).abs() <= 1e-9 * (1.0 + sum.abs()),
+                "policy {:?} (p1 = {p1}): neg_g {} differs from the component sum {sum} \
+                 by {} (pragmatic {}, epistemic {}, a_novelty {}, b_novelty {})",
+                p.actions,
+                p.neg_g,
+                p.neg_g - sum,
+                p.pragmatic,
+                p.epistemic,
+                p.a_novelty,
+                p.b_novelty
+            );
+            max_epistemic = max_epistemic.max(p.epistemic);
+            max_a_novelty = max_a_novelty.max(p.a_novelty);
+        }
+        assert!(
+            max_epistemic > 1e-3,
+            "the epistemic term must be live in some policy, max {max_epistemic}"
+        );
+        assert!(
+            max_a_novelty > 1e-3,
+            "the A-novelty term must be live in some policy, max {max_a_novelty}"
+        );
     }
 
     /// Object-safety: the arm is usable behind the decision trait object.
