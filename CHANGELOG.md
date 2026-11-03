@@ -19,6 +19,75 @@ Planned work — issue-tracked:
 - **K7 lineage**: EQ5b (c) ([#103]); the multi-coalition harness scaffold and
   the tira-extension re-pins and registrations ([#104]–[#111]).
 
+## [0.49.0] — 2026-11-03
+
+One caller-owned rayon pool for koalisi's CPU work (#115).
+
+### Added
+- `core::Executor`, a rayon pool with threads named `koalisi-exec-<i>`.
+  `Executor::new` and `Executor::with_num_threads` return
+  `Result<Self, ExecutorError>`. `Executor::run` runs a closure on the pool
+  and resolves to its value, and a panic in the closure resumes on the
+  awaiting task.
+- `TemporalHypergraph::executor` and `CoalitionRuntime::executor` return
+  the shared `Arc<Executor>`.
+
+### Changed
+- **Breaking:** these take the executor:
+  - `TemporalHypergraph::new(executor)`, `TemporalHypergraph::wrap(graph, executor)`
+  - `CoalitionManager::empty(executor)`, `CoalitionRuntime::new(executor)`
+  - `CoalitionDecisionPolicy::should_join_async` and `should_leave_async`
+    (last parameter `executor: &Executor`)
+  - `TemporalAnalytics::magnitude_history` (last parameter `executor: &Executor`)
+- **Breaking:** `CoalitionService::spawn`, `spawn_with_tap` and
+  `spawn_with_trace_tap` take a `&TaskTracker` as their last parameter, and
+  the service task runs on it.
+- The 18 graph operations, the async methods of `AifDecisionPolicy`,
+  `AifMmDecisionPolicy` and `MagnitudePolicy`, and `magnitude_history` run
+  on the caller's executor. They ran on a private static pool and on rayon's
+  global pool before.
+- `catgraph-applied` and `catgraph` are dependencies with
+  `default-features = false`, so their `parallel` feature is off. The lock
+  loses `rayon-cond`, and no package version moves.
+- `thiserror` 2 is a normal dependency (for `ExecutorError`), not an
+  optional one under `durable`.
+
+### Removed
+- **Breaking:** `topology::HypergraphExecutor`, the static `EXEC`, and
+  `impl Default` for `TemporalHypergraph`, `CoalitionManager` and
+  `CoalitionRuntime`.
+- The direct `rayon` dependency. `src/core/executor.rs` imports rayon
+  through `tokio_rayon::rayon`.
+
+### Gates
+- At `d4f8728`, these lanes pass:
+  - default 114, `decision` 172, `magnitude` 145, `decision,magnitude` 204
+  - `magnitude-fast` 153, `persistence` 139, `persistence,magnitude` 171
+  - `remote` 120, `process` 172, `decision,magnitude,process` 263
+  - `metrics` 114, `durable` 115, `persistence,durable` 141
+
+  Each count is the `v0.48.0` count plus the new tests compiled into that
+  lane. The two Docker lanes ran with `-- --nocapture`, and neither
+  container test prints `SKIP`.
+- `cargo clippy --locked --all-targets -- -D warnings` is clean on those 13
+  lanes, `--no-default-features`, `harness`, `harness,process` and
+  `harness,decision,process`. The frozen `strategy_comparison.rs` and
+  `examples/k7/*.rs` are unchanged and compile.
+- `tests/executor_global_pool.rs` runs every async path on an executor, and
+  then `rayon::ThreadPoolBuilder::new().build_global()` returns `Ok`.
+- These are clean at `d4f8728`:
+
+  ```sh
+  RUSTDOCFLAGS='-D warnings' cargo doc --locked --no-deps --all-features
+  cargo fmt --all -- --check
+  cargo +1.95.0 check --all-targets --locked
+  cargo +1.95.0 check --all-targets --locked --features persistence,durable
+  cargo +1.95.0 check --all-targets --locked --features decision,magnitude-fast,persistence,remote,process,harness,metrics
+  ```
+
+- The K4 archive gate and the `harness` test lanes did not run (owner,
+  2026-11-03).
+
 ## [0.48.0] — 2026-11-03
 
 ### Removed

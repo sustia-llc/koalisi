@@ -1,6 +1,6 @@
 [package]
 name = "koalisi"
-version = "0.48.0"
+version = "0.49.0"
 edition = "2024"
 # Declared floor 1.95.0 (owner, 2026-11-03; it replaces C-D1's 1.93.0). Do not
 # lower in passing. Edition 2024 means resolver 3, so this value also bounds
