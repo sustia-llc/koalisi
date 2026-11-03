@@ -55,13 +55,13 @@ async fn graph_paths(exec: &Arc<Executor>) -> Result<()> {
     );
     g.remove_hyperedge(b).await?;
     assert_eq!(
-        (g.count_vertices().await, g.count_hyperedges().await),
+        (g.count_vertices().await?, g.count_hyperedges().await?),
         (3, 1),
         "(vertices, hyperedges) before the clears"
     );
     g.clear_hyperedges().await?;
     g.clear().await?;
-    assert_eq!(g.count_vertices().await, 0, "vertices after clear");
+    assert_eq!(g.count_vertices().await?, 0, "vertices after clear");
     Ok(())
 }
 

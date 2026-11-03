@@ -168,14 +168,14 @@ async fn form_and_dissolve_coalition() {
         .await
         .unwrap();
 
-    assert_eq!(manager.count_coalitions().await, 1);
+    assert_eq!(manager.count_coalitions().await.unwrap(), 1);
     let members = manager.coalition_members(c1).await.unwrap();
     assert_eq!(members.len(), 2);
     assert!(members.contains(&a1));
     assert!(members.contains(&a2));
 
     manager.dissolve_coalition(c1).await.unwrap();
-    assert_eq!(manager.count_coalitions().await, 0);
+    assert_eq!(manager.count_coalitions().await.unwrap(), 0);
 }
 
 #[tokio::test]
@@ -252,10 +252,10 @@ async fn merge_coalitions() {
         .await
         .unwrap();
 
-    assert_eq!(manager.count_coalitions().await, 2);
+    assert_eq!(manager.count_coalitions().await.unwrap(), 2);
 
     manager.merge_coalitions(vec![c1, c2]).await.unwrap();
-    assert_eq!(manager.count_coalitions().await, 1);
+    assert_eq!(manager.count_coalitions().await.unwrap(), 1);
 }
 
 // =========================================================================

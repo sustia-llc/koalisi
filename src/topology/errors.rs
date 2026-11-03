@@ -40,6 +40,10 @@ pub enum TemporalError {
 
     /// Cannot leave a coalition that would become empty.
     EmptyCoalition,
+
+    /// The graph's lock is poisoned: code running under its write lock
+    /// panicked, and the graph may hold a partial update.
+    LockPoisoned,
 }
 
 impl std::fmt::Display for TemporalError {
@@ -74,6 +78,10 @@ impl std::fmt::Display for TemporalError {
                     "Cannot leave coalition: would become empty (use dissolve instead)"
                 )
             }
+            Self::LockPoisoned => write!(
+                f,
+                "Graph lock poisoned: a panic occurred while the write lock was held"
+            ),
         }
     }
 }
