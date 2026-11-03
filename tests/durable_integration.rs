@@ -4,10 +4,11 @@
 //! Modeled on the upstream `scenario_durable_restart` proof, but driven through
 //! koalisi's `CoalitionService` decision tap + `spawn_decision_forwarder`:
 //!
-//! 1. Boot SurrealDB (upstream container harness). If the Docker daemon does
-//!    not answer `GET /_ping` on the socket `sdb_task` connects to, print a
-//!    `SKIP` line and pass. Any later boot failure or timeout panics with the
-//!    error's source chain.
+//! 1. Boot SurrealDB (upstream container harness) under a `common::sdb`
+//!    guard, which stops the container on every exit, a panic included. If
+//!    the Docker daemon does not answer `GET /_ping` on the socket `sdb_task`
+//!    connects to, print a `SKIP` line and pass. Any later boot failure or
+//!    timeout panics with the error's source chain.
 //! 2. Round 1: stand up the durable bus (`recorder` + `decision_log`) so
 //!    `decision_log` snapshots a "from-now" cursor against the empty log, then
 //!    shut it down — `decision_log` is now OFFLINE, cursor persisted.
@@ -30,25 +31,33 @@
 //!    buffered in its receiver, then stops while the sender is still open.
 //! 8. A bus from `DurableDecisionBus::new_with_parent` stops its agents when
 //!    the parent token is cancelled: its inbox closes.
+//! 9. After the container stops, a child process of this binary boots it,
+//!    creates a bus and panics; once the child exits, no container named
+//!    `SETTINGS.sdb.container_name` runs, and none exists within
+//!    `REMOVE_TIMEOUT`.
 //!
 //! The hot path never touches the DB; only the *decisions* are forwarded.
 
 mod common;
 
 use std::collections::HashMap;
-use std::future::{Future, pending, ready};
+use std::future::{pending, ready};
 use std::io::{Read, Write};
-use std::os::unix::net::{UnixListener, UnixStream};
+use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use tokio::sync::mpsc;
 use tokio::task::JoinError;
-use tokio::time::{Duration, sleep, timeout};
+use tokio::time::{Duration, Instant, sleep, timeout};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 use tracing::Level;
 
 use common::log_capture::Capture;
+use common::sdb::{
+    BOOT_TIMEOUT, Boot, await_boot, boot_db, docker_ping, docker_socket, sdb_containers,
+};
 use koalisi::algorithms::{AdditiveCalculator, AgentCapabilities};
 use koalisi::core::config::setup_logging;
 use koalisi::decision::{DecisionContext, ThresholdPolicy};
@@ -56,16 +65,14 @@ use koalisi::subsystems::coalition_actor::{CoalitionService, DecisionKind, Decis
 use koalisi::subsystems::durable::{DurableDecisionBus, DurableError, spawn_decision_forwarder};
 use koalisi::topology::CoalitionManager;
 
-use surrealdb_live_message::error::{self as slm_error, chain};
+use surrealdb_live_message::error as slm_error;
 use surrealdb_live_message::subsystems::agents::Agent;
-use surrealdb_live_message::subsystems::sdb::{self, SurrealDBWrapper};
+use surrealdb_live_message::subsystems::sdb::SurrealDBWrapper;
 
 const RECORDER: &str = "recorder";
 const DECISION_LOG: &str = "decision_log";
 const OUTSIDER: &str = "outsider";
-const BOOT_TIMEOUT: Duration = Duration::from_secs(180);
 const RECV_TIMEOUT: Duration = Duration::from_secs(10);
-const PING_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Domain agent — a valid graph vertex weight and an `AgentCapabilities`.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -87,88 +94,6 @@ impl AgentCapabilities for Worker {
     }
 }
 
-/// The outcome of [`boot_db`].
-enum Boot {
-    /// SurrealDB is ready.
-    Ready,
-    /// The Docker daemon did not answer the ping; the reason is attached.
-    DockerUnreachable(String),
-}
-
-/// The Unix socket that `sdb::sdb_task` connects to: the path of
-/// `DOCKER_HOST` when it starts with `unix://`, else `/var/run/docker.sock`
-/// (bollard 0.21.1 `Docker::connect_with_unix_defaults`).
-fn docker_socket() -> PathBuf {
-    let host = std::env::var("DOCKER_HOST")
-        .ok()
-        .filter(|h| h.starts_with("unix://"));
-    let uri = host.as_deref().unwrap_or("unix:///var/run/docker.sock");
-    PathBuf::from(uri.replacen("unix://", "", 1))
-}
-
-/// `Ok` iff the daemon on `socket` answers `GET /_ping` with status 200 and
-/// body `OK` within `PING_TIMEOUT` per read or write; otherwise the reason.
-fn docker_ping(socket: &Path) -> Result<(), String> {
-    let at = socket.display();
-    let mut stream = UnixStream::connect(socket).map_err(|e| format!("connect {at}: {e}"))?;
-    stream
-        .set_read_timeout(Some(PING_TIMEOUT))
-        .and_then(|()| stream.set_write_timeout(Some(PING_TIMEOUT)))
-        .map_err(|e| format!("set timeouts on {at}: {e}"))?;
-    stream
-        .write_all(b"GET /_ping HTTP/1.0\r\nHost: docker\r\n\r\n")
-        .map_err(|e| format!("write GET /_ping to {at}: {e}"))?;
-    let mut reply = String::new();
-    stream
-        .read_to_string(&mut reply)
-        .map_err(|e| format!("read the /_ping reply from {at}: {e}"))?;
-    let status_ok = reply
-        .lines()
-        .next()
-        .is_some_and(|line| line.split_whitespace().nth(1) == Some("200"));
-    let body_ok = reply.split_once("\r\n\r\n").map(|(_, body)| body) == Some("OK");
-    if status_ok && body_ok {
-        Ok(())
-    } else {
-        Err(format!("GET /_ping on {at} answered {reply:?}"))
-    }
-}
-
-/// Boot the DB under a child token. Returns `Boot::DockerUnreachable` iff
-/// [`docker_ping`] fails on [`docker_socket`]; otherwise returns
-/// `Boot::Ready` once SurrealDB is ready, and panics as [`await_boot`] does.
-async fn boot_db(tracker: &TaskTracker, token: &CancellationToken) -> Boot {
-    if let Err(reason) = docker_ping(&docker_socket()) {
-        return Boot::DockerUnreachable(reason);
-    }
-    let sdb = tracker.spawn(sdb::sdb_task(token.child_token()));
-    await_boot(SurrealDBWrapper::wait_until_ready(), sdb, BOOT_TIMEOUT).await;
-    Boot::Ready
-}
-
-/// Return once `ready` resolves `Ok`. Panic, with the error's source chain,
-/// when `ready` resolves `Err`, when `sdb` (the `sdb_task` handle) ends first
-/// with any outcome, or when neither resolves within `limit`.
-async fn await_boot<R, S>(ready: R, sdb: S, limit: Duration)
-where
-    R: Future<Output = slm_error::Result<()>>,
-    S: Future<Output = Result<slm_error::Result<()>, JoinError>>,
-{
-    tokio::select! {
-        r = ready => {
-            if let Err(e) = r {
-                panic!("SurrealDB ready signal failed: {}", chain(&e));
-            }
-        }
-        r = sdb => match r {
-            Ok(Ok(())) => panic!("sdb_task returned before SurrealDB was ready"),
-            Ok(Err(e)) => panic!("sdb_task failed: {}", chain(&e)),
-            Err(e) => panic!("sdb_task did not finish: {}", chain(&e)),
-        },
-        () = sleep(limit) => panic!("SurrealDB not ready within {limit:?}"),
-    }
-}
-
 #[tokio::test]
 async fn durable_decisions_survive_restart_through_the_seam() {
     setup_logging().expect("setup_logging: no subscriber is installed before it in this binary");
@@ -176,15 +101,15 @@ async fn durable_decisions_survive_restart_through_the_seam() {
     let token = CancellationToken::new();
     let tracker = TaskTracker::new();
 
-    if let Boot::DockerUnreachable(reason) = boot_db(&tracker, &token).await {
-        eprintln!("SKIP durable_decisions_survive_restart_through_the_seam: {reason}");
-        token.cancel();
-        tracker.close();
-        tracker.wait().await;
-        return;
-    }
-    // Cancels the sdb token on every exit from here, a panic included.
-    let _sdb_guard = token.clone().drop_guard();
+    // Dropping `sdb` stops the container on every exit from here, a panic
+    // included.
+    let sdb = match boot_db(&token).await {
+        Boot::Ready(sdb) => sdb,
+        Boot::DockerUnreachable(reason) => {
+            eprintln!("SKIP durable_decisions_survive_restart_through_the_seam: {reason}");
+            return;
+        }
+    };
 
     // --- Round 1: pin decision_log's "from-now" cursor against an empty log,
     //     then take it offline. recorder's Agent handle stays usable for sends
@@ -353,6 +278,77 @@ async fn durable_decisions_survive_restart_through_the_seam() {
     token.cancel();
     tracker.close();
     tracker.wait().await;
+    sdb.stop().await.expect("sdb_task stops the container");
+
+    panic_after_boot_leaves_no_container().await;
+}
+
+const PANIC_CHILD: &str = "panic_after_boot_child";
+const PANIC_CHILD_ENV: &str = "KOALISI_PANIC_AFTER_BOOT_CHILD";
+const PANIC_MESSAGE: &str = "deliberate panic after the SurrealDB boot";
+const REMOVE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Boot SurrealDB, create a bus, then panic. Run only by
+/// [`panic_after_boot_leaves_no_container`], as a child process.
+#[tokio::test]
+#[ignore = "child process of durable_decisions_survive_restart_through_the_seam"]
+async fn panic_after_boot_child() {
+    assert_eq!(
+        std::env::var(PANIC_CHILD_ENV).as_deref(),
+        Ok("1"),
+        "{PANIC_CHILD} runs only as a child of durable_decisions_survive_restart_through_the_seam"
+    );
+    let token = CancellationToken::new();
+    let Boot::Ready(_sdb) = boot_db(&token).await else {
+        panic!("{PANIC_CHILD}: the Docker daemon is unreachable");
+    };
+    let _bus = DurableDecisionBus::new(vec![RECORDER.to_string(), DECISION_LOG.to_string()])
+        .await
+        .expect("child bus");
+    panic!("{PANIC_MESSAGE}");
+}
+
+/// Run [`panic_after_boot_child`] in a child process of this test binary.
+/// The child must fail with [`PANIC_MESSAGE`]; once it exits, no container
+/// named `SETTINGS.sdb.container_name` runs, and none exists within
+/// [`REMOVE_TIMEOUT`].
+async fn panic_after_boot_leaves_no_container() {
+    let exe = std::env::current_exe().expect("the test binary path");
+    let out = tokio::task::spawn_blocking(move || {
+        Command::new(exe)
+            .args([PANIC_CHILD, "--exact", "--ignored", "--nocapture"])
+            .env(PANIC_CHILD_ENV, "1")
+            .output()
+    })
+    .await
+    .expect("join the child runner")
+    .expect("run the child test binary");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !out.status.success()
+            && stdout.contains("0 passed; 1 failed")
+            && stderr.contains(PANIC_MESSAGE),
+        "the child must run once and fail with {PANIC_MESSAGE:?}; status {}, stdout {stdout}, stderr {stderr}",
+        out.status
+    );
+
+    let socket = docker_socket();
+    let running = sdb_containers(&socket, false).expect("list running containers");
+    assert_eq!(
+        running, "[]",
+        "a container runs after the panicking child exited; child stderr {stderr}"
+    );
+    let deadline = Instant::now() + REMOVE_TIMEOUT;
+    let mut listed = sdb_containers(&socket, true).expect("list all containers");
+    while listed != "[]" && Instant::now() < deadline {
+        sleep(Duration::from_millis(200)).await;
+        listed = sdb_containers(&socket, true).expect("list all containers");
+    }
+    assert_eq!(
+        listed, "[]",
+        "a container exists {REMOVE_TIMEOUT:?} after the panicking child exited; child stderr {stderr}"
+    );
 }
 
 const FAIL_PRODUCER: &str = "fail_producer";
