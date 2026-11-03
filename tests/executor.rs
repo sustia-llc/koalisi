@@ -181,10 +181,11 @@ async fn every_graph_method_runs_on_the_graphs_executor() -> Result<()> {
         g.contract_hyperedge_vertices(a, vec![v1, v2], v1),
     )
     .await?;
+    let stored = g.get_hyperedge_vertices(a).await?;
     assert_eq!(
-        contracted,
-        g.get_hyperedge_vertices(a).await?,
-        "contract_hyperedge_vertices returns the stored members"
+        (contracted, stored),
+        (vec![v1, v0], vec![v1, v0]),
+        "(returned, stored) members after contracting [v1, v2] of [v2, v1, v0] into v1"
     );
     gated(&exec, "join_hyperedges", g.join_hyperedges(vec![b, c])).await?;
     assert_eq!(

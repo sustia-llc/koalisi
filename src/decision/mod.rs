@@ -133,7 +133,7 @@ pub trait CoalitionDecisionPolicy: Send + Sync {
     /// The default impl runs the sync method inline, ignores the executor, and
     /// returns a ready future — correct for cheap policies. Policies whose
     /// decision is CPU-heavy (e.g. the AIF expected-free-energy bridge) override
-    /// this to run the work on `executor` so the async runtime is not blocked.
+    /// this to run the work on the executor so the async runtime is not blocked.
     /// Dyn-compatible: returns a boxed future rather than using `async fn` in
     /// trait position.
     ///
@@ -159,7 +159,7 @@ pub trait CoalitionDecisionPolicy: Send + Sync {
     ///
     /// The default impl runs the sync method inline, ignores the executor, and
     /// returns a ready future — correct for cheap policies. Policies whose
-    /// decision is CPU-heavy override this to run the work on `executor`.
+    /// decision is CPU-heavy override this to run the work on the executor.
     /// Dyn-compatible: returns a boxed future rather than using `async fn` in
     /// trait position.
     ///

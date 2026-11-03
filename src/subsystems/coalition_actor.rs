@@ -19,8 +19,10 @@
 //! [`CoalitionService`] with a [`CoalitionServiceHandle`]. The task runs on the
 //! caller's [`TaskTracker`] and exits when the caller's [`CancellationToken`]
 //! is cancelled or the last handle is dropped (its command channel closes).
-//! A panic in the task is logged at error level and sets
-//! [`CoalitionServiceHandle::panicked`].
+//! On cancellation every queued command is answered with the error
+//! `coalition service stopped: cancelled`. A panic while handling a command
+//! is logged at error level, sets [`CoalitionServiceHandle::panicked`] and
+//! ends the task.
 //!
 //! ```ignore
 //! let service = CoalitionService::spawn(
@@ -34,6 +36,7 @@
 //! ```
 
 use std::any::Any;
+use std::future::Future;
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -50,6 +53,10 @@ use crate::decision::{CoalitionDecisionPolicy, Decision, DecisionContext};
 use crate::topology::{CoalitionManager, HyperedgeIndex, HyperedgeTrait, VertexIndex, VertexTrait};
 
 const COMMAND_CAPACITY: usize = 64;
+
+/// The error a command still queued when the service's token is cancelled
+/// receives.
+const CANCELLED: &str = "coalition service stopped: cancelled";
 
 // ---------------------------------------------------------------------------
 // Decision tap (feature-INDEPENDENT — no surrealdb types here)
@@ -353,10 +360,19 @@ pub struct CoalitionServiceHandle {
 
 impl CoalitionServiceHandle {
     /// Whether the service task has ended in a panic. `false` while the task
-    /// runs and after it stops on cancellation.
+    /// runs and after it stops on cancellation. After a panic it reads `true`
+    /// to every caller whose reply the panic dropped, from the moment that
+    /// caller's `Err` returns.
     #[must_use]
     pub fn panicked(&self) -> bool {
         self.panicked.load(Ordering::SeqCst)
+    }
+
+    /// Resolves once the service task has stopped taking commands, on
+    /// cancellation or on a panic. After a panic, [`panicked`](Self::panicked)
+    /// reads `true` when this resolves.
+    pub async fn closed(&self) {
+        self.tx.closed().await;
     }
 
     /// Ask the service to consider `agent` joining `coalition`. Membership is
@@ -419,13 +435,18 @@ pub struct CoalitionService;
 impl CoalitionService {
     /// Spawn the service task on `tracker`. It owns `manager`, consults
     /// `policy` (via its async offload) before mutating membership, and uses
-    /// `ctx`'s `required_capabilities` for capability-aware policies. The task
-    /// ends when `token` is cancelled or every [`CoalitionServiceHandle`] is
-    /// dropped; a command already taken from the channel completes first, and
-    /// commands still queued at cancellation get no reply. A panic in the task
-    /// is logged at error level with its message and sets
-    /// [`CoalitionServiceHandle::panicked`]. Returns a clone-able
-    /// [`CoalitionServiceHandle`].
+    /// `ctx`'s `required_capabilities` for capability-aware policies. Returns
+    /// a clone-able [`CoalitionServiceHandle`].
+    ///
+    /// The task ends when `token` is cancelled or every handle is dropped. A
+    /// command already taken from the channel completes first. On
+    /// cancellation the task closes the channel and answers every command
+    /// still queued with the error `coalition service stopped: cancelled`; a
+    /// command sent after that fails with `coalition service is gone`. A panic
+    /// while handling a command is logged at error level with its message,
+    /// sets [`CoalitionServiceHandle::panicked`] and ends the task; that
+    /// command and every queued command fail with
+    /// `coalition service dropped reply`.
     pub fn spawn<V, HE>(
         manager: CoalitionManager<V, HE>,
         policy: Box<dyn CoalitionDecisionPolicy>,
@@ -450,6 +471,9 @@ impl CoalitionService {
     /// decision-event forwarder). It is best-effort: a full or closed tap drops
     /// records with a `warn` and NEVER stalls or fails a decision — the
     /// coalition membership path is unaffected by tap health.
+    ///
+    /// The task ends, answers queued commands on cancellation and reports a
+    /// panic as [`spawn`](Self::spawn) describes.
     pub fn spawn_with_tap<V, HE>(
         manager: CoalitionManager<V, HE>,
         policy: Box<dyn CoalitionDecisionPolicy>,
@@ -477,6 +501,9 @@ impl CoalitionService {
     /// fails a decision. The position read (one event-log read lock and one
     /// clock load per join/leave) happens only on a service spawned through
     /// this constructor.
+    ///
+    /// The task ends, answers queued commands on cancellation and reports a
+    /// panic as [`spawn`](Self::spawn) describes.
     pub fn spawn_with_trace_tap<V, HE>(
         manager: CoalitionManager<V, HE>,
         policy: Box<dyn CoalitionDecisionPolicy>,
@@ -513,18 +540,48 @@ impl CoalitionService {
             "CoalitionService started"
         );
         let panicked = Arc::new(AtomicBool::new(false));
-        let flag = Arc::clone(&panicked);
-        let service = service_loop(rx, manager, policy, ctx, tap, trace_tap, token);
-        tracker.spawn(async move {
-            if let Err(payload) = AssertUnwindSafe(service).catch_unwind().await {
-                flag.store(true, Ordering::SeqCst);
-                tracing::error!(
-                    panic = panic_message(payload.as_ref()),
-                    "CoalitionService panicked"
-                );
-            }
-        });
+        tracker.spawn(service_loop(
+            rx,
+            manager,
+            policy,
+            ctx,
+            tap,
+            trace_tap,
+            token,
+            Arc::clone(&panicked),
+        ));
         CoalitionServiceHandle { tx, panicked }
+    }
+}
+
+/// Await `work`. On a panic, set `panicked`, log the panic at error level and
+/// return `None`.
+async fn guarded<F: Future>(panicked: &AtomicBool, work: F) -> Option<F::Output> {
+    match AssertUnwindSafe(work).catch_unwind().await {
+        Ok(output) => Some(output),
+        Err(payload) => {
+            panicked.store(true, Ordering::SeqCst);
+            tracing::error!(
+                panic = panic_message(payload.as_ref()),
+                "CoalitionService panicked"
+            );
+            None
+        }
+    }
+}
+
+/// Close `rx` and answer every command still in it with [`CANCELLED`].
+async fn refuse_queued(rx: &mut mpsc::Receiver<CoalitionCommand>) {
+    rx.close();
+    while let Some(cmd) = rx.recv().await {
+        match cmd {
+            CoalitionCommand::Join { reply, .. } | CoalitionCommand::Leave { reply, .. } => {
+                let _ = reply.send(Err(CANCELLED.to_owned()));
+            }
+            CoalitionCommand::Members { reply, .. } => {
+                let _ = reply.send(Err(CANCELLED.to_owned()));
+            }
+        }
     }
 }
 
@@ -540,6 +597,10 @@ fn panic_message(payload: &(dyn Any + Send)) -> &str {
     }
 }
 
+/// Serve commands from `rx` until `token` is cancelled or every sender is
+/// dropped. Each command's work runs under [`guarded`]: a panic sets
+/// `panicked` while that command's `reply` is still held, then the task ends.
+#[allow(clippy::too_many_arguments)]
 async fn service_loop<V, HE>(
     mut rx: mpsc::Receiver<CoalitionCommand>,
     manager: CoalitionManager<V, HE>,
@@ -548,6 +609,7 @@ async fn service_loop<V, HE>(
     tap: Option<mpsc::Sender<DecisionRecord>>,
     trace_tap: Option<mpsc::Sender<DecisionTrace>>,
     token: CancellationToken,
+    panicked: Arc<AtomicBool>,
 ) where
     V: VertexTrait + Clone + AgentCapabilities + 'static,
     HE: HyperedgeTrait + Clone + 'static,
@@ -555,7 +617,10 @@ async fn service_loop<V, HE>(
     loop {
         let cmd = tokio::select! {
             biased;
-            () = token.cancelled() => break,
+            () = token.cancelled() => {
+                refuse_queued(&mut rx).await;
+                break;
+            }
             cmd = rx.recv() => match cmd {
                 Some(cmd) => cmd,
                 None => break,
@@ -567,24 +632,31 @@ async fn service_loop<V, HE>(
                 coalition,
                 reply,
             } => {
-                let position = decision_position(trace_tap.as_ref(), &manager).await;
-                let r = manager
-                    .try_join_coalition(agent, coalition, policy.as_ref(), &ctx)
-                    .await
-                    .map_err(|e| e.to_string());
-                // Tap every consulted decision (join or decline) before replying;
-                // a manager error (no Decision produced) is not tapped.
-                if let Ok(decision) = &r {
-                    emit_decision(tap.as_ref(), coalition, agent, DecisionKind::Join, decision);
-                    emit_trace(
-                        trace_tap.as_ref(),
-                        position,
-                        coalition,
-                        agent,
-                        DecisionKind::Join,
-                        decision,
-                    );
-                }
+                let work = async {
+                    let position = decision_position(trace_tap.as_ref(), &manager).await;
+                    let r = manager
+                        .try_join_coalition(agent, coalition, policy.as_ref(), &ctx)
+                        .await
+                        .map_err(|e| e.to_string());
+                    // Tap every consulted decision (join or decline) before
+                    // replying; a manager error (no Decision produced) is not
+                    // tapped.
+                    if let Ok(decision) = &r {
+                        emit_decision(tap.as_ref(), coalition, agent, DecisionKind::Join, decision);
+                        emit_trace(
+                            trace_tap.as_ref(),
+                            position,
+                            coalition,
+                            agent,
+                            DecisionKind::Join,
+                            decision,
+                        );
+                    }
+                    r
+                };
+                let Some(r) = guarded(&panicked, work).await else {
+                    return;
+                };
                 let _ = reply.send(r);
             }
             CoalitionCommand::Leave {
@@ -592,35 +664,46 @@ async fn service_loop<V, HE>(
                 coalition,
                 reply,
             } => {
-                let position = decision_position(trace_tap.as_ref(), &manager).await;
-                let r = manager
-                    .try_leave_coalition(agent, coalition, policy.as_ref(), &ctx)
-                    .await
-                    .map_err(|e| e.to_string());
-                if let Ok(decision) = &r {
-                    emit_decision(
-                        tap.as_ref(),
-                        coalition,
-                        agent,
-                        DecisionKind::Leave,
-                        decision,
-                    );
-                    emit_trace(
-                        trace_tap.as_ref(),
-                        position,
-                        coalition,
-                        agent,
-                        DecisionKind::Leave,
-                        decision,
-                    );
-                }
+                let work = async {
+                    let position = decision_position(trace_tap.as_ref(), &manager).await;
+                    let r = manager
+                        .try_leave_coalition(agent, coalition, policy.as_ref(), &ctx)
+                        .await
+                        .map_err(|e| e.to_string());
+                    if let Ok(decision) = &r {
+                        emit_decision(
+                            tap.as_ref(),
+                            coalition,
+                            agent,
+                            DecisionKind::Leave,
+                            decision,
+                        );
+                        emit_trace(
+                            trace_tap.as_ref(),
+                            position,
+                            coalition,
+                            agent,
+                            DecisionKind::Leave,
+                            decision,
+                        );
+                    }
+                    r
+                };
+                let Some(r) = guarded(&panicked, work).await else {
+                    return;
+                };
                 let _ = reply.send(r);
             }
             CoalitionCommand::Members { coalition, reply } => {
-                let r = manager
-                    .coalition_members(coalition)
-                    .await
-                    .map_err(|e| e.to_string());
+                let work = async {
+                    manager
+                        .coalition_members(coalition)
+                        .await
+                        .map_err(|e| e.to_string())
+                };
+                let Some(r) = guarded(&panicked, work).await else {
+                    return;
+                };
                 let _ = reply.send(r);
             }
         }
@@ -921,8 +1004,17 @@ mod tests {
         assert!(!service.panicked(), "a cancelled service did not panic");
     }
 
-    /// A policy whose join decision panics.
-    struct PanickingPolicy;
+    /// A policy whose join decision panics and whose drop blocks its thread
+    /// for `drop_delay`.
+    struct PanickingPolicy {
+        drop_delay: std::time::Duration,
+    }
+
+    impl Drop for PanickingPolicy {
+        fn drop(&mut self) {
+            std::thread::sleep(self.drop_delay);
+        }
+    }
 
     impl CoalitionDecisionPolicy for PanickingPolicy {
         fn should_join(
@@ -957,7 +1049,9 @@ mod tests {
         let tracker = TaskTracker::new();
         let service = CoalitionService::spawn(
             manager,
-            Box::new(PanickingPolicy),
+            Box::new(PanickingPolicy {
+                drop_delay: std::time::Duration::ZERO,
+            }),
             DecisionContext::default(),
             &tracker,
             CancellationToken::new(),
@@ -985,6 +1079,148 @@ mod tests {
             "panic field; fields {:?}",
             events[0].fields
         );
+    }
+
+    /// On a multi-thread runtime, a caller whose join fails on the policy
+    /// panic reads `panicked() == true` as soon as its `Err` returns, while
+    /// the service task is still blocked for 300 ms in the policy's drop.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn panicked_reads_true_when_the_dropped_reply_returns() {
+        let (manager, candidate, coalition) = seed().await;
+        let tracker = TaskTracker::new();
+        let service = CoalitionService::spawn(
+            manager,
+            Box::new(PanickingPolicy {
+                drop_delay: std::time::Duration::from_millis(300),
+            }),
+            DecisionContext::default(),
+            &tracker,
+            CancellationToken::new(),
+        );
+
+        let join = service.join(candidate, coalition).await;
+        let panicked = service.panicked();
+        assert_eq!(
+            join.as_ref().map_err(ToString::to_string).err().as_deref(),
+            Some("coalition service dropped reply"),
+            "join: observed {join:?}"
+        );
+        assert!(
+            panicked,
+            "expected panicked() == true when the dropped reply returned, observed false"
+        );
+        tracker.close();
+        tracker.wait().await;
+    }
+
+    /// A policy whose async join signals `started`, then waits for `release`
+    /// and joins.
+    struct GatedPolicy {
+        started: Arc<tokio::sync::Notify>,
+        release: Arc<tokio::sync::Notify>,
+    }
+
+    impl CoalitionDecisionPolicy for GatedPolicy {
+        fn should_join(
+            &self,
+            _agent: &dyn AgentCapabilities,
+            _coalition: &[&dyn AgentCapabilities],
+            _ctx: &DecisionContext,
+        ) -> Decision {
+            Decision {
+                act: true,
+                score: 1.0,
+            }
+        }
+
+        fn should_leave(
+            &self,
+            _agent: &dyn AgentCapabilities,
+            _coalition: &[&dyn AgentCapabilities],
+            _ctx: &DecisionContext,
+        ) -> Decision {
+            Decision {
+                act: false,
+                score: 0.0,
+            }
+        }
+
+        fn should_join_async<'a>(
+            &'a self,
+            agent: &'a dyn AgentCapabilities,
+            coalition: &'a [&'a dyn AgentCapabilities],
+            ctx: &'a DecisionContext,
+            _executor: &'a crate::core::Executor,
+        ) -> std::pin::Pin<Box<dyn Future<Output = Decision> + Send + 'a>> {
+            let decision = self.should_join(agent, coalition, ctx);
+            Box::pin(async move {
+                self.started.notify_one();
+                self.release.notified().await;
+                decision
+            })
+        }
+    }
+
+    /// With a join in flight and a members command queued, cancelling the
+    /// token lets the join complete, answers the queued command with the
+    /// cancelled error, and refuses a later command as gone.
+    #[tokio::test]
+    async fn cancel_answers_queued_commands_with_the_cancelled_error() {
+        let (manager, candidate, coalition) = seed().await;
+        let started = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let tracker = TaskTracker::new();
+        let token = CancellationToken::new();
+        let service = CoalitionService::spawn(
+            manager,
+            Box::new(GatedPolicy {
+                started: Arc::clone(&started),
+                release: Arc::clone(&release),
+            }),
+            DecisionContext::default(),
+            &tracker,
+            token.clone(),
+        );
+
+        let in_flight = tokio::spawn({
+            let service = service.clone();
+            async move { service.join(candidate, coalition).await }
+        });
+        started.notified().await;
+        let queued = service.members(coalition);
+        tokio::pin!(queued);
+        assert!(
+            futures::poll!(&mut queued).is_pending(),
+            "expected the members command to wait behind the in-flight join"
+        );
+
+        token.cancel();
+        release.notify_one();
+
+        let joined = in_flight.await.expect("the join task completes");
+        assert!(
+            matches!(&joined, Ok(d) if d.act),
+            "expected the in-flight join to complete with act == true, observed {joined:?}"
+        );
+        let queued = queued.await;
+        assert_eq!(
+            queued
+                .as_ref()
+                .map_err(ToString::to_string)
+                .err()
+                .as_deref(),
+            Some(CANCELLED),
+            "queued members: observed {queued:?}"
+        );
+        let after = service.members(coalition).await;
+        assert_eq!(
+            after.as_ref().map_err(ToString::to_string).err().as_deref(),
+            Some("coalition service is gone"),
+            "members after the stop: observed {after:?}"
+        );
+        assert!(!service.panicked(), "a cancelled service did not panic");
+        tracker.close();
+        tracker.wait().await;
     }
 
     // -----------------------------------------------------------------------

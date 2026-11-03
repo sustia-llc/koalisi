@@ -56,11 +56,9 @@ impl Executor {
     /// Runs `f` on the pool and resolves to its return value; a panic in `f`
     /// resumes on the awaiting task.
     ///
-    /// Dropping the returned future before it resolves abandons the result,
-    /// not the job: `f` still runs to completion on the pool, and a panic in
-    /// `f` is then resumed on no task (tokio-rayon 2.1.0
-    /// `src/async_thread_pool.rs:58-59` sends the caught result on a oneshot
-    /// whose send error is discarded).
+    /// Dropping the returned future before it resolves does not stop `f`: `f`
+    /// still runs to completion on the pool, its return value is discarded,
+    /// and a panic in `f` is resumed on no task.
     pub async fn run<F, R>(&self, f: F) -> R
     where
         F: FnOnce() -> R + Send + 'static,

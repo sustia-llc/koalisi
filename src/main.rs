@@ -5,13 +5,16 @@
 //! diversity), then runs a bounded, policy-gated join loop that grows the
 //! coalition one candidate at a time through the [`CoalitionService`] seam —
 //! the same runtime seam the flagship `synthetic_ingestion` example uses. Waits
-//! for ctrl-c, then runs the runtime's three-step shutdown (cancel the root
-//! token, close the tracker, drain tracked tasks).
+//! for ctrl-c or for the service to stop, whichever comes first, then runs the
+//! runtime's three-step shutdown (cancel the root token, close the tracker,
+//! drain tracked tasks). Exits with an error when the service panicked or
+//! stopped before ctrl-c.
 
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use tokio::time::interval;
 use tokio_util::sync::CancellationToken;
 
@@ -82,14 +85,45 @@ async fn main() -> Result<()> {
         loop_token,
     ));
 
-    tokio::signal::ctrl_c().await?;
-    tracing::info!("ctrl-c received, shutting down");
+    run_until_stopped(runtime, &service, tokio::signal::ctrl_c()).await
+}
+
+/// Wait for `signal` or for `service` to stop taking commands, whichever
+/// comes first, then run `runtime`'s shutdown. Returns `Ok` when `signal`
+/// came first and the service did not panic; an error when `signal` fails
+/// (before the shutdown), when the service panicked, or when it stopped
+/// before `signal`.
+async fn run_until_stopped<S>(
+    runtime: CoalitionRuntime,
+    service: &CoalitionServiceHandle,
+    signal: S,
+) -> Result<()>
+where
+    S: Future<Output = std::io::Result<()>>,
+{
+    let signalled = tokio::select! {
+        r = signal => {
+            r?;
+            tracing::info!("ctrl-c received, shutting down");
+            true
+        }
+        () = service.closed() => {
+            tracing::error!(
+                panicked = service.panicked(),
+                "coalition service stopped, shutting down"
+            );
+            false
+        }
+    };
 
     // `shutdown` cancels the root token, which stops the join loop and the
     // service, and drains both tracked tasks.
     runtime.shutdown().await;
     if service.panicked() {
-        anyhow::bail!("coalition service panicked");
+        bail!("coalition service panicked");
+    }
+    if !signalled {
+        bail!("coalition service stopped before ctrl-c");
     }
     tracing::info!("shutdown clean");
     Ok(())
@@ -133,5 +167,139 @@ async fn join_loop(
         if let Ok(members) = service.members(coalition).await {
             tracing::info!(size = members.len(), "coalition size");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use koalisi::algorithms::AgentCapabilities;
+    use koalisi::decision::{CoalitionDecisionPolicy, Decision};
+
+    /// A policy whose join decision panics.
+    struct PanickingPolicy;
+
+    impl CoalitionDecisionPolicy for PanickingPolicy {
+        fn should_join(
+            &self,
+            _agent: &dyn AgentCapabilities,
+            _coalition: &[&dyn AgentCapabilities],
+            _ctx: &DecisionContext,
+        ) -> Decision {
+            panic!("policy exploded");
+        }
+
+        fn should_leave(
+            &self,
+            _agent: &dyn AgentCapabilities,
+            _coalition: &[&dyn AgentCapabilities],
+            _ctx: &DecisionContext,
+        ) -> Decision {
+            Decision {
+                act: false,
+                score: 0.0,
+            }
+        }
+    }
+
+    /// A runtime and a service under `policy` over a one-member coalition and
+    /// one candidate; returns the candidate and the coalition.
+    async fn daemon(
+        policy: Box<dyn CoalitionDecisionPolicy>,
+    ) -> Result<(
+        CoalitionRuntime,
+        CoalitionServiceHandle,
+        VertexIndex,
+        HyperedgeIndex,
+    )> {
+        let runtime = CoalitionRuntime::new(Arc::new(Executor::with_num_threads(1)?));
+        let manager: CoalitionManager<CapabilityAgent, Team> =
+            CoalitionManager::empty(Arc::clone(runtime.executor()));
+        let seed = manager.add_agent(CapabilityAgent::new(0, 0b01, 50)).await?;
+        let candidate = manager.add_agent(CapabilityAgent::new(1, 0b10, 50)).await?;
+        let coalition = manager.form_coalition(vec![seed], Team(1)).await?;
+        let service = CoalitionService::spawn(
+            manager,
+            policy,
+            DecisionContext::default(),
+            runtime.task_tracker(),
+            runtime.cancellation_token().child_token(),
+        );
+        Ok((runtime, service, candidate, coalition))
+    }
+
+    /// Run `run_until_stopped` under a 5 s bound and return its error text,
+    /// `None` for `Ok`; a timeout fails the test naming `label`.
+    async fn stop_outcome<S>(
+        label: &str,
+        runtime: CoalitionRuntime,
+        service: &CoalitionServiceHandle,
+        signal: S,
+    ) -> Option<String>
+    where
+        S: Future<Output = std::io::Result<()>>,
+    {
+        let bounded = tokio::time::timeout(
+            Duration::from_secs(5),
+            run_until_stopped(runtime, service, signal),
+        )
+        .await;
+        bounded
+            .unwrap_or_else(|_| {
+                panic!(
+                    "{label}: expected run_until_stopped to return within 5 s, observed a timeout"
+                )
+            })
+            .err()
+            .map(|e| e.to_string())
+    }
+
+    /// A signal ends the wait cleanly; a service that panicked or was
+    /// cancelled ends it with its error while the signal is still pending.
+    #[tokio::test]
+    async fn run_until_stopped_ends_on_the_signal_or_a_dead_service() -> Result<()> {
+        let (runtime, service, _, _) =
+            daemon(Box::new(ThresholdPolicy::new(AdditiveCalculator, 0.0, 0.0))).await?;
+        let outcome = stop_outcome("signal first", runtime, &service, async {
+            std::io::Result::Ok(())
+        })
+        .await;
+        assert_eq!(outcome, None, "signal first: expected Ok");
+
+        let (runtime, service, candidate, coalition) = daemon(Box::new(PanickingPolicy)).await?;
+        let join = service.join(candidate, coalition).await;
+        assert!(
+            join.is_err(),
+            "expected the policy panic to fail the join, observed {join:?}"
+        );
+        let outcome = stop_outcome(
+            "panicked service",
+            runtime,
+            &service,
+            std::future::pending(),
+        )
+        .await;
+        assert_eq!(
+            outcome.as_deref(),
+            Some("coalition service panicked"),
+            "panicked service"
+        );
+
+        let (runtime, service, _, _) =
+            daemon(Box::new(ThresholdPolicy::new(AdditiveCalculator, 0.0, 0.0))).await?;
+        runtime.cancellation_token().cancel();
+        let outcome = stop_outcome(
+            "cancelled service",
+            runtime,
+            &service,
+            std::future::pending(),
+        )
+        .await;
+        assert_eq!(
+            outcome.as_deref(),
+            Some("coalition service stopped before ctrl-c"),
+            "cancelled service"
+        );
+        Ok(())
     }
 }
