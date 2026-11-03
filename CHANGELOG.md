@@ -26,11 +26,15 @@ One caller-owned rayon pool for koalisi's CPU work (#115).
 ### Added
 - `core::Executor`, a rayon pool with threads named `koalisi-exec-<i>`.
   `Executor::new` and `Executor::with_num_threads` return
-  `Result<Self, ExecutorError>`. `Executor::run` runs a closure on the pool
-  and resolves to its value, and a panic in the closure resumes on the
-  awaiting task.
+  `Result<Self, ExecutorError>`. `ExecutorError::Build` carries the
+  requested thread count and rayon's `ThreadPoolBuildError`.
+  `Executor::run` runs a closure on the pool and resolves to its value, and
+  a panic in the closure resumes on the awaiting task.
 - `TemporalHypergraph::executor` and `CoalitionRuntime::executor` return
   the shared `Arc<Executor>`.
+- `CoalitionServiceHandle::panicked`. A panic in the service task is logged
+  at error level with its message, and the `koalisi` binary then exits with
+  an error instead of logging `shutdown clean`.
 
 ### Changed
 - **Breaking:** these take the executor:
@@ -40,8 +44,9 @@ One caller-owned rayon pool for koalisi's CPU work (#115).
     (last parameter `executor: &Executor`)
   - `TemporalAnalytics::magnitude_history` (last parameter `executor: &Executor`)
 - **Breaking:** `CoalitionService::spawn`, `spawn_with_tap` and
-  `spawn_with_trace_tap` take a `&TaskTracker` as their last parameter, and
-  the service task runs on it.
+  `spawn_with_trace_tap` take a `&TaskTracker` and a `CancellationToken` as
+  their last two parameters. The service task runs on the tracker and stops
+  when the token is cancelled or the last handle drops.
 - The 18 graph operations, the async methods of `AifDecisionPolicy`,
   `AifMmDecisionPolicy` and `MagnitudePolicy`, and `magnitude_history` run
   on the caller's executor. They ran on a private static pool and on rayon's
@@ -60,11 +65,11 @@ One caller-owned rayon pool for koalisi's CPU work (#115).
   through `tokio_rayon::rayon`.
 
 ### Gates
-- At `d4f8728`, these lanes pass:
-  - default 114, `decision` 172, `magnitude` 145, `decision,magnitude` 204
-  - `magnitude-fast` 153, `persistence` 139, `persistence,magnitude` 171
-  - `remote` 120, `process` 172, `decision,magnitude,process` 263
-  - `metrics` 114, `durable` 115, `persistence,durable` 141
+- At `0d60ee2`, these lanes pass:
+  - default 116, `decision` 174, `magnitude` 147, `decision,magnitude` 206
+  - `magnitude-fast` 155, `persistence` 141, `persistence,magnitude` 173
+  - `remote` 122, `process` 174, `decision,magnitude,process` 265
+  - `metrics` 116, `durable` 117, `persistence,durable` 143
 
   Each count is the `v0.48.0` count plus the new tests compiled into that
   lane. The two Docker lanes ran with `-- --nocapture`, and neither
@@ -73,9 +78,13 @@ One caller-owned rayon pool for koalisi's CPU work (#115).
   lanes, `--no-default-features`, `harness`, `harness,process` and
   `harness,decision,process`. The frozen `strategy_comparison.rs` and
   `examples/k7/*.rs` are unchanged and compile.
-- `tests/executor_global_pool.rs` runs every async path on an executor, and
-  then `rayon::ThreadPoolBuilder::new().build_global()` returns `Ok`.
-- These are clean at `d4f8728`:
+- `tests/executor_global_pool.rs` runs under features `decision,magnitude`.
+  It runs these paths on an executor: the 18 async graph methods, the async
+  and manager join and leave of the three policies, and `magnitude_history`.
+  Then `rayon::ThreadPoolBuilder::new().build_global()` returns `Ok`.
+- At `0d60ee2`, the `koalisi` binary starts, and on SIGINT it logs
+  "shutdown clean". Seven examples exit 0.
+- These are clean at `0d60ee2`:
 
   ```sh
   RUSTDOCFLAGS='-D warnings' cargo doc --locked --no-deps --all-features
