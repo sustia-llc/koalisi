@@ -72,7 +72,7 @@ impl AgentCapabilities for Worker {
 #[tokio::main]
 async fn main() -> Result<()> {
     let executor = Arc::new(Executor::new()?);
-    setup_logging();
+    setup_logging()?;
 
     let token = CancellationToken::new();
     let tracker = TaskTracker::new();
