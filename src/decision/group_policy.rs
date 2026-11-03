@@ -117,21 +117,33 @@
 //! # Determinism
 //!
 //! [`group_distribution`](aif::GroupAgent::group_distribution) draws no
-//! randomness here. Upstream `aif` states RNG-freedom for a `CopyAgent`
-//! sensory slot, [`POMDPAgent`](aif::POMDPAgent) members and a `VotingAgent`
-//! aggregator, and states that `RoutedAggregator`'s distribution twins are
-//! RNG-free. This arm's members are `RoleMember`s: `act` returns
-//! `Unsupported`, and `action_probabilities` calls `run_replay`, which calls
-//! only `POMDPAgent::record_action` and
-//! `POMDPAgent::action_probabilities_multi`. Seeds are threaded for hygiene
-//! only; nothing draws from them.
+//! randomness here. Upstream `aif` (tag `aif-v0.15.0`, rev `f16c331`) states
+//! RNG-freedom for a `CopyAgent` sensory slot, [`POMDPAgent`](aif::POMDPAgent)
+//! members and a `VotingAgent` aggregator (`crates/aif/src/group.rs:803-811`),
+//! and states that `RoutedAggregator`'s distribution twins are RNG-free
+//! (`crates/aif/src/topology.rs:18`, `:389-412`). This arm's members are
+//! `RoleMember`s: `act` returns `Unsupported`, and `action_probabilities` calls
+//! `run_replay`, which calls only `POMDPAgent::record_action` and
+//! `POMDPAgent::action_probabilities_multi`. `record_action` is documented as
+//! replay without sampling and writes only `last_action` and the MMP action
+//! history (`crates/aif/src/agent.rs:2546-2556`);
+//! `action_probabilities_multi` is documented as returning action
+//! probabilities without sampling and runs only perception, learning and
+//! policy inference (`crates/aif/src/agent.rs:2494-2495`, `:2510-2524`). In
+//! `agent.rs` the agent's RNG is drawn from only in `act_multi`
+//! (`crates/aif/src/agent.rs:2541`). Seeds are threaded for hygiene only;
+//! nothing draws from them.
 //!
 //! *Correction (A5.10 L3-12):* it is **not** the only RNG-free path —
-//! `group_distribution_recording` is equally RNG-free. The reason this arm avoids
-//! that one is **D4a**: it advances each member to its own argmax,
-//! which is a per-member surrogate rather than the group's resolved action. Only
-//! [`Agent::act`](aif::Agent::act) samples, and only the exploratory
-//! [`DecisionRead::SeededSampling`] cell calls it.
+//! `group_distribution_recording` is equally RNG-free
+//! (`crates/aif/src/group.rs:840`). This arm calls neither it nor
+//! `record_group_action`. Either advance guards against the MMP double count:
+//! two reads of one member with no recorded action between them are one
+//! timestep, with the belief update and, under `learn_*`, the Dirichlet update
+//! applied twice (`crates/aif/src/group.rs:794-801`). A single-use member is
+//! read once (point 3), so the double count cannot arise and no advance is
+//! needed. Only [`Agent::act`](aif::Agent::act) samples, and only the
+//! exploratory [`DecisionRead::SeededSampling`] cell calls it.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
