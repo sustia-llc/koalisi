@@ -19,6 +19,65 @@ Planned work — issue-tracked:
 - **K7 lineage**: EQ5b (c) ([#103]); the multi-coalition harness scaffold and
   the tira-extension re-pins and registrations ([#104]–[#111]).
 
+## [0.47.0] - 2026-11-03
+
+Re-pins `surrealdb-live-message` to `v0.7.0` (feature `durable`).
+
+### Changed
+- **Breaking:** `rust-version` is now 1.95.0 (it was 1.93.0). Under feature
+  `durable`, `surrealdb-common` 3.3.5 calls `std::hint::cold_path`, which is
+  stable since Rust 1.95.0. `cargo +1.93.0 check --all-targets --locked
+  --features durable` at `a678550` fails with `E0658` on that call.
+- **`surrealdb-live-message` `v0.2.2` → `v0.7.0`**, and `surrealdb-types`
+  3.2.4 → 3.3.5, so the two versions unify. The `[sdb]` `tag` in
+  `config/default.toml` is `v3.3.5`.
+- The lock change also moves `tokio` 1.53.1 → 1.54.1, `tokio-util` 0.7.19 →
+  0.7.20, `thiserror` 2.0.20 → 2.0.21 and `config` 0.15.25 → 0.15.27 in the
+  `decision,magnitude,process` graph. Each new version is a minimum that
+  `surrealdb-live-message` `v0.7.0` declares in its `Cargo.toml`.
+- `Coalition::inbox()` returns `async_channel::Receiver` in place of
+  `kanal::AsyncReceiver`. The three callers in `tests/` and `examples/` use
+  only `recv().await` and compile unchanged.
+- The `durable` module docs state the delivery bound: at-least-once from the
+  log to the upstream delivery bus. If the process exits before a receiver
+  reads a delivery that is already on that bus, that delivery is lost.
+  `DurableDecisionBus::shutdown` documents the upstream wait, and that a drop
+  of the bus cancels without waiting.
+- koalisi matches no upstream `Error` variant. This search prints nothing:
+
+  ```sh
+  git grep -n 'Error::' v0.47.0 -- src/subsystems/durable.rs tests/durable_integration.rs tests/decision_log_bus_tee.rs examples/durable_decisions.rs
+  ```
+
+- koalisi defines no SurrealDB table, so upstream's `message` table is the
+  one table with a changefeed. This search prints nothing:
+
+  ```sh
+  git grep -n -i 'DEFINE TABLE' v0.47.0 -- src tests examples config
+  ```
+
+### Gates
+- `cargo test` on all 16 lanes, `main` (`77dc711`) against the pinned tree
+  at `a678550`, each with its own target directory: the per-binary result
+  lines are identical. `durable` 108 and `persistence,durable` 133 ran
+  against the Docker container.
+- `cargo run --features durable --example durable_decisions` at `a678550`
+  replays both decisions and stops cleanly.
+- `cargo clippy --locked --all-targets -- -D warnings` is clean at `a678550`
+  on the 14 non-Docker lanes and `--no-default-features`, and at `9a8f831`
+  on `persistence,durable`.
+- These are clean at `9a8f831`:
+
+  ```sh
+  cargo +1.95.0 check --all-targets --locked --features durable
+  cargo +1.95.0 check --all-targets --locked --features persistence,durable
+  cargo +1.95.0 check --all-targets --locked --features decision,magnitude-fast,persistence,remote,process,harness,metrics
+  RUSTDOCFLAGS='-D warnings' cargo doc --locked --no-deps --all-features
+  cargo fmt --all -- --check
+  ```
+
+- The K4 archive gate did not run (owner, 2026-11-03).
+
 ## [0.46.0] — 2026-11-02
 
 Re-pins `aif` to `aif-v0.15.0`.
