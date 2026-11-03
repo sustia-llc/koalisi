@@ -70,6 +70,35 @@ The review follow-ups of v0.45.0 to v0.49.0 (#116, #121, #122, #124, #126,
   skip. Every other boot failure fails the test. A test that panics
   after the boot leaves no `koalisi_sdb_container` running.
 
+### Gates
+- These lanes pass at `1fe6ff4`:
+  - default 134, `decision` 195, `magnitude` 165, `decision,magnitude` 227
+  - `magnitude-fast` 173, `persistence` 159, `persistence,magnitude` 191
+  - `remote` 140, `process` 192, `decision,magnitude,process` 286
+  - `metrics` 134, `blake3-pure` 134, `durable` 146, `persistence,durable` 178
+
+  The two Docker lanes ran with `-- --nocapture` from the checkout. Each
+  has 1 ignored test, the child that the container-drain test starts.
+  `rg 'SKIP|SdbGuard drop'` over their logs prints nothing.
+- `cargo clippy --locked --all-targets -- -D warnings` is clean at
+  `1fe6ff4` on those 14 lanes, `--no-default-features`, `harness`,
+  `harness,process` and `harness,decision,process`.
+- These are clean at `1fe6ff4`:
+
+  ```sh
+  RUSTDOCFLAGS='-D warnings' cargo doc --locked --no-deps --all-features
+  cargo fmt --all -- --check
+  cargo +1.95.0 check --all-targets --locked
+  cargo +1.95.0 check --all-targets --locked --features persistence,durable
+  cargo +1.95.0 check --all-targets --locked --features decision,magnitude-fast,persistence,remote,process,harness,metrics,blake3-pure
+  ```
+
+- At `1fe6ff4`, the `koalisi` binary logs "shutdown clean" on SIGINT, and
+  `synthetic_ingestion`, `topology_coalition`, `remote_coalition_consumer`
+  and `durable_decisions` exit 0.
+- The K4 archive gate and the `harness` test lanes did not run (owner,
+  2026-11-03).
+
 ## [0.49.0] — 2026-11-03
 
 One caller-owned rayon pool for koalisi's CPU work (#115).
