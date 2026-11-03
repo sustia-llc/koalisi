@@ -38,7 +38,7 @@ const SEED_MEMBERS: usize = 2;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    setup_logging();
+    setup_logging()?;
     let runtime = CoalitionRuntime::new(Arc::new(Executor::new()?));
 
     // A set of agents, each covering a distinct capability bit.

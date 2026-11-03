@@ -171,7 +171,7 @@ where
 
 #[tokio::test]
 async fn durable_decisions_survive_restart_through_the_seam() {
-    setup_logging();
+    setup_logging().expect("setup_logging: no subscriber is installed before it in this binary");
 
     let token = CancellationToken::new();
     let tracker = TaskTracker::new();

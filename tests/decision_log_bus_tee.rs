@@ -186,7 +186,7 @@ where
 #[tokio::test]
 #[allow(clippy::too_many_lines)]
 async fn every_trace_reaches_the_decisions_stream_and_the_bus() {
-    setup_logging();
+    setup_logging().expect("setup_logging: no subscriber is installed before it in this binary");
 
     let token = CancellationToken::new();
     let db_tracker = TaskTracker::new();
