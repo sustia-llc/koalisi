@@ -21,8 +21,6 @@
 //!
 //! Every wait is bounded; the test cannot hang.
 
-#![cfg(feature = "remote")]
-
 use std::fmt::{Display, Formatter};
 use std::time::Duration;
 

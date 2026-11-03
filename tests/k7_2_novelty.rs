@@ -12,8 +12,6 @@
 //! `{0, 1, 2}` — its removal changes no covered step. The join read is agent
 //! 0 into `{1, 2}` — it adds the covered step `(1, r0)`.
 
-#![cfg(all(feature = "harness", feature = "decision", feature = "process"))]
-
 use std::collections::HashMap;
 
 use koalisi::algorithms::{AgentCapabilities, CapabilityAgent};
