@@ -101,6 +101,8 @@ async fn main() -> Result<()> {
     let bus = DurableDecisionBus::new(vec![PRODUCER.to_string(), DECISION_LOG.to_string()])
         .await
         .context("durable decision bus")?;
+    // Cancels the sdb token on every exit from here, an early return included.
+    let _sdb_guard = token.clone().drop_guard();
     let producer = bus.agent(PRODUCER).await.context("producer agent")?;
     // Grab the consumer inbox BEFORE any decision so nothing is missed.
     let inbox = bus.coalition().inbox();
