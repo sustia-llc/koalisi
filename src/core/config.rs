@@ -14,21 +14,9 @@ pub struct Logger {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct CoalitionSettings {
-    pub threshold_bps: f64,
-    pub history_capacity: usize,
-    /// "guaranteed" or "best_effort"
-    pub delivery_strategy: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
 pub struct Settings {
     pub environment: String,
     pub logger: Logger,
-    // Accept both "swarm" and "coalition" keys from config files for
-    // backward compatibility during the rename transition.
-    #[serde(alias = "swarm")]
-    pub coalition: CoalitionSettings,
 }
 
 impl Settings {
