@@ -6,7 +6,7 @@ use super::events::{SnapshotId, TemporalEvent};
 use super::timestamp::{Clock, TimeRange, Timestamp};
 use super::{HyperedgeTrait, VertexTrait};
 use crate::core::Executor;
-use catgraph_applied::{HyperedgeIndex, Hypergraph, HypergraphError, VertexIndex};
+use catgraph_applied::{HyperedgeIndex, Hypergraph, VertexIndex};
 
 pub type SharedGraph<V, HE> = std::sync::Arc<std::sync::RwLock<Hypergraph<V, HE>>>;
 use std::collections::BTreeMap;
@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::sync::RwLock as StdRwLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::RwLock;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{Mutex, mpsc, oneshot};
 
 /// A snapshot marker at a point in time.
 ///
@@ -33,10 +33,13 @@ pub struct Snapshot {
 /// A temporal hypergraph with full event sourcing: it wraps a SharedGraph and
 /// records every mutation as an event, so the graph state at any point in
 /// time can be reconstructed. Each mutation method runs as one spawned tokio
-/// task that holds the event-log write lock while it ticks the clock, applies
-/// the graph change and appends the event, so it must be called inside a
-/// tokio runtime, and the events one value records appear in the log in
-/// timestamp order and in the order their changes reached the graph. A
+/// task that holds a mutation lock, shared by every clone, while it applies
+/// the graph change, ticks the clock and appends the event, taking the
+/// event-log write lock for the append only, so it must be called inside a
+/// tokio runtime, an event-log reader does not wait on a graph change, a
+/// failed mutation ticks no timestamp, and the events one value records
+/// appear in the log in timestamp order and in the order their changes
+/// reached the graph. A
 /// mutation future dropped after its first poll still applies the change and
 /// records its event; if that mutation fails, the error is logged at warn
 /// level with the operation name. Every graph operation, mutation or read,
@@ -65,6 +68,9 @@ where
     event_tap: Option<mpsc::Sender<TemporalEvent<V, HE>>>,
     /// The pool every graph operation runs on. `Clone` shares it.
     executor: Arc<Executor>,
+    /// Held by each mutation and by `create_snapshot` from before the graph
+    /// change to after the event append. `Clone` shares it.
+    mutation: Arc<Mutex<()>>,
 }
 
 /// Mirror `event` to `tap`, if any, with a non-blocking `try_send`; a full or
@@ -116,6 +122,7 @@ where
             snapshot_counter: AtomicU64::new(0),
             event_tap: None,
             executor,
+            mutation: Arc::new(Mutex::new(())),
         }
     }
 
@@ -142,16 +149,17 @@ where
     }
 
     /// Run one graph mutation as a spawned tokio task and resolve to the value
-    /// `finish` returns. The task takes the event-log write lock, ticks the
-    /// clock, runs `job` on the executor under the graph's write lock, appends
-    /// and taps the event `finish` builds from the timestamp and the job's
-    /// output, then releases the event-log lock. The task runs to completion
-    /// when the returned future is dropped after its first poll, and an error
-    /// it can no longer return is logged at warn level with `operation`. A
-    /// poisoned graph lock yields [`TemporalError::LockPoisoned`], a `job`
-    /// error is returned as is, and neither records an event; a panic in
-    /// `job` resumes on the awaiting task; a task cancelled by the shutdown of
-    /// its runtime yields [`TemporalError::TaskCancelled`].
+    /// `finish` returns. The task takes the mutation lock, runs `job` on the
+    /// executor under the graph's write lock, and on success ticks the clock
+    /// and, under the event-log write lock, taps and appends the event
+    /// `finish` builds from the timestamp and the job's output, then releases
+    /// the mutation lock. The task runs to completion when the returned future
+    /// is dropped after its first poll, and an error it can no longer return
+    /// is logged at warn level with `operation`. A poisoned graph lock yields
+    /// [`TemporalError::LockPoisoned`], a `job` error is returned as is, and
+    /// neither ticks the clock nor records an event; a panic in `job` resumes
+    /// on the awaiting task; a task cancelled by the shutdown of its runtime
+    /// yields [`TemporalError::TaskCancelled`].
     async fn mutate<T, R>(
         &self,
         operation: &'static str,
@@ -167,23 +175,28 @@ where
         let clock = Arc::clone(&self.clock);
         let tap = self.event_tap.clone();
         let executor = Arc::clone(&self.executor);
+        let mutation = Arc::clone(&self.mutation);
         let (reply_tx, reply_rx) = oneshot::channel();
         let task = tokio::spawn(async move {
-            let mut log = events.write().await;
-            let timestamp = clock.tick();
+            let serial = mutation.lock().await;
             let output = executor
                 .run(move || {
                     let mut g = graph.write().map_err(|_| TemporalError::LockPoisoned)?;
                     job(&mut g)
                 })
                 .await;
-            let result = output.map(|output| {
-                let (event, value) = finish(timestamp, output);
-                tap_event(tap.as_ref(), &event);
-                log.append(event);
-                value
-            });
-            drop(log);
+            let result = match output {
+                Ok(output) => {
+                    let timestamp = clock.tick();
+                    let (event, value) = finish(timestamp, output);
+                    let mut log = events.write().await;
+                    tap_event(tap.as_ref(), &event);
+                    log.append(event);
+                    Ok(value)
+                }
+                Err(error) => Err(error),
+            };
+            drop(serial);
             if let Err(Err(error)) = reply_tx.send(result) {
                 tracing::warn!(
                     operation,
@@ -504,21 +517,16 @@ where
     }
 
     /// Join hyperedges and record the event; fewer than two indices is
-    /// [`HypergraphError::InvalidJoin`] once the graph lock is taken, so a
+    /// [`InvalidJoin`](catgraph_applied::HypergraphError::InvalidJoin) once
+    /// the graph lock is taken, so a
     /// poisoned lock yields [`TemporalError::LockPoisoned`] for every
     /// `indices`. The mutation contract of [`TemporalHypergraph`] applies.
     pub async fn join_hyperedges(&self, indices: Vec<HyperedgeIndex>) -> TemporalResult<()> {
         self.mutate(
             "join_hyperedges",
             move |g| {
-                let [target_index, sources @ ..] = indices.as_slice() else {
-                    return Err(TemporalError::Hypergraph(HypergraphError::InvalidJoin));
-                };
-                if sources.is_empty() {
-                    return Err(TemporalError::Hypergraph(HypergraphError::InvalidJoin));
-                }
-                let (target_index, source_indices) = (*target_index, sources.to_vec());
-                g.join_hyperedges(&indices)?;
+                let target_index = g.join_hyperedges(&indices)?;
+                let source_indices = indices[1..].to_vec();
                 let new_vertices = g.get_hyperedge_vertices(target_index)?;
                 Ok((target_index, source_indices, new_vertices))
             },
@@ -653,10 +661,9 @@ where
     /// Create a snapshot at the current timestamp.
     ///
     /// `event_index` points to the SnapshotMarker itself, so replay-to-snapshot
-    /// includes the marker as its terminator. The marker append and the snapshots
-    /// table insert happen under a single events-log write guard to keep the
-    /// stored index consistent under concurrent mutation, and the clock ticks
-    /// under that guard, as for a mutation.
+    /// includes the marker as its terminator. Under the mutation lock of
+    /// [`TemporalHypergraph`], the clock ticks, and the marker is tapped and
+    /// appended and its index read under one event-log write guard.
     pub async fn create_snapshot(&self) -> SnapshotId {
         let id = SnapshotId(self.snapshot_counter.fetch_add(1, Ordering::Relaxed));
 
@@ -665,8 +672,9 @@ where
         // order always matches log order — and compute the stored index under
         // the same guard to keep it consistent under concurrent mutation.
         let (timestamp, event_index) = {
-            let mut events = self.events.write().await;
+            let _serial = self.mutation.lock().await;
             let timestamp = self.clock.tick();
+            let mut events = self.events.write().await;
             let marker = TemporalEvent::SnapshotMarker {
                 timestamp,
                 snapshot_id: id,
@@ -776,6 +784,7 @@ where
             // the events Arc above.
             event_tap: self.event_tap.clone(),
             executor: Arc::clone(&self.executor),
+            mutation: Arc::clone(&self.mutation),
         }
     }
 }
@@ -1048,6 +1057,69 @@ mod tests {
         assert_eq!(weights, (1, 2), "graph weights at vertex indices 0 and 1");
         let marker_index = g.get_snapshot(snapshot).await.map(|s| s.event_index);
         assert_eq!(marker_index, Some(2), "the snapshot's event index");
+    }
+
+    /// While an `update_hyperedge_vertices_try` mutator is blocked on an
+    /// executor worker, `event_count` returns 2, the events recorded before
+    /// it, within 5 s; once released, the mutation records the third event.
+    #[tokio::test]
+    async fn an_event_log_reader_completes_while_a_mutation_job_is_held() {
+        let g = TemporalHypergraph::<u32, u32>::new(crate::core::executor::test_executor());
+        let v0 = g.add_vertex(1).await.expect("add v0");
+        let h = g.add_hyperedge(vec![v0], 1).await.expect("add h");
+
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let mutating = g.clone();
+        let mutation = tokio::spawn(async move {
+            mutating
+                .update_hyperedge_vertices_try(h, move |members| {
+                    let _ = started_tx.send(());
+                    let _ = release_rx.recv();
+                    Ok(members)
+                })
+                .await
+        });
+        started_rx.await.expect("the mutator starts");
+        let count = tokio::time::timeout(Duration::from_secs(5), g.event_count()).await;
+        release_tx.send(()).expect("the mutator is waiting");
+        let outcome = mutation.await.expect("the mutation task completes");
+
+        assert_eq!(
+            count.ok(),
+            Some(2),
+            "event_count while the mutator is held (None: it timed out after 5 s)"
+        );
+        assert!(outcome.is_ok(), "the held mutation: {outcome:?}");
+        assert_eq!(g.event_count().await, 3, "events after the release");
+    }
+
+    /// A failed `add_hyperedge` between two `add_vertex` calls ticks no
+    /// timestamp: the clock reads 1 after it, and the log holds the two
+    /// vertex events at timestamps 0 and 1.
+    #[tokio::test]
+    async fn a_failed_mutation_ticks_no_timestamp() {
+        let g = TemporalHypergraph::<u32, u32>::new(crate::core::executor::test_executor());
+        g.add_vertex(1).await.expect("add the first vertex");
+        let failed = g.add_hyperedge(vec![VertexIndex::from(7)], 1).await;
+        let clock_after_failure = g.current_timestamp().value();
+        g.add_vertex(2).await.expect("add the second vertex");
+        let stamps: Vec<u64> = g
+            .events()
+            .await
+            .iter()
+            .map(|e| e.timestamp().value())
+            .collect();
+
+        assert!(
+            failed.is_err(),
+            "expected the add_hyperedge over an unassigned vertex to fail, observed {failed:?}"
+        );
+        assert_eq!(
+            (clock_after_failure, stamps),
+            (1, vec![0, 1]),
+            "(clock after the failure, event timestamps)"
+        );
     }
 
     /// An `add_hyperedge` over a vertex index the graph never assigned, polled

@@ -28,11 +28,13 @@ The review follow-ups of v0.45.0 to v0.49.0 (#116, #121, #122, #124, #126,
 - `subsystems::coalition_actor::ServiceError`, with the variants `Gone`,
   `ReplyDropped`, `Cancelled`, `Panicked { message }` and
   `Topology(TemporalError)`, and `ServiceError::is_terminal`, which is
-  `true` for the first four and for `Topology(LockPoisoned)`.
+  `true` for the first four, for `Topology(LockPoisoned)` and for
+  `Topology(TaskCancelled)`.
 - `TemporalError::LockPoisoned`. After a panic under the graph's write lock,
   every graph operation returns it.
-- `TemporalError::TaskCancelled`, returned by a graph mutation whose task
-  is cancelled by the shutdown of its runtime.
+- **Breaking:** `TemporalError::TaskCancelled`, returned by a graph mutation
+  whose task is cancelled by the shutdown of its runtime. `TemporalError` is
+  exhaustive, so a `match` over it needs the new arm.
 - `core::config::LoggingError::AlreadyInstalled { source }`, whose `source`
   is the `tracing-subscriber` `TryInitError`, and the constants
   `DEFAULT_RUN_MODE` and `ENV_PREFIX`.
@@ -62,13 +64,16 @@ The review follow-ups of v0.45.0 to v0.49.0 (#116, #121, #122, #124, #126,
   `RUN_MODE`, and for a `RUN_MODE` with no `config/<mode>` file.
 - **Breaking:** `setup_logging` returns `Result<(), LoggingError>`. Every
   call returns the outcome of the first call.
-- A graph mutation and its event-log record run in one spawned task, which
-  holds the event-log write lock while it ticks the clock, changes the graph
-  and appends the event. The events that one `TemporalHypergraph` value
-  records, its snapshot markers included, are logged in timestamp order and
-  in the order their changes reached the graph. If the caller drops the
-  future, both still land, and a failure is logged at warn level. A graph
-  mutation must run inside a tokio runtime.
+- A graph mutation and its event-log record run in one spawned task. The
+  task holds a mutation lock while it changes the graph, ticks the clock
+  and appends the event. The clones of a `TemporalHypergraph` share this
+  lock. The task holds the event-log write lock for the append only, so an
+  event-log reader does not wait on a graph change. A failed mutation ticks
+  no timestamp. The events that one `TemporalHypergraph` value records, its
+  snapshot markers included, are logged in timestamp order and in the order
+  their changes reached the graph. If the caller drops the future, both
+  still land, and a failure is logged at warn level. A graph mutation must
+  run inside a tokio runtime.
 - `join_hyperedges` with fewer than two indices returns `LockPoisoned` on a
   poisoned graph.
 - If its token is cancelled, `spawn_decision_forwarder`,

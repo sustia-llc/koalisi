@@ -67,16 +67,26 @@ pub enum ServiceError {
 
 impl ServiceError {
     /// `true` for [`Gone`](Self::Gone), [`ReplyDropped`](Self::ReplyDropped),
-    /// [`Cancelled`](Self::Cancelled), [`Panicked`](Self::Panicked) and
-    /// `Topology(`[`TemporalError::LockPoisoned`]`)`, after each of which every
-    /// later command on the same service fails; `false` for every other
+    /// [`Cancelled`](Self::Cancelled), [`Panicked`](Self::Panicked),
+    /// `Topology(`[`TemporalError::LockPoisoned`]`)` and
+    /// `Topology(`[`TemporalError::TaskCancelled`]`)`; `false` for every other
     /// `Topology` error.
     #[must_use]
     pub fn is_terminal(&self) -> bool {
         match self {
-            Self::Topology(TemporalError::LockPoisoned) => true,
-            Self::Topology(_) => false,
             Self::Gone | Self::ReplyDropped | Self::Cancelled | Self::Panicked { .. } => true,
+            Self::Topology(error) => match error {
+                TemporalError::LockPoisoned | TemporalError::TaskCancelled => true,
+                TemporalError::Hypergraph(_)
+                | TemporalError::TimestampInFuture { .. }
+                | TemporalError::NoSnapshotBefore(_)
+                | TemporalError::SnapshotNotFound(_)
+                | TemporalError::ReplayError { .. }
+                | TemporalError::InvalidTimeRange { .. }
+                | TemporalError::EventLogCorrupted(_)
+                | TemporalError::ConcurrentModification
+                | TemporalError::EmptyCoalition => false,
+            },
         }
     }
 }
@@ -1384,13 +1394,15 @@ mod tests {
         tracker.wait().await;
     }
 
-    /// `is_terminal` is `true` for the four service-stop variants and
-    /// `Topology(LockPoisoned)`, and `false` for `Topology(EmptyCoalition)`
-    /// and `Topology(Hypergraph(InvalidJoin))`.
+    /// `is_terminal` is `true` for the four service-stop variants,
+    /// `Topology(LockPoisoned)` and `Topology(TaskCancelled)`, and `false`
+    /// for `Topology` of each of the nine other `TemporalError` variants.
     #[test]
-    fn is_terminal_marks_the_stop_variants_and_a_poisoned_lock() {
+    fn is_terminal_marks_the_stop_variants_a_poisoned_lock_and_a_cancelled_task() {
+        use crate::topology::{SnapshotId, Timestamp};
         use catgraph_applied::HypergraphError;
 
+        let ts = Timestamp::new;
         let observed: Vec<(String, bool)> = [
             ServiceError::Gone,
             ServiceError::ReplyDropped,
@@ -1399,16 +1411,34 @@ mod tests {
                 message: "boom".to_string(),
             },
             ServiceError::Topology(TemporalError::LockPoisoned),
-            ServiceError::Topology(TemporalError::EmptyCoalition),
+            ServiceError::Topology(TemporalError::TaskCancelled),
             ServiceError::Topology(TemporalError::Hypergraph(HypergraphError::InvalidJoin)),
+            ServiceError::Topology(TemporalError::TimestampInFuture {
+                requested: ts(2),
+                current: ts(1),
+            }),
+            ServiceError::Topology(TemporalError::NoSnapshotBefore(ts(0))),
+            ServiceError::Topology(TemporalError::SnapshotNotFound(SnapshotId::new(0))),
+            ServiceError::Topology(TemporalError::ReplayError {
+                event_index: 0,
+                message: "x".to_string(),
+            }),
+            ServiceError::Topology(TemporalError::InvalidTimeRange {
+                start: ts(1),
+                end: ts(0),
+            }),
+            ServiceError::Topology(TemporalError::EventLogCorrupted("x".to_string())),
+            ServiceError::Topology(TemporalError::ConcurrentModification),
+            ServiceError::Topology(TemporalError::EmptyCoalition),
         ]
         .into_iter()
         .map(|e| (format!("{e:?}"), e.is_terminal()))
         .collect();
         let terminal: Vec<bool> = observed.iter().map(|(_, t)| *t).collect();
+        let mut expected = vec![true; 6];
+        expected.extend([false; 9]);
         assert_eq!(
-            terminal,
-            vec![true, true, true, true, true, false, false],
+            terminal, expected,
             "is_terminal per variant; observed {observed:?}"
         );
     }

@@ -7,8 +7,9 @@ use std::sync::Arc;
 use koalisi::core::config::{LoggingError, setup_logging};
 
 /// Over an installed subscriber, `setup_logging` returns `AlreadyInstalled`
-/// whose `source()` is the `TryInitError`, and a second call returns the same
-/// error, sharing its source.
+/// whose `source()` is the `TryInitError` and whose message ends with the
+/// `TryInitError` text, and a second call returns the same error, sharing its
+/// source.
 #[test]
 fn setup_logging_reports_an_installed_subscriber() {
     tracing_subscriber::fmt()
@@ -31,6 +32,14 @@ fn setup_logging_reports_an_installed_subscriber() {
         chained,
         Some(first_source.to_string()),
         "Error::source of the first error"
+    );
+    let message = first.as_ref().err().map(ToString::to_string);
+    let expected =
+        format!("a global tracing subscriber or log logger is already installed: {first_source}");
+    assert_eq!(
+        message.as_deref(),
+        Some(expected.as_str()),
+        "Display of the first error"
     );
     let second = setup_logging();
     assert!(

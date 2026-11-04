@@ -507,11 +507,9 @@ mod tests {
     #[tokio::test]
     async fn offer_stops_on_a_poisoned_graph_lock() -> Result<()> {
         use koalisi::topology::TemporalError;
-        use tracing_subscriber::layer::SubscriberExt;
 
-        let warns = Warns::default();
-        let _guard =
-            tracing::subscriber::set_default(tracing_subscriber::registry().with(warns.clone()));
+        let capture = test_support::log_capture::Capture::default();
+        let _guard = capture.install();
         let runtime = CoalitionRuntime::new(Arc::new(Executor::with_num_threads(1)?));
         let manager: CoalitionManager<CapabilityAgent, Team> =
             CoalitionManager::empty(Arc::clone(runtime.executor()));
@@ -543,7 +541,7 @@ mod tests {
         );
 
         let next = offer(&service, coalition, candidate).await;
-        let seen = warns.take();
+        let seen = warns_after(&capture, 0);
         let messages: Vec<&str> = seen.iter().map(|w| w.message.as_str()).collect();
         assert_eq!(
             (next, messages),
@@ -561,44 +559,18 @@ mod tests {
         error: Option<String>,
     }
 
-    /// A `tracing` layer recording every warn-level event.
-    #[derive(Clone, Default)]
-    struct Warns(Arc<std::sync::Mutex<Vec<Warn>>>);
-
-    impl Warns {
-        fn take(&self) -> Vec<Warn> {
-            std::mem::take(&mut *self.0.lock().expect("capture lock"))
-        }
-    }
-
-    struct WarnFields<'a>(&'a mut Warn);
-
-    impl tracing::field::Visit for WarnFields<'_> {
-        fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
-            match field.name() {
-                "message" => self.0.message = format!("{value:?}"),
-                "error" => self.0.error = Some(format!("{value:?}")),
-                _ => {}
-            }
-        }
-    }
-
-    impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for Warns {
-        fn on_event(
-            &self,
-            event: &tracing::Event<'_>,
-            _ctx: tracing_subscriber::layer::Context<'_, S>,
-        ) {
-            if *event.metadata().level() != tracing::Level::WARN {
-                return;
-            }
-            let mut warn = Warn {
-                message: String::new(),
-                error: None,
-            };
-            event.record(&mut WarnFields(&mut warn));
-            self.0.lock().expect("capture lock").push(warn);
-        }
+    /// The warn-level events `capture` holds after its first `skip` warns.
+    fn warns_after(capture: &test_support::log_capture::Capture, skip: usize) -> Vec<Warn> {
+        capture
+            .matching("")
+            .into_iter()
+            .filter(|e| e.level == tracing::Level::WARN)
+            .skip(skip)
+            .map(|e| Warn {
+                message: e.fields.get("message").cloned().unwrap_or_default(),
+                error: e.fields.get("error").cloned(),
+            })
+            .collect()
     }
 
     /// `offer` logs a join topology error as `join failed` and continues; a
@@ -607,11 +579,8 @@ mod tests {
     /// coalition service stopped` and stops. Each warn carries the error.
     #[tokio::test]
     async fn offer_logs_each_error_and_tells_a_stopped_service_apart() -> Result<()> {
-        use tracing_subscriber::layer::SubscriberExt;
-
-        let warns = Warns::default();
-        let _guard =
-            tracing::subscriber::set_default(tracing_subscriber::registry().with(warns.clone()));
+        let capture = test_support::log_capture::Capture::default();
+        let _guard = capture.install();
         let (runtime, service, candidate, removed, coalition) =
             daemon(|token| Box::new(CancellingPolicy { token })).await?;
 
@@ -635,9 +604,11 @@ mod tests {
                 "join failed; coalition service stopped",
             ),
         ];
+        let mut warns_before = 0;
         for (label, agent, want_next, want_message) in steps {
             let next = offer(&service, coalition, agent).await;
-            let seen = warns.take();
+            let seen = warns_after(&capture, warns_before);
+            warns_before += seen.len();
             let messages: Vec<&str> = seen.iter().map(|w| w.message.as_str()).collect();
             assert_eq!(
                 (next, messages),

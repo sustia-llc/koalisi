@@ -119,8 +119,9 @@ fn load_failure_message(error: &ConfigError) -> String {
 pub enum LoggingError {
     /// A global `tracing` subscriber or a `log` logger was installed before
     /// the first `setup_logging` call; `source` is the `tracing-subscriber`
-    /// error, which `Error::source` returns.
-    #[error("a global tracing subscriber or log logger is already installed")]
+    /// error, which `Error::source` returns, and the message ends with its
+    /// text.
+    #[error("a global tracing subscriber or log logger is already installed: {source}")]
     AlreadyInstalled {
         source: Arc<tracing_subscriber::util::TryInitError>,
     },
