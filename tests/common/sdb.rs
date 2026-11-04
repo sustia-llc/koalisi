@@ -123,10 +123,11 @@ fn describe(
     }
 }
 
-/// The outcome of [`boot_db`].
-pub enum Boot {
-    /// SurrealDB is ready; dropping the guard stops it.
-    Ready(SdbGuard),
+/// The outcome of [`boot_db`], or of [`boot_db_on`] with a `G`-valued boot.
+pub enum Boot<G = SdbGuard> {
+    /// The boot returned; for [`boot_db`], SurrealDB is ready and dropping
+    /// the guard stops it.
+    Ready(G),
     /// The Docker daemon did not answer the ping; the reason is attached.
     DockerUnreachable(String),
 }
@@ -242,17 +243,31 @@ pub fn docker_check(environment: &str, socket: &Path) -> Result<(), String> {
 /// fails; otherwise returns `Boot::Ready` once SurrealDB is ready, and panics
 /// as [`await_boot`] does, after the guard has stopped the task.
 pub async fn boot_db(token: &CancellationToken) -> Boot {
-    if let Err(reason) = docker_check(&SETTINGS.environment, &docker_socket()) {
+    boot_db_on(&SETTINGS.environment, &docker_socket(), || async {
+        let mut sdb = SdbGuard::spawn(token.child_token()).expect("build the sdb runtime");
+        await_boot(
+            SurrealDBWrapper::wait_until_ready(),
+            sdb.ended(),
+            BOOT_TIMEOUT,
+        )
+        .await;
+        sdb
+    })
+    .await
+}
+
+/// Returns `Boot::DockerUnreachable` iff [`docker_check`] of `environment`
+/// on `socket` fails, without calling `boot`; otherwise returns
+/// `Boot::Ready` with the output of `boot`.
+pub async fn boot_db_on<G, B, F>(environment: &str, socket: &Path, boot: B) -> Boot<G>
+where
+    B: FnOnce() -> F,
+    F: Future<Output = G>,
+{
+    if let Err(reason) = docker_check(environment, socket) {
         return Boot::DockerUnreachable(reason);
     }
-    let mut sdb = SdbGuard::spawn(token.child_token()).expect("build the sdb runtime");
-    await_boot(
-        SurrealDBWrapper::wait_until_ready(),
-        sdb.ended(),
-        BOOT_TIMEOUT,
-    )
-    .await;
-    Boot::Ready(sdb)
+    Boot::Ready(boot().await)
 }
 
 /// Return once `ready` resolves `Ok`. Panic, with the error's source chain,

@@ -57,7 +57,7 @@ use tracing::Level;
 
 use common::log_capture::Capture;
 use common::sdb::{
-    BOOT_TIMEOUT, Boot, await_boot, boot_db, docker_check, docker_ping, docker_socket,
+    BOOT_TIMEOUT, Boot, await_boot, boot_db, boot_db_on, docker_check, docker_ping, docker_socket,
     sdb_containers, serve_once, temp_socket,
 };
 use koalisi::algorithms::{AdditiveCalculator, AgentCapabilities};
@@ -709,6 +709,47 @@ fn docker_ping_passes_on_a_200_ok_answer() {
     let got = docker_ping(&socket);
     server.join().expect("server thread");
     assert_eq!(got, Ok(()));
+}
+
+/// Outside `production`, `boot_db_on` returns `Ready` with the boot's output
+/// when the ping on its socket is answered `200 OK`, and `DockerUnreachable`
+/// with the ping error, without calling the boot, when the socket has no
+/// listener.
+#[tokio::test]
+async fn boot_db_on_boots_iff_the_ping_passes() {
+    fn describe(boot: &Boot<&'static str>) -> String {
+        match boot {
+            Boot::Ready(output) => format!("Ready({output:?})"),
+            Boot::DockerUnreachable(reason) => format!("DockerUnreachable({reason:?})"),
+        }
+    }
+
+    let ok_socket = temp_socket("boot-ok");
+    let server = serve_once(&ok_socket, "HTTP/1.0 200 OK\r\nContent-Length: 2\r\n\r\nOK");
+    let passed = boot_db_on("development", &ok_socket, || async { "booted" }).await;
+    server.join().expect("server thread");
+    assert!(
+        matches!(passed, Boot::Ready("booted")),
+        "passing ping: expected Ready(\"booted\"), observed {}",
+        describe(&passed)
+    );
+
+    let absent_socket = temp_socket("boot-absent");
+    let _ = std::fs::remove_file(&absent_socket);
+    let mut boot_called = false;
+    let failed = boot_db_on("development", &absent_socket, || {
+        boot_called = true;
+        async { "booted" }
+    })
+    .await;
+    let want_prefix = format!("connect {}: ", absent_socket.display());
+    assert!(
+        matches!(&failed, Boot::DockerUnreachable(reason) if reason.starts_with(&want_prefix))
+            && !boot_called,
+        "failing ping: expected DockerUnreachable starting with {want_prefix:?} and no boot call, \
+         observed {} with boot called = {boot_called}",
+        describe(&failed)
+    );
 }
 
 #[test]

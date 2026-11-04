@@ -1352,6 +1352,120 @@ mod tests {
         tracker.wait().await;
     }
 
+    /// Wait until `service` reaches `pause`, assert `panicked()` reads `true`
+    /// and `caller` has not finished, release the pause, and assert `caller`
+    /// returns `Panicked` with `message`.
+    async fn assert_flag_stored_before_reply<T>(
+        label: &str,
+        service: &CoalitionServiceHandle,
+        pause: &faults::Pause,
+        caller: tokio::task::JoinHandle<Result<T, ServiceError>>,
+        message: &str,
+    ) where
+        T: std::fmt::Debug,
+    {
+        pause.reached.notified().await;
+        let panicked = service.panicked();
+        let replied = caller.is_finished();
+        assert!(
+            panicked,
+            "{label}: expected panicked() == true between the flag store and the reply, observed false"
+        );
+        assert!(
+            !replied,
+            "{label}: expected no reply between the flag store and the reply, observed the caller finished"
+        );
+
+        pause.release.notify_one();
+        let result = caller.await.expect("caller task");
+        assert!(
+            matches!(&result, Err(ServiceError::Panicked { message: m }) if m == message),
+            "{label}: expected Panicked {{ message: {message:?} }}, observed {result:?}"
+        );
+    }
+
+    /// On the panic path of a leave command, `serve` stores `panicked`
+    /// before it sends the reply: with the service paused between the two
+    /// steps, `panicked()` reads `true` and the caller has no reply yet;
+    /// after the release the caller receives `Panicked` with the panic
+    /// message.
+    #[tokio::test]
+    async fn leave_panic_flag_is_stored_before_the_reply_is_sent() {
+        let (manager, candidate, coalition) = seed().await;
+        let tracker = TaskTracker::new();
+        let pause = Arc::new(faults::Pause::default());
+        let service = faults::FAULTS
+            .scope(
+                faults::Faults {
+                    pause_before_reply: Some(Arc::clone(&pause)),
+                    members_panics: false,
+                },
+                async {
+                    CoalitionService::spawn(
+                        manager,
+                        Box::new(ActPolicy { leave_panics: true }),
+                        DecisionContext::default(),
+                        &tracker,
+                        CancellationToken::new(),
+                    )
+                },
+            )
+            .await;
+        let join = service.join(candidate, coalition).await;
+        assert!(
+            matches!(&join, Ok(d) if d.act),
+            "join: expected act == true, observed {join:?}"
+        );
+
+        let caller = {
+            let service = service.clone();
+            tokio::spawn(async move { service.leave(candidate, coalition).await })
+        };
+        assert_flag_stored_before_reply("leave", &service, &pause, caller, "leave exploded").await;
+        tracker.close();
+        tracker.wait().await;
+    }
+
+    /// On the panic path of a members command, `serve` stores `panicked`
+    /// before it sends the reply: with the service paused between the two
+    /// steps, `panicked()` reads `true` and the caller has no reply yet;
+    /// after the release the caller receives `Panicked` with the panic
+    /// message.
+    #[tokio::test]
+    async fn members_panic_flag_is_stored_before_the_reply_is_sent() {
+        let (manager, _candidate, coalition) = seed().await;
+        let tracker = TaskTracker::new();
+        let pause = Arc::new(faults::Pause::default());
+        let service = faults::FAULTS
+            .scope(
+                faults::Faults {
+                    pause_before_reply: Some(Arc::clone(&pause)),
+                    members_panics: true,
+                },
+                async {
+                    CoalitionService::spawn(
+                        manager,
+                        Box::new(ActPolicy {
+                            leave_panics: false,
+                        }),
+                        DecisionContext::default(),
+                        &tracker,
+                        CancellationToken::new(),
+                    )
+                },
+            )
+            .await;
+
+        let caller = {
+            let service = service.clone();
+            tokio::spawn(async move { service.members(coalition).await })
+        };
+        assert_flag_stored_before_reply("members", &service, &pause, caller, "members exploded")
+            .await;
+        tracker.close();
+        tracker.wait().await;
+    }
+
     /// A members command whose work panics replies `Panicked` with the panic
     /// message, and its caller reads `panicked() == true` as soon as that
     /// error returns.
