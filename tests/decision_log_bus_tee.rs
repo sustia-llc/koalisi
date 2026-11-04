@@ -4,10 +4,10 @@
 //!
 //! Container-backed like `tests/durable_integration.rs`: boots SurrealDB via
 //! upstream's `sdb::sdb_task` under a `common::sdb` guard, which stops the
-//! container on every exit, a panic included. If the Docker daemon does not answer
-//! `GET /_ping` on the socket `sdb_task` connects to, it prints a `SKIP` line
-//! and passes; any later boot failure or timeout panics with the error's
-//! source chain. A log sink that is not an agent of the bus is refused with
+//! container on every exit, a panic included. Outside the
+//! `production` environment, if the Docker daemon does not answer `GET /_ping`
+//! on the socket `sdb_task` connects to, it prints a `SKIP` line and passes;
+//! any later boot failure or timeout panics with the error's source chain. A log sink that is not an agent of the bus is refused with
 //! `DurableError::UnknownLogSink`, and a producer that is not an agent of the
 //! bus, or a bus agent renamed to another bus agent's name, with
 //! `DurableError::UnknownProducer`; none spawns a task.
@@ -20,19 +20,15 @@
 mod common;
 
 use std::fs;
-use std::future::{pending, ready};
-use std::io::{Read, Write};
-use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tokio::sync::mpsc;
-use tokio::task::JoinError;
 use tokio::time::{Duration, timeout};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
-use common::sdb::{BOOT_TIMEOUT, Boot, await_boot, boot_db, docker_ping};
+use common::sdb::{Boot, boot_db};
 use koalisi::algorithms::{AdditiveCalculator, AgentCapabilities};
 use koalisi::core::Executor;
 use koalisi::core::config::setup_logging;
@@ -49,7 +45,6 @@ use koalisi::subsystems::durable::{
 };
 use koalisi::topology::CoalitionManager;
 
-use surrealdb_live_message::error as slm_error;
 use surrealdb_live_message::subsystems::agents::Agent;
 
 const PRODUCER: &str = "tee_producer";
@@ -314,95 +309,4 @@ async fn every_trace_reaches_the_decisions_stream_and_the_bus() {
     bus.shutdown().await;
     token.cancel();
     sdb.stop().await.expect("sdb_task stops the container");
-}
-
-/// A socket path under the temp dir, unique to this process and `tag`.
-fn temp_socket(tag: &str) -> PathBuf {
-    std::env::temp_dir().join(format!(
-        "koalisi-tee-ping-{tag}-{}.sock",
-        std::process::id()
-    ))
-}
-
-/// Serve one connection on `socket` with `reply`, then remove the socket.
-fn serve_once(socket: &Path, reply: &'static str) -> std::thread::JoinHandle<()> {
-    let _ = fs::remove_file(socket);
-    let listener = UnixListener::bind(socket).expect("bind the test socket");
-    let path = socket.to_path_buf();
-    std::thread::spawn(move || {
-        let (mut conn, _) = listener.accept().expect("accept the ping");
-        let mut request = [0u8; 256];
-        let _ = conn.read(&mut request).expect("read the ping");
-        conn.write_all(reply.as_bytes()).expect("write the reply");
-        drop(conn);
-        let _ = fs::remove_file(path);
-    })
-}
-
-#[test]
-fn docker_ping_fails_on_a_socket_with_no_listener() {
-    let socket = temp_socket("absent");
-    let _ = fs::remove_file(&socket);
-    let got = docker_ping(&socket);
-    let want_prefix = format!("connect {}: ", socket.display());
-    assert!(
-        got.as_ref()
-            .is_err_and(|reason| reason.starts_with(&want_prefix)),
-        "expected Err starting with {want_prefix:?}; got {got:?}"
-    );
-}
-
-#[test]
-fn docker_ping_passes_on_a_200_ok_answer() {
-    let socket = temp_socket("ok");
-    let server = serve_once(&socket, "HTTP/1.0 200 OK\r\nContent-Length: 2\r\n\r\nOK");
-    let got = docker_ping(&socket);
-    server.join().expect("server thread");
-    assert_eq!(got, Ok(()));
-}
-
-#[test]
-fn docker_ping_fails_on_a_500_answer() {
-    let socket = temp_socket("err");
-    let server = serve_once(&socket, "HTTP/1.0 500 Internal Server Error\r\n\r\nno");
-    let got = docker_ping(&socket);
-    server.join().expect("server thread");
-    let want_prefix = format!("GET /_ping on {} answered ", socket.display());
-    assert!(
-        got.as_ref()
-            .is_err_and(|reason| reason.starts_with(&want_prefix)),
-        "expected Err starting with {want_prefix:?}; got {got:?}"
-    );
-}
-
-#[tokio::test]
-#[should_panic(expected = "sdb_task failed: SurrealDB health check failed after all attempts")]
-async fn await_boot_panics_when_sdb_task_fails() {
-    await_boot(
-        pending(),
-        ready(Ok(Err(slm_error::Error::HealthCheck))),
-        BOOT_TIMEOUT,
-    )
-    .await;
-}
-
-#[tokio::test]
-#[should_panic(expected = "panicked with message \"container create failed\"")]
-async fn await_boot_panics_when_sdb_task_panics() {
-    async fn panicking_sdb_task() -> slm_error::Result<()> {
-        panic!("container create failed")
-    }
-    let sdb = tokio::spawn(panicking_sdb_task());
-    await_boot(pending(), sdb, BOOT_TIMEOUT).await;
-}
-
-#[tokio::test]
-#[should_panic(expected = "SurrealDB not ready within 10ms")]
-async fn await_boot_panics_on_timeout() {
-    await_boot(
-        pending(),
-        pending::<Result<slm_error::Result<()>, JoinError>>(),
-        Duration::from_millis(10),
-    )
-    .await;
 }

@@ -24,9 +24,7 @@ use koalisi::algorithms::{AdditiveCalculator, CapabilityAgent};
 use koalisi::core::config::setup_logging;
 use koalisi::core::{CoalitionRuntime, Executor};
 use koalisi::decision::{DecisionContext, ThresholdPolicy};
-use koalisi::subsystems::coalition_actor::{
-    CoalitionService, CoalitionServiceHandle, ServiceError,
-};
+use koalisi::subsystems::coalition_actor::{CoalitionService, CoalitionServiceHandle};
 use koalisi::topology::{CoalitionManager, HyperedgeIndex, VertexIndex};
 
 /// A minimal coalition label (satisfies the topology `HyperedgeTrait` bound).
@@ -95,9 +93,9 @@ async fn main() -> Result<()> {
 /// Wait for `signal` or for `service` to stop taking commands, whichever
 /// comes first, then run `runtime`'s shutdown and await `join_loop`. Returns
 /// `Ok` when `signal` came first and neither the service nor the join loop
-/// panicked; otherwise the first of these errors: `signal` failed, the
-/// service panicked, the join loop panicked or was cancelled, the service
-/// stopped before `signal`.
+/// panicked; otherwise the first of these errors, with each later one that
+/// holds logged at error level: `signal` failed, the service panicked, the
+/// join loop panicked or was cancelled, the service stopped before `signal`.
 async fn run_until_stopped<S>(
     runtime: CoalitionRuntime,
     service: &CoalitionServiceHandle,
@@ -128,20 +126,28 @@ where
     // service, and drains both tracked tasks.
     runtime.shutdown().await;
     let join_outcome = join_loop.await;
+    let mut failures = Vec::new();
     if let Some(Err(e)) = &signalled {
-        bail!("awaiting ctrl-c failed: {e}");
+        failures.push(format!("awaiting ctrl-c failed: {e}"));
     }
     if service.panicked() {
-        bail!("coalition service panicked");
+        failures.push("coalition service panicked".to_string());
     }
-    if let Err(e) = join_outcome {
-        bail!("join loop failed: {e}");
+    if let Err(e) = &join_outcome {
+        failures.push(format!("join loop failed: {e}"));
     }
     if signalled.is_none() {
-        bail!("coalition service stopped before ctrl-c");
+        failures.push("coalition service stopped before ctrl-c".to_string());
     }
-    tracing::info!("shutdown clean");
-    Ok(())
+    let mut failures = failures.into_iter();
+    let Some(first) = failures.next() else {
+        tracing::info!("shutdown clean");
+        return Ok(());
+    };
+    for later in failures {
+        tracing::error!(error = %later, first = %first, "a further shutdown failure");
+    }
+    bail!(first)
 }
 
 /// What the join loop does after one offer.
@@ -153,22 +159,11 @@ enum Next {
     Stop,
 }
 
-/// Whether `e` means the service no longer answers commands, as opposed to a
-/// topology error on one command.
-fn service_stopped(e: &ServiceError) -> bool {
-    match e {
-        ServiceError::Topology(_) => false,
-        ServiceError::Gone
-        | ServiceError::ReplyDropped
-        | ServiceError::Cancelled
-        | ServiceError::Panicked { .. } => true,
-    }
-}
-
 /// Offer `candidate` to `coalition`, then read the coalition size, logging
-/// each outcome: a decision and a size at info, a topology error at warn and
-/// [`Next::Continue`], a stopped service at warn and [`Next::Stop`]. A failed
-/// join skips the size read.
+/// each outcome: a decision and a size at info, a non-terminal error
+/// (`ServiceError::is_terminal`) at warn and [`Next::Continue`], a terminal
+/// one at warn as a stopped service and [`Next::Stop`]. A failed join skips
+/// the size read.
 async fn offer(
     service: &CoalitionServiceHandle,
     coalition: HyperedgeIndex,
@@ -182,7 +177,7 @@ async fn offer(
             score = decision.score,
             "policy-gated join decision"
         ),
-        Err(e) if service_stopped(&e) => {
+        Err(e) if e.is_terminal() => {
             tracing::warn!(agent, error = %e, "join failed; coalition service stopped");
             return Next::Stop;
         }
@@ -196,7 +191,7 @@ async fn offer(
             tracing::info!(size = members.len(), "coalition size");
             Next::Continue
         }
-        Err(e) if service_stopped(&e) => {
+        Err(e) if e.is_terminal() => {
             tracing::warn!(error = %e, "members failed; coalition service stopped");
             Next::Stop
         }
@@ -236,6 +231,10 @@ async fn join_loop(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "test_support.rs"]
+mod test_support;
 
 #[cfg(test)]
 mod tests {
@@ -448,6 +447,110 @@ mod tests {
                 .is_some_and(|e| e.starts_with("join loop failed:")),
             "panicked join loop: expected an error starting `join loop failed:`, observed {outcome:?}"
         );
+        Ok(())
+    }
+
+    /// A panicked service and a panicked join loop under a pending signal
+    /// return the first error, `coalition service panicked`, and log the two
+    /// later ones, `join loop failed: …` and `coalition service stopped before
+    /// ctrl-c`, once each at error level, in that order.
+    #[tokio::test]
+    async fn run_until_stopped_logs_each_failure_after_the_first() -> Result<()> {
+        let capture = test_support::log_capture::Capture::default();
+        let _guard = capture.install();
+        let (runtime, service, candidate, _, coalition) =
+            daemon(|_| Box::new(PanickingPolicy)).await?;
+        let join = service.join(candidate, coalition).await;
+        assert!(
+            join.is_err(),
+            "expected the policy panic to fail the join, observed {join:?}"
+        );
+        let join_loop = runtime
+            .task_tracker()
+            .spawn(async { panic!("join loop exploded") });
+        let outcome = stop_outcome_with(
+            "three failures",
+            runtime,
+            &service,
+            join_loop,
+            std::future::pending(),
+        )
+        .await;
+        let further = capture.matching("a further shutdown failure");
+        let errors: Vec<(tracing::Level, Option<&str>)> = further
+            .iter()
+            .map(|e| (e.level, e.fields.get("error").map(String::as_str)))
+            .collect();
+        assert_eq!(
+            outcome.as_deref(),
+            Some("coalition service panicked"),
+            "the returned error; further failures logged {errors:?}"
+        );
+        assert!(
+            errors.len() == 2
+                && errors
+                    .iter()
+                    .all(|(level, _)| *level == tracing::Level::ERROR)
+                && errors[0]
+                    .1
+                    .is_some_and(|e| e.starts_with("join loop failed:"))
+                && errors[1].1 == Some("coalition service stopped before ctrl-c"),
+            "expected error-level logs of the join loop failure, then the early stop, \
+             observed {errors:?}"
+        );
+        Ok(())
+    }
+
+    /// A join whose graph lock another clone of the graph poisoned fails with
+    /// `Topology(LockPoisoned)`, which `offer` logs as `join failed;
+    /// coalition service stopped` and answers with `Next::Stop`.
+    #[tokio::test]
+    async fn offer_stops_on_a_poisoned_graph_lock() -> Result<()> {
+        use koalisi::topology::TemporalError;
+        use tracing_subscriber::layer::SubscriberExt;
+
+        let warns = Warns::default();
+        let _guard =
+            tracing::subscriber::set_default(tracing_subscriber::registry().with(warns.clone()));
+        let runtime = CoalitionRuntime::new(Arc::new(Executor::with_num_threads(1)?));
+        let manager: CoalitionManager<CapabilityAgent, Team> =
+            CoalitionManager::empty(Arc::clone(runtime.executor()));
+        let seed = manager.add_agent(CapabilityAgent::new(0, 0b01, 50)).await?;
+        let candidate = manager.add_agent(CapabilityAgent::new(1, 0b10, 50)).await?;
+        let coalition = manager.form_coalition(vec![seed], Team(1)).await?;
+        let graph = manager.graph().clone();
+        let poisoned = tokio::spawn(async move {
+            graph
+                .update_hyperedge_vertices_try(
+                    coalition,
+                    |_: Vec<VertexIndex>| -> Result<Vec<VertexIndex>, TemporalError> {
+                        panic!("mutator exploded")
+                    },
+                )
+                .await
+        })
+        .await;
+        assert!(
+            poisoned.as_ref().is_err_and(|e| e.is_panic()),
+            "expected the mutator panic to poison the lock, observed {poisoned:?}"
+        );
+        let service = CoalitionService::spawn(
+            manager,
+            Box::new(ThresholdPolicy::new(AdditiveCalculator, 0.0, 0.0)),
+            DecisionContext::default(),
+            runtime.task_tracker(),
+            runtime.cancellation_token().child_token(),
+        );
+
+        let next = offer(&service, coalition, candidate).await;
+        let seen = warns.take();
+        let messages: Vec<&str> = seen.iter().map(|w| w.message.as_str()).collect();
+        assert_eq!(
+            (next, messages),
+            (Next::Stop, vec!["join failed; coalition service stopped"]),
+            "(next, warn messages); warns {seen:?}"
+        );
+        runtime.shutdown().await;
         Ok(())
     }
 

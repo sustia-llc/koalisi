@@ -27,18 +27,23 @@ The review follow-ups of v0.45.0 to v0.49.0 (#116, #121, #122, #124, #126,
 ### Added
 - `subsystems::coalition_actor::ServiceError`, with the variants `Gone`,
   `ReplyDropped`, `Cancelled`, `Panicked { message }` and
-  `Topology(TemporalError)`.
+  `Topology(TemporalError)`, and `ServiceError::is_terminal`, which is
+  `true` for the first four and for `Topology(LockPoisoned)`.
 - `TemporalError::LockPoisoned`. After a panic under the graph's write lock,
   every graph operation returns it.
-- `core::config::LoggingError::AlreadyInstalled`, and the constants
+- `TemporalError::TaskCancelled`, returned by a graph mutation whose task
+  is cancelled by the shutdown of its runtime.
+- `core::config::LoggingError::AlreadyInstalled { source }`, whose `source`
+  is the `tracing-subscriber` `TryInitError`, and the constants
   `DEFAULT_RUN_MODE` and `ENV_PREFIX`.
 - `subsystems::durable::DurableBusError`, which wraps the upstream
   `surrealdb_live_message` error, and `DurableDecisionBus::new_with_parent`.
   If the parent token is cancelled, the bus agents stop.
 - Feature `blake3-pure`. It turns on `blake3`'s `pure` feature, so the
   build compiles no C or assembly for `blake3`.
-- If `p(control 1)` is not finite, `PersistentAifArm` logs a warning with
-  `p1` and declines.
+- If `p(control 1)` is missing or not finite, `PersistentAifArm` logs a
+  warning with the distribution length or `p1`, and with `required`,
+  `cfg0` and `cfg1`, and declines.
 
 ### Changed
 - **Breaking:** `CoalitionServiceHandle::join`, `leave` and `members` return
@@ -57,18 +62,27 @@ The review follow-ups of v0.45.0 to v0.49.0 (#116, #121, #122, #124, #126,
   `RUN_MODE`, and for a `RUN_MODE` with no `config/<mode>` file.
 - **Breaking:** `setup_logging` returns `Result<(), LoggingError>`. Every
   call returns the outcome of the first call.
-- A graph mutation and its event-log record run in one spawned task. If the
-  caller drops the future, both still land. A graph mutation must run
-  inside a tokio runtime.
-- If its token is cancelled, `spawn_decision_forwarder` forwards the records
-  already buffered, then stops.
+- A graph mutation and its event-log record run in one spawned task, which
+  holds the event-log write lock while it ticks the clock, changes the graph
+  and appends the event. The events that one `TemporalHypergraph` value
+  records, its snapshot markers included, are logged in timestamp order and
+  in the order their changes reached the graph. If the caller drops the
+  future, both still land, and a failure is logged at warn level. A graph
+  mutation must run inside a tokio runtime.
+- `join_hyperedges` with fewer than two indices returns `LockPoisoned` on a
+  poisoned graph.
+- If its token is cancelled, `spawn_decision_forwarder`,
+  `spawn_decision_log_bus_tee` and `spawn_decision_store_forwarder` forward
+  at most the records buffered at the cancel, then stop.
 - The `koalisi` binary reads the join loop's outcome at shutdown, logs a
-  `members` error, and tells a stopped service apart from a topology error.
+  `members` error, and stops the join loop on a terminal service error. At
+  shutdown it returns the first failure and logs each later one.
 - The `SETTINGS` panic message names the working directory and `RUN_MODE`.
 - `Step::encode_canonical` destructures `Step`.
-- If the Docker socket does not answer `GET /_ping`, the two container tests
-  skip. Every other boot failure fails the test. A test that panics
-  after the boot leaves no `koalisi_sdb_container` running.
+- If the environment is not `production` and the Docker socket does not
+  answer `GET /_ping`, the two container tests skip. Every other boot
+  failure fails the test. A test that panics after the boot leaves no
+  `koalisi_sdb_container` running.
 
 ### Gates
 - These lanes pass at `1fe6ff4`:

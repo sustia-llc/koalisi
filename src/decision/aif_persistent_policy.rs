@@ -520,20 +520,61 @@ impl PersistentAifArm {
         };
 
         // p(control 1) — switch to config1 (join / leave).
-        let p1 = dist.get(1).copied().unwrap_or(f64::NAN);
-        decision_from_p1(p1, leave)
+        decision_from_dist(
+            dist.as_slice(),
+            leave,
+            QueryMasks {
+                required,
+                cfg0,
+                cfg1,
+            },
+        )
     }
 }
 
-/// The decision for a read `p1 = p(control 1)`, for any `f64`. A finite `p1`
-/// acts iff `p1 > 0.5` (join) or `p1 ≥ 0.5` (`leave`), with score `p1 − 0.5`.
-/// A non-finite `p1` logs a warning carrying `p1` and declines with score
-/// `0.0`.
-fn decision_from_p1(p1: f64, leave: bool) -> Decision {
+/// The masks of one persistent query: `required` restricted to the world
+/// model's universe, and the two membership configurations.
+#[derive(Clone, Copy, Debug)]
+struct QueryMasks {
+    required: u32,
+    cfg0: u32,
+    cfg1: u32,
+}
+
+/// The decision for the marginal action posterior `dist` of a query over
+/// `masks`, for any `dist`. A `dist` with no entry at index 1 logs a warning
+/// carrying its length, `leave` and `masks`, and declines with score `0.0`;
+/// any other `dist` decides as [`decision_from_p1`] of `dist[1]`.
+fn decision_from_dist(dist: &[f64], leave: bool, masks: QueryMasks) -> Decision {
+    let Some(&p1) = dist.get(1) else {
+        tracing::warn!(
+            len = dist.len(),
+            leave,
+            required = masks.required,
+            cfg0 = masks.cfg0,
+            cfg1 = masks.cfg1,
+            "persistent query returned no p(control 1), declining"
+        );
+        return Decision {
+            act: false,
+            score: 0.0,
+        };
+    };
+    decision_from_p1(p1, leave, masks)
+}
+
+/// The decision for a read `p1 = p(control 1)` of a query over `masks`, for
+/// any `f64`. A finite `p1` acts iff `p1 > 0.5` (join) or `p1 ≥ 0.5`
+/// (`leave`), with score `p1 − 0.5`. A non-finite `p1` logs a warning
+/// carrying `p1`, `leave` and `masks`, and declines with score `0.0`.
+fn decision_from_p1(p1: f64, leave: bool, masks: QueryMasks) -> Decision {
     if !p1.is_finite() {
         tracing::warn!(
             p1,
             leave,
+            required = masks.required,
+            cfg0 = masks.cfg0,
+            cfg1 = masks.cfg1,
             "persistent query returned a non-finite p(control 1), declining"
         );
         return Decision {
@@ -1707,76 +1748,68 @@ mod tests {
         assert_eq!(arm.state_snapshot().beliefs.len(), MIN_N_BITS);
     }
 
-    /// The events a [`WarnCapture`] layer recorded: one entry per WARN event,
-    /// holding its fields as `name=value` strings.
-    type CapturedWarns = Arc<Mutex<Vec<Vec<String>>>>;
-
-    /// A `tracing` layer that records every WARN event's fields.
-    struct WarnCapture(CapturedWarns);
-
-    /// Collects an event's fields as `name=value` strings.
-    struct FieldStrings<'a>(&'a mut Vec<String>);
-
-    impl tracing::field::Visit for FieldStrings<'_> {
-        fn record_f64(&mut self, field: &tracing::field::Field, value: f64) {
-            self.0.push(format!("{}={value}", field.name()));
-        }
-
-        fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
-            self.0.push(format!("{}={value:?}", field.name()));
-        }
-    }
-
-    impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for WarnCapture {
-        fn on_event(
-            &self,
-            event: &tracing::Event<'_>,
-            _ctx: tracing_subscriber::layer::Context<'_, S>,
-        ) {
-            if *event.metadata().level() == tracing::Level::WARN {
-                let mut fields = Vec::new();
-                event.record(&mut FieldStrings(&mut fields));
-                self.0.lock().unwrap().push(fields);
-            }
-        }
-    }
-
-    /// Every non-finite `p(control 1)`, on both the join and the leave rule,
-    /// declines with score `0.0` and emits exactly one WARN event whose `p1`
-    /// field carries the value read; a finite read emits none.
+    /// A `dist` of length 1 and every non-finite `p(control 1)`, on both the
+    /// join and the leave rule, decline with score `0.0` and emit one WARN
+    /// event carrying `required = 7`, `cfg0 = 1`, `cfg1 = 3`, `leave`, and
+    /// `len = 1` or the `p1` read; the finite `dist = [0.25, 0.75]` joins with
+    /// score `0.25` and emits no event.
     #[test]
-    fn non_finite_p1_warns_with_p1_then_declines() {
-        use tracing_subscriber::layer::SubscriberExt;
+    fn a_short_or_non_finite_dist_warns_with_the_query_masks_then_declines() {
+        use crate::test_support::log_capture::Capture;
 
-        for p1 in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let masks = QueryMasks {
+            required: 7,
+            cfg0: 1,
+            cfg1: 3,
+        };
+        let cases: [(&[f64], &str, &str); 4] = [
+            (&[0.4], "len", "1"),
+            (&[0.2, f64::NAN], "p1", "NaN"),
+            (&[0.2, f64::INFINITY], "p1", "inf"),
+            (&[0.2, f64::NEG_INFINITY], "p1", "-inf"),
+        ];
+        for (dist, field, value) in cases {
             for leave in [false, true] {
-                let warns: CapturedWarns = Arc::default();
-                let subscriber =
-                    tracing_subscriber::registry().with(WarnCapture(Arc::clone(&warns)));
-                let d =
-                    tracing::subscriber::with_default(subscriber, || decision_from_p1(p1, leave));
+                let capture = Capture::default();
+                let d = {
+                    let _guard = capture.install();
+                    decision_from_dist(dist, leave, masks)
+                };
                 assert!(
                     !d.act && d.score == 0.0,
-                    "p1 = {p1}, leave = {leave}: expected a decline with score 0.0, got {d:?}"
+                    "dist = {dist:?}, leave = {leave}: expected a decline with score 0.0, got {d:?}"
                 );
-                let warns = warns.lock().unwrap();
-                let expected = format!("p1={p1}");
+                let events = capture.matching("");
+                let leave_text = leave.to_string();
+                let want = [
+                    (field, value),
+                    ("required", "7"),
+                    ("cfg0", "1"),
+                    ("cfg1", "3"),
+                    ("leave", leave_text.as_str()),
+                ];
                 assert!(
-                    warns.len() == 1 && warns[0].contains(&expected),
-                    "p1 = {p1}, leave = {leave}: expected one WARN event carrying {expected}, \
-                     captured {warns:?}"
+                    events.len() == 1
+                        && events[0].level == tracing::Level::WARN
+                        && want.iter().all(|(name, v)| {
+                            events[0].fields.get(*name).map(String::as_str) == Some(*v)
+                        }),
+                    "dist = {dist:?}, leave = {leave}: expected one WARN event carrying {want:?}, \
+                     captured {events:?}"
                 );
             }
         }
 
-        let warns: CapturedWarns = Arc::default();
-        let subscriber = tracing_subscriber::registry().with(WarnCapture(Arc::clone(&warns)));
-        let d = tracing::subscriber::with_default(subscriber, || decision_from_p1(0.75, false));
+        let capture = Capture::default();
+        let d = {
+            let _guard = capture.install();
+            decision_from_dist(&[0.25, 0.75], false, masks)
+        };
         assert!(d.act && d.score == 0.25, "finite p1 = 0.75: got {d:?}");
-        let warns = warns.lock().unwrap();
+        let events = capture.matching("");
         assert!(
-            warns.is_empty(),
-            "finite p1 must not warn, captured {warns:?}"
+            events.is_empty(),
+            "a finite p1 must not log, captured {events:?}"
         );
     }
 

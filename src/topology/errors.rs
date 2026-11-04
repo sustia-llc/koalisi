@@ -44,6 +44,11 @@ pub enum TemporalError {
     /// The graph's lock is poisoned: code running under its write lock
     /// panicked, and the graph may hold a partial update.
     LockPoisoned,
+
+    /// The tokio task running a graph mutation was cancelled before it
+    /// answered, by the shutdown of the runtime it was spawned on; the graph
+    /// change may have been applied without its event being recorded.
+    TaskCancelled,
 }
 
 impl std::fmt::Display for TemporalError {
@@ -81,6 +86,10 @@ impl std::fmt::Display for TemporalError {
             Self::LockPoisoned => write!(
                 f,
                 "Graph lock poisoned: a panic occurred while the write lock was held"
+            ),
+            Self::TaskCancelled => write!(
+                f,
+                "Graph mutation task cancelled before it answered: its runtime shut down"
             ),
         }
     }

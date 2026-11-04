@@ -7,12 +7,18 @@
 //! until the task returns, which is after it stops the container
 //! (`surrealdb-live-message` `f60eeca` `src/subsystems/sdb.rs:175-183`), or
 //! until [`STOP_TIMEOUT`] elapses.
+//!
+//! A boot that is not ready within [`BOOT_TIMEOUT`] is outside this: before
+//! it reports ready, `sdb_task` does not read its token
+//! (`surrealdb-live-message` `f60eeca` `src/subsystems/sdb.rs:150-175`), so
+//! the guard's wait ends at [`STOP_TIMEOUT`], the in-flight task is dropped
+//! with the runtime, and a container it created can keep running.
 
 #![allow(dead_code)]
 
 use std::future::Future;
 use std::io::{Read, Write};
-use std::os::unix::net::UnixStream;
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 
 use tokio::runtime::{Builder, Runtime};
@@ -32,9 +38,8 @@ pub const STOP_TIMEOUT: Duration = Duration::from_secs(60);
 /// `sdb::sdb_task` on a one-worker runtime owned by the guard.
 ///
 /// [`SdbGuard::stop`] and `Drop` cancel the task's token and wait up to
-/// [`STOP_TIMEOUT`] for the task to return. `Drop` waits on a thread of its
-/// own, because blocking on or dropping a runtime inside an async context
-/// panics (`tokio` 1.54.1 `src/runtime/blocking/shutdown.rs:52`).
+/// [`STOP_TIMEOUT`] for the task to return; `Drop` waits on a thread of its
+/// own.
 pub struct SdbGuard {
     token: CancellationToken,
     runtime: Option<Runtime>,
@@ -180,6 +185,26 @@ pub fn docker_ping(socket: &Path) -> Result<(), String> {
     }
 }
 
+/// A socket path under the temp dir, unique to this process and `tag`.
+pub fn temp_socket(tag: &str) -> PathBuf {
+    std::env::temp_dir().join(format!("koalisi-ping-{tag}-{}.sock", std::process::id()))
+}
+
+/// Serve one connection on `socket` with `reply`, then remove the socket.
+pub fn serve_once(socket: &Path, reply: &'static str) -> std::thread::JoinHandle<()> {
+    let _ = std::fs::remove_file(socket);
+    let listener = UnixListener::bind(socket).expect("bind the test socket");
+    let path = socket.to_path_buf();
+    std::thread::spawn(move || {
+        let (mut conn, _) = listener.accept().expect("accept the ping");
+        let mut request = [0u8; 256];
+        let _ = conn.read(&mut request).expect("read the ping");
+        conn.write_all(reply.as_bytes()).expect("write the reply");
+        drop(conn);
+        let _ = std::fs::remove_file(path);
+    })
+}
+
 /// The JSON body of `GET /containers/json` on `socket` for the containers
 /// whose name matches `SETTINGS.sdb.container_name`: running ones only, or
 /// with `all`, stopped ones too (the `docker ps [-a] --filter name=` list).
@@ -203,12 +228,21 @@ pub fn sdb_containers(socket: &Path, all: bool) -> Result<String, String> {
     }
 }
 
+/// `Ok` with no request when `environment` is `production`; otherwise
+/// [`docker_ping`] on `socket`.
+pub fn docker_check(environment: &str, socket: &Path) -> Result<(), String> {
+    if environment == "production" {
+        return Ok(());
+    }
+    docker_ping(socket)
+}
+
 /// Boot the DB under a child of `token`. Returns `Boot::DockerUnreachable`
-/// iff [`docker_ping`] fails on [`docker_socket`]; otherwise returns
-/// `Boot::Ready` once SurrealDB is ready, and panics as [`await_boot`] does,
-/// after the guard has stopped the task.
+/// iff [`docker_check`] of `SETTINGS.environment` on [`docker_socket`]
+/// fails; otherwise returns `Boot::Ready` once SurrealDB is ready, and panics
+/// as [`await_boot`] does, after the guard has stopped the task.
 pub async fn boot_db(token: &CancellationToken) -> Boot {
-    if let Err(reason) = docker_ping(&docker_socket()) {
+    if let Err(reason) = docker_check(&SETTINGS.environment, &docker_socket()) {
         return Boot::DockerUnreachable(reason);
     }
     let mut sdb = SdbGuard::spawn(token.child_token()).expect("build the sdb runtime");

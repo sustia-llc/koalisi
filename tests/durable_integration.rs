@@ -5,10 +5,11 @@
 //! koalisi's `CoalitionService` decision tap + `spawn_decision_forwarder`:
 //!
 //! 1. Boot SurrealDB (upstream container harness) under a `common::sdb`
-//!    guard, which stops the container on every exit, a panic included. If
-//!    the Docker daemon does not answer `GET /_ping` on the socket `sdb_task`
-//!    connects to, print a `SKIP` line and pass. Any later boot failure or
-//!    timeout panics with the error's source chain.
+//!    guard, which stops the container on every exit, a panic included.
+//!    Outside the `production` environment, if the Docker daemon
+//!    does not answer `GET /_ping` on the socket `sdb_task` connects to,
+//!    print a `SKIP` line and pass. Any later boot failure or timeout panics
+//!    with the error's source chain.
 //! 2. Round 1: stand up the durable bus (`recorder` + `decision_log`) so
 //!    `decision_log` snapshots a "from-now" cursor against the empty log, then
 //!    shut it down — `decision_log` is now OFFLINE, cursor persisted.
@@ -29,12 +30,14 @@
 //!    level with the decision's fields and the error's source chain.
 //! 7. A forwarder whose token is cancelled forwards the records already
 //!    buffered in its receiver, then stops while the sender is still open.
-//! 8. A bus from `DurableDecisionBus::new_with_parent` stops its agents when
+//! 8. A forwarder whose token is cancelled while a producer keeps sending
+//!    ends within `RECV_TIMEOUT`.
+//! 9. A bus from `DurableDecisionBus::new_with_parent` stops its agents when
 //!    the parent token is cancelled: its inbox closes.
-//! 9. After the container stops, a child process of this binary boots it,
-//!    creates a bus and panics; once the child exits, no container named
-//!    `SETTINGS.sdb.container_name` runs, and none exists within
-//!    `REMOVE_TIMEOUT`.
+//! 10. Once the stopped container no longer exists, a child process of this
+//!     binary boots it, creates a bus and panics; once the child exits, no
+//!     container named `SETTINGS.sdb.container_name` runs, and none exists
+//!     within `REMOVE_TIMEOUT`.
 //!
 //! The hot path never touches the DB; only the *decisions* are forwarded.
 
@@ -42,9 +45,7 @@ mod common;
 
 use std::collections::HashMap;
 use std::future::{pending, ready};
-use std::io::{Read, Write};
-use std::os::unix::net::UnixListener;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 
 use tokio::sync::mpsc;
@@ -56,7 +57,8 @@ use tracing::Level;
 
 use common::log_capture::Capture;
 use common::sdb::{
-    BOOT_TIMEOUT, Boot, await_boot, boot_db, docker_ping, docker_socket, sdb_containers,
+    BOOT_TIMEOUT, Boot, await_boot, boot_db, docker_check, docker_ping, docker_socket,
+    sdb_containers, serve_once, temp_socket,
 };
 use koalisi::algorithms::{AdditiveCalculator, AgentCapabilities};
 use koalisi::core::config::setup_logging;
@@ -273,6 +275,7 @@ async fn durable_decisions_survive_restart_through_the_seam() {
 
     failed_send_logs_at_error(&tracker, &token).await;
     cancelled_forwarder_drains_buffered_records(&tracker, &token).await;
+    cancelled_forwarder_stops_while_the_producer_sends(&tracker, &token).await;
     parented_bus_stops_when_parent_is_cancelled(&token).await;
 
     token.cancel();
@@ -308,11 +311,30 @@ async fn panic_after_boot_child() {
     panic!("{PANIC_MESSAGE}");
 }
 
-/// Run [`panic_after_boot_child`] in a child process of this test binary.
-/// The child must fail with [`PANIC_MESSAGE`]; once it exits, no container
-/// named `SETTINGS.sdb.container_name` runs, and none exists within
+/// The `docker ps -a --filter name=` list of [`sdb_containers`], polled
+/// every 200 ms until it is empty or [`REMOVE_TIMEOUT`] elapses.
+async fn await_no_container(socket: &Path) -> String {
+    let deadline = Instant::now() + REMOVE_TIMEOUT;
+    let mut listed = sdb_containers(socket, true).expect("list all containers");
+    while listed != "[]" && Instant::now() < deadline {
+        sleep(Duration::from_millis(200)).await;
+        listed = sdb_containers(socket, true).expect("list all containers");
+    }
+    listed
+}
+
+/// Once no container named `SETTINGS.sdb.container_name` exists, within
+/// [`REMOVE_TIMEOUT`], run [`panic_after_boot_child`] in a child process of
+/// this test binary. The child must fail with [`PANIC_MESSAGE`]; once it
+/// exits, no container of that name runs, and none exists within
 /// [`REMOVE_TIMEOUT`].
 async fn panic_after_boot_leaves_no_container() {
+    let socket = docker_socket();
+    let before = await_no_container(&socket).await;
+    assert_eq!(
+        before, "[]",
+        "the parent's container exists {REMOVE_TIMEOUT:?} after its stop"
+    );
     let exe = std::env::current_exe().expect("the test binary path");
     let out = tokio::task::spawn_blocking(move || {
         Command::new(exe)
@@ -333,18 +355,12 @@ async fn panic_after_boot_leaves_no_container() {
         out.status
     );
 
-    let socket = docker_socket();
     let running = sdb_containers(&socket, false).expect("list running containers");
     assert_eq!(
         running, "[]",
         "a container runs after the panicking child exited; child stderr {stderr}"
     );
-    let deadline = Instant::now() + REMOVE_TIMEOUT;
-    let mut listed = sdb_containers(&socket, true).expect("list all containers");
-    while listed != "[]" && Instant::now() < deadline {
-        sleep(Duration::from_millis(200)).await;
-        listed = sdb_containers(&socket, true).expect("list all containers");
-    }
+    let listed = await_no_container(&socket).await;
     assert_eq!(
         listed, "[]",
         "a container exists {REMOVE_TIMEOUT:?} after the panicking child exited; child stderr {stderr}"
@@ -559,6 +575,72 @@ async fn cancelled_forwarder_drains_buffered_records(
     bus.shutdown().await;
 }
 
+const LIVE_PRODUCER: &str = "live_producer";
+const LIVE_SINK: &str = "live_sink";
+const LIVE_CAPACITY: usize = 4;
+
+/// A forwarder whose token is cancelled after its first delivery, while a
+/// producer keeps its 4-slot receiver full and sends until a send fails,
+/// ends within `RECV_TIMEOUT`; the producer then stops on the dropped
+/// receiver.
+async fn cancelled_forwarder_stops_while_the_producer_sends(
+    tracker: &TaskTracker,
+    token: &CancellationToken,
+) {
+    let bus = DurableDecisionBus::new(vec![LIVE_PRODUCER.to_string(), LIVE_SINK.to_string()])
+        .await
+        .expect("live bus");
+    let producer = bus.agent(LIVE_PRODUCER).await.expect("producer agent");
+    let inbox = bus.coalition().inbox();
+    let (tx, rx) = mpsc::channel(LIVE_CAPACITY);
+    let forward_token = token.child_token();
+    let forwarder = spawn_decision_forwarder(
+        &bus,
+        producer,
+        LIVE_SINK.to_string(),
+        rx,
+        tracker,
+        forward_token.clone(),
+    )
+    .await
+    .expect("live_sink is an agent of the bus");
+    let sender = tokio::spawn(async move {
+        let mut sent = 0usize;
+        while tx
+            .send(DecisionRecord {
+                coalition: "coalition-11".to_string(),
+                agent_id: sent,
+                kind: DecisionKind::Join,
+                act: true,
+                score: 1.0,
+            })
+            .await
+            .is_ok()
+        {
+            sent += 1;
+        }
+        sent
+    });
+    timeout(RECV_TIMEOUT, inbox.recv())
+        .await
+        .expect("a first delivery before the cancel")
+        .expect("inbox bus closed unexpectedly");
+
+    forward_token.cancel();
+    let ended = timeout(RECV_TIMEOUT, forwarder).await;
+    let sent = timeout(RECV_TIMEOUT, sender).await;
+    assert!(
+        matches!(ended, Ok(Ok(()))),
+        "the forwarder must end within {RECV_TIMEOUT:?} of the cancel while the producer \
+         sends; observed {ended:?}, producer {sent:?}"
+    );
+    assert!(
+        matches!(sent, Ok(Ok(_))),
+        "the producer must stop once the forwarder drops its receiver; observed {sent:?}"
+    );
+    bus.shutdown().await;
+}
+
 const PARENTED_A: &str = "parented_a";
 const PARENTED_B: &str = "parented_b";
 
@@ -587,26 +669,6 @@ async fn parented_bus_stops_when_parent_is_cancelled(token: &CancellationToken) 
     bus.shutdown().await;
 }
 
-/// A socket path under the temp dir, unique to this process and `tag`.
-fn temp_socket(tag: &str) -> PathBuf {
-    std::env::temp_dir().join(format!("koalisi-ping-{tag}-{}.sock", std::process::id()))
-}
-
-/// Serve one connection on `socket` with `reply`, then remove the socket.
-fn serve_once(socket: &Path, reply: &'static str) -> std::thread::JoinHandle<()> {
-    let _ = std::fs::remove_file(socket);
-    let listener = UnixListener::bind(socket).expect("bind the test socket");
-    let path = socket.to_path_buf();
-    std::thread::spawn(move || {
-        let (mut conn, _) = listener.accept().expect("accept the ping");
-        let mut request = [0u8; 256];
-        let _ = conn.read(&mut request).expect("read the ping");
-        conn.write_all(reply.as_bytes()).expect("write the reply");
-        drop(conn);
-        let _ = std::fs::remove_file(path);
-    })
-}
-
 #[test]
 fn docker_ping_fails_on_a_socket_with_no_listener() {
     let socket = temp_socket("absent");
@@ -617,6 +679,26 @@ fn docker_ping_fails_on_a_socket_with_no_listener() {
         got.as_ref()
             .is_err_and(|reason| reason.starts_with(&want_prefix)),
         "expected Err starting with {want_prefix:?}; got {got:?}"
+    );
+}
+
+/// On a socket with no listener, `docker_check` is `Ok` in `production` and
+/// the `docker_ping` error in `development`.
+#[test]
+fn docker_check_skips_the_ping_in_production() {
+    let socket = temp_socket("check");
+    let _ = std::fs::remove_file(&socket);
+    let checks = [
+        docker_check("production", &socket),
+        docker_check("development", &socket),
+    ];
+    let want_prefix = format!("connect {}: ", socket.display());
+    assert!(
+        checks[0].is_ok()
+            && checks[1]
+                .as_ref()
+                .is_err_and(|reason| reason.starts_with(&want_prefix)),
+        "expected [Ok, Err starting with {want_prefix:?}]; got {checks:?}"
     );
 }
 

@@ -224,9 +224,17 @@ async fn main() -> Result<()> {
     token.cancel();
     tracker.close();
     tracker.wait().await;
-    sdb.stop().await.map_err(anyhow::Error::msg)?;
+    let stopped = sdb.stop().await;
 
-    let mut received = outcome?;
+    let mut received = match (outcome, stopped) {
+        (Ok(received), Ok(())) => received,
+        (Ok(_), Err(stop)) => return Err(anyhow::Error::msg(stop)),
+        (Err(run), Ok(())) => return Err(run),
+        (Err(run), Err(stop)) => {
+            tracing::error!(error = %stop, "stopping SurrealDB failed after the run failed");
+            return Err(run);
+        }
+    };
     if let Ok(extra) = inbox.try_recv() {
         anyhow::bail!(
             "unexpected extra decision event to '{}': {:?}",

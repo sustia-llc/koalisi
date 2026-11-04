@@ -80,8 +80,9 @@ use tokio_util::task::TaskTracker;
 use surrealdb_live_message::error::chain;
 use surrealdb_live_message::subsystems::agents::{Agent, Coalition};
 
+use crate::core::drain::CancelDrain;
 #[cfg(feature = "persistence")]
-use crate::persistence::{Record, StreamId, forward_decision_trace, next_trace};
+use crate::persistence::{Record, StreamId, forward_decision_trace};
 use crate::subsystems::coalition_actor::DecisionRecord;
 #[cfg(feature = "persistence")]
 use crate::subsystems::coalition_actor::DecisionTrace;
@@ -266,9 +267,10 @@ async fn check_agents(
 ///
 /// The task ends when either `token` is cancelled or `rx` closes (the core
 /// service, and with it the tap `Sender`, has been dropped). On cancellation
-/// it first forwards whatever is already buffered in `rx`, then stops; on a
-/// closed `rx` it forwards every buffered record first. Spawned on `tracker`
-/// so the caller's cancel→close→drain shutdown covers it.
+/// it reads the number of records buffered in `rx`, forwards at most that
+/// many, then stops, whatever is sent after the cancel; on a closed `rx` it
+/// forwards every buffered record first. Spawned on `tracker` so the
+/// caller's cancel→close→drain shutdown covers it.
 ///
 /// # Errors
 ///
@@ -281,31 +283,18 @@ pub async fn spawn_decision_forwarder(
     bus: &DurableDecisionBus,
     producer: Agent,
     log_sink: String,
-    mut rx: mpsc::Receiver<DecisionRecord>,
+    rx: mpsc::Receiver<DecisionRecord>,
     tracker: &TaskTracker,
     token: CancellationToken,
 ) -> Result<JoinHandle<()>, DurableError> {
     check_agents(bus, &producer, &log_sink).await?;
+    let mut rx = CancelDrain::new(rx);
     Ok(tracker.spawn(async move {
-        while let Some(record) = next_record(&mut rx, &token).await {
+        while let Some(record) = rx.next(&token).await {
             send_event(&producer, &log_sink, record).await;
         }
         tracing::debug!("decision forwarder stopped");
     }))
-}
-
-/// The next record of `rx`, or `None` once `rx` is closed and empty. After
-/// `token` is cancelled, only records already buffered in `rx` are returned,
-/// then `None`.
-async fn next_record(
-    rx: &mut mpsc::Receiver<DecisionRecord>,
-    token: &CancellationToken,
-) -> Option<DecisionRecord> {
-    tokio::select! {
-        biased;
-        () = token.cancelled() => rx.try_recv().ok(),
-        maybe = rx.recv() => maybe,
-    }
 }
 
 /// Send `record`'s [`DecisionEvent`] from `producer` to `log_sink`. A failure
@@ -355,7 +344,8 @@ async fn tee_one(
 /// missing from the bus log.
 ///
 /// Ends when either `token` is cancelled or `rx` closes. On cancellation it
-/// first tees whatever is already buffered in `rx`, then stops. Spawned on
+/// reads the number of traces buffered in `rx`, tees at most that many, then
+/// stops, whatever is sent after the cancel. Spawned on
 /// `tracker` so the caller's shutdown covers it; the returned [`JoinHandle`]
 /// may be dropped.
 ///
@@ -369,7 +359,7 @@ async fn tee_one(
 #[cfg(feature = "persistence")]
 pub async fn spawn_decision_log_bus_tee(
     bus: &DurableDecisionBus,
-    mut rx: mpsc::Receiver<DecisionTrace>,
+    rx: mpsc::Receiver<DecisionTrace>,
     writer_tx: mpsc::Sender<(StreamId, Record)>,
     producer: Agent,
     log_sink: String,
@@ -377,8 +367,9 @@ pub async fn spawn_decision_log_bus_tee(
     token: CancellationToken,
 ) -> Result<JoinHandle<()>, DurableError> {
     check_agents(bus, &producer, &log_sink).await?;
+    let mut rx = CancelDrain::new(rx);
     Ok(tracker.spawn(async move {
-        while let Some(trace) = next_trace(&mut rx, &token).await {
+        while let Some(trace) = rx.next(&token).await {
             tee_one(trace, &writer_tx, &producer, &log_sink).await;
         }
         tracing::debug!("decision log/bus tee stopped");

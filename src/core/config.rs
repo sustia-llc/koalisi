@@ -2,8 +2,9 @@ use config::{Config, ConfigError, Environment, File};
 use serde::{Deserialize, Deserializer};
 use std::env;
 use std::str::FromStr;
-use std::sync::{LazyLock, OnceLock};
+use std::sync::{Arc, LazyLock, OnceLock};
 use tracing::level_filters::LevelFilter;
+use tracing_subscriber::util::SubscriberInitExt;
 
 /// The mode file loaded when `RUN_MODE` is unset.
 pub const DEFAULT_RUN_MODE: &str = "development";
@@ -23,9 +24,10 @@ pub static SETTINGS: LazyLock<Settings> = LazyLock::new(|| {
 #[derive(Debug, Clone, Deserialize)]
 pub struct Logger {
     /// The maximum level `setup_logging` installs. It accepts `off`, `error`,
-    /// `warn`, `info`, `debug` and `trace` in any letter case, and the digits
-    /// `0` to `5`; any other value, the empty string included, fails
-    /// deserialization.
+    /// `warn`, `info`, `debug` and `trace` in any letter case, and every
+    /// string that `usize::from_str` reads as a number from 0 to 5 (`3`,
+    /// `03` and `+3` all select `info`); any other value, the empty string
+    /// included, fails deserialization.
     #[serde(deserialize_with = "deserialize_level")]
     pub level: LevelFilter,
 }
@@ -113,13 +115,15 @@ fn load_failure_message(error: &ConfigError) -> String {
 }
 
 /// The error `setup_logging` returns.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum LoggingError {
     /// A global `tracing` subscriber or a `log` logger was installed before
-    /// the first `setup_logging` call; `reason` is the `tracing-subscriber`
-    /// error text.
-    #[error("a global tracing subscriber or log logger is already installed: {reason}")]
-    AlreadyInstalled { reason: String },
+    /// the first `setup_logging` call; `source` is the `tracing-subscriber`
+    /// error, which `Error::source` returns.
+    #[error("a global tracing subscriber or log logger is already installed")]
+    AlreadyInstalled {
+        source: Arc<tracing_subscriber::util::TryInitError>,
+    },
 }
 
 static LOGGING: OnceLock<Result<(), LoggingError>> = OnceLock::new();
@@ -144,9 +148,10 @@ pub fn setup_logging() -> Result<(), LoggingError> {
             tracing_subscriber::fmt()
                 .with_max_level(SETTINGS.logger.level)
                 .with_test_writer()
+                .finish()
                 .try_init()
                 .map_err(|error| LoggingError::AlreadyInstalled {
-                    reason: error.to_string(),
+                    source: Arc::new(error),
                 })
         })
         .clone()
@@ -177,6 +182,36 @@ mod tests {
         assert!(
             message.contains("invalid logger.level: empty"),
             "an empty logger.level failed with {message:?}"
+        );
+    }
+
+    /// `3`, `03` and `+3` deserialize to `INFO`; `6` fails deserialization.
+    #[test]
+    fn logger_level_reads_every_usize_spelling_from_0_to_5() {
+        let level = |raw: &str| {
+            deserialize_toml(&format!(
+                "environment = \"x\"\n[logger]\nlevel = \"{raw}\"\n"
+            ))
+            .map(|s| s.logger.level)
+            .map_err(|e| e.to_string())
+        };
+        let observed: Vec<(&str, Result<LevelFilter, String>)> = ["3", "03", "+3", "6"]
+            .into_iter()
+            .map(|raw| (raw, level(raw)))
+            .collect();
+        let ok: Vec<Option<LevelFilter>> = observed
+            .iter()
+            .map(|(_, r)| r.as_ref().ok().copied())
+            .collect();
+        assert_eq!(
+            ok,
+            vec![
+                Some(LevelFilter::INFO),
+                Some(LevelFilter::INFO),
+                Some(LevelFilter::INFO),
+                None
+            ],
+            "level per spelling; observed {observed:?}"
         );
     }
 

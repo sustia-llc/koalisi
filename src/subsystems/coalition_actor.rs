@@ -65,6 +65,22 @@ pub enum ServiceError {
     Topology(#[from] TemporalError),
 }
 
+impl ServiceError {
+    /// `true` for [`Gone`](Self::Gone), [`ReplyDropped`](Self::ReplyDropped),
+    /// [`Cancelled`](Self::Cancelled), [`Panicked`](Self::Panicked) and
+    /// `Topology(`[`TemporalError::LockPoisoned`]`)`, after each of which every
+    /// later command on the same service fails; `false` for every other
+    /// `Topology` error.
+    #[must_use]
+    pub fn is_terminal(&self) -> bool {
+        match self {
+            Self::Topology(TemporalError::LockPoisoned) => true,
+            Self::Topology(_) => false,
+            Self::Gone | Self::ReplyDropped | Self::Cancelled | Self::Panicked { .. } => true,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Decision tap (feature-INDEPENDENT — no surrealdb types here)
 // ---------------------------------------------------------------------------
@@ -1366,6 +1382,35 @@ mod tests {
         );
         tracker.close();
         tracker.wait().await;
+    }
+
+    /// `is_terminal` is `true` for the four service-stop variants and
+    /// `Topology(LockPoisoned)`, and `false` for `Topology(EmptyCoalition)`
+    /// and `Topology(Hypergraph(InvalidJoin))`.
+    #[test]
+    fn is_terminal_marks_the_stop_variants_and_a_poisoned_lock() {
+        use catgraph_applied::HypergraphError;
+
+        let observed: Vec<(String, bool)> = [
+            ServiceError::Gone,
+            ServiceError::ReplyDropped,
+            ServiceError::Cancelled,
+            ServiceError::Panicked {
+                message: "boom".to_string(),
+            },
+            ServiceError::Topology(TemporalError::LockPoisoned),
+            ServiceError::Topology(TemporalError::EmptyCoalition),
+            ServiceError::Topology(TemporalError::Hypergraph(HypergraphError::InvalidJoin)),
+        ]
+        .into_iter()
+        .map(|e| (format!("{e:?}"), e.is_terminal()))
+        .collect();
+        let terminal: Vec<bool> = observed.iter().map(|(_, t)| *t).collect();
+        assert_eq!(
+            terminal,
+            vec![true, true, true, true, true, false, false],
+            "is_terminal per variant; observed {observed:?}"
+        );
     }
 
     /// A failed join, leave and members command each return
