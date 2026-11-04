@@ -19,6 +19,111 @@ Planned work — issue-tracked:
 - **K7 lineage**: EQ5b (c) ([#103]); the multi-coalition harness scaffold and
   the tira-extension re-pins and registrations ([#104]–[#111]).
 
+## [0.50.0] — 2026-11-03
+
+The review follow-ups of v0.45.0 to v0.49.0 (#116, #121, #122, #124, #126,
+#128).
+
+### Added
+- `subsystems::coalition_actor::ServiceError`, with the variants `Gone`,
+  `ReplyDropped`, `Cancelled`, `Panicked { message }` and
+  `Topology(TemporalError)`, and `ServiceError::is_terminal`, which is
+  `true` for the first four, for `Topology(LockPoisoned)` and for
+  `Topology(TaskCancelled)`.
+- **Breaking:** `TemporalError::LockPoisoned`. After a panic under the
+  graph's write lock, every graph operation returns it. `TemporalError` is
+  exhaustive, so a `match` over it needs the new arm.
+- **Breaking:** `TemporalError::TaskCancelled`, returned by a graph mutation
+  whose task is cancelled by the shutdown of its runtime. `TemporalError` is
+  exhaustive, so a `match` over it needs the new arm.
+- `core::config::LoggingError::AlreadyInstalled { source }`, whose `source`
+  is the `tracing-subscriber` `TryInitError`, and the constants
+  `DEFAULT_RUN_MODE` and `ENV_PREFIX`.
+- `subsystems::durable::DurableBusError`, which wraps the upstream
+  `surrealdb_live_message` error, and `DurableDecisionBus::new_with_parent`.
+  If the parent token is cancelled, the bus agents stop.
+- Feature `blake3-pure`. It turns on `blake3`'s `pure` feature, so the
+  build compiles no C or assembly for `blake3`.
+- If `p(control 1)` is missing or not finite, `PersistentAifArm` logs a
+  warning with the distribution length or `p1`, and with `required`,
+  `cfg0` and `cfg1`, and declines.
+
+### Changed
+- **Breaking:** `CoalitionServiceHandle::join`, `leave` and `members` return
+  `Result<_, ServiceError>` in place of `anyhow::Result`.
+- **Breaking:** `TemporalHypergraph::count_vertices`, `count_hyperedges`,
+  `CoalitionManager::count_agents` and `count_coalitions` return
+  `TemporalResult<usize>`.
+- **Breaking:** `DurableDecisionBus::new` returns
+  `Result<Self, DurableBusError>` in place of `anyhow::Result`.
+- **Breaking:** `Settings` reads only environment variables with the
+  prefix `KOALISI_` and skips empty ones. The override of `logger.level` is
+  `KOALISI_LOGGER__LEVEL`. `RUN_MODE` keeps its name.
+- **Breaking:** `Logger::level` is a `LevelFilter`. `Settings::new` returns
+  a `ConfigError` for an unknown or empty level, and accepts `off`.
+- **Breaking:** `Settings::new` returns an error for a non-Unicode
+  `RUN_MODE`, and for a `RUN_MODE` with no `config/<mode>` file.
+- **Breaking:** `setup_logging` returns `Result<(), LoggingError>`. Every
+  call returns the outcome of the first call.
+- A graph mutation and its event-log record run in one spawned task. The
+  task holds a mutation lock while it changes the graph, ticks the clock
+  and appends the event. The clones of a `TemporalHypergraph` share this
+  lock. The task holds the event-log write lock for the append only, so an
+  event-log reader does not wait on a graph change. A failed mutation ticks
+  no timestamp. The events that one `TemporalHypergraph` value records, its
+  snapshot markers included, are logged in timestamp order and in the order
+  their changes reached the graph. If the caller drops the future, both
+  still land, and a failure is logged at warn level. A graph mutation must
+  run inside a tokio runtime.
+- `join_hyperedges` with fewer than two indices returns `LockPoisoned` on a
+  poisoned graph.
+- If its token is cancelled, `spawn_decision_forwarder`,
+  `spawn_decision_log_bus_tee` and `spawn_decision_store_forwarder` forward
+  at most the records buffered at the cancel, then stop.
+- The `koalisi` binary reads the join loop's outcome at shutdown, logs a
+  `members` error, and stops the join loop on a terminal service error. At
+  shutdown it returns the first failure and logs each later one.
+- The `SETTINGS` panic message names the working directory and `RUN_MODE`.
+- `Step::encode_canonical` destructures `Step`.
+- If the environment is not `production` and the Docker socket does not
+  answer `GET /_ping`, the two container tests skip. Every other boot
+  failure fails the test. A test that panics after the boot leaves no
+  `koalisi_sdb_container` running.
+
+### Gates
+- These lanes pass at `ad45135`:
+  - default 143, `decision` 204, `magnitude` 174, `decision,magnitude` 236
+  - `magnitude-fast` 182, `persistence` 170, `persistence,magnitude` 202
+  - `remote` 149, `process` 201, `decision,magnitude,process` 295
+  - `metrics` 143, `blake3-pure` 143, `durable` 158, `persistence,durable` 184
+
+  The two Docker lanes ran with `-- --nocapture` from the checkout. Each
+  has 1 ignored test, the child that the container-drain test starts.
+  `rg 'SKIP|SdbGuard drop'` over their logs prints nothing.
+- `cargo clippy --locked --all-targets -- -D warnings` is clean at
+  `ad45135` on those 14 lanes, `--no-default-features`, `harness`,
+  `harness,process` and `harness,decision,process`.
+- These are clean at `ad45135`:
+
+  ```sh
+  RUSTDOCFLAGS='-D warnings' cargo doc --locked --no-deps --all-features
+  cargo fmt --all -- --check
+  cargo +1.95.0 check --all-targets --locked
+  cargo +1.95.0 check --all-targets --locked --features persistence,durable
+  cargo +1.95.0 check --all-targets --locked --features decision,magnitude-fast,persistence,remote,process,harness,metrics,blake3-pure
+  ```
+
+- At `ad45135`, the `koalisi` binary logs "shutdown clean" on SIGINT, and
+  `synthetic_ingestion`, `topology_coalition`, `remote_coalition_consumer`
+  and `durable_decisions` exit 0.
+- `40f47e4` adds tests only. At `40f47e4`, default 145, `decision` 206,
+  `persistence` 172, `durable` 161 and `persistence,durable` 187 pass, with
+  no `SKIP` line. Clippy is clean on default, `--no-default-features`,
+  `durable`, `persistence,durable` and `harness,decision,process`, and
+  `cargo fmt --all -- --check` is clean.
+- The K4 archive gate and the `harness` test lanes did not run (owner,
+  2026-11-03).
+
 ## [0.49.0] — 2026-11-03
 
 One caller-owned rayon pool for koalisi's CPU work (#115).

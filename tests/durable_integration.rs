@@ -4,8 +4,12 @@
 //! Modeled on the upstream `scenario_durable_restart` proof, but driven through
 //! koalisi's `CoalitionService` decision tap + `spawn_decision_forwarder`:
 //!
-//! 1. Boot SurrealDB (upstream container harness). Skip-with-diagnostic if
-//!    Docker is unavailable (print + pass, so CI without Docker stays green).
+//! 1. Boot SurrealDB (upstream container harness) under a `common::sdb`
+//!    guard, which stops the container on every exit, a panic included.
+//!    Outside the `production` environment, if the Docker daemon
+//!    does not answer `GET /_ping` on the socket `sdb_task` connects to,
+//!    print a `SKIP` line and pass. Any later boot failure or timeout panics
+//!    with the error's source chain.
 //! 2. Round 1: stand up the durable bus (`recorder` + `decision_log`) so
 //!    `decision_log` snapshots a "from-now" cursor against the empty log, then
 //!    shut it down — `decision_log` is now OFFLINE, cursor persisted.
@@ -24,20 +28,38 @@
 //!    fails a field assertion, then a leave whose sink `agent` record is
 //!    deleted after the sink check. Each failure is logged once at error
 //!    level with the decision's fields and the error's source chain.
+//! 7. A forwarder whose token is cancelled forwards the records already
+//!    buffered in its receiver, then stops while the sender is still open.
+//! 8. A forwarder whose token is cancelled while a producer keeps sending
+//!    ends within `RECV_TIMEOUT`.
+//! 9. A bus from `DurableDecisionBus::new_with_parent` stops its agents when
+//!    the parent token is cancelled: its inbox closes.
+//! 10. Once the stopped container no longer exists, a child process of this
+//!     binary boots it, creates a bus and panics; once the child exits, no
+//!     container named `SETTINGS.sdb.container_name` runs, and none exists
+//!     within `REMOVE_TIMEOUT`.
 //!
 //! The hot path never touches the DB; only the *decisions* are forwarded.
 
 mod common;
 
 use std::collections::HashMap;
+use std::future::{pending, ready};
+use std::path::Path;
+use std::process::Command;
 
 use tokio::sync::mpsc;
-use tokio::time::{Duration, sleep, timeout};
+use tokio::task::JoinError;
+use tokio::time::{Duration, Instant, sleep, timeout};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 use tracing::Level;
 
 use common::log_capture::Capture;
+use common::sdb::{
+    BOOT_TIMEOUT, Boot, await_boot, boot_db, boot_db_on, docker_check, docker_ping, docker_socket,
+    sdb_containers, serve_once, temp_socket,
+};
 use koalisi::algorithms::{AdditiveCalculator, AgentCapabilities};
 use koalisi::core::config::setup_logging;
 use koalisi::decision::{DecisionContext, ThresholdPolicy};
@@ -45,13 +67,13 @@ use koalisi::subsystems::coalition_actor::{CoalitionService, DecisionKind, Decis
 use koalisi::subsystems::durable::{DurableDecisionBus, DurableError, spawn_decision_forwarder};
 use koalisi::topology::CoalitionManager;
 
+use surrealdb_live_message::error as slm_error;
 use surrealdb_live_message::subsystems::agents::Agent;
-use surrealdb_live_message::subsystems::sdb::{self, SurrealDBWrapper};
+use surrealdb_live_message::subsystems::sdb::SurrealDBWrapper;
 
 const RECORDER: &str = "recorder";
 const DECISION_LOG: &str = "decision_log";
 const OUTSIDER: &str = "outsider";
-const BOOT_TIMEOUT: Duration = Duration::from_secs(180);
 const RECV_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Domain agent — a valid graph vertex weight and an `AgentCapabilities`.
@@ -74,40 +96,22 @@ impl AgentCapabilities for Worker {
     }
 }
 
-/// Boot the DB under a child token; return `true` once ready. Returns `false`
-/// (skip signal) if the sdb task exits early (e.g. Docker unavailable → the
-/// container create `expect` panics) or startup times out.
-async fn boot_db(tracker: &TaskTracker, token: &CancellationToken) -> bool {
-    let sdb_token = token.child_token();
-    let mut handle = tracker.spawn(async move {
-        if let Err(e) = sdb::sdb_task(sdb_token).await {
-            tracing::error!("sdb_task failed: {e}");
-        }
-    });
-    tokio::select! {
-        r = SurrealDBWrapper::wait_until_ready() => r.is_ok(),
-        _ = &mut handle => false,
-        _ = sleep(BOOT_TIMEOUT) => false,
-    }
-}
-
 #[tokio::test]
 async fn durable_decisions_survive_restart_through_the_seam() {
-    setup_logging();
+    setup_logging().expect("setup_logging: no subscriber is installed before it in this binary");
 
     let token = CancellationToken::new();
     let tracker = TaskTracker::new();
 
-    if !boot_db(&tracker, &token).await {
-        eprintln!(
-            "SKIP durable_decisions_survive_restart_through_the_seam: \
-             SurrealDB/Docker unavailable"
-        );
-        token.cancel();
-        tracker.close();
-        tracker.wait().await;
-        return;
-    }
+    // Dropping `sdb` stops the container on every exit from here, a panic
+    // included.
+    let sdb = match boot_db(&token).await {
+        Boot::Ready(sdb) => sdb,
+        Boot::DockerUnreachable(reason) => {
+            eprintln!("SKIP durable_decisions_survive_restart_through_the_seam: {reason}");
+            return;
+        }
+    };
 
     // --- Round 1: pin decision_log's "from-now" cursor against an empty log,
     //     then take it offline. recorder's Agent handle stays usable for sends
@@ -270,10 +274,97 @@ async fn durable_decisions_survive_restart_through_the_seam() {
     bus2.shutdown().await;
 
     failed_send_logs_at_error(&tracker, &token).await;
+    cancelled_forwarder_drains_buffered_records(&tracker, &token).await;
+    cancelled_forwarder_stops_while_the_producer_sends(&tracker, &token).await;
+    parented_bus_stops_when_parent_is_cancelled(&token).await;
 
     token.cancel();
     tracker.close();
     tracker.wait().await;
+    sdb.stop().await.expect("sdb_task stops the container");
+
+    panic_after_boot_leaves_no_container().await;
+}
+
+const PANIC_CHILD: &str = "panic_after_boot_child";
+const PANIC_CHILD_ENV: &str = "KOALISI_PANIC_AFTER_BOOT_CHILD";
+const PANIC_MESSAGE: &str = "deliberate panic after the SurrealDB boot";
+const REMOVE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Boot SurrealDB, create a bus, then panic. Run only by
+/// [`panic_after_boot_leaves_no_container`], as a child process.
+#[tokio::test]
+#[ignore = "child process of durable_decisions_survive_restart_through_the_seam"]
+async fn panic_after_boot_child() {
+    assert_eq!(
+        std::env::var(PANIC_CHILD_ENV).as_deref(),
+        Ok("1"),
+        "{PANIC_CHILD} runs only as a child of durable_decisions_survive_restart_through_the_seam"
+    );
+    let token = CancellationToken::new();
+    let Boot::Ready(_sdb) = boot_db(&token).await else {
+        panic!("{PANIC_CHILD}: the Docker daemon is unreachable");
+    };
+    let _bus = DurableDecisionBus::new(vec![RECORDER.to_string(), DECISION_LOG.to_string()])
+        .await
+        .expect("child bus");
+    panic!("{PANIC_MESSAGE}");
+}
+
+/// The `docker ps -a --filter name=` list of [`sdb_containers`], polled
+/// every 200 ms until it is empty or [`REMOVE_TIMEOUT`] elapses.
+async fn await_no_container(socket: &Path) -> String {
+    let deadline = Instant::now() + REMOVE_TIMEOUT;
+    let mut listed = sdb_containers(socket, true).expect("list all containers");
+    while listed != "[]" && Instant::now() < deadline {
+        sleep(Duration::from_millis(200)).await;
+        listed = sdb_containers(socket, true).expect("list all containers");
+    }
+    listed
+}
+
+/// Once no container named `SETTINGS.sdb.container_name` exists, within
+/// [`REMOVE_TIMEOUT`], run [`panic_after_boot_child`] in a child process of
+/// this test binary. The child must fail with [`PANIC_MESSAGE`]; once it
+/// exits, no container of that name runs, and none exists within
+/// [`REMOVE_TIMEOUT`].
+async fn panic_after_boot_leaves_no_container() {
+    let socket = docker_socket();
+    let before = await_no_container(&socket).await;
+    assert_eq!(
+        before, "[]",
+        "the parent's container exists {REMOVE_TIMEOUT:?} after its stop"
+    );
+    let exe = std::env::current_exe().expect("the test binary path");
+    let out = tokio::task::spawn_blocking(move || {
+        Command::new(exe)
+            .args([PANIC_CHILD, "--exact", "--ignored", "--nocapture"])
+            .env(PANIC_CHILD_ENV, "1")
+            .output()
+    })
+    .await
+    .expect("join the child runner")
+    .expect("run the child test binary");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !out.status.success()
+            && stdout.contains("0 passed; 1 failed")
+            && stderr.contains(PANIC_MESSAGE),
+        "the child must run once and fail with {PANIC_MESSAGE:?}; status {}, stdout {stdout}, stderr {stderr}",
+        out.status
+    );
+
+    let running = sdb_containers(&socket, false).expect("list running containers");
+    assert_eq!(
+        running, "[]",
+        "a container runs after the panicking child exited; child stderr {stderr}"
+    );
+    let listed = await_no_container(&socket).await;
+    assert_eq!(
+        listed, "[]",
+        "a container exists {REMOVE_TIMEOUT:?} after the panicking child exited; child stderr {stderr}"
+    );
 }
 
 const FAIL_PRODUCER: &str = "fail_producer";
@@ -412,4 +503,297 @@ async fn failed_send_logs_at_error(tracker: &TaskTracker, token: &CancellationTo
     );
 
     bus.shutdown().await;
+}
+
+const DRAIN_PRODUCER: &str = "drain_producer";
+const DRAIN_SINK: &str = "drain_sink";
+const DRAINED_IDS: [usize; 2] = [20, 21];
+
+/// A forwarder spawned with a cancelled token over a receiver that already
+/// buffers two records forwards both to the sink, then ends while the sender
+/// is still open.
+async fn cancelled_forwarder_drains_buffered_records(
+    tracker: &TaskTracker,
+    token: &CancellationToken,
+) {
+    let bus = DurableDecisionBus::new(vec![DRAIN_PRODUCER.to_string(), DRAIN_SINK.to_string()])
+        .await
+        .expect("drain bus");
+    let producer = bus.agent(DRAIN_PRODUCER).await.expect("producer agent");
+    let inbox = bus.coalition().inbox();
+
+    let (tx, rx) = mpsc::channel(DRAINED_IDS.len());
+    for agent_id in DRAINED_IDS {
+        tx.send(DecisionRecord {
+            coalition: "coalition-9".to_string(),
+            agent_id,
+            kind: DecisionKind::Join,
+            act: true,
+            score: 1.0,
+        })
+        .await
+        .expect("buffer a record");
+    }
+    let forward_token = token.child_token();
+    forward_token.cancel();
+    let forwarder = spawn_decision_forwarder(
+        &bus,
+        producer,
+        DRAIN_SINK.to_string(),
+        rx,
+        tracker,
+        forward_token,
+    )
+    .await
+    .expect("drain_sink is an agent of the bus");
+    timeout(RECV_TIMEOUT, forwarder)
+        .await
+        .expect("a cancelled forwarder must end while its sender is open")
+        .expect("forwarder join");
+
+    let mut delivered = Vec::new();
+    for i in 0..DRAINED_IDS.len() {
+        let d = timeout(RECV_TIMEOUT, inbox.recv())
+            .await
+            .unwrap_or_else(|_| {
+                panic!(
+                    "buffered record {} of {} was not forwarded after the cancel; \
+                     delivered {delivered:?}",
+                    i + 1,
+                    DRAINED_IDS.len()
+                )
+            })
+            .expect("inbox bus closed unexpectedly");
+        assert_eq!(d.recipient, DRAIN_SINK, "addressed to the drain sink");
+        delivered.push(d.message.payload.agent_id);
+    }
+    delivered.sort_unstable();
+    let want: Vec<u64> = DRAINED_IDS.iter().map(|&id| id as u64).collect();
+    assert_eq!(delivered, want, "the buffered records, each once");
+
+    drop(tx);
+    bus.shutdown().await;
+}
+
+const LIVE_PRODUCER: &str = "live_producer";
+const LIVE_SINK: &str = "live_sink";
+const LIVE_CAPACITY: usize = 4;
+
+/// A forwarder whose token is cancelled after its first delivery, while a
+/// producer keeps its 4-slot receiver full and sends until a send fails,
+/// ends within `RECV_TIMEOUT`; the producer then stops on the dropped
+/// receiver.
+async fn cancelled_forwarder_stops_while_the_producer_sends(
+    tracker: &TaskTracker,
+    token: &CancellationToken,
+) {
+    let bus = DurableDecisionBus::new(vec![LIVE_PRODUCER.to_string(), LIVE_SINK.to_string()])
+        .await
+        .expect("live bus");
+    let producer = bus.agent(LIVE_PRODUCER).await.expect("producer agent");
+    let inbox = bus.coalition().inbox();
+    let (tx, rx) = mpsc::channel(LIVE_CAPACITY);
+    let forward_token = token.child_token();
+    let forwarder = spawn_decision_forwarder(
+        &bus,
+        producer,
+        LIVE_SINK.to_string(),
+        rx,
+        tracker,
+        forward_token.clone(),
+    )
+    .await
+    .expect("live_sink is an agent of the bus");
+    let sender = tokio::spawn(async move {
+        let mut sent = 0usize;
+        while tx
+            .send(DecisionRecord {
+                coalition: "coalition-11".to_string(),
+                agent_id: sent,
+                kind: DecisionKind::Join,
+                act: true,
+                score: 1.0,
+            })
+            .await
+            .is_ok()
+        {
+            sent += 1;
+        }
+        sent
+    });
+    timeout(RECV_TIMEOUT, inbox.recv())
+        .await
+        .expect("a first delivery before the cancel")
+        .expect("inbox bus closed unexpectedly");
+
+    forward_token.cancel();
+    let ended = timeout(RECV_TIMEOUT, forwarder).await;
+    let sent = timeout(RECV_TIMEOUT, sender).await;
+    assert!(
+        matches!(ended, Ok(Ok(()))),
+        "the forwarder must end within {RECV_TIMEOUT:?} of the cancel while the producer \
+         sends; observed {ended:?}, producer {sent:?}"
+    );
+    assert!(
+        matches!(sent, Ok(Ok(_))),
+        "the producer must stop once the forwarder drops its receiver; observed {sent:?}"
+    );
+    bus.shutdown().await;
+}
+
+const PARENTED_A: &str = "parented_a";
+const PARENTED_B: &str = "parented_b";
+
+/// Cancelling the parent of a `new_with_parent` bus cancels the bus's root
+/// token and ends its listen loops, so its inbox closes.
+async fn parented_bus_stops_when_parent_is_cancelled(token: &CancellationToken) {
+    let parent = token.child_token();
+    let bus = DurableDecisionBus::new_with_parent(
+        vec![PARENTED_A.to_string(), PARENTED_B.to_string()],
+        &parent,
+    )
+    .await
+    .expect("parented bus");
+    let inbox = bus.coalition().inbox();
+
+    parent.cancel();
+    let closed = timeout(RECV_TIMEOUT, inbox.recv()).await;
+    assert!(
+        matches!(closed, Ok(Err(_))),
+        "the inbox must close within {RECV_TIMEOUT:?} of the parent cancel; got {closed:?}"
+    );
+    assert!(
+        bus.coalition().cancellation_token().is_cancelled(),
+        "the bus's root token must be cancelled with its parent"
+    );
+    bus.shutdown().await;
+}
+
+#[test]
+fn docker_ping_fails_on_a_socket_with_no_listener() {
+    let socket = temp_socket("absent");
+    let _ = std::fs::remove_file(&socket);
+    let got = docker_ping(&socket);
+    let want_prefix = format!("connect {}: ", socket.display());
+    assert!(
+        got.as_ref()
+            .is_err_and(|reason| reason.starts_with(&want_prefix)),
+        "expected Err starting with {want_prefix:?}; got {got:?}"
+    );
+}
+
+/// On a socket with no listener, `docker_check` is `Ok` in `production` and
+/// the `docker_ping` error in `development`.
+#[test]
+fn docker_check_skips_the_ping_in_production() {
+    let socket = temp_socket("check");
+    let _ = std::fs::remove_file(&socket);
+    let checks = [
+        docker_check("production", &socket),
+        docker_check("development", &socket),
+    ];
+    let want_prefix = format!("connect {}: ", socket.display());
+    assert!(
+        checks[0].is_ok()
+            && checks[1]
+                .as_ref()
+                .is_err_and(|reason| reason.starts_with(&want_prefix)),
+        "expected [Ok, Err starting with {want_prefix:?}]; got {checks:?}"
+    );
+}
+
+#[test]
+fn docker_ping_passes_on_a_200_ok_answer() {
+    let socket = temp_socket("ok");
+    let server = serve_once(&socket, "HTTP/1.0 200 OK\r\nContent-Length: 2\r\n\r\nOK");
+    let got = docker_ping(&socket);
+    server.join().expect("server thread");
+    assert_eq!(got, Ok(()));
+}
+
+/// Outside `production`, `boot_db_on` returns `Ready` with the boot's output
+/// when the ping on its socket is answered `200 OK`, and `DockerUnreachable`
+/// with the ping error, without calling the boot, when the socket has no
+/// listener.
+#[tokio::test]
+async fn boot_db_on_boots_iff_the_ping_passes() {
+    fn describe(boot: &Boot<&'static str>) -> String {
+        match boot {
+            Boot::Ready(output) => format!("Ready({output:?})"),
+            Boot::DockerUnreachable(reason) => format!("DockerUnreachable({reason:?})"),
+        }
+    }
+
+    let ok_socket = temp_socket("boot-ok");
+    let server = serve_once(&ok_socket, "HTTP/1.0 200 OK\r\nContent-Length: 2\r\n\r\nOK");
+    let passed = boot_db_on("development", &ok_socket, || async { "booted" }).await;
+    server.join().expect("server thread");
+    assert!(
+        matches!(passed, Boot::Ready("booted")),
+        "passing ping: expected Ready(\"booted\"), observed {}",
+        describe(&passed)
+    );
+
+    let absent_socket = temp_socket("boot-absent");
+    let _ = std::fs::remove_file(&absent_socket);
+    let mut boot_called = false;
+    let failed = boot_db_on("development", &absent_socket, || {
+        boot_called = true;
+        async { "booted" }
+    })
+    .await;
+    let want_prefix = format!("connect {}: ", absent_socket.display());
+    assert!(
+        matches!(&failed, Boot::DockerUnreachable(reason) if reason.starts_with(&want_prefix))
+            && !boot_called,
+        "failing ping: expected DockerUnreachable starting with {want_prefix:?} and no boot call, \
+         observed {} with boot called = {boot_called}",
+        describe(&failed)
+    );
+}
+
+#[test]
+fn docker_ping_fails_on_a_500_answer() {
+    let socket = temp_socket("err");
+    let server = serve_once(&socket, "HTTP/1.0 500 Internal Server Error\r\n\r\nno");
+    let got = docker_ping(&socket);
+    server.join().expect("server thread");
+    let want_prefix = format!("GET /_ping on {} answered ", socket.display());
+    assert!(
+        got.as_ref()
+            .is_err_and(|reason| reason.starts_with(&want_prefix)),
+        "expected Err starting with {want_prefix:?}; got {got:?}"
+    );
+}
+
+#[tokio::test]
+#[should_panic(expected = "sdb_task failed: SurrealDB health check failed after all attempts")]
+async fn await_boot_panics_when_sdb_task_fails() {
+    await_boot(
+        pending(),
+        ready(Ok(Err(slm_error::Error::HealthCheck))),
+        BOOT_TIMEOUT,
+    )
+    .await;
+}
+
+#[tokio::test]
+#[should_panic(expected = "panicked with message \"container create failed\"")]
+async fn await_boot_panics_when_sdb_task_panics() {
+    async fn panicking_sdb_task() -> slm_error::Result<()> {
+        panic!("container create failed")
+    }
+    let sdb = tokio::spawn(panicking_sdb_task());
+    await_boot(pending(), sdb, BOOT_TIMEOUT).await;
+}
+
+#[tokio::test]
+#[should_panic(expected = "SurrealDB not ready within 10ms")]
+async fn await_boot_panics_on_timeout() {
+    await_boot(
+        pending(),
+        pending::<Result<slm_error::Result<()>, JoinError>>(),
+        Duration::from_millis(10),
+    )
+    .await;
 }

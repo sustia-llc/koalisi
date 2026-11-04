@@ -3,8 +3,11 @@
 //! `Decisions` stream of a `FileEventStore` and the durable bus inbox.
 //!
 //! Container-backed like `tests/durable_integration.rs`: boots SurrealDB via
-//! upstream's `sdb::sdb_task`, and prints a `SKIP` line and passes if Docker is
-//! unavailable. A log sink that is not an agent of the bus is refused with
+//! upstream's `sdb::sdb_task` under a `common::sdb` guard, which stops the
+//! container on every exit, a panic included. Outside the
+//! `production` environment, if the Docker daemon does not answer `GET /_ping`
+//! on the socket `sdb_task` connects to, it prints a `SKIP` line and passes;
+//! any later boot failure or timeout panics with the error's source chain. A log sink that is not an agent of the bus is refused with
 //! `DurableError::UnknownLogSink`, and a producer that is not an agent of the
 //! bus, or a bus agent renamed to another bus agent's name, with
 //! `DurableError::UnknownProducer`; none spawns a task.
@@ -14,15 +17,18 @@
 //! join is taken, the member's leave is declined, and the non-member's leave
 //! returns `act == false`, `score == 0.0` without consulting the policy.
 
+mod common;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tokio::sync::mpsc;
-use tokio::time::{Duration, sleep, timeout};
+use tokio::time::{Duration, timeout};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
+use common::sdb::{Boot, boot_db};
 use koalisi::algorithms::{AdditiveCalculator, AgentCapabilities};
 use koalisi::core::Executor;
 use koalisi::core::config::setup_logging;
@@ -40,12 +46,10 @@ use koalisi::subsystems::durable::{
 use koalisi::topology::CoalitionManager;
 
 use surrealdb_live_message::subsystems::agents::Agent;
-use surrealdb_live_message::subsystems::sdb::{self, SurrealDBWrapper};
 
 const PRODUCER: &str = "tee_producer";
 const LOG_SINK: &str = "tee_log";
 const OUTSIDER: &str = "tee_outsider";
-const BOOT_TIMEOUT: Duration = Duration::from_secs(180);
 const RECV_TIMEOUT: Duration = Duration::from_secs(10);
 
 struct TempDir {
@@ -93,40 +97,22 @@ impl AgentCapabilities for Worker {
     }
 }
 
-/// Boot the DB under a child token; return `true` once ready, `false` (skip
-/// signal) if the sdb task exits early or startup times out.
-async fn boot_db(tracker: &TaskTracker, token: &CancellationToken) -> bool {
-    let sdb_token = token.child_token();
-    let mut handle = tracker.spawn(async move {
-        if let Err(e) = sdb::sdb_task(sdb_token).await {
-            tracing::error!("sdb_task failed: {e}");
-        }
-    });
-    tokio::select! {
-        r = SurrealDBWrapper::wait_until_ready() => r.is_ok(),
-        _ = &mut handle => false,
-        _ = sleep(BOOT_TIMEOUT) => false,
-    }
-}
-
 #[tokio::test]
 #[allow(clippy::too_many_lines)]
 async fn every_trace_reaches_the_decisions_stream_and_the_bus() {
-    setup_logging();
+    setup_logging().expect("setup_logging: no subscriber is installed before it in this binary");
 
     let token = CancellationToken::new();
-    let db_tracker = TaskTracker::new();
 
-    if !boot_db(&db_tracker, &token).await {
-        eprintln!(
-            "SKIP every_trace_reaches_the_decisions_stream_and_the_bus: \
-             SurrealDB/Docker unavailable"
-        );
-        token.cancel();
-        db_tracker.close();
-        db_tracker.wait().await;
-        return;
-    }
+    // Dropping `sdb` stops the container on every exit from here, a panic
+    // included.
+    let sdb = match boot_db(&token).await {
+        Boot::Ready(sdb) => sdb,
+        Boot::DockerUnreachable(reason) => {
+            eprintln!("SKIP every_trace_reaches_the_decisions_stream_and_the_bus: {reason}");
+            return;
+        }
+    };
 
     let bus = DurableDecisionBus::new(vec![PRODUCER.to_string(), LOG_SINK.to_string()])
         .await
@@ -322,6 +308,5 @@ async fn every_trace_reaches_the_decisions_stream_and_the_bus() {
 
     bus.shutdown().await;
     token.cancel();
-    db_tracker.close();
-    db_tracker.wait().await;
+    sdb.stop().await.expect("sdb_task stops the container");
 }

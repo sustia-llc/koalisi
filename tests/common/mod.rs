@@ -5,6 +5,8 @@
 //! regular module, NOT as an integration test binary of its own.
 
 pub mod algorithms;
+#[cfg(feature = "durable")]
+pub mod sdb;
 pub mod topology;
 
 #[allow(dead_code)]

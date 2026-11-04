@@ -64,7 +64,7 @@ async fn main() -> anyhow::Result<()> {
     let bob = manager.add_agent(Agent::new("bob", 0b010)).await?;
     let carol = manager.add_agent(Agent::new("carol", 0b100)).await?;
     let dave = manager.add_agent(Agent::new("dave", 0b011)).await?;
-    println!("  agents: {} total", manager.count_agents().await);
+    println!("  agents: {} total", manager.count_agents().await?);
 
     // --- Phase 2: form coalitions ---
     println!("\n=== Phase 2: Forming coalitions ===");
@@ -74,7 +74,7 @@ async fn main() -> anyhow::Result<()> {
     let beta = manager
         .form_coalition(vec![carol, dave], Coalition::new("beta", 8))
         .await?;
-    println!("  coalitions: {}", manager.count_coalitions().await);
+    println!("  coalitions: {}", manager.count_coalitions().await?);
 
     let alpha_members = manager.coalition_members(alpha).await?;
     println!("  alpha members: {}", alpha_members.len());
@@ -107,7 +107,7 @@ async fn main() -> anyhow::Result<()> {
     manager.merge_coalitions(vec![alpha, beta]).await?;
     println!(
         "  coalitions after merge: {}",
-        manager.count_coalitions().await
+        manager.count_coalitions().await?
     );
 
     // --- Phase 6: analytics ---

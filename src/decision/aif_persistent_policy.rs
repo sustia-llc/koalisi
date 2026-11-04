@@ -520,18 +520,72 @@ impl PersistentAifArm {
         };
 
         // p(control 1) — switch to config1 (join / leave).
-        let p1 = dist.get(1).copied().unwrap_or(f64::NAN);
-        if !p1.is_finite() {
-            return Decision {
-                act: false,
-                score: 0.0,
-            };
-        }
-        let act = if leave { p1 >= 0.5 } else { p1 > 0.5 };
-        Decision {
-            act,
-            score: p1 - 0.5,
-        }
+        decision_from_dist(
+            dist.as_slice(),
+            leave,
+            QueryMasks {
+                required,
+                cfg0,
+                cfg1,
+            },
+        )
+    }
+}
+
+/// The masks of one persistent query: `required` restricted to the world
+/// model's universe, and the two membership configurations.
+#[derive(Clone, Copy, Debug)]
+struct QueryMasks {
+    required: u32,
+    cfg0: u32,
+    cfg1: u32,
+}
+
+/// The decision for the marginal action posterior `dist` of a query over
+/// `masks`, for any `dist`. A `dist` with no entry at index 1 logs a warning
+/// carrying its length, `leave` and `masks`, and declines with score `0.0`;
+/// any other `dist` decides as [`decision_from_p1`] of `dist[1]`.
+fn decision_from_dist(dist: &[f64], leave: bool, masks: QueryMasks) -> Decision {
+    let Some(&p1) = dist.get(1) else {
+        tracing::warn!(
+            len = dist.len(),
+            leave,
+            required = masks.required,
+            cfg0 = masks.cfg0,
+            cfg1 = masks.cfg1,
+            "persistent query returned no p(control 1), declining"
+        );
+        return Decision {
+            act: false,
+            score: 0.0,
+        };
+    };
+    decision_from_p1(p1, leave, masks)
+}
+
+/// The decision for a read `p1 = p(control 1)` of a query over `masks`, for
+/// any `f64`. A finite `p1` acts iff `p1 > 0.5` (join) or `p1 ≥ 0.5`
+/// (`leave`), with score `p1 − 0.5`. A non-finite `p1` logs a warning
+/// carrying `p1`, `leave` and `masks`, and declines with score `0.0`.
+fn decision_from_p1(p1: f64, leave: bool, masks: QueryMasks) -> Decision {
+    if !p1.is_finite() {
+        tracing::warn!(
+            p1,
+            leave,
+            required = masks.required,
+            cfg0 = masks.cfg0,
+            cfg1 = masks.cfg1,
+            "persistent query returned a non-finite p(control 1), declining"
+        );
+        return Decision {
+            act: false,
+            score: 0.0,
+        };
+    }
+    let act = if leave { p1 >= 0.5 } else { p1 > 0.5 };
+    Decision {
+        act,
+        score: p1 - 0.5,
     }
 }
 
@@ -1692,6 +1746,178 @@ mod tests {
         )
         .unwrap();
         assert_eq!(arm.state_snapshot().beliefs.len(), MIN_N_BITS);
+    }
+
+    /// A `dist` of length 1 and every non-finite `p(control 1)`, on both the
+    /// join and the leave rule, decline with score `0.0` and emit one WARN
+    /// event carrying `required = 7`, `cfg0 = 1`, `cfg1 = 3`, `leave`, and
+    /// `len = 1` or the `p1` read; the finite `dist = [0.25, 0.75]` joins with
+    /// score `0.25` and emits no event.
+    #[test]
+    fn a_short_or_non_finite_dist_warns_with_the_query_masks_then_declines() {
+        use crate::test_support::log_capture::Capture;
+
+        let masks = QueryMasks {
+            required: 7,
+            cfg0: 1,
+            cfg1: 3,
+        };
+        let cases: [(&[f64], &str, &str); 4] = [
+            (&[0.4], "len", "1"),
+            (&[0.2, f64::NAN], "p1", "NaN"),
+            (&[0.2, f64::INFINITY], "p1", "inf"),
+            (&[0.2, f64::NEG_INFINITY], "p1", "-inf"),
+        ];
+        for (dist, field, value) in cases {
+            for leave in [false, true] {
+                let capture = Capture::default();
+                let d = {
+                    let _guard = capture.install();
+                    decision_from_dist(dist, leave, masks)
+                };
+                assert!(
+                    !d.act && d.score == 0.0,
+                    "dist = {dist:?}, leave = {leave}: expected a decline with score 0.0, got {d:?}"
+                );
+                let events = capture.matching("");
+                let leave_text = leave.to_string();
+                let want = [
+                    (field, value),
+                    ("required", "7"),
+                    ("cfg0", "1"),
+                    ("cfg1", "3"),
+                    ("leave", leave_text.as_str()),
+                ];
+                assert!(
+                    events.len() == 1
+                        && events[0].level == tracing::Level::WARN
+                        && want.iter().all(|(name, v)| {
+                            events[0].fields.get(*name).map(String::as_str) == Some(*v)
+                        }),
+                    "dist = {dist:?}, leave = {leave}: expected one WARN event carrying {want:?}, \
+                     captured {events:?}"
+                );
+            }
+        }
+
+        let capture = Capture::default();
+        let d = {
+            let _guard = capture.install();
+            decision_from_dist(&[0.25, 0.75], false, masks)
+        };
+        assert!(d.act && d.score == 0.25, "finite p1 = 0.75: got {d:?}");
+        let events = capture.matching("");
+        assert!(
+            events.is_empty(),
+            "a finite p1 must not log, captured {events:?}"
+        );
+    }
+
+    /// Under the registered config (`use_param_info_gain` on), the arm's query
+    /// after its replay read has a stochastic predictive state (every bit
+    /// factor's transition entries and belief lie strictly inside `(0, 1)`),
+    /// a live epistemic term and a live A-novelty term, and every policy's
+    /// `neg_g` equals the sum of its pragmatic, epistemic, A-novelty and
+    /// B-novelty components.
+    #[test]
+    fn query_neg_g_carries_epistemic_and_novelty_terms() {
+        let arm = PersistentAifArm::new(11, PersistentAifConfig::default()).unwrap();
+        arm.observe_outcome(
+            0b0111,
+            &[true, false, true, false, false, false, false, false],
+        );
+        arm.observe_outcome(
+            0b0111,
+            &[true, true, false, false, false, false, false, false],
+        );
+        let required = 0b0111u32;
+        let r = required.count_ones() as usize;
+        let (mut query, replay) = {
+            let inner = arm.inner.lock().unwrap();
+            build_query(&inner, &arm.config, 99, required, 0b0001, 0b0111, None).unwrap()
+        };
+
+        let interior = |v: f64| v > 1e-3 && v < 1.0 - 1e-3;
+        for f in 0..r {
+            let b = &query.transition_model()[f][0];
+            assert!(
+                b.iter().all(|&v| interior(v)),
+                "bit factor {f}: transition entries must lie inside (0, 1), got {b}"
+            );
+            let belief = &query.state_beliefs()[f];
+            assert!(
+                belief.iter().all(|&v| interior(v)),
+                "bit factor {f}: belief must lie inside (0, 1), got {belief}"
+            );
+        }
+
+        let dist = run_replay(&mut query, &replay, r).unwrap();
+        let p1 = dist[1];
+        assert!(
+            p1.is_finite(),
+            "the read p(control 1) must be finite, got {p1}"
+        );
+
+        let policies = query.policy_efe();
+        let mut max_epistemic = f64::NEG_INFINITY;
+        let mut max_a_novelty = f64::NEG_INFINITY;
+        for p in &policies {
+            let sum = p.pragmatic + p.epistemic + p.a_novelty + p.b_novelty;
+            assert!(
+                (p.neg_g - sum).abs() <= 1e-9 * (1.0 + sum.abs()),
+                "policy {:?} (p1 = {p1}): neg_g {} differs from the component sum {sum} \
+                 by {} (pragmatic {}, epistemic {}, a_novelty {}, b_novelty {})",
+                p.actions,
+                p.neg_g,
+                p.neg_g - sum,
+                p.pragmatic,
+                p.epistemic,
+                p.a_novelty,
+                p.b_novelty
+            );
+            max_epistemic = max_epistemic.max(p.epistemic);
+            max_a_novelty = max_a_novelty.max(p.a_novelty);
+        }
+        assert!(
+            max_epistemic > 1e-3,
+            "the epistemic term must be live in some policy, max {max_epistemic}"
+        );
+        assert!(
+            max_a_novelty > 1e-3,
+            "the A-novelty term must be live in some policy, max {max_a_novelty}"
+        );
+    }
+
+    /// Under the registered config, after one task on which all three
+    /// required bits `0b0111` failed, `should_leave` for a member covering
+    /// `0b0111` beside a member covering `0b0001` reads an interior
+    /// `p(control 1)` in `[0.05, 0.45]` and keeps the member.
+    #[test]
+    fn leave_read_is_interior_and_keeps_the_covering_member() {
+        let arm = PersistentAifArm::new(11, PersistentAifConfig::default()).unwrap();
+        arm.observe_outcome(0b0111, &[false; N_BITS]);
+        let ctx = DecisionContext {
+            required_capabilities: 0b0111,
+        };
+        let member = TestAgent {
+            id: 0,
+            caps: 0b0111,
+            trust: 50,
+        };
+        let other = TestAgent {
+            id: 1,
+            caps: 0b0001,
+            trust: 50,
+        };
+        let coalition: [&dyn AgentCapabilities; 2] = [&member, &other];
+
+        let d = arm.should_leave(&member, &coalition, &ctx);
+        let p1 = d.score + 0.5;
+        assert!(
+            (0.05..=0.45).contains(&p1) && !d.act,
+            "expected p(control 1) in [0.05, 0.45] and act = false, got p1 = {p1}, act = {}",
+            d.act
+        );
     }
 
     /// Object-safety: the arm is usable behind the decision trait object.

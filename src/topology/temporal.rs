@@ -6,7 +6,7 @@ use super::events::{SnapshotId, TemporalEvent};
 use super::timestamp::{Clock, TimeRange, Timestamp};
 use super::{HyperedgeTrait, VertexTrait};
 use crate::core::Executor;
-use catgraph_applied::{HyperedgeIndex, Hypergraph, HypergraphError, VertexIndex};
+use catgraph_applied::{HyperedgeIndex, Hypergraph, VertexIndex};
 
 pub type SharedGraph<V, HE> = std::sync::Arc<std::sync::RwLock<Hypergraph<V, HE>>>;
 use std::collections::BTreeMap;
@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::sync::RwLock as StdRwLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::RwLock;
-use tokio::sync::mpsc;
+use tokio::sync::{Mutex, mpsc, oneshot};
 
 /// A snapshot marker at a point in time.
 ///
@@ -30,10 +30,20 @@ pub struct Snapshot {
     pub event_index: usize,
 }
 
-/// A temporal hypergraph with full event sourcing.
-///
-/// This wraps a SharedGraph and records all mutations as events,
-/// allowing reconstruction of the graph state at any point in time.
+/// A temporal hypergraph with full event sourcing: it wraps a SharedGraph and
+/// records every mutation as an event, so the graph state at any point in
+/// time can be reconstructed. Each mutation method runs as one spawned tokio
+/// task that holds a mutation lock, shared by every clone, while it applies
+/// the graph change, ticks the clock and appends the event, taking the
+/// event-log write lock for the append only, so it must be called inside a
+/// tokio runtime, an event-log reader does not wait on a graph change, a
+/// failed mutation ticks no timestamp, and the events one value records
+/// appear in the log in timestamp order and in the order their changes
+/// reached the graph. A
+/// mutation future dropped after its first poll still applies the change and
+/// records its event; if that mutation fails, the error is logged at warn
+/// level with the operation name. Every graph operation, mutation or read,
+/// returns [`TemporalError::LockPoisoned`] once the graph lock is poisoned.
 pub struct TemporalHypergraph<V, HE>
 where
     V: VertexTrait + Clone + 'static,
@@ -46,7 +56,7 @@ where
     /// Snapshots indexed by timestamp.
     snapshots: Arc<RwLock<BTreeMap<Timestamp, Snapshot>>>,
     /// Logical clock for timestamps.
-    clock: Clock,
+    clock: Arc<Clock>,
     /// Counter for snapshot IDs.
     snapshot_counter: AtomicU64,
     /// Optional event tap (Phase 7 / P7.2, sustia-llc/koalisi#30): when set,
@@ -58,6 +68,36 @@ where
     event_tap: Option<mpsc::Sender<TemporalEvent<V, HE>>>,
     /// The pool every graph operation runs on. `Clone` shares it.
     executor: Arc<Executor>,
+    /// Held by each mutation and by `create_snapshot` from before the graph
+    /// change to after the event append. `Clone` shares it.
+    mutation: Arc<Mutex<()>>,
+}
+
+/// Mirror `event` to `tap`, if any, with a non-blocking `try_send`; a full or
+/// closed tap logs the event type at warn and drops the event.
+fn tap_event<V, HE>(tap: Option<&mpsc::Sender<TemporalEvent<V, HE>>>, event: &TemporalEvent<V, HE>)
+where
+    V: VertexTrait + Clone + 'static,
+    HE: HyperedgeTrait + Clone + 'static,
+{
+    let Some(tap) = tap else {
+        return;
+    };
+    match tap.try_send(event.clone()) {
+        Ok(()) => {}
+        Err(mpsc::error::TrySendError::Full(_)) => {
+            tracing::warn!(
+                event_type = event.event_type(),
+                "topology event tap full — dropping event (mutation unaffected)"
+            );
+        }
+        Err(mpsc::error::TrySendError::Closed(_)) => {
+            tracing::warn!(
+                event_type = event.event_type(),
+                "topology event tap closed — dropping event (mutation unaffected)"
+            );
+        }
+    }
 }
 
 impl<V, HE> TemporalHypergraph<V, HE>
@@ -78,10 +118,11 @@ where
             graph,
             events: Arc::new(RwLock::new(EventLog::new())),
             snapshots: Arc::new(RwLock::new(BTreeMap::new())),
-            clock: Clock::new(),
+            clock: Arc::new(Clock::new()),
             snapshot_counter: AtomicU64::new(0),
             event_tap: None,
             executor,
+            mutation: Arc::new(Mutex::new(())),
         }
     }
 
@@ -107,50 +148,91 @@ where
         self
     }
 
-    /// Mirror `event` to the installed tap, if any.
-    ///
-    /// Best-effort [`try_send`](mpsc::Sender::try_send): a full or closed tap
-    /// logs and drops (the at-most-once tap contract) —
-    /// it never blocks or fails the mutation. The `event.clone()` happens ONLY
-    /// when a tap is installed; with no tap this is a single `Option` check.
-    fn tap_event(&self, event: &TemporalEvent<V, HE>) {
-        let Some(tap) = &self.event_tap else {
-            return;
-        };
-        match tap.try_send(event.clone()) {
-            Ok(()) => {}
-            Err(mpsc::error::TrySendError::Full(_)) => {
+    /// Run one graph mutation as a spawned tokio task and resolve to the value
+    /// `finish` returns. The task takes the mutation lock, runs `job` on the
+    /// executor under the graph's write lock, and on success ticks the clock
+    /// and, under the event-log write lock, taps and appends the event
+    /// `finish` builds from the timestamp and the job's output, then releases
+    /// the mutation lock. The task runs to completion when the returned future
+    /// is dropped after its first poll, and an error it can no longer return
+    /// is logged at warn level with `operation`. A poisoned graph lock yields
+    /// [`TemporalError::LockPoisoned`], a `job` error is returned as is, and
+    /// neither ticks the clock nor records an event; a panic in `job` resumes
+    /// on the awaiting task; a task cancelled by the shutdown of its runtime
+    /// yields [`TemporalError::TaskCancelled`].
+    async fn mutate<T, R>(
+        &self,
+        operation: &'static str,
+        job: impl FnOnce(&mut Hypergraph<V, HE>) -> TemporalResult<T> + Send + 'static,
+        finish: impl FnOnce(Timestamp, T) -> (TemporalEvent<V, HE>, R) + Send + 'static,
+    ) -> TemporalResult<R>
+    where
+        T: Send + 'static,
+        R: Send + 'static,
+    {
+        let graph = Arc::clone(&self.graph);
+        let events = Arc::clone(&self.events);
+        let clock = Arc::clone(&self.clock);
+        let tap = self.event_tap.clone();
+        let executor = Arc::clone(&self.executor);
+        let mutation = Arc::clone(&self.mutation);
+        let (reply_tx, reply_rx) = oneshot::channel();
+        let task = tokio::spawn(async move {
+            let serial = mutation.lock().await;
+            let output = executor
+                .run(move || {
+                    let mut g = graph.write().map_err(|_| TemporalError::LockPoisoned)?;
+                    job(&mut g)
+                })
+                .await;
+            let result = match output {
+                Ok(output) => {
+                    let timestamp = clock.tick();
+                    let (event, value) = finish(timestamp, output);
+                    let mut log = events.write().await;
+                    tap_event(tap.as_ref(), &event);
+                    log.append(event);
+                    Ok(value)
+                }
+                Err(error) => Err(error),
+            };
+            drop(serial);
+            if let Err(Err(error)) = reply_tx.send(result) {
                 tracing::warn!(
-                    event_type = event.event_type(),
-                    "topology event tap full — dropping event (mutation unaffected)"
+                    operation,
+                    error = %error,
+                    "graph mutation failed after its caller dropped the future"
                 );
             }
-            Err(mpsc::error::TrySendError::Closed(_)) => {
-                tracing::warn!(
-                    event_type = event.event_type(),
-                    "topology event tap closed — dropping event (mutation unaffected)"
-                );
-            }
+        });
+        match reply_rx.await {
+            Ok(result) => result,
+            Err(_) => match task.await {
+                Err(e) if e.is_panic() => std::panic::resume_unwind(e.into_panic()),
+                Err(_) => Err(TemporalError::TaskCancelled),
+                Ok(()) => {
+                    unreachable!("invariant: the graph task sends its reply before it returns")
+                }
+            },
         }
     }
 
-    /// Append `event` to the log and mirror it to the tap (if installed).
-    ///
-    /// The single append site every mutation method routes through. When no tap
-    /// is installed this is byte-for-byte the previous inline
-    /// `self.events.write().await.append(event)` — the tap clone happens only
-    /// under [`tap_event`](Self::tap_event) when a sender is present, so the
-    /// default (untapped) behaviour, ordering, and lock scope are unchanged.
-    ///
-    /// The tap fires while the events write guard is held: with concurrent
-    /// mutators (`Clone` shares the log and the tap), tap order is therefore
-    /// always identical to log order — the property `replay_into_event_log`'s
-    /// "same events, same order" guarantee rests on. `try_send` never blocks,
-    /// so the extra time under the guard is negligible.
-    async fn record_event(&self, event: TemporalEvent<V, HE>) {
-        let mut events = self.events.write().await;
-        self.tap_event(&event);
-        events.append(event);
+    /// Run `job` on the executor under the graph's read lock and resolve to
+    /// its result; a poisoned lock yields [`TemporalError::LockPoisoned`].
+    async fn read<T>(
+        &self,
+        job: impl FnOnce(&Hypergraph<V, HE>) -> TemporalResult<T> + Send + 'static,
+    ) -> TemporalResult<T>
+    where
+        T: Send + 'static,
+    {
+        let graph = Arc::clone(&self.graph);
+        self.executor
+            .run(move || {
+                let g = graph.read().map_err(|_| TemporalError::LockPoisoned)?;
+                job(&g)
+            })
+            .await
     }
 
     /// Get the current logical timestamp.
@@ -177,247 +259,203 @@ where
     // Mutation methods with event recording
     // =========================================================================
 
-    /// Add a vertex and record the event.
-    ///
-    /// Not cancel-safe: a future dropped after the graph job is submitted can
-    /// leave the graph mutated with no event recorded.
+    /// Add a vertex and record the event, under the mutation contract of
+    /// [`TemporalHypergraph`].
     pub async fn add_vertex(&self, weight: V) -> TemporalResult<VertexIndex> {
-        let timestamp = self.clock.tick();
-        let weight_clone = weight;
-        let graph = self.graph.clone();
-
         // K1: `add_vertex` is infallible on the catgraph backend (returns the
         // fresh `VertexIndex`, not a `Result`).
-        let index = self
-            .executor
-            .run(move || graph.write().unwrap().add_vertex(weight_clone))
-            .await;
-
-        self.record_event(TemporalEvent::VertexAdded {
-            timestamp,
-            index,
-            weight,
-        })
-        .await;
-
-        Ok(index)
+        self.mutate(
+            "add_vertex",
+            move |g| Ok(g.add_vertex(weight)),
+            move |timestamp, index| {
+                (
+                    TemporalEvent::VertexAdded {
+                        timestamp,
+                        index,
+                        weight,
+                    },
+                    index,
+                )
+            },
+        )
+        .await
     }
 
-    /// Remove a vertex and record the event.
-    ///
-    /// Not cancel-safe: a future dropped after the graph job is submitted can
-    /// leave the graph mutated with no event recorded.
+    /// Remove a vertex and record the event, under the mutation contract of
+    /// [`TemporalHypergraph`].
     pub async fn remove_vertex(&self, index: VertexIndex) -> TemporalResult<()> {
-        let timestamp = self.clock.tick();
-        let graph = self.graph.clone();
-
-        // Get weight and remove atomically in single write lock
-        let weight = self
-            .executor
-            .run(move || {
-                let mut g = graph.write().unwrap();
+        self.mutate(
+            "remove_vertex",
+            move |g| {
                 let weight = g.get_vertex_weight(index)?;
                 g.remove_vertex(index)?;
-                Ok::<V, HypergraphError>(weight)
-            })
-            .await
-            .map_err(TemporalError::from)?;
-
-        self.record_event(TemporalEvent::VertexRemoved {
-            timestamp,
-            index,
-            weight,
-        })
-        .await;
-
-        Ok(())
+                Ok(weight)
+            },
+            move |timestamp, weight| {
+                (
+                    TemporalEvent::VertexRemoved {
+                        timestamp,
+                        index,
+                        weight,
+                    },
+                    (),
+                )
+            },
+        )
+        .await
     }
 
-    /// Update a vertex weight and record the event.
-    ///
-    /// Not cancel-safe: a future dropped after the graph job is submitted can
-    /// leave the graph mutated with no event recorded.
+    /// Update a vertex weight and record the event, under the mutation
+    /// contract of [`TemporalHypergraph`].
     pub async fn update_vertex_weight(
         &self,
         index: VertexIndex,
         new_weight: V,
     ) -> TemporalResult<()> {
-        let timestamp = self.clock.tick();
-        let graph = self.graph.clone();
-        let new_weight_clone = new_weight;
-
-        // Get old weight and update atomically in single write lock
-        let old_weight = self
-            .executor
-            .run(move || {
-                let mut g = graph.write().unwrap();
+        self.mutate(
+            "update_vertex_weight",
+            move |g| {
                 let old_weight = g.get_vertex_weight(index)?;
-                g.update_vertex_weight(index, new_weight_clone)?;
-                Ok::<V, HypergraphError>(old_weight)
-            })
-            .await
-            .map_err(TemporalError::from)?;
-
-        self.record_event(TemporalEvent::VertexWeightUpdated {
-            timestamp,
-            index,
-            old_weight,
-            new_weight,
-        })
-        .await;
-
-        Ok(())
+                g.update_vertex_weight(index, new_weight)?;
+                Ok(old_weight)
+            },
+            move |timestamp, old_weight| {
+                (
+                    TemporalEvent::VertexWeightUpdated {
+                        timestamp,
+                        index,
+                        old_weight,
+                        new_weight,
+                    },
+                    (),
+                )
+            },
+        )
+        .await
     }
 
-    /// Add a hyperedge and record the event.
-    ///
-    /// Not cancel-safe: a future dropped after the graph job is submitted can
-    /// leave the graph mutated with no event recorded.
+    /// Add a hyperedge and record the event, under the mutation contract of
+    /// [`TemporalHypergraph`].
     pub async fn add_hyperedge(
         &self,
         vertices: Vec<VertexIndex>,
         weight: HE,
     ) -> TemporalResult<HyperedgeIndex> {
-        let timestamp = self.clock.tick();
-        let weight_clone = weight;
         let vertices_clone = vertices.clone();
-        let graph = self.graph.clone();
-
-        let index = self
-            .executor
-            .run(move || {
-                graph
-                    .write()
-                    .unwrap()
-                    .add_hyperedge(vertices_clone, weight_clone)
-            })
-            .await
-            .map_err(TemporalError::from)?;
-
-        self.record_event(TemporalEvent::HyperedgeAdded {
-            timestamp,
-            index,
-            vertices,
-            weight,
-        })
-        .await;
-
-        Ok(index)
+        self.mutate(
+            "add_hyperedge",
+            move |g| Ok(g.add_hyperedge(vertices_clone, weight)?),
+            move |timestamp, index| {
+                (
+                    TemporalEvent::HyperedgeAdded {
+                        timestamp,
+                        index,
+                        vertices,
+                        weight,
+                    },
+                    index,
+                )
+            },
+        )
+        .await
     }
 
-    /// Remove a hyperedge and record the event.
-    ///
-    /// Not cancel-safe: a future dropped after the graph job is submitted can
-    /// leave the graph mutated with no event recorded.
+    /// Remove a hyperedge and record the event, under the mutation contract
+    /// of [`TemporalHypergraph`].
     pub async fn remove_hyperedge(&self, index: HyperedgeIndex) -> TemporalResult<()> {
-        let timestamp = self.clock.tick();
-        let graph = self.graph.clone();
-
-        // Get info and remove atomically in single write lock
-        let (vertices, weight) = self
-            .executor
-            .run(move || {
-                let mut g = graph.write().unwrap();
+        self.mutate(
+            "remove_hyperedge",
+            move |g| {
                 let vertices = g.get_hyperedge_vertices(index)?;
                 let weight = g.get_hyperedge_weight(index)?;
                 g.remove_hyperedge(index)?;
-                Ok::<(Vec<VertexIndex>, HE), HypergraphError>((vertices, weight))
-            })
-            .await
-            .map_err(TemporalError::from)?;
-
-        self.record_event(TemporalEvent::HyperedgeRemoved {
-            timestamp,
-            index,
-            vertices,
-            weight,
-        })
-        .await;
-
-        Ok(())
+                Ok((vertices, weight))
+            },
+            move |timestamp, (vertices, weight)| {
+                (
+                    TemporalEvent::HyperedgeRemoved {
+                        timestamp,
+                        index,
+                        vertices,
+                        weight,
+                    },
+                    (),
+                )
+            },
+        )
+        .await
     }
 
-    /// Update a hyperedge weight and record the event.
-    ///
-    /// Not cancel-safe: a future dropped after the graph job is submitted can
-    /// leave the graph mutated with no event recorded.
+    /// Update a hyperedge weight and record the event, under the mutation
+    /// contract of [`TemporalHypergraph`].
     pub async fn update_hyperedge_weight(
         &self,
         index: HyperedgeIndex,
         new_weight: HE,
     ) -> TemporalResult<()> {
-        let timestamp = self.clock.tick();
-        let graph = self.graph.clone();
-        let new_weight_clone = new_weight;
-
-        // Get old weight and update atomically in single write lock
-        let old_weight = self
-            .executor
-            .run(move || {
-                let mut g = graph.write().unwrap();
+        self.mutate(
+            "update_hyperedge_weight",
+            move |g| {
                 let old_weight = g.get_hyperedge_weight(index)?;
-                g.update_hyperedge_weight(index, new_weight_clone)?;
-                Ok::<HE, HypergraphError>(old_weight)
-            })
-            .await
-            .map_err(TemporalError::from)?;
-
-        self.record_event(TemporalEvent::HyperedgeWeightUpdated {
-            timestamp,
-            index,
-            old_weight,
-            new_weight,
-        })
-        .await;
-
-        Ok(())
+                g.update_hyperedge_weight(index, new_weight)?;
+                Ok(old_weight)
+            },
+            move |timestamp, old_weight| {
+                (
+                    TemporalEvent::HyperedgeWeightUpdated {
+                        timestamp,
+                        index,
+                        old_weight,
+                        new_weight,
+                    },
+                    (),
+                )
+            },
+        )
+        .await
     }
 
-    /// Update a hyperedge's vertices and record the event.
-    ///
-    /// Not cancel-safe: a future dropped after the graph job is submitted can
-    /// leave the graph mutated with no event recorded.
+    /// Update a hyperedge's vertices and record the event, under the mutation
+    /// contract of [`TemporalHypergraph`].
     pub async fn update_hyperedge_vertices(
         &self,
         index: HyperedgeIndex,
         new_vertices: Vec<VertexIndex>,
     ) -> TemporalResult<()> {
-        let timestamp = self.clock.tick();
-        let graph = self.graph.clone();
         let new_vertices_clone = new_vertices.clone();
-
-        // Get old vertices and update atomically in single write lock
-        let old_vertices = self
-            .executor
-            .run(move || {
-                let mut g = graph.write().unwrap();
+        self.mutate(
+            "update_hyperedge_vertices",
+            move |g| {
                 let old_vertices = g.get_hyperedge_vertices(index)?;
                 g.update_hyperedge_vertices(index, new_vertices_clone)?;
-                Ok::<Vec<VertexIndex>, HypergraphError>(old_vertices)
-            })
-            .await
-            .map_err(TemporalError::from)?;
-
-        self.record_event(TemporalEvent::HyperedgeVerticesUpdated {
-            timestamp,
-            index,
-            old_vertices,
-            new_vertices,
-        })
-        .await;
-
-        Ok(())
+                Ok(old_vertices)
+            },
+            move |timestamp, old_vertices| {
+                (
+                    TemporalEvent::HyperedgeVerticesUpdated {
+                        timestamp,
+                        index,
+                        old_vertices,
+                        new_vertices,
+                    },
+                    (),
+                )
+            },
+        )
+        .await
     }
 
-    /// Read-modify-write a hyperedge's vertex set atomically.
-    ///
-    /// The mutator runs inside the same write-lock as the read of `old_vertices`
-    /// and the write of the new set, so two concurrent join/leave calls cannot
-    /// race. The mutator may return `Err` to abort the update (e.g. a coalition
-    /// leave that would leave the membership empty).
-    ///
-    /// Not cancel-safe: a future dropped after the graph job is submitted can
-    /// leave the graph mutated with no event recorded.
+    /// Replace a hyperedge's vertex set with `mutator(old_vertices)` and
+    /// record the event, with the read, the `mutator` call and the write under
+    /// one graph write lock on an executor worker; a `mutator` `Err` aborts
+    /// the update and records nothing, and a `mutator` panic poisons the lock,
+    /// after which every graph operation returns
+    /// [`TemporalError::LockPoisoned`]. A `mutator` that runs rayon work
+    /// (`rayon::join`, `rayon::scope`, a parallel iterator) on that worker can
+    /// deadlock: while the worker waits for the rayon work, it can take a
+    /// queued graph job from the same pool, and that job blocks on the write
+    /// lock the worker already holds. The mutation contract of
+    /// [`TemporalHypergraph`] applies.
     pub async fn update_hyperedge_vertices_try<F>(
         &self,
         index: HyperedgeIndex,
@@ -426,208 +464,161 @@ where
     where
         F: FnOnce(Vec<VertexIndex>) -> Result<Vec<VertexIndex>, TemporalError> + Send + 'static,
     {
-        let timestamp = self.clock.tick();
-        let graph = self.graph.clone();
-
-        let (old_vertices, new_vertices) = self
-            .executor
-            .run(move || {
-                let mut g = graph.write().unwrap();
-                let old_vertices = g
-                    .get_hyperedge_vertices(index)
-                    .map_err(TemporalError::from)?;
+        self.mutate(
+            "update_hyperedge_vertices_try",
+            move |g| {
+                let old_vertices = g.get_hyperedge_vertices(index)?;
                 let new_vertices = mutator(old_vertices.clone())?;
-                g.update_hyperedge_vertices(index, new_vertices.clone())
-                    .map_err(TemporalError::from)?;
-                Ok::<_, TemporalError>((old_vertices, new_vertices))
-            })
-            .await?;
-
-        self.record_event(TemporalEvent::HyperedgeVerticesUpdated {
-            timestamp,
-            index,
-            old_vertices,
-            new_vertices,
-        })
-        .await;
-
-        Ok(())
+                g.update_hyperedge_vertices(index, new_vertices.clone())?;
+                Ok((old_vertices, new_vertices))
+            },
+            move |timestamp, (old_vertices, new_vertices)| {
+                (
+                    TemporalEvent::HyperedgeVerticesUpdated {
+                        timestamp,
+                        index,
+                        old_vertices,
+                        new_vertices,
+                    },
+                    (),
+                )
+            },
+        )
+        .await
     }
 
-    /// Reverse a hyperedge and record the event.
-    ///
-    /// Not cancel-safe: a future dropped after the graph job is submitted can
-    /// leave the graph mutated with no event recorded.
+    /// Reverse a hyperedge and record the event, under the mutation contract
+    /// of [`TemporalHypergraph`].
     pub async fn reverse_hyperedge(
         &self,
         index: HyperedgeIndex,
     ) -> TemporalResult<Vec<VertexIndex>> {
-        let timestamp = self.clock.tick();
-        let graph = self.graph.clone();
-
-        // Get old vertices, reverse, get new vertices atomically in single write lock
-        let (old_vertices, new_vertices) = self
-            .executor
-            .run(move || {
-                let mut g = graph.write().unwrap();
+        self.mutate(
+            "reverse_hyperedge",
+            move |g| {
                 let old_vertices = g.get_hyperedge_vertices(index)?;
                 g.reverse_hyperedge(index)?;
                 let new_vertices = g.get_hyperedge_vertices(index)?;
-                Ok::<(Vec<VertexIndex>, Vec<VertexIndex>), HypergraphError>((
-                    old_vertices,
+                Ok((old_vertices, new_vertices))
+            },
+            move |timestamp, (old_vertices, new_vertices)| {
+                (
+                    TemporalEvent::HyperedgeReversed {
+                        timestamp,
+                        index,
+                        old_vertices,
+                        new_vertices: new_vertices.clone(),
+                    },
                     new_vertices,
-                ))
-            })
-            .await
-            .map_err(TemporalError::from)?;
-
-        self.record_event(TemporalEvent::HyperedgeReversed {
-            timestamp,
-            index,
-            old_vertices,
-            new_vertices: new_vertices.clone(),
-        })
-        .await;
-
-        Ok(new_vertices)
+                )
+            },
+        )
+        .await
     }
 
-    /// Join hyperedges and record the event.
-    ///
-    /// Not cancel-safe: a future dropped after the graph job is submitted can
-    /// leave the graph mutated with no event recorded.
+    /// Join hyperedges and record the event; fewer than two indices is
+    /// [`InvalidJoin`](catgraph_applied::HypergraphError::InvalidJoin) once
+    /// the graph lock is taken, so a
+    /// poisoned lock yields [`TemporalError::LockPoisoned`] for every
+    /// `indices`. The mutation contract of [`TemporalHypergraph`] applies.
     pub async fn join_hyperedges(&self, indices: Vec<HyperedgeIndex>) -> TemporalResult<()> {
-        if indices.len() < 2 {
-            return Err(TemporalError::Hypergraph(HypergraphError::InvalidJoin));
-        }
-
-        let timestamp = self.clock.tick();
-        let graph = self.graph.clone();
-        let target_index = indices[0];
-        let source_indices: Vec<HyperedgeIndex> = indices[1..].to_vec();
-        let indices_clone = indices.clone();
-
-        // Join and get new vertices atomically in single write lock
-        let new_vertices = self
-            .executor
-            .run(move || {
-                let mut g = graph.write().unwrap();
-                g.join_hyperedges(&indices_clone)?;
+        self.mutate(
+            "join_hyperedges",
+            move |g| {
+                let target_index = g.join_hyperedges(&indices)?;
+                let source_indices = indices[1..].to_vec();
                 let new_vertices = g.get_hyperedge_vertices(target_index)?;
-                Ok::<Vec<VertexIndex>, HypergraphError>(new_vertices)
-            })
-            .await
-            .map_err(TemporalError::from)?;
-
-        self.record_event(TemporalEvent::HyperedgesJoined {
-            timestamp,
-            target_index,
-            source_indices,
-            new_vertices,
-        })
-        .await;
-
-        Ok(())
+                Ok((target_index, source_indices, new_vertices))
+            },
+            move |timestamp, (target_index, source_indices, new_vertices)| {
+                (
+                    TemporalEvent::HyperedgesJoined {
+                        timestamp,
+                        target_index,
+                        source_indices,
+                        new_vertices,
+                    },
+                    (),
+                )
+            },
+        )
+        .await
     }
 
-    /// Contract vertices in a hyperedge and record the event.
-    ///
-    /// Not cancel-safe: a future dropped after the graph job is submitted can
-    /// leave the graph mutated with no event recorded.
+    /// Contract vertices in a hyperedge and record the event, under the
+    /// mutation contract of [`TemporalHypergraph`].
     pub async fn contract_hyperedge_vertices(
         &self,
         hyperedge_index: HyperedgeIndex,
         vertices: Vec<VertexIndex>,
         target: VertexIndex,
     ) -> TemporalResult<Vec<VertexIndex>> {
-        let timestamp = self.clock.tick();
-        let graph = self.graph.clone();
         let vertices_clone = vertices.clone();
-
-        // Get old vertices, contract, all atomically in single write lock
-        let (old_vertices, new_vertices) = self
-            .executor
-            .run(move || {
-                let mut g = graph.write().unwrap();
+        self.mutate(
+            "contract_hyperedge_vertices",
+            move |g| {
                 let old_vertices = g.get_hyperedge_vertices(hyperedge_index)?;
                 let new_vertices =
                     g.contract_hyperedge_vertices(hyperedge_index, vertices_clone, target)?;
-                Ok::<(Vec<VertexIndex>, Vec<VertexIndex>), HypergraphError>((
-                    old_vertices,
+                Ok((old_vertices, new_vertices))
+            },
+            move |timestamp, (old_vertices, new_vertices)| {
+                (
+                    TemporalEvent::VerticesContracted {
+                        timestamp,
+                        hyperedge_index,
+                        contracted_vertices: vertices,
+                        target_vertex: target,
+                        old_vertices,
+                        new_vertices: new_vertices.clone(),
+                    },
                     new_vertices,
-                ))
-            })
-            .await
-            .map_err(TemporalError::from)?;
-
-        self.record_event(TemporalEvent::VerticesContracted {
-            timestamp,
-            hyperedge_index,
-            contracted_vertices: vertices,
-            target_vertex: target,
-            old_vertices,
-            new_vertices: new_vertices.clone(),
-        })
-        .await;
-
-        Ok(new_vertices)
+                )
+            },
+        )
+        .await
     }
 
-    /// Clear all hyperedges and record the event.
-    ///
-    /// Not cancel-safe: a future dropped after the graph job is submitted can
-    /// leave the graph mutated with no event recorded.
+    /// Clear all hyperedges and record the event, under the mutation contract
+    /// of [`TemporalHypergraph`].
     pub async fn clear_hyperedges(&self) -> TemporalResult<()> {
-        let timestamp = self.clock.tick();
-        let graph = self.graph.clone();
-
-        // Get count and clear atomically in single write lock.
         // K1: `clear_hyperedges` is infallible on the catgraph backend (returns
-        // `()`, not `Result`), so the closure yields the count directly.
-        let count = self
-            .executor
-            .run(move || {
-                let mut g = graph.write().unwrap();
+        // `()`, not `Result`), so the job yields the count directly.
+        self.mutate(
+            "clear_hyperedges",
+            move |g| {
                 let count = g.count_hyperedges();
                 g.clear_hyperedges();
-                count
-            })
-            .await;
-
-        self.record_event(TemporalEvent::HyperedgesCleared { timestamp, count })
-            .await;
-
-        Ok(())
+                Ok(count)
+            },
+            move |timestamp, count| (TemporalEvent::HyperedgesCleared { timestamp, count }, ()),
+        )
+        .await
     }
 
-    /// Clear the entire graph and record the event.
-    ///
-    /// Not cancel-safe: a future dropped after the graph job is submitted can
-    /// leave the graph mutated with no event recorded.
+    /// Clear the entire graph and record the event, under the mutation
+    /// contract of [`TemporalHypergraph`].
     pub async fn clear(&self) -> TemporalResult<()> {
-        let timestamp = self.clock.tick();
-        let graph = self.graph.clone();
-
-        // Get counts and clear atomically in single write lock
-        let (vertex_count, hyperedge_count) = self
-            .executor
-            .run(move || {
-                let mut g = graph.write().unwrap();
+        self.mutate(
+            "clear",
+            move |g| {
                 let vertex_count = g.count_vertices();
                 let hyperedge_count = g.count_hyperedges();
                 g.clear();
-                (vertex_count, hyperedge_count)
-            })
-            .await;
-
-        self.record_event(TemporalEvent::GraphCleared {
-            timestamp,
-            vertex_count,
-            hyperedge_count,
-        })
-        .await;
-
-        Ok(())
+                Ok((vertex_count, hyperedge_count))
+            },
+            move |timestamp, (vertex_count, hyperedge_count)| {
+                (
+                    TemporalEvent::GraphCleared {
+                        timestamp,
+                        vertex_count,
+                        hyperedge_count,
+                    },
+                    (),
+                )
+            },
+        )
+        .await
     }
 
     // =========================================================================
@@ -636,20 +627,12 @@ where
 
     /// Get the vertex weight.
     pub async fn get_vertex_weight(&self, index: VertexIndex) -> TemporalResult<V> {
-        let graph = self.graph.clone();
-        self.executor
-            .run(move || graph.read().unwrap().get_vertex_weight(index))
-            .await
-            .map_err(TemporalError::from)
+        self.read(move |g| Ok(g.get_vertex_weight(index)?)).await
     }
 
     /// Get the hyperedge weight.
     pub async fn get_hyperedge_weight(&self, index: HyperedgeIndex) -> TemporalResult<HE> {
-        let graph = self.graph.clone();
-        self.executor
-            .run(move || graph.read().unwrap().get_hyperedge_weight(index))
-            .await
-            .map_err(TemporalError::from)
+        self.read(move |g| Ok(g.get_hyperedge_weight(index)?)).await
     }
 
     /// Get the vertices of a hyperedge.
@@ -657,27 +640,18 @@ where
         &self,
         index: HyperedgeIndex,
     ) -> TemporalResult<Vec<VertexIndex>> {
-        let graph = self.graph.clone();
-        self.executor
-            .run(move || graph.read().unwrap().get_hyperedge_vertices(index))
+        self.read(move |g| Ok(g.get_hyperedge_vertices(index)?))
             .await
-            .map_err(TemporalError::from)
     }
 
     /// Count vertices.
-    pub async fn count_vertices(&self) -> usize {
-        let graph = self.graph.clone();
-        self.executor
-            .run(move || graph.read().unwrap().count_vertices())
-            .await
+    pub async fn count_vertices(&self) -> TemporalResult<usize> {
+        self.read(|g| Ok(g.count_vertices())).await
     }
 
     /// Count hyperedges.
-    pub async fn count_hyperedges(&self) -> usize {
-        let graph = self.graph.clone();
-        self.executor
-            .run(move || graph.read().unwrap().count_hyperedges())
-            .await
+    pub async fn count_hyperedges(&self) -> TemporalResult<usize> {
+        self.read(|g| Ok(g.count_hyperedges())).await
     }
 
     // =========================================================================
@@ -687,27 +661,28 @@ where
     /// Create a snapshot at the current timestamp.
     ///
     /// `event_index` points to the SnapshotMarker itself, so replay-to-snapshot
-    /// includes the marker as its terminator. The marker append and the snapshots
-    /// table insert happen under a single events-log write guard to keep the
-    /// stored index consistent under concurrent mutation.
+    /// includes the marker as its terminator. Under the mutation lock of
+    /// [`TemporalHypergraph`], the clock ticks, and the marker is tapped and
+    /// appended and its index read under one event-log write guard.
     pub async fn create_snapshot(&self) -> SnapshotId {
-        let timestamp = self.clock.tick();
         let id = SnapshotId(self.snapshot_counter.fetch_add(1, Ordering::Relaxed));
-        let marker = TemporalEvent::SnapshotMarker {
-            timestamp,
-            snapshot_id: id,
-        };
 
         // The marker is a tapped record too (replay uses it as an accelerator).
-        // Tap under the events guard — same discipline as `record_event`, so
-        // tap order always matches log order — and compute the stored index
-        // under the same guard to keep it consistent under concurrent mutation.
-        let event_index = {
+        // Tap under the events guard — same discipline as `mutate`, so tap
+        // order always matches log order — and compute the stored index under
+        // the same guard to keep it consistent under concurrent mutation.
+        let (timestamp, event_index) = {
+            let _serial = self.mutation.lock().await;
+            let timestamp = self.clock.tick();
             let mut events = self.events.write().await;
+            let marker = TemporalEvent::SnapshotMarker {
+                timestamp,
+                snapshot_id: id,
+            };
             let index = events.len();
-            self.tap_event(&marker);
+            tap_event(self.event_tap.as_ref(), &marker);
             events.append(marker);
-            index
+            (timestamp, index)
         };
 
         let snapshot = Snapshot {
@@ -803,12 +778,418 @@ where
             graph: self.graph.clone(),
             events: self.events.clone(),
             snapshots: self.snapshots.clone(),
-            clock: Clock::starting_at(self.clock.current().value()),
+            clock: Arc::new(Clock::starting_at(self.clock.current().value())),
             snapshot_counter: AtomicU64::new(self.snapshot_counter.load(Ordering::Acquire)),
             // Share the tap (clone the Option<Sender>), consistent with sharing
             // the events Arc above.
             event_tap: self.event_tap.clone(),
             executor: Arc::clone(&self.executor),
+            mutation: Arc::clone(&self.mutation),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::topology::TemporalQueries;
+    use std::time::Duration;
+
+    /// After a mutator passed to `update_hyperedge_vertices_try` panics, each
+    /// of the 18 graph operations, and `join_hyperedges` with one index,
+    /// returns `LockPoisoned` and none records an event.
+    #[tokio::test]
+    async fn a_mutator_panic_makes_every_graph_operation_return_lock_poisoned() {
+        let g = TemporalHypergraph::<u32, u32>::new(crate::core::executor::test_executor());
+        let v0 = g.add_vertex(1).await.expect("add v0");
+        let v1 = g.add_vertex(2).await.expect("add v1");
+        let a = g.add_hyperedge(vec![v0], 1).await.expect("add a");
+        let b = g.add_hyperedge(vec![v1], 2).await.expect("add b");
+        let events_before = g.event_count().await;
+
+        let panicking = g.clone();
+        let outcome = tokio::spawn(async move {
+            panicking
+                .update_hyperedge_vertices_try(
+                    a,
+                    |_: Vec<VertexIndex>| -> Result<Vec<VertexIndex>, TemporalError> {
+                        panic!("mutator exploded")
+                    },
+                )
+                .await
+        })
+        .await;
+        assert!(
+            outcome.as_ref().is_err_and(|e| e.is_panic()),
+            "expected the mutator panic to resume on the awaiting task, observed {outcome:?}"
+        );
+
+        let outcomes: Vec<(&str, TemporalResult<()>)> = vec![
+            ("add_vertex", g.add_vertex(3).await.map(drop)),
+            ("remove_vertex", g.remove_vertex(v1).await),
+            ("update_vertex_weight", g.update_vertex_weight(v0, 9).await),
+            (
+                "add_hyperedge",
+                g.add_hyperedge(vec![v0], 3).await.map(drop),
+            ),
+            ("remove_hyperedge", g.remove_hyperedge(b).await),
+            (
+                "update_hyperedge_weight",
+                g.update_hyperedge_weight(a, 9).await,
+            ),
+            (
+                "update_hyperedge_vertices",
+                g.update_hyperedge_vertices(a, vec![v0, v1]).await,
+            ),
+            (
+                "update_hyperedge_vertices_try",
+                g.update_hyperedge_vertices_try(a, Ok).await,
+            ),
+            ("reverse_hyperedge", g.reverse_hyperedge(a).await.map(drop)),
+            ("join_hyperedges", g.join_hyperedges(vec![a, b]).await),
+            (
+                "join_hyperedges, one index",
+                g.join_hyperedges(vec![a]).await,
+            ),
+            (
+                "contract_hyperedge_vertices",
+                g.contract_hyperedge_vertices(a, vec![v0], v0)
+                    .await
+                    .map(drop),
+            ),
+            ("clear_hyperedges", g.clear_hyperedges().await),
+            ("clear", g.clear().await),
+            ("get_vertex_weight", g.get_vertex_weight(v0).await.map(drop)),
+            (
+                "get_hyperedge_weight",
+                g.get_hyperedge_weight(a).await.map(drop),
+            ),
+            (
+                "get_hyperedge_vertices",
+                g.get_hyperedge_vertices(a).await.map(drop),
+            ),
+            ("count_vertices", g.count_vertices().await.map(drop)),
+            ("count_hyperedges", g.count_hyperedges().await.map(drop)),
+        ];
+        let not_poisoned: Vec<String> = outcomes
+            .iter()
+            .filter(|(_, r)| !matches!(r, Err(TemporalError::LockPoisoned)))
+            .map(|(op, r)| format!("{op}: {r:?}"))
+            .collect();
+        assert_eq!(outcomes.len(), 19, "operations checked");
+        assert!(
+            not_poisoned.is_empty(),
+            "expected every operation to return LockPoisoned, observed {not_poisoned:?}"
+        );
+        assert_eq!(
+            g.event_count().await,
+            events_before,
+            "expected no event recorded after the panic"
+        );
+    }
+
+    /// With a one-thread executor's only worker occupied, an `add_vertex` and
+    /// an `update_hyperedge_vertices_try` future polled once and dropped both
+    /// land: the log reaches 5 events and replays to the graph's 3 vertices
+    /// and hyperedge members `[v0, v1]`.
+    #[tokio::test]
+    async fn a_dropped_mutation_future_still_records_its_event() {
+        let exec = Arc::new(Executor::with_num_threads(1).expect("one-thread pool builds"));
+        let g = TemporalHypergraph::<u32, u32>::new(Arc::clone(&exec));
+        let v0 = g.add_vertex(10).await.expect("add v0");
+        let v1 = g.add_vertex(11).await.expect("add v1");
+        let h = g.add_hyperedge(vec![v0], 1).await.expect("add h");
+
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let blocker = {
+            let exec = Arc::clone(&exec);
+            tokio::spawn(async move {
+                exec.run(move || {
+                    let _ = started_tx.send(());
+                    let _ = release_rx.recv();
+                })
+                .await;
+            })
+        };
+        started_rx.await.expect("the blocker job starts");
+        {
+            let mut add = Box::pin(g.add_vertex(12));
+            assert!(
+                futures::poll!(&mut add).is_pending(),
+                "add_vertex resolved while the worker was occupied"
+            );
+            let mut update = Box::pin(g.update_hyperedge_vertices_try(h, move |mut m| {
+                m.push(v1);
+                Ok(m)
+            }));
+            assert!(
+                futures::poll!(&mut update).is_pending(),
+                "update_hyperedge_vertices_try resolved while the worker was occupied"
+            );
+        }
+        release_tx.send(()).expect("the blocker job is waiting");
+        blocker.await.expect("the blocker task completes");
+
+        let landed = tokio::time::timeout(Duration::from_secs(5), async {
+            while g.event_count().await < 5 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await;
+        let ts = g.current_timestamp();
+        let graph_state = (
+            g.count_vertices().await.expect("count"),
+            g.get_hyperedge_vertices(h).await.expect("members"),
+        );
+        let log_state = (
+            TemporalQueries::count_vertices_at(g.events_ref(), ts).await,
+            TemporalQueries::hyperedge_vertices_at(g.events_ref(), h, ts).await,
+        );
+        assert!(
+            landed.is_ok(),
+            "expected 5 events within 5 s, observed {} (graph {graph_state:?}, log {log_state:?})",
+            g.event_count().await
+        );
+        assert_eq!(graph_state, (3, vec![v0, v1]), "graph state");
+        assert_eq!(log_state, (3, Some(vec![v0, v1])), "log replay");
+    }
+
+    /// Occupy the only worker of a one-thread `exec` until the returned sender
+    /// sends; resolves once the blocking job runs.
+    async fn occupy(
+        exec: &Arc<Executor>,
+    ) -> (std::sync::mpsc::Sender<()>, tokio::task::JoinHandle<()>) {
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let blocker = {
+            let exec = Arc::clone(exec);
+            tokio::spawn(async move {
+                exec.run(move || {
+                    let _ = started_tx.send(());
+                    let _ = release_rx.recv();
+                })
+                .await;
+            })
+        };
+        started_rx.await.expect("the blocker job starts");
+        (release_tx, blocker)
+    }
+
+    /// With a one-thread executor's only worker occupied, an `add_vertex(1)`
+    /// future polled once and dropped (A), a concurrent `add_vertex(2)` (B) and
+    /// a `create_snapshot` (C), each started after the task before it ran,
+    /// record in log order A, B, C with timestamps 0, 1, 2; A and B carry the
+    /// vertex indices 0 and 1 the graph assigned, whose weights are 1 and 2,
+    /// and the snapshot's event index is 2.
+    #[tokio::test]
+    async fn a_dropped_and_a_concurrent_mutation_record_in_timestamp_and_graph_order() {
+        let exec = Arc::new(Executor::with_num_threads(1).expect("one-thread pool builds"));
+        let g = TemporalHypergraph::<u32, u32>::new(Arc::clone(&exec));
+        let (release_tx, blocker) = occupy(&exec).await;
+
+        {
+            let mut a = Box::pin(g.add_vertex(1));
+            assert!(
+                futures::poll!(&mut a).is_pending(),
+                "A resolved while the worker was occupied"
+            );
+        }
+        for _ in 0..16 {
+            tokio::task::yield_now().await;
+        }
+        let mut b = Box::pin(g.add_vertex(2));
+        assert!(
+            futures::poll!(&mut b).is_pending(),
+            "B resolved while the worker was occupied"
+        );
+        for _ in 0..16 {
+            tokio::task::yield_now().await;
+        }
+        let mut c = Box::pin(g.create_snapshot());
+        let c_first = futures::poll!(&mut c);
+
+        release_tx.send(()).expect("the blocker job is waiting");
+        blocker.await.expect("the blocker task completes");
+        let finished = tokio::time::timeout(Duration::from_secs(5), async {
+            let vb = b.await;
+            let snapshot = match c_first {
+                std::task::Poll::Ready(id) => id,
+                std::task::Poll::Pending => c.await,
+            };
+            while g.event_count().await < 3 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            (vb, snapshot)
+        })
+        .await;
+        let (vb, snapshot) = finished.expect("B, C and A's event land within 5 s");
+        let vb = vb.expect("B adds its vertex");
+
+        let log: Vec<(&str, u64, Option<usize>)> = g
+            .events()
+            .await
+            .iter()
+            .map(|e| {
+                (
+                    e.event_type(),
+                    e.timestamp().value(),
+                    e.vertex_index().map(usize::from),
+                )
+            })
+            .collect();
+        assert_eq!(
+            log,
+            vec![
+                ("VertexAdded", 0, Some(0)),
+                ("VertexAdded", 1, Some(1)),
+                ("SnapshotMarker", 2, None),
+            ],
+            "(event type, timestamp, vertex index) in log order"
+        );
+        assert_eq!(usize::from(vb), 1, "B's vertex index");
+        let weights = (
+            g.get_vertex_weight(VertexIndex::from(0))
+                .await
+                .expect("weight 0"),
+            g.get_vertex_weight(vb).await.expect("weight 1"),
+        );
+        assert_eq!(weights, (1, 2), "graph weights at vertex indices 0 and 1");
+        let marker_index = g.get_snapshot(snapshot).await.map(|s| s.event_index);
+        assert_eq!(marker_index, Some(2), "the snapshot's event index");
+    }
+
+    /// While an `update_hyperedge_vertices_try` mutator is blocked on an
+    /// executor worker, `event_count` returns 2, the events recorded before
+    /// it, within 5 s; once released, the mutation records the third event.
+    #[tokio::test]
+    async fn an_event_log_reader_completes_while_a_mutation_job_is_held() {
+        let g = TemporalHypergraph::<u32, u32>::new(crate::core::executor::test_executor());
+        let v0 = g.add_vertex(1).await.expect("add v0");
+        let h = g.add_hyperedge(vec![v0], 1).await.expect("add h");
+
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let mutating = g.clone();
+        let mutation = tokio::spawn(async move {
+            mutating
+                .update_hyperedge_vertices_try(h, move |members| {
+                    let _ = started_tx.send(());
+                    let _ = release_rx.recv();
+                    Ok(members)
+                })
+                .await
+        });
+        started_rx.await.expect("the mutator starts");
+        let count = tokio::time::timeout(Duration::from_secs(5), g.event_count()).await;
+        release_tx.send(()).expect("the mutator is waiting");
+        let outcome = mutation.await.expect("the mutation task completes");
+
+        assert_eq!(
+            count.ok(),
+            Some(2),
+            "event_count while the mutator is held (None: it timed out after 5 s)"
+        );
+        assert!(outcome.is_ok(), "the held mutation: {outcome:?}");
+        assert_eq!(g.event_count().await, 3, "events after the release");
+    }
+
+    /// A failed `add_hyperedge` between two `add_vertex` calls ticks no
+    /// timestamp: the clock reads 1 after it, and the log holds the two
+    /// vertex events at timestamps 0 and 1.
+    #[tokio::test]
+    async fn a_failed_mutation_ticks_no_timestamp() {
+        let g = TemporalHypergraph::<u32, u32>::new(crate::core::executor::test_executor());
+        g.add_vertex(1).await.expect("add the first vertex");
+        let failed = g.add_hyperedge(vec![VertexIndex::from(7)], 1).await;
+        let clock_after_failure = g.current_timestamp().value();
+        g.add_vertex(2).await.expect("add the second vertex");
+        let stamps: Vec<u64> = g
+            .events()
+            .await
+            .iter()
+            .map(|e| e.timestamp().value())
+            .collect();
+
+        assert!(
+            failed.is_err(),
+            "expected the add_hyperedge over an unassigned vertex to fail, observed {failed:?}"
+        );
+        assert_eq!(
+            (clock_after_failure, stamps),
+            (1, vec![0, 1]),
+            "(clock after the failure, event timestamps)"
+        );
+    }
+
+    /// An `add_hyperedge` over a vertex index the graph never assigned, polled
+    /// once and dropped while the only worker is occupied, logs one warning
+    /// whose `operation` is `add_hyperedge` and records nothing.
+    #[tokio::test]
+    async fn a_dropped_mutation_that_fails_logs_a_warning() {
+        let capture = crate::test_support::log_capture::Capture::default();
+        let _guard = capture.install();
+        let exec = Arc::new(Executor::with_num_threads(1).expect("one-thread pool builds"));
+        let g = TemporalHypergraph::<u32, u32>::new(Arc::clone(&exec));
+        let (release_tx, blocker) = occupy(&exec).await;
+        {
+            let mut failing = Box::pin(g.add_hyperedge(vec![VertexIndex::from(7)], 1));
+            assert!(
+                futures::poll!(&mut failing).is_pending(),
+                "add_hyperedge resolved while the worker was occupied"
+            );
+        }
+        release_tx.send(()).expect("the blocker job is waiting");
+        blocker.await.expect("the blocker task completes");
+
+        let message = "graph mutation failed after its caller dropped the future";
+        let logged = tokio::time::timeout(Duration::from_secs(5), async {
+            while capture.matching(message).is_empty() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await;
+        let warns = capture.matching(message);
+        assert!(
+            logged.is_ok()
+                && warns.len() == 1
+                && warns[0].level == tracing::Level::WARN
+                && warns[0].fields.get("operation").map(String::as_str) == Some("add_hyperedge"),
+            "expected one warn with operation add_hyperedge, observed {warns:?}"
+        );
+        assert_eq!(g.event_count().await, 0, "events recorded");
+    }
+
+    /// A mutation whose task runtime shuts down before the task answers,
+    /// awaited on another runtime, returns `TaskCancelled`.
+    #[test]
+    fn a_mutation_whose_runtime_shuts_down_returns_task_cancelled() {
+        let exec = Arc::new(Executor::with_num_threads(1).expect("one-thread pool builds"));
+        let g = TemporalHypergraph::<u32, u32>::new(Arc::clone(&exec));
+        let runtime = |name| {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap_or_else(|e| panic!("build the {name} runtime: {e}"))
+        };
+        let spawner = runtime("spawning");
+        let (release_tx, blocker, mut pending) = spawner.block_on(async {
+            let (release_tx, blocker) = occupy(&exec).await;
+            let mut pending = Box::pin(g.add_vertex(1));
+            assert!(
+                futures::poll!(&mut pending).is_pending(),
+                "add_vertex resolved while the worker was occupied"
+            );
+            (release_tx, blocker, pending)
+        });
+        drop(spawner);
+        let outcome = runtime("awaiting")
+            .block_on(async { tokio::time::timeout(Duration::from_secs(5), &mut pending).await });
+        release_tx.send(()).expect("the blocker job is waiting");
+        drop(blocker);
+        assert!(
+            matches!(outcome, Ok(Err(TemporalError::TaskCancelled))),
+            "expected Ok(Err(TaskCancelled)), observed {outcome:?}"
+        );
     }
 }

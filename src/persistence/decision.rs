@@ -11,6 +11,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
+use crate::core::drain::CancelDrain;
 use crate::subsystems::coalition_actor::DecisionTrace;
 
 use super::envelope::{EventRef, Payload, Record, SequenceNo, StreamId};
@@ -120,39 +121,24 @@ async fn send_decision_record(
 /// ## Shutdown
 ///
 /// Ends when either `token` is cancelled or `rx` closes (the trace tap and all
-/// its clones dropped). On cancellation it first forwards whatever is already
-/// buffered in `rx`, then stops — as
-/// [`spawn_topology_forwarder`](super::spawn_topology_forwarder). Spawned on
-/// `tracker` so the caller's shutdown covers it; the returned [`JoinHandle`]
-/// may be dropped.
+/// its clones dropped). On cancellation it reads the number of traces
+/// buffered in `rx`, forwards at most that many, then stops, whatever is sent
+/// after the cancel. Spawned on `tracker` so the caller's shutdown covers it;
+/// the returned [`JoinHandle`] may be dropped.
 #[allow(clippy::must_use_candidate)]
 pub fn spawn_decision_store_forwarder(
-    mut rx: mpsc::Receiver<DecisionTrace>,
+    rx: mpsc::Receiver<DecisionTrace>,
     writer_tx: mpsc::Sender<(StreamId, Record)>,
     tracker: &TaskTracker,
     token: CancellationToken,
 ) -> JoinHandle<()> {
+    let mut rx = CancelDrain::new(rx);
     tracker.spawn(async move {
-        while let Some(trace) = next_trace(&mut rx, &token).await {
+        while let Some(trace) = rx.next(&token).await {
             forward_decision_trace(&trace, &writer_tx).await;
         }
         tracing::debug!("decision store forwarder stopped");
     })
-}
-
-/// The next trace a draining task handles: the next one received on `rx`, or
-/// `None` once `rx` is closed (the trace tap and all its clones dropped) and
-/// empty. After `token` is cancelled, only traces already buffered in `rx`
-/// are returned, then `None`.
-pub(crate) async fn next_trace(
-    rx: &mut mpsc::Receiver<DecisionTrace>,
-    token: &CancellationToken,
-) -> Option<DecisionTrace> {
-    tokio::select! {
-        biased;
-        () = token.cancelled() => rx.try_recv().ok(),
-        maybe = rx.recv() => maybe,
-    }
 }
 
 #[cfg(test)]

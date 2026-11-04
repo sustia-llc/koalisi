@@ -70,7 +70,6 @@
 //! global — booting the DB via [`sdb::sdb_task`](surrealdb_live_message::subsystems::sdb::sdb_task)
 //! and constructing a [`DurableDecisionBus`] reads it transparently.
 
-use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use surrealdb_types::SurrealValue;
 use tokio::sync::mpsc;
@@ -81,8 +80,9 @@ use tokio_util::task::TaskTracker;
 use surrealdb_live_message::error::chain;
 use surrealdb_live_message::subsystems::agents::{Agent, Coalition};
 
+use crate::core::drain::CancelDrain;
 #[cfg(feature = "persistence")]
-use crate::persistence::{Record, StreamId, forward_decision_trace, next_trace};
+use crate::persistence::{Record, StreamId, forward_decision_trace};
 use crate::subsystems::coalition_actor::DecisionRecord;
 #[cfg(feature = "persistence")]
 use crate::subsystems::coalition_actor::DecisionTrace;
@@ -139,6 +139,14 @@ pub struct DurableDecisionBus {
     coalition: Coalition<DecisionEvent>,
 }
 
+/// Errors from creating a [`DurableDecisionBus`].
+#[derive(Debug, thiserror::Error)]
+pub enum DurableBusError {
+    /// The upstream [`Coalition`] constructor returned this error.
+    #[error("failed to create the durable decision bus")]
+    Upstream(#[from] surrealdb_live_message::error::Error),
+}
+
 impl DurableDecisionBus {
     /// Create the durable bus over `names`, spawning each agent's listen loop.
     ///
@@ -146,10 +154,31 @@ impl DurableDecisionBus {
     /// [`sdb::sdb_task`](surrealdb_live_message::subsystems::sdb::sdb_task)
     /// first). Returns once every agent's LIVE subscription is registered, so a
     /// send issued immediately after cannot race the subscription.
-    pub async fn new(names: Vec<String>) -> Result<Self> {
-        let coalition = Coalition::<DecisionEvent>::new(names)
-            .await
-            .context("create durable decision coalition")?;
+    ///
+    /// # Errors
+    ///
+    /// [`DurableBusError::Upstream`] with the error of upstream
+    /// [`Coalition::new`], for example `DuplicateAgentName` when a name occurs
+    /// twice in `names`.
+    pub async fn new(names: Vec<String>) -> Result<Self, DurableBusError> {
+        let coalition = Coalition::<DecisionEvent>::new(names).await?;
+        Ok(Self { coalition })
+    }
+
+    /// Create the durable bus over `names` as [`DurableDecisionBus::new`]
+    /// does, with a root token that is a child of `parent`: cancelling
+    /// `parent` stops every agent's listen loop and the retention sweep.
+    ///
+    /// # Errors
+    ///
+    /// [`DurableBusError::Upstream`] with the error of upstream
+    /// [`Coalition::new_with_parent`], for example `Cancelled { agent: None }`
+    /// when `parent` is already cancelled and no name occurs twice in `names`.
+    pub async fn new_with_parent(
+        names: Vec<String>,
+        parent: &CancellationToken,
+    ) -> Result<Self, DurableBusError> {
+        let coalition = Coalition::<DecisionEvent>::new_with_parent(names, parent).await?;
         Ok(Self { coalition })
     }
 
@@ -236,10 +265,12 @@ async fn check_agents(
 /// coalition, agent id and kind; the decision may be missing from the log. The
 /// forwarder keeps running.
 ///
-/// The task ends when either `token` cancels or `rx` closes (the core service —
-/// and thus its tap `Sender` — has been dropped; buffered records are drained
-/// first). Spawned on `tracker` so the caller's cancel→close→drain shutdown
-/// covers it.
+/// The task ends when either `token` is cancelled or `rx` closes (the core
+/// service, and with it the tap `Sender`, has been dropped). On cancellation
+/// it reads the number of records buffered in `rx`, forwards at most that
+/// many, then stops, whatever is sent after the cancel; on a closed `rx` it
+/// forwards every buffered record first. Spawned on `tracker` so the
+/// caller's cancel→close→drain shutdown covers it.
 ///
 /// # Errors
 ///
@@ -252,21 +283,15 @@ pub async fn spawn_decision_forwarder(
     bus: &DurableDecisionBus,
     producer: Agent,
     log_sink: String,
-    mut rx: mpsc::Receiver<DecisionRecord>,
+    rx: mpsc::Receiver<DecisionRecord>,
     tracker: &TaskTracker,
     token: CancellationToken,
 ) -> Result<JoinHandle<()>, DurableError> {
     check_agents(bus, &producer, &log_sink).await?;
+    let mut rx = CancelDrain::new(rx);
     Ok(tracker.spawn(async move {
-        loop {
-            tokio::select! {
-                biased;
-                _ = token.cancelled() => break,
-                maybe = rx.recv() => match maybe {
-                    Some(record) => send_event(&producer, &log_sink, record).await,
-                    None => break, // core tap dropped; nothing more to forward
-                },
-            }
+        while let Some(record) = rx.next(&token).await {
+            send_event(&producer, &log_sink, record).await;
         }
         tracing::debug!("decision forwarder stopped");
     }))
@@ -319,7 +344,8 @@ async fn tee_one(
 /// missing from the bus log.
 ///
 /// Ends when either `token` is cancelled or `rx` closes. On cancellation it
-/// first tees whatever is already buffered in `rx`, then stops. Spawned on
+/// reads the number of traces buffered in `rx`, tees at most that many, then
+/// stops, whatever is sent after the cancel. Spawned on
 /// `tracker` so the caller's shutdown covers it; the returned [`JoinHandle`]
 /// may be dropped.
 ///
@@ -333,7 +359,7 @@ async fn tee_one(
 #[cfg(feature = "persistence")]
 pub async fn spawn_decision_log_bus_tee(
     bus: &DurableDecisionBus,
-    mut rx: mpsc::Receiver<DecisionTrace>,
+    rx: mpsc::Receiver<DecisionTrace>,
     writer_tx: mpsc::Sender<(StreamId, Record)>,
     producer: Agent,
     log_sink: String,
@@ -341,10 +367,61 @@ pub async fn spawn_decision_log_bus_tee(
     token: CancellationToken,
 ) -> Result<JoinHandle<()>, DurableError> {
     check_agents(bus, &producer, &log_sink).await?;
+    let mut rx = CancelDrain::new(rx);
     Ok(tracker.spawn(async move {
-        while let Some(trace) = next_trace(&mut rx, &token).await {
+        while let Some(trace) = rx.next(&token).await {
             tee_one(trace, &writer_tx, &producer, &log_sink).await;
         }
         tracing::debug!("decision log/bus tee stopped");
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use surrealdb_live_message::error::Error as UpstreamError;
+
+    /// `new` refuses a repeated name before any database call, and the caller
+    /// matches the upstream `DuplicateAgentName` variant through
+    /// `DurableBusError::Upstream`.
+    #[tokio::test]
+    async fn new_returns_the_upstream_duplicate_name_variant() {
+        let result = DurableDecisionBus::new(vec!["dup".to_string(), "dup".to_string()]).await;
+        let Err(err) = result else {
+            panic!("a repeated name must be refused; got Ok");
+        };
+        assert!(
+            matches!(
+                &err,
+                DurableBusError::Upstream(UpstreamError::DuplicateAgentName { name }) if name == "dup"
+            ),
+            "expected Upstream(DuplicateAgentName {{ name: \"dup\" }}); got {err:?}"
+        );
+        assert_eq!(
+            chain(&err),
+            "failed to create the durable decision bus: \
+             agent name 'dup' appears more than once in one coalition",
+        );
+    }
+
+    /// `new_with_parent` with an already-cancelled parent returns the upstream
+    /// `Cancelled { agent: None }` variant before any database call.
+    #[tokio::test]
+    async fn new_with_parent_refuses_a_cancelled_parent() {
+        let parent = CancellationToken::new();
+        parent.cancel();
+        let result =
+            DurableDecisionBus::new_with_parent(vec!["p".to_string(), "q".to_string()], &parent)
+                .await;
+        let Err(err) = result else {
+            panic!("a cancelled parent must be refused; got Ok");
+        };
+        assert!(
+            matches!(
+                &err,
+                DurableBusError::Upstream(UpstreamError::Cancelled { agent: None })
+            ),
+            "expected Upstream(Cancelled {{ agent: None }}); got {err:?}"
+        );
+    }
 }

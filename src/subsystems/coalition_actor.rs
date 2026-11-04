@@ -19,21 +19,11 @@
 //! [`CoalitionService`] with a [`CoalitionServiceHandle`]. The task runs on the
 //! caller's [`TaskTracker`] and exits when the caller's [`CancellationToken`]
 //! is cancelled or the last handle is dropped (its command channel closes).
-//! On cancellation every queued command is answered with the error
-//! `coalition service stopped: cancelled`. A panic while handling a command
-//! is logged at error level, sets [`CoalitionServiceHandle::panicked`] and
-//! ends the task.
-//!
-//! ```ignore
-//! let service = CoalitionService::spawn(
-//!     manager,                                  // CoalitionManager<Agent, Team>
-//!     Box::new(ThresholdPolicy::new(AdditiveCalculator, 0.0, 0.0)),
-//!     DecisionContext { required_capabilities: 0b111 },
-//!     runtime.task_tracker(),
-//!     runtime.cancellation_token().child_token(),
-//! );
-//! let decision = service.join(agent, coalition).await?;
-//! ```
+//! Every handle command returns a [`ServiceError`] on failure. On
+//! cancellation every queued command is answered with
+//! [`ServiceError::Cancelled`]. A panic while handling a command is logged at
+//! error level, sets [`CoalitionServiceHandle::panicked`], answers that
+//! command with [`ServiceError::Panicked`] and ends the task.
 
 use std::any::Any;
 use std::future::Future;
@@ -41,7 +31,6 @@ use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use anyhow::{Result, anyhow};
 use futures::FutureExt;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
@@ -50,13 +39,57 @@ use tokio_util::task::TaskTracker;
 
 use crate::algorithms::AgentCapabilities;
 use crate::decision::{CoalitionDecisionPolicy, Decision, DecisionContext};
-use crate::topology::{CoalitionManager, HyperedgeIndex, HyperedgeTrait, VertexIndex, VertexTrait};
+use crate::topology::{
+    CoalitionManager, HyperedgeIndex, HyperedgeTrait, TemporalError, VertexIndex, VertexTrait,
+};
 
 const COMMAND_CAPACITY: usize = 64;
 
-/// The error a command still queued when the service's token is cancelled
-/// receives.
-const CANCELLED: &str = "coalition service stopped: cancelled";
+/// The failure of a [`CoalitionServiceHandle`] join, leave or members command.
+#[derive(Debug, thiserror::Error)]
+pub enum ServiceError {
+    /// The service task had stopped taking commands when the command was sent.
+    #[error("coalition service is gone")]
+    Gone,
+    /// The service task ended without answering the command.
+    #[error("coalition service dropped reply")]
+    ReplyDropped,
+    /// The command was still queued when the service's token was cancelled.
+    #[error("coalition service stopped: cancelled")]
+    Cancelled,
+    /// Handling this command panicked; `message` is the panic payload's text.
+    #[error("coalition service panicked: {message}")]
+    Panicked { message: String },
+    /// The coalition manager failed the command with a topology error.
+    #[error(transparent)]
+    Topology(#[from] TemporalError),
+}
+
+impl ServiceError {
+    /// `true` for [`Gone`](Self::Gone), [`ReplyDropped`](Self::ReplyDropped),
+    /// [`Cancelled`](Self::Cancelled), [`Panicked`](Self::Panicked),
+    /// `Topology(`[`TemporalError::LockPoisoned`]`)` and
+    /// `Topology(`[`TemporalError::TaskCancelled`]`)`; `false` for every other
+    /// `Topology` error.
+    #[must_use]
+    pub fn is_terminal(&self) -> bool {
+        match self {
+            Self::Gone | Self::ReplyDropped | Self::Cancelled | Self::Panicked { .. } => true,
+            Self::Topology(error) => match error {
+                TemporalError::LockPoisoned | TemporalError::TaskCancelled => true,
+                TemporalError::Hypergraph(_)
+                | TemporalError::TimestampInFuture { .. }
+                | TemporalError::NoSnapshotBefore(_)
+                | TemporalError::SnapshotNotFound(_)
+                | TemporalError::ReplayError { .. }
+                | TemporalError::InvalidTimeRange { .. }
+                | TemporalError::EventLogCorrupted(_)
+                | TemporalError::ConcurrentModification
+                | TemporalError::EmptyCoalition => false,
+            },
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Decision tap (feature-INDEPENDENT — no surrealdb types here)
@@ -334,16 +367,16 @@ enum CoalitionCommand {
     Join {
         agent: VertexIndex,
         coalition: HyperedgeIndex,
-        reply: oneshot::Sender<Result<Decision, String>>,
+        reply: oneshot::Sender<Result<Decision, ServiceError>>,
     },
     Leave {
         agent: VertexIndex,
         coalition: HyperedgeIndex,
-        reply: oneshot::Sender<Result<Decision, String>>,
+        reply: oneshot::Sender<Result<Decision, ServiceError>>,
     },
     Members {
         coalition: HyperedgeIndex,
-        reply: oneshot::Sender<Result<Vec<VertexIndex>, String>>,
+        reply: oneshot::Sender<Result<Vec<VertexIndex>, ServiceError>>,
     },
 }
 
@@ -361,8 +394,8 @@ pub struct CoalitionServiceHandle {
 impl CoalitionServiceHandle {
     /// Whether the service task has ended in a panic. `false` while the task
     /// runs and after it stops on cancellation. After a panic it reads `true`
-    /// to every caller whose reply the panic dropped, from the moment that
-    /// caller's `Err` returns.
+    /// to the caller whose command panicked, from the moment its
+    /// [`ServiceError::Panicked`] returns.
     #[must_use]
     pub fn panicked(&self) -> bool {
         self.panicked.load(Ordering::SeqCst)
@@ -377,50 +410,60 @@ impl CoalitionServiceHandle {
 
     /// Ask the service to consider `agent` joining `coalition`. Membership is
     /// mutated iff the policy returns `act == true`; the [`Decision`] is
-    /// returned either way.
-    pub async fn join(&self, agent: VertexIndex, coalition: HyperedgeIndex) -> Result<Decision> {
-        let (reply, rx) = oneshot::channel();
-        self.tx
-            .send(CoalitionCommand::Join {
-                agent,
-                coalition,
-                reply,
-            })
-            .await
-            .map_err(|_| anyhow!("coalition service is gone"))?;
-        rx.await
-            .map_err(|_| anyhow!("coalition service dropped reply"))?
-            .map_err(|e| anyhow!(e))
+    /// returned either way. A manager error is [`ServiceError::Topology`].
+    pub async fn join(
+        &self,
+        agent: VertexIndex,
+        coalition: HyperedgeIndex,
+    ) -> Result<Decision, ServiceError> {
+        self.request(|reply| CoalitionCommand::Join {
+            agent,
+            coalition,
+            reply,
+        })
+        .await
     }
 
     /// Ask the service to consider `agent` leaving `coalition`. Membership is
     /// mutated iff the policy returns `act == true`. Leaving the final member
-    /// surfaces the manager's `EmptyCoalition` error.
-    pub async fn leave(&self, agent: VertexIndex, coalition: HyperedgeIndex) -> Result<Decision> {
-        let (reply, rx) = oneshot::channel();
-        self.tx
-            .send(CoalitionCommand::Leave {
-                agent,
-                coalition,
-                reply,
-            })
-            .await
-            .map_err(|_| anyhow!("coalition service is gone"))?;
-        rx.await
-            .map_err(|_| anyhow!("coalition service dropped reply"))?
-            .map_err(|e| anyhow!(e))
+    /// is [`ServiceError::Topology`] carrying
+    /// [`TemporalError::EmptyCoalition`].
+    pub async fn leave(
+        &self,
+        agent: VertexIndex,
+        coalition: HyperedgeIndex,
+    ) -> Result<Decision, ServiceError> {
+        self.request(|reply| CoalitionCommand::Leave {
+            agent,
+            coalition,
+            reply,
+        })
+        .await
     }
 
-    /// Read the current members of `coalition`.
-    pub async fn members(&self, coalition: HyperedgeIndex) -> Result<Vec<VertexIndex>> {
+    /// Read the current members of `coalition`; a manager error is
+    /// [`ServiceError::Topology`].
+    pub async fn members(
+        &self,
+        coalition: HyperedgeIndex,
+    ) -> Result<Vec<VertexIndex>, ServiceError> {
+        self.request(|reply| CoalitionCommand::Members { coalition, reply })
+            .await
+    }
+
+    /// Send the command `make` builds around a fresh reply channel and await
+    /// the reply: [`ServiceError::Gone`] when the channel is closed,
+    /// [`ServiceError::ReplyDropped`] when the reply sender drops unanswered.
+    async fn request<T>(
+        &self,
+        make: impl FnOnce(oneshot::Sender<Result<T, ServiceError>>) -> CoalitionCommand,
+    ) -> Result<T, ServiceError> {
         let (reply, rx) = oneshot::channel();
         self.tx
-            .send(CoalitionCommand::Members { coalition, reply })
+            .send(make(reply))
             .await
-            .map_err(|_| anyhow!("coalition service is gone"))?;
-        rx.await
-            .map_err(|_| anyhow!("coalition service dropped reply"))?
-            .map_err(|e| anyhow!(e))
+            .map_err(|_| ServiceError::Gone)?;
+        rx.await.map_err(|_| ServiceError::ReplyDropped)?
     }
 }
 
@@ -441,12 +484,12 @@ impl CoalitionService {
     /// The task ends when `token` is cancelled or every handle is dropped. A
     /// command already taken from the channel completes first. On
     /// cancellation the task closes the channel and answers every command
-    /// still queued with the error `coalition service stopped: cancelled`; a
-    /// command sent after that fails with `coalition service is gone`. A panic
-    /// while handling a command is logged at error level with its message,
-    /// sets [`CoalitionServiceHandle::panicked`] and ends the task; that
-    /// command and every queued command fail with
-    /// `coalition service dropped reply`.
+    /// still queued with [`ServiceError::Cancelled`]; a command sent after
+    /// that fails with [`ServiceError::Gone`]. A panic while handling a
+    /// command is logged at error level with its message, sets
+    /// [`CoalitionServiceHandle::panicked`], answers that command with
+    /// [`ServiceError::Panicked`] and ends the task; every queued command
+    /// fails with [`ServiceError::ReplyDropped`].
     pub fn spawn<V, HE>(
         manager: CoalitionManager<V, HE>,
         policy: Box<dyn CoalitionDecisionPolicy>,
@@ -540,7 +583,7 @@ impl CoalitionService {
             "CoalitionService started"
         );
         let panicked = Arc::new(AtomicBool::new(false));
-        tracker.spawn(service_loop(
+        let task = service_loop(
             rx,
             manager,
             policy,
@@ -549,37 +592,112 @@ impl CoalitionService {
             trace_tap,
             token,
             Arc::clone(&panicked),
-        ));
+        );
+        #[cfg(test)]
+        let task = faults::inherit(task);
+        tracker.spawn(task);
         CoalitionServiceHandle { tx, panicked }
     }
 }
 
-/// Await `work`. On a panic, set `panicked`, log the panic at error level and
-/// return `None`.
-async fn guarded<F: Future>(panicked: &AtomicBool, work: F) -> Option<F::Output> {
+/// Await `work` and send its result on `reply`, returning `true`. On a panic,
+/// set `panicked`, log the panic message at error level, then send
+/// [`ServiceError::Panicked`] with that message on `reply` and return `false`.
+async fn serve<T, F>(
+    panicked: &AtomicBool,
+    reply: oneshot::Sender<Result<T, ServiceError>>,
+    work: F,
+) -> bool
+where
+    F: Future<Output = Result<T, ServiceError>>,
+{
     match AssertUnwindSafe(work).catch_unwind().await {
-        Ok(output) => Some(output),
+        Ok(output) => {
+            let _ = reply.send(output);
+            true
+        }
         Err(payload) => {
+            let message = panic_message(payload.as_ref()).to_owned();
             panicked.store(true, Ordering::SeqCst);
-            tracing::error!(
-                panic = panic_message(payload.as_ref()),
-                "CoalitionService panicked"
-            );
-            None
+            tracing::error!(panic = message.as_str(), "CoalitionService panicked");
+            #[cfg(test)]
+            faults::between_flag_and_reply().await;
+            let _ = reply.send(Err(ServiceError::Panicked { message }));
+            false
         }
     }
 }
 
-/// Close `rx` and answer every command still in it with [`CANCELLED`].
+/// Test-only fault injection for the service task. A test sets [`Faults`]
+/// with [`FAULTS`]`.scope(..)` around [`CoalitionService::spawn`]; the
+/// spawned task inherits them. A task with no faults in scope runs unchanged.
+#[cfg(test)]
+mod faults {
+    use std::future::Future;
+    use std::sync::Arc;
+
+    use tokio::sync::Notify;
+
+    /// The faults one service task runs with.
+    #[derive(Clone, Default)]
+    pub(super) struct Faults {
+        /// Pause the panic path of `serve` after `panicked` is stored and
+        /// before the reply is sent.
+        pub(super) pause_before_reply: Option<Arc<Pause>>,
+        /// Panic with `"members exploded"` at the start of every members
+        /// command's work.
+        pub(super) members_panics: bool,
+    }
+
+    /// A two-way rendezvous: the service task notifies `reached`, then waits
+    /// for `release`.
+    #[derive(Default)]
+    pub(super) struct Pause {
+        pub(super) reached: Notify,
+        pub(super) release: Notify,
+    }
+
+    tokio::task_local! {
+        pub(super) static FAULTS: Faults;
+    }
+
+    /// Run `task` with the faults in scope on the calling task, or none.
+    pub(super) fn inherit<F: Future>(task: F) -> impl Future<Output = F::Output> {
+        let faults = FAULTS.try_with(Faults::clone).unwrap_or_default();
+        FAULTS.scope(faults, task)
+    }
+
+    /// The pause between storing `panicked` and sending the reply.
+    pub(super) async fn between_flag_and_reply() {
+        let pause = FAULTS
+            .try_with(|f| f.pause_before_reply.clone())
+            .ok()
+            .flatten();
+        if let Some(pause) = pause {
+            pause.reached.notify_one();
+            pause.release.notified().await;
+        }
+    }
+
+    /// The members fault.
+    pub(super) fn members() {
+        if FAULTS.try_with(|f| f.members_panics).unwrap_or(false) {
+            panic!("members exploded");
+        }
+    }
+}
+
+/// Close `rx` and answer every command still in it with
+/// [`ServiceError::Cancelled`].
 async fn refuse_queued(rx: &mut mpsc::Receiver<CoalitionCommand>) {
     rx.close();
     while let Some(cmd) = rx.recv().await {
         match cmd {
             CoalitionCommand::Join { reply, .. } | CoalitionCommand::Leave { reply, .. } => {
-                let _ = reply.send(Err(CANCELLED.to_owned()));
+                let _ = reply.send(Err(ServiceError::Cancelled));
             }
             CoalitionCommand::Members { reply, .. } => {
-                let _ = reply.send(Err(CANCELLED.to_owned()));
+                let _ = reply.send(Err(ServiceError::Cancelled));
             }
         }
     }
@@ -598,8 +716,8 @@ fn panic_message(payload: &(dyn Any + Send)) -> &str {
 }
 
 /// Serve commands from `rx` until `token` is cancelled or every sender is
-/// dropped. Each command's work runs under [`guarded`]: a panic sets
-/// `panicked` while that command's `reply` is still held, then the task ends.
+/// dropped. Each command's work runs under [`serve`]: a panic sets `panicked`
+/// before that command's `reply` is answered, then the task ends.
 #[allow(clippy::too_many_arguments)]
 async fn service_loop<V, HE>(
     mut rx: mpsc::Receiver<CoalitionCommand>,
@@ -637,7 +755,7 @@ async fn service_loop<V, HE>(
                     let r = manager
                         .try_join_coalition(agent, coalition, policy.as_ref(), &ctx)
                         .await
-                        .map_err(|e| e.to_string());
+                        .map_err(ServiceError::from);
                     // Tap every consulted decision (join or decline) before
                     // replying; a manager error (no Decision produced) is not
                     // tapped.
@@ -654,10 +772,9 @@ async fn service_loop<V, HE>(
                     }
                     r
                 };
-                let Some(r) = guarded(&panicked, work).await else {
+                if !serve(&panicked, reply, work).await {
                     return;
-                };
-                let _ = reply.send(r);
+                }
             }
             CoalitionCommand::Leave {
                 agent,
@@ -669,7 +786,7 @@ async fn service_loop<V, HE>(
                     let r = manager
                         .try_leave_coalition(agent, coalition, policy.as_ref(), &ctx)
                         .await
-                        .map_err(|e| e.to_string());
+                        .map_err(ServiceError::from);
                     if let Ok(decision) = &r {
                         emit_decision(
                             tap.as_ref(),
@@ -689,22 +806,22 @@ async fn service_loop<V, HE>(
                     }
                     r
                 };
-                let Some(r) = guarded(&panicked, work).await else {
+                if !serve(&panicked, reply, work).await {
                     return;
-                };
-                let _ = reply.send(r);
+                }
             }
             CoalitionCommand::Members { coalition, reply } => {
                 let work = async {
+                    #[cfg(test)]
+                    faults::members();
                     manager
                         .coalition_members(coalition)
                         .await
-                        .map_err(|e| e.to_string())
+                        .map_err(ServiceError::from)
                 };
-                let Some(r) = guarded(&panicked, work).await else {
+                if !serve(&panicked, reply, work).await {
                     return;
-                };
-                let _ = reply.send(r);
+                }
             }
         }
     }
@@ -1082,10 +1199,11 @@ mod tests {
     }
 
     /// On a multi-thread runtime, a caller whose join fails on the policy
-    /// panic reads `panicked() == true` as soon as its `Err` returns, while
-    /// the service task is still blocked for 300 ms in the policy's drop.
+    /// panic receives `Panicked` with the panic message and reads
+    /// `panicked() == true` as soon as that error returns, while the service
+    /// task is still blocked for 300 ms in the policy's drop.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn panicked_reads_true_when_the_dropped_reply_returns() {
+    async fn panicked_reads_true_when_a_join_panic_error_returns() {
         let (manager, candidate, coalition) = seed().await;
         let tracker = TaskTracker::new();
         let service = CoalitionService::spawn(
@@ -1100,17 +1218,404 @@ mod tests {
 
         let join = service.join(candidate, coalition).await;
         let panicked = service.panicked();
-        assert_eq!(
-            join.as_ref().map_err(ToString::to_string).err().as_deref(),
-            Some("coalition service dropped reply"),
-            "join: observed {join:?}"
+        assert!(
+            matches!(&join, Err(ServiceError::Panicked { message }) if message == "policy exploded"),
+            "join: expected Panicked {{ message: \"policy exploded\" }}, observed {join:?}"
         );
         assert!(
             panicked,
-            "expected panicked() == true when the dropped reply returned, observed false"
+            "expected panicked() == true when the join's Panicked error returned, observed false"
         );
         tracker.close();
         tracker.wait().await;
+    }
+
+    /// A policy that joins and leaves on every opportunity, or panics on
+    /// every leave when `leave_panics`.
+    struct ActPolicy {
+        leave_panics: bool,
+    }
+
+    impl CoalitionDecisionPolicy for ActPolicy {
+        fn should_join(
+            &self,
+            _agent: &dyn AgentCapabilities,
+            _coalition: &[&dyn AgentCapabilities],
+            _ctx: &DecisionContext,
+        ) -> Decision {
+            Decision {
+                act: true,
+                score: 1.0,
+            }
+        }
+
+        fn should_leave(
+            &self,
+            _agent: &dyn AgentCapabilities,
+            _coalition: &[&dyn AgentCapabilities],
+            _ctx: &DecisionContext,
+        ) -> Decision {
+            assert!(!self.leave_panics, "leave exploded");
+            Decision {
+                act: true,
+                score: 1.0,
+            }
+        }
+    }
+
+    /// On a multi-thread runtime, a caller whose leave panics in the policy
+    /// receives `Panicked` with the panic message and reads
+    /// `panicked() == true` as soon as that error returns.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn panicked_reads_true_when_a_leave_panic_error_returns() {
+        let (manager, candidate, coalition) = seed().await;
+        let tracker = TaskTracker::new();
+        let service = CoalitionService::spawn(
+            manager,
+            Box::new(ActPolicy { leave_panics: true }),
+            DecisionContext::default(),
+            &tracker,
+            CancellationToken::new(),
+        );
+        let join = service.join(candidate, coalition).await;
+        assert!(
+            matches!(&join, Ok(d) if d.act),
+            "join: expected act == true, observed {join:?}"
+        );
+
+        let leave = service.leave(candidate, coalition).await;
+        let panicked = service.panicked();
+        assert!(
+            matches!(&leave, Err(ServiceError::Panicked { message }) if message == "leave exploded"),
+            "leave: expected Panicked {{ message: \"leave exploded\" }}, observed {leave:?}"
+        );
+        assert!(
+            panicked,
+            "expected panicked() == true when the leave's Panicked error returned, observed false"
+        );
+        tracker.close();
+        tracker.wait().await;
+    }
+
+    /// On the panic path, `serve` stores `panicked` before it sends the
+    /// reply: with the service paused between the two steps, `panicked()`
+    /// reads `true` and the caller has no reply yet; after the release the
+    /// caller receives `Panicked` with the panic message.
+    #[tokio::test]
+    async fn panic_flag_is_stored_before_the_reply_is_sent() {
+        let (manager, candidate, coalition) = seed().await;
+        let tracker = TaskTracker::new();
+        let pause = Arc::new(faults::Pause::default());
+        let service = faults::FAULTS
+            .scope(
+                faults::Faults {
+                    pause_before_reply: Some(Arc::clone(&pause)),
+                    members_panics: false,
+                },
+                async {
+                    CoalitionService::spawn(
+                        manager,
+                        Box::new(PanickingPolicy {
+                            drop_delay: std::time::Duration::ZERO,
+                        }),
+                        DecisionContext::default(),
+                        &tracker,
+                        CancellationToken::new(),
+                    )
+                },
+            )
+            .await;
+
+        let caller = {
+            let service = service.clone();
+            tokio::spawn(async move { service.join(candidate, coalition).await })
+        };
+        pause.reached.notified().await;
+        let panicked = service.panicked();
+        let replied = caller.is_finished();
+        assert!(
+            panicked,
+            "expected panicked() == true between the flag store and the reply, observed false"
+        );
+        assert!(
+            !replied,
+            "expected no reply between the flag store and the reply, observed the caller finished"
+        );
+
+        pause.release.notify_one();
+        let join = caller.await.expect("caller task");
+        assert!(
+            matches!(&join, Err(ServiceError::Panicked { message }) if message == "policy exploded"),
+            "join: expected Panicked {{ message: \"policy exploded\" }}, observed {join:?}"
+        );
+        tracker.close();
+        tracker.wait().await;
+    }
+
+    /// Wait until `service` reaches `pause`, assert `panicked()` reads `true`
+    /// and `caller` has not finished, release the pause, and assert `caller`
+    /// returns `Panicked` with `message`.
+    async fn assert_flag_stored_before_reply<T>(
+        label: &str,
+        service: &CoalitionServiceHandle,
+        pause: &faults::Pause,
+        caller: tokio::task::JoinHandle<Result<T, ServiceError>>,
+        message: &str,
+    ) where
+        T: std::fmt::Debug,
+    {
+        pause.reached.notified().await;
+        let panicked = service.panicked();
+        let replied = caller.is_finished();
+        assert!(
+            panicked,
+            "{label}: expected panicked() == true between the flag store and the reply, observed false"
+        );
+        assert!(
+            !replied,
+            "{label}: expected no reply between the flag store and the reply, observed the caller finished"
+        );
+
+        pause.release.notify_one();
+        let result = caller.await.expect("caller task");
+        assert!(
+            matches!(&result, Err(ServiceError::Panicked { message: m }) if m == message),
+            "{label}: expected Panicked {{ message: {message:?} }}, observed {result:?}"
+        );
+    }
+
+    /// On the panic path of a leave command, `serve` stores `panicked`
+    /// before it sends the reply: with the service paused between the two
+    /// steps, `panicked()` reads `true` and the caller has no reply yet;
+    /// after the release the caller receives `Panicked` with the panic
+    /// message.
+    #[tokio::test]
+    async fn leave_panic_flag_is_stored_before_the_reply_is_sent() {
+        let (manager, candidate, coalition) = seed().await;
+        let tracker = TaskTracker::new();
+        let pause = Arc::new(faults::Pause::default());
+        let service = faults::FAULTS
+            .scope(
+                faults::Faults {
+                    pause_before_reply: Some(Arc::clone(&pause)),
+                    members_panics: false,
+                },
+                async {
+                    CoalitionService::spawn(
+                        manager,
+                        Box::new(ActPolicy { leave_panics: true }),
+                        DecisionContext::default(),
+                        &tracker,
+                        CancellationToken::new(),
+                    )
+                },
+            )
+            .await;
+        let join = service.join(candidate, coalition).await;
+        assert!(
+            matches!(&join, Ok(d) if d.act),
+            "join: expected act == true, observed {join:?}"
+        );
+
+        let caller = {
+            let service = service.clone();
+            tokio::spawn(async move { service.leave(candidate, coalition).await })
+        };
+        assert_flag_stored_before_reply("leave", &service, &pause, caller, "leave exploded").await;
+        tracker.close();
+        tracker.wait().await;
+    }
+
+    /// On the panic path of a members command, `serve` stores `panicked`
+    /// before it sends the reply: with the service paused between the two
+    /// steps, `panicked()` reads `true` and the caller has no reply yet;
+    /// after the release the caller receives `Panicked` with the panic
+    /// message.
+    #[tokio::test]
+    async fn members_panic_flag_is_stored_before_the_reply_is_sent() {
+        let (manager, _candidate, coalition) = seed().await;
+        let tracker = TaskTracker::new();
+        let pause = Arc::new(faults::Pause::default());
+        let service = faults::FAULTS
+            .scope(
+                faults::Faults {
+                    pause_before_reply: Some(Arc::clone(&pause)),
+                    members_panics: true,
+                },
+                async {
+                    CoalitionService::spawn(
+                        manager,
+                        Box::new(ActPolicy {
+                            leave_panics: false,
+                        }),
+                        DecisionContext::default(),
+                        &tracker,
+                        CancellationToken::new(),
+                    )
+                },
+            )
+            .await;
+
+        let caller = {
+            let service = service.clone();
+            tokio::spawn(async move { service.members(coalition).await })
+        };
+        assert_flag_stored_before_reply("members", &service, &pause, caller, "members exploded")
+            .await;
+        tracker.close();
+        tracker.wait().await;
+    }
+
+    /// A members command whose work panics replies `Panicked` with the panic
+    /// message, and its caller reads `panicked() == true` as soon as that
+    /// error returns.
+    #[tokio::test]
+    async fn members_panic_replies_panicked_and_sets_the_flag() {
+        let (manager, _candidate, coalition) = seed().await;
+        let tracker = TaskTracker::new();
+        let service = faults::FAULTS
+            .scope(
+                faults::Faults {
+                    pause_before_reply: None,
+                    members_panics: true,
+                },
+                async {
+                    CoalitionService::spawn(
+                        manager,
+                        Box::new(ActPolicy {
+                            leave_panics: false,
+                        }),
+                        DecisionContext::default(),
+                        &tracker,
+                        CancellationToken::new(),
+                    )
+                },
+            )
+            .await;
+        assert!(!service.panicked(), "no panic before the members command");
+
+        let members = service.members(coalition).await;
+        let panicked = service.panicked();
+        assert!(
+            matches!(&members, Err(ServiceError::Panicked { message }) if message == "members exploded"),
+            "members: expected Panicked {{ message: \"members exploded\" }}, observed {members:?}"
+        );
+        assert!(
+            panicked,
+            "expected panicked() == true when the members' Panicked error returned, observed false"
+        );
+        tracker.close();
+        tracker.wait().await;
+    }
+
+    /// `is_terminal` is `true` for the four service-stop variants,
+    /// `Topology(LockPoisoned)` and `Topology(TaskCancelled)`, and `false`
+    /// for `Topology` of each of the nine other `TemporalError` variants.
+    #[test]
+    fn is_terminal_marks_the_stop_variants_a_poisoned_lock_and_a_cancelled_task() {
+        use crate::topology::{SnapshotId, Timestamp};
+        use catgraph_applied::HypergraphError;
+
+        let ts = Timestamp::new;
+        let observed: Vec<(String, bool)> = [
+            ServiceError::Gone,
+            ServiceError::ReplyDropped,
+            ServiceError::Cancelled,
+            ServiceError::Panicked {
+                message: "boom".to_string(),
+            },
+            ServiceError::Topology(TemporalError::LockPoisoned),
+            ServiceError::Topology(TemporalError::TaskCancelled),
+            ServiceError::Topology(TemporalError::Hypergraph(HypergraphError::InvalidJoin)),
+            ServiceError::Topology(TemporalError::TimestampInFuture {
+                requested: ts(2),
+                current: ts(1),
+            }),
+            ServiceError::Topology(TemporalError::NoSnapshotBefore(ts(0))),
+            ServiceError::Topology(TemporalError::SnapshotNotFound(SnapshotId::new(0))),
+            ServiceError::Topology(TemporalError::ReplayError {
+                event_index: 0,
+                message: "x".to_string(),
+            }),
+            ServiceError::Topology(TemporalError::InvalidTimeRange {
+                start: ts(1),
+                end: ts(0),
+            }),
+            ServiceError::Topology(TemporalError::EventLogCorrupted("x".to_string())),
+            ServiceError::Topology(TemporalError::ConcurrentModification),
+            ServiceError::Topology(TemporalError::EmptyCoalition),
+        ]
+        .into_iter()
+        .map(|e| (format!("{e:?}"), e.is_terminal()))
+        .collect();
+        let terminal: Vec<bool> = observed.iter().map(|(_, t)| *t).collect();
+        let mut expected = vec![true; 6];
+        expected.extend([false; 9]);
+        assert_eq!(
+            terminal, expected,
+            "is_terminal per variant; observed {observed:?}"
+        );
+    }
+
+    /// A failed join, leave and members command each return
+    /// `ServiceError::Topology` carrying the manager's `TemporalError`
+    /// variant: a removed agent's join is `VertexNotFound` for that agent,
+    /// the final member's leave is `EmptyCoalition`, and an unknown
+    /// coalition's members is `HyperedgeNotFound` for that coalition.
+    #[tokio::test]
+    async fn topology_errors_reach_the_caller_as_temporal_variants() {
+        use catgraph_applied::HypergraphError;
+
+        let (manager, _candidate, coalition) = seed().await;
+        let removed = manager
+            .add_agent(Worker {
+                id: 3,
+                caps: 0b100,
+                trust: 10,
+            })
+            .await
+            .expect("add agent");
+        manager.remove_agent(removed).await.expect("remove agent");
+        let only_member = manager.coalition_members(coalition).await.expect("members")[0];
+        let unknown = HyperedgeIndex::from(usize::from(coalition) + 1);
+        let service = CoalitionService::spawn(
+            manager,
+            Box::new(ActPolicy {
+                leave_panics: false,
+            }),
+            DecisionContext::default(),
+            &TaskTracker::new(),
+            CancellationToken::new(),
+        );
+
+        let join = service.join(removed, coalition).await;
+        assert!(
+            matches!(
+                &join,
+                Err(ServiceError::Topology(TemporalError::Hypergraph(
+                    HypergraphError::VertexNotFound(v)
+                ))) if *v == removed
+            ),
+            "join of a removed agent: expected Topology(Hypergraph(VertexNotFound({removed:?}))), observed {join:?}"
+        );
+        let leave = service.leave(only_member, coalition).await;
+        assert!(
+            matches!(
+                &leave,
+                Err(ServiceError::Topology(TemporalError::EmptyCoalition))
+            ),
+            "leave of the final member: expected Topology(EmptyCoalition), observed {leave:?}"
+        );
+        let members = service.members(unknown).await;
+        assert!(
+            matches!(
+                &members,
+                Err(ServiceError::Topology(TemporalError::Hypergraph(
+                    HypergraphError::HyperedgeNotFound(h)
+                ))) if *h == unknown
+            ),
+            "members of an unknown coalition: expected Topology(Hypergraph(HyperedgeNotFound({unknown:?}))), observed {members:?}"
+        );
     }
 
     /// A policy whose async join signals `started`, then waits for `release`
@@ -1203,20 +1708,14 @@ mod tests {
             "expected the in-flight join to complete with act == true, observed {joined:?}"
         );
         let queued = queued.await;
-        assert_eq!(
-            queued
-                .as_ref()
-                .map_err(ToString::to_string)
-                .err()
-                .as_deref(),
-            Some(CANCELLED),
-            "queued members: observed {queued:?}"
+        assert!(
+            matches!(queued, Err(ServiceError::Cancelled)),
+            "queued members: expected Cancelled, observed {queued:?}"
         );
         let after = service.members(coalition).await;
-        assert_eq!(
-            after.as_ref().map_err(ToString::to_string).err().as_deref(),
-            Some("coalition service is gone"),
-            "members after the stop: observed {after:?}"
+        assert!(
+            matches!(after, Err(ServiceError::Gone)),
+            "members after the stop: expected Gone, observed {after:?}"
         );
         assert!(!service.panicked(), "a cancelled service did not panic");
         tracker.close();

@@ -1,6 +1,6 @@
 [package]
 name = "koalisi"
-version = "0.49.0"
+version = "0.50.0"
 edition = "2024"
 # Declared floor 1.95.0 (owner, 2026-11-03; it replaces C-D1's 1.93.0). Do not
 # lower in passing. Edition 2024 means resolver 3, so this value also bounds
@@ -48,6 +48,10 @@ serde = { version = "1.0", features = ["derive"] }
 catgraph-applied = { git = "https://github.com/sustia-llc/catgraph", tag = "v0.25.0", default-features = false }
 # `core::Executor`'s pool; rayon comes through the `tokio_rayon::rayon` re-export.
 tokio-rayon = "2.1"
+# Optional: the `blake3` that catgraph depends on, declared here only so the
+# `blake3-pure` feature can turn on its `pure` feature; Cargo unifies it with
+# catgraph's.
+blake3 = { version = "1", optional = true }
 
 # Optional: Active Inference decision strategy (expected free energy), the
 # engine crate from the `tira` repo. Feature `decision` off compiles none of it
@@ -148,6 +152,9 @@ harness = []
 # event), consumed by `examples/metrics_scrape.rs` (off by default). Adds
 # tokio's `net` + `io-util` for the example's loopback self-scrape.
 metrics = ["dep:metrics", "dep:metrics-exporter-prometheus", "tokio/net", "tokio/io-util"]
+# Turns on `blake3`'s `pure` feature, under which its build script compiles
+# no C or assembly, so the build needs no C compiler (off by default).
+blake3-pure = ["dep:blake3", "blake3/pure"]
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "test-util"] }

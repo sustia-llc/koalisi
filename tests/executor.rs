@@ -194,8 +194,8 @@ async fn every_graph_method_runs_on_the_graphs_executor() -> Result<()> {
         "joined members"
     );
     gated(&exec, "remove_hyperedge", g.remove_hyperedge(b)).await?;
-    let vertices = gated(&exec, "count_vertices", g.count_vertices()).await;
-    let hyperedges = gated(&exec, "count_hyperedges", g.count_hyperedges()).await;
+    let vertices = gated(&exec, "count_vertices", g.count_vertices()).await?;
+    let hyperedges = gated(&exec, "count_hyperedges", g.count_hyperedges()).await?;
     assert_eq!(
         (vertices, hyperedges),
         (3, 1),
@@ -203,12 +203,12 @@ async fn every_graph_method_runs_on_the_graphs_executor() -> Result<()> {
     );
     gated(&exec, "clear_hyperedges", g.clear_hyperedges()).await?;
     assert_eq!(
-        g.count_hyperedges().await,
+        g.count_hyperedges().await?,
         0,
         "hyperedges after clear_hyperedges"
     );
     gated(&exec, "clear", g.clear()).await?;
-    assert_eq!(g.count_vertices().await, 0, "vertices after clear");
+    assert_eq!(g.count_vertices().await?, 0, "vertices after clear");
     Ok(())
 }
 

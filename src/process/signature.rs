@@ -139,8 +139,9 @@ impl Step {
 /// Encodes as `bit` then `role`, each by its own encoding: two bytes.
 impl CanonicalEncode for Step {
     fn encode_canonical(&self, out: &mut Vec<u8>) {
-        self.bit.encode_canonical(out);
-        self.role.encode_canonical(out);
+        let Self { bit, role } = *self;
+        bit.encode_canonical(out);
+        role.encode_canonical(out);
     }
 }
 
@@ -297,23 +298,25 @@ mod tests {
         assert_eq!(Step::new(32, Role::new(0)).capability_mask(), None);
     }
 
-    fn encoding<T: CanonicalEncode>(value: &T) -> Vec<u8> {
-        let mut out = Vec::new();
-        value.encode_canonical(&mut out);
+    /// Clears `out`, then writes `value`'s canonical encoding into it.
+    fn encode_into<'a, T: CanonicalEncode>(value: &T, out: &'a mut Vec<u8>) -> &'a [u8] {
+        out.clear();
+        value.encode_canonical(out);
         out
     }
 
     #[test]
     fn canonical_encoding_is_the_field_bytes_over_the_whole_domain() {
+        let mut out = Vec::with_capacity(2);
         for role in 0..=u8::MAX {
-            let observed = encoding(&Role::new(role));
+            let observed = encode_into(&Role::new(role), &mut out);
             assert_eq!(
                 observed,
                 [role],
                 "Role::new({role}): observed {observed:?}, expected [{role}]"
             );
             for bit in 0..=u8::MAX {
-                let observed = encoding(&Step::new(bit, Role::new(role)));
+                let observed = encode_into(&Step::new(bit, Role::new(role)), &mut out);
                 assert_eq!(
                     observed,
                     [bit, role],
