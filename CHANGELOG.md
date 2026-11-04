@@ -116,6 +116,11 @@ The review follow-ups of v0.45.0 to v0.49.0 (#116, #121, #122, #124, #126,
 - At `ad45135`, the `koalisi` binary logs "shutdown clean" on SIGINT, and
   `synthetic_ingestion`, `topology_coalition`, `remote_coalition_consumer`
   and `durable_decisions` exit 0.
+- `40f47e4` adds tests only. At `40f47e4`, default 145, `decision` 206,
+  `persistence` 172, `durable` 161 and `persistence,durable` 187 pass, with
+  no `SKIP` line. Clippy is clean on default, `--no-default-features`,
+  `durable`, `persistence,durable` and `harness,decision,process`, and
+  `cargo fmt --all -- --check` is clean.
 - The K4 archive gate and the `harness` test lanes did not run (owner,
   2026-11-03).
 
